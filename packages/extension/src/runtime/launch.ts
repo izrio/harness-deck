@@ -6,6 +6,7 @@
  * dsh 文档说明这一行就是就绪信号（packages/bundle/web-app/README）。
  */
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { redactSecrets } from '../util/redact.ts';
 import { t } from '../i18n.ts';
 
@@ -158,11 +159,12 @@ export function probeVersion(
   });
 }
 
-class LineSplitter {
+export class LineSplitter {
   private buffer = '';
+  private readonly decoder = new StringDecoder('utf8');
   constructor(private readonly onLine: (line: string) => void) {}
   push(chunk: Buffer | string): void {
-    this.buffer += chunk.toString();
+    this.buffer += typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
     let index: number;
     while ((index = this.buffer.indexOf('\n')) >= 0) {
       this.onLine(this.buffer.slice(0, index).replace(/\r$/u, ''));
@@ -170,7 +172,8 @@ class LineSplitter {
     }
   }
   flush(): void {
-    if (this.buffer) this.onLine(this.buffer);
+    this.buffer += this.decoder.end();
+    if (this.buffer) this.onLine(this.buffer.replace(/\r$/u, ''));
     this.buffer = '';
   }
 }

@@ -71,6 +71,7 @@ export function createDshBackend(profile: Extract<BackendProfile, { kind: 'dsh' 
   return {
     profile,
     controller: chat,
+    dshClient: () => dsh.client,
     start: () => {
       if (!vscode.workspace.isTrusted) {
         host.log('工作区未受信任，不启动 dsh');

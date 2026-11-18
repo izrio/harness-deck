@@ -3,7 +3,7 @@
  * Host 是唯一的状态来源，这里只做缓存和按 id 的增量合并。
  */
 import { useSyncExternalStore } from 'react';
-import { postToHost } from './vscode.ts';
+import { loadState, postToHost, saveState } from './vscode.ts';
 import type {
   AppearanceState,
   CommandView,
@@ -14,16 +14,23 @@ import type {
   Locale,
   HostToWebview,
   Item,
+  MarkdownPreviewData,
   ModelState,
   PendingInteraction,
   PermissionState,
+  PreferencesState,
+  ProjectsState,
   RuntimeStatus,
   SessionHeader,
   SessionListItem,
   BackendsState,
   TabsState,
+  WorkbenchModule,
+  WorkbenchState,
   WorkspaceState,
 } from '@harness-deck/shared';
+
+export type SettingsTab = 'interface' | 'agents' | 'projects';
 
 export interface Toast {
   readonly id: number;
@@ -61,11 +68,28 @@ export interface ViewState {
   /** Host 要求聚焦输入框的次数，组件据此触发聚焦。 */
   readonly focusRequests: number;
   readonly appearance: AppearanceState;
+  readonly preferences: PreferencesState;
+  readonly projects: ProjectsState;
+  readonly workbench: WorkbenchState;
+  readonly activeModule: WorkbenchModule;
+  readonly moduleExplicit: boolean;
+  readonly inspectScheduleRuleId?: string;
+  readonly settingsOpen: boolean;
+  readonly settingsTab: SettingsTab;
+  readonly markdownPreview?: MarkdownPreviewData & { readonly loading?: boolean };
   /** 图片内容缓存：`local:<localId>` 或 attachmentId → data URL；'loading' 读取中，'error' 读不到。 */
   readonly images: Readonly<Record<string, string>>;
   /** 正在打开的 Diff：`key` 是 DiffRef 的 JSON，对应的行显示加载中。 */
   readonly openingDiff?: { readonly token: number; readonly key: string };
 }
+
+const emptyWorkbench: WorkbenchState = {
+  overview: { waiting: [], todos: [], running: [], upcoming: [], unread: [] },
+  schedules: [],
+  agents: [],
+  tasks: { items: [], autoRun: true },
+  sessionGroups: [],
+};
 
 const initialState: ViewState = {
   ready: false,
@@ -89,6 +113,31 @@ const initialState: ViewState = {
   prefill: { text: '', n: 0, mode: 'replace' },
   focusRequests: 0,
   appearance: {},
+  preferences: {
+    language: 'auto',
+    includeActiveEditor: true,
+    showTurnChanges: false,
+    schedulePermission: 'danger-full-access',
+    notifications: {
+      enabled: true,
+      onlyWhenUnfocused: true,
+      onAttention: true,
+      onTurnComplete: true,
+      onUnexpectedExit: true,
+      onScheduledComplete: true,
+    },
+    advanced: {
+      dshPath: '',
+      dshProfile: 'web',
+      backendTrace: false,
+    },
+  },
+  projects: { recent: [], configs: {} },
+  workbench: emptyWorkbench,
+  activeModule: 'sessions',
+  moduleExplicit: false,
+  settingsOpen: false,
+  settingsTab: 'interface',
   images: {},
 };
 
@@ -120,6 +169,57 @@ export function useView<T>(selector: (state: ViewState) => T): T {
 /** 字体设置先在本地生效，Host 写完设置后会再推送一次。 */
 export function setAppearanceLocal(appearance: ViewState['appearance']): void {
   set({ appearance });
+}
+
+/** 通用偏好先在本地生效，Host 写完设置后会再推送一次。 */
+export function setPreferencesLocal(preferences: PreferencesState): void {
+  set({ preferences });
+}
+
+export function setProjectsLocal(projects: ProjectsState): void {
+  set({ projects });
+}
+
+export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRuleId?: string): void {
+  set({
+    activeModule,
+    moduleExplicit: true,
+    settingsOpen: false,
+    markdownPreview: undefined,
+    inspectScheduleRuleId,
+  });
+  try {
+    saveState({ activeModule });
+  } catch {
+    // 测试环境中 acquireVsCodeApi 未必已就绪，忽略本地持久化异常
+  }
+}
+
+export function openSettingsPage(tab?: SettingsTab): void {
+  set({ settingsOpen: true, ...(tab ? { settingsTab: tab } : {}) });
+}
+
+export function setSettingsTab(settingsTab: SettingsTab): void {
+  set({ settingsTab });
+}
+
+export function closeSettingsPage(): void {
+  set({ settingsOpen: false });
+}
+
+export function toggleSettingsPage(): void {
+  set({ settingsOpen: !state.settingsOpen });
+}
+
+export function requestMarkdownPreview(path: string): void {
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  const title = slash >= 0 ? path.slice(slash + 1) : path;
+  set({ markdownPreview: { path, title, loading: true } });
+  postToHost({ type: 'previewMarkdown', payload: { path } });
+}
+
+export function closeMarkdownPreview(): void {
+  set({ markdownPreview: undefined });
 }
 
 /** 图片在缓存里的键。 */
@@ -175,6 +275,16 @@ export function applyHostMessage(message: HostToWebview): void {
   switch (message.type) {
     case 'snapshot': {
       const p = message.payload;
+      let resolvedModule = state.activeModule;
+      if (!state.moduleExplicit) {
+        let savedMod: WorkbenchModule | undefined;
+        try {
+          savedMod = loadState().activeModule;
+        } catch {
+          savedMod = undefined;
+        }
+        resolvedModule = savedMod ?? (p.workbench !== undefined ? 'overview' : 'sessions');
+      }
       set({
         ready: true,
         runtime: p.runtime,
@@ -193,6 +303,10 @@ export function applyHostMessage(message: HostToWebview): void {
         locale: p.locale,
         commands: p.commands,
         appearance: p.appearance ?? {},
+        activeModule: resolvedModule,
+        ...(p.preferences ? { preferences: p.preferences } : {}),
+        ...(p.projects ? { projects: p.projects } : {}),
+        ...(p.workbench ? { workbench: p.workbench } : {}),
       });
       return;
     }
@@ -235,6 +349,26 @@ export function applyHostMessage(message: HostToWebview): void {
     case 'appearance':
       set({ appearance: message.payload });
       return;
+    case 'preferences':
+      set({ preferences: message.payload });
+      return;
+    case 'projects':
+      set({ projects: message.payload });
+      return;
+    case 'workbench':
+      set({ workbench: message.payload });
+      return;
+    case 'switchWorkbenchModule':
+      setActiveModule(message.payload.module);
+      return;
+    case 'markdownPreview':
+      if (state.markdownPreview?.path === message.payload.path) {
+        set({ markdownPreview: message.payload });
+      }
+      return;
+    case 'navigateToSession':
+      set({ activeModule: 'sessions', moduleExplicit: true, settingsOpen: false, markdownPreview: undefined });
+      return;
     case 'imageData':
       set({ images: { ...state.images, [message.payload.attachmentId]: message.payload.dataUrl ?? 'error' } });
       return;
@@ -245,7 +379,9 @@ export function applyHostMessage(message: HostToWebview): void {
       set({ commands: message.payload });
       return;
     case 'fileCandidates':
-      set({ fileCandidates: message.payload });
+      if (message.payload.requestId >= state.fileCandidates.requestId) {
+        set({ fileCandidates: message.payload });
+      }
       return;
     case 'items': {
       const patch = message.payload;
@@ -268,7 +404,7 @@ export function applyHostMessage(message: HostToWebview): void {
       return;
     }
     case 'focusComposer':
-      set({ focusRequests: state.focusRequests + 1 });
+      set({ activeModule: 'sessions', moduleExplicit: true, settingsOpen: false, focusRequests: state.focusRequests + 1 });
       return;
     case 'restoreDraft':
       requestPrefill(message.payload.text, 'restore');

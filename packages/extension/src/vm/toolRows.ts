@@ -2,7 +2,7 @@
  * 工具调用怎么显示成一行（两种底层共用）：按工具名归类（命令、修改、浏览、子代理、其他），从参数里取最能说明这次调用的一项做摘要。
  * 纯函数，只看工具名和参数，不涉及任何底层的协议。
  */
-import { joinLabel } from '@harness-deck/shared';
+import { joinLabel, splitLabel, type Item } from '@harness-deck/shared';
 import { t } from '../i18n.ts';
 import { displayPath } from './paths.ts';
 import { canonicalTool } from './toolNames.ts';
@@ -91,4 +91,28 @@ export function activityLabel(tool: string, rawArguments: unknown, workspacePath
 export function firstLine(text: string): string {
   const line = text.split('\n', 1)[0] ?? '';
   return line.length < text.length ? `${line} …` : line;
+}
+
+type ExploreItem = Extract<Item, { kind: 'explore' }>;
+
+/** 合并只读操作的摘要：「读取 2 个文件，搜索 1 次，列出 1 个目录」（dsh 与 ACP 共用）。 */
+export function summarizeExplore(group: ExploreItem): ExploreItem {
+  let reads = 0;
+  let searches = 0;
+  let lists = 0;
+  for (const entry of group.entries) {
+    const rawName = splitLabel(entry.label).name;
+    const tool = canonicalTool(rawName);
+    if (tool === 'read' || tool === 'read_image' || /read|cat|view/iu.test(rawName)) reads++;
+    else if (tool === 'ls' || tool === 'list' || /^list[_-]?dir/iu.test(rawName)) lists++;
+    else searches++;
+  }
+  const parts = [
+    reads ? t('explore.reads', reads) : '',
+    searches ? t('explore.searches', searches) : '',
+    lists ? t('explore.lists', lists) : '',
+  ].filter(Boolean);
+  const statuses = group.entries.map((e) => e.status);
+  const status = statuses.includes('running') ? 'running' : statuses.every((s) => s === 'error') ? 'error' : 'ok';
+  return { ...group, summary: parts.join(t('explore.separator')), status };
 }

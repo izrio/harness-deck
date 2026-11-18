@@ -1,8 +1,9 @@
 /**
- * 输入框里的上下文标签：当前编辑器（有选区时是选区，否则是文件；点击切换是否附带）和用「添加到对话」固定的选区。
+ * 输入框里的上下文标签（Beautiful UI Chip 胶囊）。
  */
 import type { AttachmentView } from '@harness-deck/shared';
 import { postToHost } from '../vscode.ts';
+import { cn } from '../lib/utils.ts';
 import { CloseIcon, FileIcon, SelectionIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
@@ -30,20 +31,34 @@ export function ContextChips({
   const t = useT();
   if (!active && pinned.length === 0) return null;
   return (
-    <div className="context-chips" data-testid="context-chips">
+    <div className="context-chips flex flex-wrap gap-1.5 px-2 pt-1.5" data-testid="context-chips">
       {pinned.map((a) => (
-        <span key={a.id} className="chip" title={t('chip.pinnedTitle', a.startLine ? t('chip.lines', a.path, a.startLine, a.endLine ?? a.startLine) : a.path)}>
-          {a.kind === 'selection' ? <SelectionIcon /> : <FileIcon />}
-          <span className="chip__label">{attachmentLabel(a)}</span>
-          <button type="button" className="chip__remove" aria-label={t('chip.remove', attachmentLabel(a))} onClick={() => postToHost({ type: 'removeAttachment', payload: { id: a.id } })}>
-            <CloseIcon />
+        <span
+          key={a.id}
+          className="chip inline-flex h-6.5 max-w-full min-w-0 items-center gap-1.5 rounded-chip bg-field py-0.5 pr-1 pl-2 text-[11.5px] text-ink-2 shadow-hairline"
+          title={t('chip.pinnedTitle', a.startLine ? t('chip.lines', a.path, a.startLine, a.endLine ?? a.startLine) : a.path)}
+        >
+          {a.kind === 'selection' ? <SelectionIcon className="size-3 shrink-0 text-ink-3" /> : <FileIcon className="size-3 shrink-0 text-ink-3" />}
+          <span className="chip__label min-w-0 truncate font-mono">{attachmentLabel(a)}</span>
+          <button
+            type="button"
+            className="chip__remove inline-flex size-5 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-colors duration-100 hover:bg-line/70 hover:text-ink"
+            aria-label={t('chip.remove', attachmentLabel(a))}
+            onClick={() => postToHost({ type: 'removeAttachment', payload: { id: a.id } })}
+          >
+            <CloseIcon className="size-3" />
           </button>
         </span>
       ))}
       {active ? (
         <button
           type="button"
-          className={`chip chip--active ${included ? '' : 'chip--excluded'}`}
+          className={cn(
+            'chip chip--active inline-flex h-6.5 max-w-full min-w-0 items-center gap-1.5 rounded-chip px-2 text-[11.5px] transition-colors duration-100',
+            included
+              ? 'bg-field text-ink-2 shadow-hairline hover:bg-hover hover:text-ink'
+              : 'chip--excluded border border-dashed border-line-strong bg-transparent text-ink-3 hover:bg-hover',
+          )}
           aria-pressed={included}
           onClick={onToggle}
           title={
@@ -53,9 +68,9 @@ export function ContextChips({
           }
           data-testid="active-context"
         >
-          {active.kind === 'selection' ? <SelectionIcon /> : <FileIcon />}
-          <span className="chip__label">{attachmentLabel(active)}</span>
-          <span className="chip__hint">{active.kind === 'selection' ? t('chip.selection') : t('chip.file')}</span>
+          {active.kind === 'selection' ? <SelectionIcon className="size-3 shrink-0 text-ink-3" /> : <FileIcon className="size-3 shrink-0 text-ink-3" />}
+          <span className={cn('chip__label min-w-0 truncate font-mono', !included && 'line-through')}>{attachmentLabel(active)}</span>
+          <span className="chip__hint shrink-0 text-ink-3">{active.kind === 'selection' ? t('chip.selection') : t('chip.file')}</span>
         </button>
       ) : null}
     </div>

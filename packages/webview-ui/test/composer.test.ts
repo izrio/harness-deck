@@ -101,6 +101,30 @@ describe('输入框', () => {
     fireEvent.keyDown(input(), { key: 'Escape' });
     expect(posted.at(-1)).toMatchObject({ type: 'interrupt' });
   });
+
+  it('点击 + 展示菜单，支持上传文件与上传图片', async () => {
+    render(createElement(Composer));
+    host({ type: 'snapshot', payload: snapshot() });
+
+    fireEvent.click(screen.getByTestId('composer-attach-btn'));
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy();
+
+    // 选择上传文件 -> 发送 pickFiles
+    fireEvent.click(screen.getByRole('menuitem', { name: '上传文件' }));
+    expect(posted.at(-1)).toEqual({ type: 'pickFiles', payload: {} });
+    expect(screen.queryByTestId('composer-attach-menu')).toBeNull();
+
+    // 重新打开菜单并选择上传图片 -> 通过 input 上传后展示缩略图
+    fireEvent.click(screen.getByTestId('composer-attach-btn'));
+    fireEvent.click(screen.getByRole('menuitem', { name: '上传图片' }));
+    const file = new File(['png-bytes'], 'demo.png', { type: 'image/png' });
+    const fileInput = screen.getByTestId('composer-image-input') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.getByTestId('composer-images')).toBeTruthy();
+  });
 });
 
 describe('输入框上方的状态栏', () => {

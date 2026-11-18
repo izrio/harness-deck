@@ -1,39 +1,31 @@
 /**
- * 输入框：一张整宽卡片，上面是上下文标签和多行输入，下面一行工具条（模型、权限、上下文用量、发送/停止）。
- * Enter 发送，Shift+Enter 换行；输入法组合输入时不拦截 Enter。草稿保存在 Webview 状态里。
- *
- * 补全：消息开头输入 `/` 列出斜杠命令；任意位置输入 `@` 列出文件和目录（候选由 Host 提供）。
- * 列表打开时 ↑↓ 选择，Enter / Tab 确认，Esc 关闭。
- *
- * 输入框顶边可以上下拖动调整高度（也可以聚焦后用 ↑↓），双击恢复随内容自动增高。高度保存在 Webview 状态里。
- *
- * 图片：粘贴（截图、复制的图片）或拖进输入框，显示成缩略图，随消息一起发送；可以只发图片不写文字。
+ * 输入框（Beautiful UI PromptBar / ChatComposer 卡片）：
+ * 上面是上下文标签和图片缩略图、中间是多行输入、下面是工具条（模型、权限、上下文用量、发送/停止）。
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { PromptImage } from '@harness-deck/shared';
-// 只引入常量模块：包入口会把 zod 打进 Webview（zod 探测 new Function 会触发 CSP 违规）
 import { IMAGE_MEDIA_TYPES, MAX_IMAGES, type ImageMediaType } from '@harness-deck/shared/limits';
 import { registerLocalImage, showToast, useView } from '../store.ts';
 import { ImageThumb } from './Images.tsx';
 import { activeAtToken, formatFileMention, type ActiveAtToken } from '../mentions.ts';
 import { loadState, postToHost, saveState } from '../vscode.ts';
+import { cn } from '../lib/utils.ts';
 import { Completion, type CompletionItem } from './Completion.tsx';
 import { ContextChips } from './ContextChips.tsx';
 import { ContextRing } from './ContextRing.tsx';
-import { AgentIcon, ArrowUpIcon, CloseIcon, PlanIcon, StopIcon } from './icons.tsx';
+import { AgentIcon, ArrowUpIcon, CloseIcon, FileIcon, ImageIcon, PlanIcon, PlusIcon, StopIcon } from './icons.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { PermissionPicker } from './PermissionPicker.tsx';
+import { MenuItem, Popover } from './Popover.tsx';
 import { StatusDock } from './StatusDock.tsx';
+import { GlideMenu } from './ui/GlideMenu.tsx';
 import { useT } from '../i18n.ts';
 
-/** 自动增高的上限；拖动设定的高度可以更高。 */
-/** 单张图片的原始大小上限（dsh 还有自己的限制，超过时发送会报错）。 */
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 let imageCounter = 0;
 const nextImageId = () => `${Date.now().toString(36)}-${(++imageCounter).toString(36)}`;
 
-/** 读成 data URL，返回 base64 部分和整个 data URL。 */
 function readImage(file: File): Promise<{ data: string; dataUrl: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -50,17 +42,12 @@ const MAX_HEIGHT = 200;
 const MIN_HEIGHT = 40;
 const RESIZE_STEP = 16;
 
-/** 拖动高度的上限：留出对话流的空间。 */
 const resizeLimit = () => Math.max(120, Math.round(window.innerHeight * 0.7));
 const clampHeight = (height: number) => Math.round(Math.min(Math.max(height, MIN_HEIGHT), resizeLimit()));
 const SEARCH_DELAY_MS = 60;
 
 type Trigger = { readonly kind: 'command'; readonly query: string } | { readonly kind: 'file'; readonly token: ActiveAtToken; readonly start: number };
 
-/**
- * 斜杠命令补全的候选：不区分大小写，名字开头匹配的在前，名字中间匹配的在后（输入 review 也能找到 code-review）。
- * 同一档里保持原来的顺序（插件模板、底层命令、skill）。
- */
 export function matchCommands<T extends { readonly name: string }>(commands: readonly T[], query: string): T[] {
   const q = query.toLowerCase();
   const starts: T[] = [];
@@ -73,10 +60,8 @@ export function matchCommands<T extends { readonly name: string }>(commands: rea
   return [...starts, ...contains];
 }
 
-/** 光标前的文本决定要不要打开补全。 */
 function triggerAt(text: string, caret: number): Trigger | undefined {
   const before = text.slice(0, caret);
-  // 命令名可以带 : . 等（插件里的 skill：engineering:code-review），到空白为止
   const command = /^\/(\S*)$/u.exec(before);
   if (command) return { kind: 'command', query: command[1] ?? '' };
   const line = before.slice(before.lastIndexOf('\n') + 1);
@@ -96,21 +81,18 @@ export function Composer() {
   const candidates = useView((s) => s.fileCandidates);
   const t = useT();
   const tabKey = useView((s) => s.tabs.active);
-  /** 待发送的图片；切换标签时按标签暂存。 */
   const [images, setImages] = useState<PromptImage[]>([]);
   const imageStash = useRef(new Map<string, PromptImage[]>());
   const [text, setText] = useState(() => loadState().draft ?? '');
-  /** 草稿属于哪个标签；切换标签时存下当前草稿，换成目标标签的草稿。 */
   const draftOwner = useRef(tabKey);
   const [caret, setCaret] = useState(0);
   const [selected, setSelected] = useState(0);
-  /** 按 Esc 关掉补全时的文本；文本变化后才重新打开。 */
   const [dismissedFor, setDismissedFor] = useState<string | undefined>();
   const [requestId, setRequestId] = useState(-1);
-  /** 被点过的当前编辑器标签：与默认附带状态相反。换了文件或选区自动恢复默认。 */
   const [toggledKey, setToggledKey] = useState<string | undefined>();
   const ref = useRef<HTMLTextAreaElement>(null);
-  /** 拖动设定的高度：作为最小高度，内容更多时继续增高到它和 MAX_HEIGHT 中较大的那个。 */
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
   const [inputHeight, setInputHeight] = useState<number | undefined>(() => loadState().inputHeight);
 
   useEffect(() => {
@@ -120,7 +102,6 @@ export function Composer() {
   useEffect(() => {
     const previous = draftOwner.current;
     draftOwner.current = tabKey;
-    // 还没收到快照时（key 为空）恢复的草稿就属于当前标签
     if (!previous || previous === tabKey) return;
     const { [tabKey]: next = '', ...rest } = loadState().drafts ?? {};
     saveState({ drafts: text.trim() ? { ...rest, [previous]: text } : rest });
@@ -184,7 +165,6 @@ export function Composer() {
     ref.current?.focus();
   }, [focusRequests, session.id]);
 
-  // 「编辑后重发」、示例任务：换掉输入框里的内容；消息没发出去时放回原文，这期间新写的内容接在后面。光标放到末尾
   useEffect(() => {
     if (prefill.n === 0) return;
     const current = ref.current?.value ?? '';
@@ -200,12 +180,11 @@ export function Composer() {
   const trigger = dismissedFor === text ? undefined : triggerAt(text, caret);
   const fileQuery = trigger?.kind === 'file' ? trigger.token.query : undefined;
 
-  // @ 补全：输入停顿后再向 Host 要候选
   useEffect(() => {
     if (fileQuery === undefined || !connected) return;
+    const id = ++nextRequestId;
+    setRequestId(id);
     const timer = setTimeout(() => {
-      const id = ++nextRequestId;
-      setRequestId(id);
       postToHost({ type: 'searchFiles', payload: { requestId: id, query: fileQuery } });
     }, SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
@@ -238,12 +217,10 @@ export function Composer() {
 
   useEffect(() => setSelected(0), [items.length, trigger?.kind, fileQuery]);
 
-  // 光标停在一个已经完整的文件引用或命令名后面时不打开（否则 Enter 会被补全吃掉，发不出消息）
   const complete =
     trigger?.kind === 'file'
       ? candidates.items.some((c) => c.kind === 'file' && c.path === trigger.token.query)
       : trigger?.kind === 'command' && commands.some((c) => c.name.toLowerCase() === trigger.query.toLowerCase());
-  // 文件补全：结果还没回来时也打开，显示"正在搜索"
   const menuOpen = trigger !== undefined && !complete && (items.length > 0 || trigger.kind === 'file');
 
   const replaceRange = (start: number, end: number, insertion: string) => {
@@ -265,7 +242,6 @@ export function Composer() {
     if (!candidate) return;
     const mention = formatFileMention(candidate, trigger.token.quoted);
     if (!mention) return;
-    // 目录不加空格，补全继续列出目录内容
     replaceRange(trigger.start, caret, candidate.kind === 'file' ? `${mention} ` : mention);
   };
 
@@ -292,7 +268,6 @@ export function Composer() {
         const { data, dataUrl } = await readImage(file);
         const localId = nextImageId();
         registerLocalImage(localId, dataUrl);
-        // 截图粘贴时文件名总是 image.png，不当作名字
         const name = file.name && file.name !== 'image.png' ? file.name : undefined;
         added.push({ localId, mediaType: file.type as ImageMediaType, data, ...(name ? { name } : {}) });
         room--;
@@ -312,7 +287,6 @@ export function Composer() {
       .filter((file): file is File => file !== null);
   };
 
-  /** 子代理的对话：只能查看。 */
   const readOnly = session.subagentOf !== undefined;
   const canSend = connected && !readOnly && (text.trim().length > 0 || images.length > 0);
   const send = () => {
@@ -350,7 +324,6 @@ export function Composer() {
       send();
       return;
     }
-    // Esc 停止生成（补全列表打开时 Esc 先关列表，输入法组合输入时不拦截）
     if (event.key === 'Escape' && !composing && session.running && !readOnly) {
       event.preventDefault();
       postToHost({ type: 'interrupt', payload: {} });
@@ -358,18 +331,21 @@ export function Composer() {
   };
 
   const syncCaret = () => setCaret(ref.current?.selectionStart ?? 0);
-
-  // 运行中输入框仍可发送（消息排进队列，当前回复结束后处理），所以写了内容时发送和停止两个按钮都在
   const showStop = session.running && !readOnly;
   const showSend = !showStop || text.trim().length > 0 || images.length > 0;
+
   return (
-    <div className="composer-wrap">
+    <div className="content-column relative shrink-0">
       <StatusDock />
       {session.subagentOf ? (
-        <div className="subagent-strip" data-testid="subagent-strip">
-          <AgentIcon />
+        <div className="mb-2 flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12px] text-ink-2 shadow-card" data-testid="subagent-strip">
+          <AgentIcon className="size-3.5 shrink-0 text-ink-3" />
           <span>{t('subagent.readOnlyHint')}</span>
-          <button type="button" className="link-button" onClick={() => postToHost({ type: 'switchSession', payload: { sessionId: session.subagentOf!.parentId } })}>
+          <button
+            type="button"
+            className="ml-auto font-medium text-ink hover:underline"
+            onClick={() => postToHost({ type: 'switchSession', payload: { sessionId: session.subagentOf!.parentId } })}
+          >
             {t('subagent.backToParent')}
           </button>
         </div>
@@ -386,7 +362,7 @@ export function Composer() {
         />
       ) : null}
       <div
-        className="composer"
+        className="composer relative mb-2.5 flex flex-col rounded-window bg-surface p-1.5 shadow-card transition-shadow duration-150 focus-within:shadow-[0_0_0_1px_var(--accent),var(--shadow-sm)]"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes('Files')) event.preventDefault();
         }}
@@ -411,7 +387,7 @@ export function Composer() {
         />
         <ContextChips active={active} included={includeActive} onToggle={() => active && setToggledKey(toggledKey === active.key ? undefined : active.key)} pinned={context.pinned} />
         {images.length ? (
-          <div className="composer__images" data-testid="composer-images">
+          <div className="composer__images flex flex-wrap gap-1.5 px-2 pt-1.5" data-testid="composer-images">
             {images.map((image) => (
               <ImageThumb key={image.localId} image={image} size="small" onRemove={() => setImages((current) => current.filter((i) => i.localId !== image.localId))} />
             ))}
@@ -419,7 +395,7 @@ export function Composer() {
         ) : null}
         <textarea
           ref={ref}
-          className="composer__input"
+          className="composer__input block min-h-10 w-full resize-none border-0 bg-transparent px-2 pt-1.5 pb-1 text-ink outline-none leading-[1.5] placeholder:truncate placeholder:text-ink-3"
           value={text}
           onChange={(event) => {
             setText(event.target.value);
@@ -431,7 +407,6 @@ export function Composer() {
           onPaste={(event) => {
             const files = imageFiles(event.clipboardData.items);
             if (files.length === 0) return;
-            // 同时有文字时（例如从文档里复制）照常粘贴文字，图片一并附上
             if (!event.clipboardData.types.includes('text/plain')) event.preventDefault();
             void addImages(files);
           }}
@@ -451,38 +426,113 @@ export function Composer() {
           aria-expanded={menuOpen}
           {...(menuOpen ? { 'aria-controls': 'composer-completion', 'aria-activedescendant': `completion-${selected}` } : {})}
         />
-        <div className="composer__toolbar">
+        <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
+          <div className="relative">
+            <button
+              type="button"
+              data-testid="composer-attach-btn"
+              disabled={!connected || readOnly}
+              aria-label={t('composer.attach')}
+              title={t('composer.attach')}
+              aria-haspopup="menu"
+              aria-expanded={attachOpen}
+              className={cn(
+                'inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40',
+                attachOpen && 'bg-field text-ink shadow-hairline',
+              )}
+              onClick={() => setAttachOpen((v) => !v)}
+            >
+              <PlusIcon className="size-4" />
+            </button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              className="hidden"
+              data-testid="composer-image-input"
+              onChange={(event) => {
+                const picked = event.target.files ? [...event.target.files] : [];
+                event.target.value = '';
+                if (picked.length > 0) void addImages(picked);
+              }}
+            />
+            <Popover
+              open={attachOpen}
+              onClose={() => setAttachOpen(false)}
+              label={t('composer.attach')}
+              className="top-auto bottom-[calc(100%+6px)] left-0 w-44 min-w-[168px]"
+            >
+              <div role="menu" data-testid="composer-attach-menu">
+                <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
+                  <MenuItem
+                    icon={<FileIcon className="size-3.5" />}
+                    onSelect={() => {
+                      setAttachOpen(false);
+                      postToHost({ type: 'pickFiles', payload: {} });
+                    }}
+                  >
+                    {t('composer.attachFile')}
+                  </MenuItem>
+                  <MenuItem
+                    icon={<ImageIcon className="size-3.5" />}
+                    onSelect={() => {
+                      setAttachOpen(false);
+                      imageInputRef.current?.click();
+                    }}
+                  >
+                    {t('composer.attachImage')}
+                  </MenuItem>
+                </GlideMenu>
+              </div>
+            </Popover>
+          </div>
           <ModelPicker disabled={!connected || readOnly} />
           <PermissionPicker disabled={!connected || readOnly} />
           {session.planMode ? (
             <button
               type="button"
-              className="toolbar-button plan-badge"
+              className="toolbar-button plan-badge inline-flex h-7 items-center gap-1 rounded-[8px] bg-accent-tint px-2 text-[12px] font-medium text-accent-ink transition-opacity duration-150 hover:opacity-85"
               title={t('composer.planTitle')}
               onClick={() => postToHost({ type: 'sendMessage', payload: { text: '/plan off' } })}
               data-testid="plan-badge"
             >
-              <PlanIcon />
+              <PlanIcon className="size-3.5" />
               <span className="toolbar-button__text">{t('composer.plan')}</span>
-              <CloseIcon />
+              <CloseIcon className="size-3" />
             </button>
           ) : null}
           {session.contextUsage !== undefined ? <ContextRing usage={session.contextUsage} {...(session.contextTokens ? { tokens: session.contextTokens } : {})} /> : null}
-          <span className="composer__spacer" />
+          <span className="composer__spacer min-w-0 flex-1!" />
           {showStop ? (
             <button
               type="button"
-              className={`send-button send-button--stop ${showSend ? 'send-button--secondary' : ''}`}
+              className={cn(
+                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-[8px] transition-[background-color,color,transform] duration-150 active:scale-[0.95]',
+                showSend
+                  ? 'send-button--secondary bg-field text-ink shadow-hairline hover:bg-hover-2'
+                  : 'bg-ink text-surface hover:opacity-90',
+              )}
               onClick={() => postToHost({ type: 'interrupt', payload: {} })}
               aria-label={t('composer.stop')}
               title={t('composer.stopHint')}
             >
-              <StopIcon />
+              <StopIcon className="size-3.5" />
             </button>
           ) : null}
           {showSend ? (
-            <button type="button" className="send-button" disabled={!canSend} onClick={send} aria-label={t('composer.send')} title={t('composer.sendTitle')}>
-              <ArrowUpIcon />
+            <button
+              type="button"
+              className={cn(
+                'send-button inline-flex size-7 items-center justify-center rounded-[8px] transition-[background-color,color,transform] duration-150 enabled:active:scale-[0.95] disabled:cursor-default',
+                canSend ? 'bg-ink text-surface hover:opacity-90' : 'bg-line-strong text-ink-2',
+              )}
+              disabled={!canSend}
+              onClick={send}
+              aria-label={t('composer.send')}
+              title={t('composer.sendTitle')}
+            >
+              <ArrowUpIcon className="size-4" />
             </button>
           ) : null}
         </div>

@@ -1,10 +1,10 @@
 /**
- * 会话标签：顶栏下面一行，只在打开了两个以上的会话时出现。点击切换（后台标签的会话继续运行，切回时内容立即可见），
- * × 或鼠标中键关闭（会话仍在 dsh 里，可以从会话列表重新打开）。运行中显示动画点，等待审批或提问时显示提醒点。
+ * 会话标签栏（对齐 Beautiful UI ChatComposer 顶部标签切换条：`bg-field` 选中块 + `opacity-50` 未选中项）。
  */
 import { useEffect, useRef } from 'react';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
+import { cn } from '../lib/utils.ts';
 import { CloseIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
@@ -13,7 +13,6 @@ export function TabBar() {
   const strip = useRef<HTMLDivElement>(null);
   const t = useT();
 
-  // 当前标签滚动到可见范围
   useEffect(() => {
     strip.current?.querySelector<HTMLElement>('.tab--active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [tabs.active, tabs.items.length]);
@@ -21,13 +20,24 @@ export function TabBar() {
   if (tabs.items.length < 2) return null;
   const close = (key: string) => postToHost({ type: 'closeTab', payload: { key } });
   return (
-    <div className="tabs" role="tablist" aria-label={t('tabs.label')} ref={strip} data-testid="tabs">
+    <div
+      className="tabs flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-surface px-2 py-1"
+      role="tablist"
+      aria-label={t('tabs.label')}
+      ref={strip}
+      data-testid="tabs"
+    >
       {tabs.items.map((tab) => {
         const active = tab.key === tabs.active;
         return (
           <div
             key={tab.key}
-            className={`tab ${active ? 'tab--active' : ''}`}
+            className={cn(
+              'tab group/tab relative flex min-w-[72px] max-w-[168px] flex-none items-center gap-1.5 rounded-[6px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,opacity] duration-100',
+              active
+                ? 'tab--active cursor-default bg-field font-medium text-ink opacity-100'
+                : 'cursor-pointer text-ink opacity-55 hover:bg-hover hover:opacity-85',
+            )}
             role="tab"
             aria-selected={active}
             tabIndex={active ? 0 : -1}
@@ -38,21 +48,29 @@ export function TabBar() {
             }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                event.preventDefault();
                 const index = tabs.items.findIndex((item) => item.key === tab.key);
-                const next = tabs.items[(index + (event.key === 'ArrowRight' ? 1 : tabs.items.length - 1)) % tabs.items.length];
-                if (next) postToHost({ type: 'activateTab', payload: { key: next.key } });
+                const nextIndex = (index + (event.key === 'ArrowRight' ? 1 : tabs.items.length - 1)) % tabs.items.length;
+                const next = tabs.items[nextIndex];
+                if (next) {
+                  postToHost({ type: 'activateTab', payload: { key: next.key } });
+                  strip.current?.querySelectorAll<HTMLElement>('[role="tab"]')[nextIndex]?.focus();
+                }
               } else if (event.key === 'Delete') close(tab.key);
             }}
           >
             {tab.needsAttention ? (
-              <span className="dot dot--attention" aria-label={t('tabs.attention')} />
+              <span className="dot dot--attention inline-block size-1.5 shrink-0 rounded-full bg-orange" aria-label={t('tabs.attention')} />
             ) : tab.running ? (
-              <span className="dot dot--running" aria-label={t('header.running')} />
+              <span className="dot dot--running inline-block size-1.5 shrink-0 rounded-full bg-accent" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} aria-label={t('header.running')} />
             ) : null}
-            <span className="tab__title">{tab.title}</span>
+            <span className="tab__title min-w-0 flex-1 truncate">{tab.title}</span>
             <button
               type="button"
-              className="tab__close"
+              className={cn(
+                'tab__close inline-flex size-4.5 shrink-0 items-center justify-center rounded-[4px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover-2 hover:text-ink',
+                active ? 'opacity-80 hover:opacity-100' : 'opacity-0 group-hover/tab:opacity-100 group-focus-visible/tab:opacity-100',
+              )}
               tabIndex={-1}
               aria-label={t('tabs.close', tab.title)}
               title={t('tabs.closeTitle')}
@@ -61,7 +79,7 @@ export function TabBar() {
                 close(tab.key);
               }}
             >
-              <CloseIcon />
+              <CloseIcon className="size-3" />
             </button>
           </div>
         );

@@ -10,3 +10,15 @@ export type ImageMediaType = (typeof IMAGE_MEDIA_TYPES)[number];
 /** 一条消息最多带的图片数，和单张图片 base64 的上限（约 15 MB 原始字节；dsh 自己还有更严格的限制）。 */
 export const MAX_IMAGES = 10;
 export const MAX_IMAGE_BASE64 = 20_000_000;
+
+/** 整套界面配色方案标识（默认 slate，均内置浅色与深色两套令牌，随主题自动切换）。 */
+export const COLOR_SCHEMES = ['slate', 'warm', 'forest', 'violet', 'rose'] as const;
+export type ColorSchemeId = (typeof COLOR_SCHEMES)[number];
+
+/** 工作台五大核心模块。 */
+export const WORKBENCH_MODULES = ['overview', 'schedules', 'agents', 'tasks', 'sessions'] as const;
+export type WorkbenchModule = (typeof WORKBENCH_MODULES)[number];
+
+/** 任务看板四列状态。 */
+export const TASK_COLUMNS = ['todo', 'in_progress', 'review', 'done'] as const;
+export type TaskColumn = (typeof TASK_COLUMNS)[number];

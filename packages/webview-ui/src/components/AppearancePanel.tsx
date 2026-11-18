@@ -1,19 +1,63 @@
 /**
- * 字体与字号：直接在面板里调整，写入 VS Code 设置 harnessDeck.ui.fontSize / fontFamily / codeFontFamily。
- * 改动先在本地生效（不等设置写完），留空或「恢复默认」时跟随 VS Code。
+ * 阅读与聊天排版控件：
+ * 聊天回复、计划和 Markdown 文件预览共用字体、字号、行高、段距与内容宽度，切换主题或配色不会改变这些设置。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AppearanceState } from '@harness-deck/shared';
+import { useT } from '../i18n.ts';
+import { cn } from '../lib/utils.ts';
 import { setAppearanceLocal, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
-import { useT } from '../i18n.ts';
+import { Markdown } from './Markdown.tsx';
+import { Button } from './ui/Button.tsx';
+import { Input, Stepper } from './ui/FormControls.tsx';
+import { ValuePill } from './ui/ValuePill.tsx';
 
 const MIN_SIZE = 10;
 const MAX_SIZE = 24;
+const DEFAULT_SIZE = 14;
 
-type Patch = { fontSize?: number | null; fontFamily?: string | null; codeFontFamily?: string | null; palette?: 'theme' | null };
+const MIN_LINE_HEIGHT = 1.3;
+const MAX_LINE_HEIGHT = 2.2;
+const DEFAULT_LINE_HEIGHT = 1.6;
 
-function apply(current: AppearanceState, patch: Patch): void {
+const MIN_SPACING = 4;
+const MAX_SPACING = 24;
+const DEFAULT_SPACING = 10;
+
+const MIN_WIDTH = 600;
+const MAX_WIDTH = 1280;
+const DEFAULT_WIDTH = 820;
+
+const FONT_PRESETS = [
+  { id: 'vscode', labelKey: 'settings.appearance.fontPreset.vscode' as const, value: '' },
+  {
+    id: 'sans',
+    labelKey: 'settings.appearance.fontPreset.sans' as const,
+    value: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif',
+  },
+  {
+    id: 'serif',
+    labelKey: 'settings.appearance.fontPreset.serif' as const,
+    value: 'Charter, "Source Serif 4", Georgia, "Songti SC", "Noto Serif SC", serif',
+  },
+] as const;
+
+const WIDTH_PRESETS = [
+  { labelKey: 'settings.appearance.widthPreset.compact' as const, width: 680 },
+  { labelKey: 'settings.appearance.widthPreset.standard' as const, width: 820 },
+  { labelKey: 'settings.appearance.widthPreset.wide' as const, width: 980 },
+] as const;
+
+type ProsePatch = {
+  fontSize?: number | null;
+  fontFamily?: string | null;
+  lineHeight?: number | null;
+  paragraphSpacing?: number | null;
+  contentWidth?: number | null;
+};
+
+function applyProsePatch(current: AppearanceState, patch: ProsePatch): void {
   const next: Record<string, unknown> = { ...current };
   for (const [key, value] of Object.entries(patch)) {
     if (value === null || value === '') delete next[key];
@@ -23,97 +67,199 @@ function apply(current: AppearanceState, patch: Patch): void {
   postToHost({ type: 'setAppearance', payload: patch });
 }
 
-/** 当前生效的字号：设置了就是设置值，否则读页面的实际字号（VS Code 字号 + 1）。 */
-function effectiveSize(appearance: AppearanceState): number {
-  if (appearance.fontSize) return appearance.fontSize;
-  const size = Number.parseFloat(getComputedStyle(document.body).fontSize);
-  return Number.isFinite(size) ? Math.round(size) : 14;
-}
-
-export function AppearancePanel({ onClose }: { onClose: () => void }) {
+export function AppearancePanel() {
   const t = useT();
   const appearance = useView((s) => s.appearance);
-  const size = effectiveSize(appearance);
-  const [family, setFamily] = useState(appearance.fontFamily ?? '');
-  const [codeFamily, setCodeFamily] = useState(appearance.codeFontFamily ?? '');
+  const size = appearance.fontSize ?? DEFAULT_SIZE;
+  const lineHeight = appearance.lineHeight ?? DEFAULT_LINE_HEIGHT;
+  const paragraphSpacing = appearance.paragraphSpacing ?? DEFAULT_SPACING;
+  const contentWidth = appearance.contentWidth ?? DEFAULT_WIDTH;
 
-  const setSize = (value: number) => apply(appearance, { fontSize: Math.min(MAX_SIZE, Math.max(MIN_SIZE, value)) });
-  const commitFamily = (key: 'fontFamily' | 'codeFontFamily', value: string) => {
+  const [family, setFamily] = useState(appearance.fontFamily ?? '');
+
+  useEffect(() => {
+    setFamily(appearance.fontFamily ?? '');
+  }, [appearance.fontFamily]);
+
+  const setSize = (value: number) =>
+    applyProsePatch(appearance, { fontSize: Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.round(value))) });
+
+  const setLineHeight = (value: number) => {
+    const rounded = Number(Math.min(MAX_LINE_HEIGHT, Math.max(MIN_LINE_HEIGHT, value)).toFixed(1));
+    applyProsePatch(appearance, { lineHeight: rounded });
+  };
+
+  const setParagraphSpacing = (value: number) =>
+    applyProsePatch(appearance, { paragraphSpacing: Math.min(MAX_SPACING, Math.max(MIN_SPACING, Math.round(value))) });
+
+  const setContentWidth = (value: number) =>
+    applyProsePatch(appearance, { contentWidth: Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(value))) });
+
+  const commitFamily = (value: string) => {
     const trimmed = value.trim();
-    if (trimmed === (appearance[key] ?? '')) return;
-    apply(appearance, { [key]: trimmed || null });
+    if (trimmed === (appearance.fontFamily ?? '')) return;
+    applyProsePatch(appearance, { fontFamily: trimmed || null });
   };
-  const reset = () => {
+
+  const selectFontPreset = (presetValue: string) => {
+    setFamily(presetValue);
+    applyProsePatch(appearance, { fontFamily: presetValue || null });
+  };
+
+  const resetProse = () => {
     setFamily('');
-    setCodeFamily('');
-    apply(appearance, { fontSize: null, fontFamily: null, codeFontFamily: null, palette: null });
+    applyProsePatch(appearance, {
+      fontSize: null,
+      fontFamily: null,
+      lineHeight: null,
+      paragraphSpacing: null,
+      contentWidth: null,
+    });
   };
+
+  const activePreset = FONT_PRESETS.find((p) => p.value === (appearance.fontFamily ?? ''));
 
   return (
-    <div className="appearance" data-testid="appearance-panel">
-      <div className="appearance__title">{t('header.appearance')}</div>
-      <div className="appearance__row">
-        <span className="appearance__label">{t('appearance.size')}</span>
-        <div className="stepper">
-          <button type="button" className="stepper__button" aria-label={t('appearance.smaller')} disabled={size <= MIN_SIZE} onClick={() => setSize(size - 1)}>
-            −
-          </button>
-          <span className="stepper__value" data-testid="appearance-size">
-            {size}px
-          </span>
-          <button type="button" className="stepper__button" aria-label={t('appearance.larger')} disabled={size >= MAX_SIZE} onClick={() => setSize(size + 1)}>
-            +
-          </button>
+    <div className="flex flex-col gap-3.5" data-testid="appearance-panel">
+      {/* 字体选择：预设快捷胶囊 + 自定义输入 */}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.proseFont')}</span>
+          <div className="flex flex-wrap items-center gap-1">
+            {FONT_PRESETS.map((preset) => {
+              const selected = activePreset?.id === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid={`font-preset-${preset.id}`}
+                  onClick={() => selectFontPreset(preset.value)}
+                  className={cn(
+                    'rounded-full px-2.5 py-0.5 text-[11.5px] transition-colors duration-100',
+                    selected
+                      ? 'bg-accent-tint font-medium text-accent-ink shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]'
+                      : 'bg-field text-ink-2 shadow-hairline hover:bg-hover hover:text-ink',
+                  )}
+                >
+                  {t(preset.labelKey)}
+                </button>
+              );
+            })}
+          </div>
         </div>
-        {appearance.fontSize ? null : <span className="appearance__default">{t('appearance.default')}</span>}
-      </div>
-      <label className="appearance__field">
-        <span className="appearance__label">{t('appearance.family')}</span>
-        <input
-          className="appearance__input"
+        <Input
+          data-testid="prose-font-family"
           value={family}
           placeholder={t('appearance.familyPlaceholder')}
+          aria-label={t('appearance.family')}
           onChange={(event) => setFamily(event.target.value)}
-          onBlur={() => commitFamily('fontFamily', family)}
-          onKeyDown={(event) => event.key === 'Enter' && commitFamily('fontFamily', family)}
+          onBlur={() => commitFamily(family)}
+          onKeyDown={(event) => event.key === 'Enter' && commitFamily(family)}
         />
-      </label>
-      <label className="appearance__field">
-        <span className="appearance__label">{t('appearance.codeFamily')}</span>
-        <input
-          className="appearance__input"
-          value={codeFamily}
-          placeholder={t('appearance.codeFamilyPlaceholder')}
-          onChange={(event) => setCodeFamily(event.target.value)}
-          onBlur={() => commitFamily('codeFontFamily', codeFamily)}
-          onKeyDown={(event) => event.key === 'Enter' && commitFamily('codeFontFamily', codeFamily)}
-        />
-      </label>
-      <label className="appearance__row appearance__switch">
-        <span className="appearance__label">{t('appearance.soft')}</span>
-        <input
-          type="checkbox"
-          role="switch"
-          data-testid="appearance-soft"
-          checked={appearance.palette !== 'theme'}
-          onChange={(event) => apply(appearance, { palette: event.target.checked ? null : 'theme' })}
-        />
-        <span className="appearance__hint">{t('appearance.softHint')}</span>
-      </label>
-      <div className="appearance__actions">
-        <button type="button" className="link-button" onClick={reset}>
+      </div>
+
+      {/* 字号 */}
+      <div className="flex items-center justify-between gap-2.5">
+        <span className="text-[12.5px] font-medium text-ink">{t('appearance.size')}</span>
+        <div className="flex items-center gap-2">
+          {appearance.fontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
+          <Stepper
+            valueLabel={`${size}px`}
+            valueTestId="appearance-size"
+            canDecrease={size > MIN_SIZE}
+            canIncrease={size < MAX_SIZE}
+            decreaseLabel={t('appearance.smaller')}
+            increaseLabel={t('appearance.larger')}
+            onDecrease={() => setSize(size - 1)}
+            onIncrease={() => setSize(size + 1)}
+          />
+        </div>
+      </div>
+
+      {/* 行高 */}
+      <div className="flex items-center justify-between gap-2.5">
+        <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.lineHeight')}</span>
+        <div className="flex items-center gap-2">
+          {appearance.lineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
+          <Stepper
+            valueLabel={lineHeight.toFixed(1)}
+            valueTestId="prose-line-height"
+            canDecrease={lineHeight > MIN_LINE_HEIGHT + 0.01}
+            canIncrease={lineHeight < MAX_LINE_HEIGHT - 0.01}
+            decreaseLabel={t('settings.appearance.lineHeightSmaller')}
+            increaseLabel={t('settings.appearance.lineHeightLarger')}
+            onDecrease={() => setLineHeight(lineHeight - 0.1)}
+            onIncrease={() => setLineHeight(lineHeight + 0.1)}
+          />
+        </div>
+      </div>
+
+      {/* 段距 */}
+      <div className="flex items-center justify-between gap-2.5">
+        <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.paragraphSpacing')}</span>
+        <div className="flex items-center gap-2">
+          {appearance.paragraphSpacing === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
+          <Stepper
+            valueLabel={`${paragraphSpacing}px`}
+            valueTestId="prose-paragraph-spacing"
+            canDecrease={paragraphSpacing > MIN_SPACING}
+            canIncrease={paragraphSpacing < MAX_SPACING}
+            decreaseLabel={t('settings.appearance.paragraphSpacingSmaller')}
+            increaseLabel={t('settings.appearance.paragraphSpacingLarger')}
+            onDecrease={() => setParagraphSpacing(paragraphSpacing - 2)}
+            onIncrease={() => setParagraphSpacing(paragraphSpacing + 2)}
+          />
+        </div>
+      </div>
+
+      {/* 内容宽度 */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.contentWidth')}</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1">
+            {WIDTH_PRESETS.map((preset) => {
+              const selected = contentWidth === preset.width;
+              return (
+                <button
+                  key={preset.width}
+                  type="button"
+                  data-testid={`width-preset-${preset.width}`}
+                  onClick={() => setContentWidth(preset.width)}
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-[11px] transition-colors duration-100',
+                    selected
+                      ? 'bg-accent-tint font-medium text-accent-ink shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]'
+                      : 'bg-field text-ink-2 shadow-hairline hover:bg-hover hover:text-ink',
+                  )}
+                >
+                  {t(preset.labelKey)}
+                </button>
+              );
+            })}
+          </div>
+          <Stepper
+            valueLabel={`${contentWidth}px`}
+            valueTestId="prose-content-width"
+            canDecrease={contentWidth > MIN_WIDTH}
+            canIncrease={contentWidth < MAX_WIDTH}
+            decreaseLabel={t('settings.appearance.contentWidthSmaller')}
+            increaseLabel={t('settings.appearance.contentWidthLarger')}
+            onDecrease={() => setContentWidth(contentWidth - 40)}
+            onIncrease={() => setContentWidth(contentWidth + 40)}
+          />
+        </div>
+      </div>
+
+      {/* 实时阅读与聊天排版预览 */}
+      <div className="flex flex-col gap-1.5 rounded-card bg-inset/70 p-3 shadow-hairline" data-testid="reading-live-preview">
+        <span className="text-[11px] font-medium text-ink-3">{t('settings.appearance.readingPreview')}</span>
+        <Markdown text={t('settings.appearance.readingPreviewSample')} />
+      </div>
+
+      <div className="flex items-center justify-end">
+        <Button variant="ghost" size="xs" data-testid="prose-reset" onClick={resetProse}>
           {t('appearance.reset')}
-        </button>
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => {
-            onClose();
-            postToHost({ type: 'openSettings', payload: {} });
-          }}
-        >
-          {t('appearance.allSettings')}
-        </button>
+        </Button>
       </div>
     </div>
   );

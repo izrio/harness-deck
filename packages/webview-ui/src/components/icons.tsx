@@ -293,3 +293,97 @@ export const ServerIcon = (p: IconProps) => (
     <path d="M5 4.75h.01M5 11.25h.01" />
   </svg>
 );
+export const SettingsIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="8" r="2.2" />
+    <path d="M8 2.2v1.3M8 12.5v1.3M3.9 3.9l.9.9M11.2 11.2l.9.9M2.2 8h1.3M12.5 8h1.3M3.9 12.1l.9-.9M11.2 4.8l.9-.9" />
+  </svg>
+);
+export const DownloadIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 2.5v8M5 7.5l3 3 3-3M3 13h10" />
+  </svg>
+);
+export const BellIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4.2 10.5a1 1 0 0 1-.8-1.6l.6-.9V6.5a4 4 0 0 1 8 0V8l.6.9a1 1 0 0 1-.8 1.6ZM6.5 12.2a1.5 1.5 0 0 0 3 0" />
+  </svg>
+);
+export const PaletteIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 2.5a5.5 5.5 0 1 0 0 11h.8a1.2 1.2 0 0 0 1.2-1.2c0-.4-.2-.7-.4-1-.3-.3-.4-.7-.2-1.1.2-.4.6-.7 1.1-.7h1a2 2 0 0 0 2-2A5 5 0 0 0 8 2.5Z" />
+    <circle cx="5.2" cy="7.5" r=".7" fill="currentColor" stroke="none" />
+    <circle cx="7.2" cy="5.2" r=".7" fill="currentColor" stroke="none" />
+    <circle cx="10" cy="5.5" r=".7" fill="currentColor" stroke="none" />
+  </svg>
+);
+export const SunIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="8" r="2.7" />
+    <path d="M8 2v1.3M8 12.7V14M3.8 3.8l.9.9M11.3 11.3l.9.9M2 8h1.3M12.7 8H14M3.8 12.2l.9-.9M11.3 4.7l.9-.9" />
+  </svg>
+);
+export const MoonIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12.8 9.8A5 5 0 0 1 6.2 3.2a5.5 5.5 0 1 0 6.6 6.6Z" />
+  </svg>
+);
+export const MonitorIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="2" y="2.8" width="12" height="8.4" rx="1.3" />
+    <path d="M5.5 13.5h5M8 11.2v2.3" />
+  </svg>
+);
+export const GitBranchIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="5" cy="4" r="1.4" />
+    <circle cx="5" cy="12" r="1.4" />
+    <circle cx="11.5" cy="6" r="1.4" />
+    <path d="M5 5.4v5.2M5 10.5c0-2.5 6.5-1.5 6.5-3.1" />
+  </svg>
+);
+export const SlidersIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 4.5h10M3 8h10M3 11.5h10" />
+    <circle cx="5.5" cy="4.5" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="10.5" cy="8" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="6.5" cy="11.5" r="1.2" fill="currentColor" stroke="none" />
+  </svg>
+);
+export const DashboardIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" />
+    <rect x="9" y="2.5" width="4.5" height="4.5" rx="1" />
+    <rect x="2.5" y="9" width="4.5" height="4.5" rx="1" />
+    <rect x="9" y="9" width="4.5" height="4.5" rx="1" />
+  </svg>
+);
+export const ClockIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="8" r="5.5" />
+    <path d="M8 5v3.2l2.3 1.4" />
+  </svg>
+);
+export const KanbanIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="2.3" y="3" width="3" height="10" rx="0.8" />
+    <rect x="6.5" y="3" width="3" height="7" rx="0.8" />
+    <rect x="10.7" y="3" width="3" height="8.5" rx="0.8" />
+  </svg>
+);
+export const PlayIcon = (p: IconProps) => (
+  <svg {...base(p)} fill="currentColor" stroke="none">
+    <path d="M4.8 3.5a.8.8 0 0 1 1.2-.7l6.4 4.5a.8.8 0 0 1 0 1.4L6 13.2a.8.8 0 0 1-1.2-.7Z" />
+  </svg>
+);
+export const ExpandPanelIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9" />
+  </svg>
+);
+export const SidebarIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="2.2" y="3" width="11.6" height="10" rx="1.4" />
+    <path d="M6.2 3v10" />
+  </svg>
+);

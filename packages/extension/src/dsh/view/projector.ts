@@ -7,7 +7,7 @@
  * - 工具调用按类型渲染：命令一行、文件修改带增删行数、连续的只读操作合并成一行「浏览」；
  * - 一轮结束时的 `workspace/changes` 渲染成改动汇总卡片（汇总内容由调用方从 Host 读取后传入）。
  */
-import { joinLabel, splitLabel, type ChangedFileView, type ImageView, type Item, type LineStats, type SessionChangesView } from '@harness-deck/shared';
+import { joinLabel, type ChangedFileView, type ImageView, type Item, type LineStats, type SessionChangesView } from '@harness-deck/shared';
 import { resolve } from 'node:path';
 import type { ChangesSummary } from '../DshClient.ts';
 import type { PendingPrompt } from '../SessionService.ts';
@@ -18,7 +18,7 @@ import { countLines, lineStats, sumStats, type ToolDiff } from '../../vm/diffs.t
 import { t } from '../../i18n.ts';
 import { canonicalTool } from '../../vm/toolNames.ts';
 import { displayPath } from '../../vm/paths.ts';
-import { activityLabel, FILE_KEYS, firstLine, parseArguments, stringArg, toolVariant } from '../../vm/toolRows.ts';
+import { activityLabel, FILE_KEYS, firstLine, parseArguments, stringArg, summarizeExplore, toolVariant } from '../../vm/toolRows.ts';
 
 /** 某一轮改动汇总的读取结果：还没读到时为 undefined。 */
 export type ChangesLookup = (seq: number) => ChangesSummary | 'unavailable' | undefined;
@@ -602,23 +602,6 @@ function settledResult(content: unknown, summary: string): { result?: string; fa
   const failed = !/\bfinished\b/iu.test(head);
   const rest = (marker >= 0 ? texts.slice(marker + 1) : failed ? texts : texts.slice(1)).join('\n\n').trim();
   return { ...(rest ? { result: truncate(rest) } : {}), failed };
-}
-
-/** 合并行的摘要：「读取 2 个文件，搜索 1 次」。 */
-function summarizeExplore(group: Explore): Explore {
-  let reads = 0;
-  let searches = 0;
-  let lists = 0;
-  for (const entry of group.entries) {
-    const tool = canonicalTool(splitLabel(entry.label).name);
-    if (tool === 'read' || tool === 'read_image') reads++;
-    else if (tool === 'ls' || tool === 'list') lists++;
-    else searches++;
-  }
-  const parts = [reads ? t('explore.reads', reads) : '', searches ? t('explore.searches', searches) : '', lists ? t('explore.lists', lists) : ''].filter(Boolean);
-  const statuses = group.entries.map((e) => e.status);
-  const status = statuses.includes('running') ? 'running' : statuses.every((s) => s === 'error') ? 'error' : 'ok';
-  return { ...group, summary: parts.join(t('explore.separator')), status };
 }
 
 function changesCard(seq: number, summary: ChangesSummary | 'unavailable' | undefined, edits: readonly TurnEdit[], workspacePath?: string): Item | undefined {

@@ -103,4 +103,48 @@ describe('新对话沿用上次选的模型', () => {
     expect(calls).toEqual(['new s1']);
     c.dispose();
   });
+
+  it('新开标签时 session/new 尚未返回，仍立即可见已缓存的模型列表并支持预选', async () => {
+    const calls: string[] = [];
+    const base = fakeClaude(calls);
+    let releaseSecondNew: (() => void) | undefined;
+    let newCount = 0;
+    const slowLink: AcpLink = {
+      notify: base.notify,
+      request: async <T,>(method: string, params: unknown): Promise<T> => {
+        if (method === 'session/new') {
+          newCount += 1;
+          if (newCount === 2) {
+            await new Promise<void>((resolve) => {
+              releaseSecondNew = resolve;
+            });
+          }
+        }
+        return base.request<T>(method, params);
+      },
+    };
+    const { c, models } = controller({ model: 'opus', effort: 'high' });
+    c.setLink(slowLink, { authMethods: [] });
+    await flush();
+    // 先把 s1 变成正式会话，再点加号开新标签
+    await c.handle({ type: 'sendMessage', payload: { text: '第一个', includeActive: false } });
+    const newSessionDone = c.handle({ type: 'newSession', payload: {} });
+    await flush();
+
+    // s2 的 session/new 仍在等待返回，但模型列表和偏好模型已经立即可用
+    expect(models().options.map((o) => o.model)).toEqual(['default', 'opus', 'haiku']);
+    expect(models().current).toMatchObject({ model: 'opus', reasoningEffort: 'high' });
+
+    // 在 session/new 仍在等待时切换模型，界面应立即响应并在建好后生效
+    const selectDone = c.handle({ type: 'selectModel', payload: { provider: 'acp', model: 'haiku', reasoningEffort: 'low' } });
+    expect(models().current).toMatchObject({ model: 'haiku', reasoningEffort: 'low' });
+
+    releaseSecondNew?.();
+    await newSessionDone;
+    await selectDone;
+    await flush();
+    expect(models().current).toMatchObject({ model: 'haiku', reasoningEffort: 'low' });
+    expect(calls).toContain('set s2 model=haiku');
+    c.dispose();
+  });
 });

@@ -3,7 +3,15 @@
  */
 import * as vscode from 'vscode';
 import type { RuntimeStatus } from '@harness-deck/shared';
+import { envWithExtraPath } from './npmManager.ts';
 import type { ControllerHostOptions } from './types.ts';
+
+let extraBinDir: string | undefined;
+
+/** 补充 npm 全局可执行目录，确保通过设置页安装的命令在 PATH 未包含时也能找到。 */
+export function setNpmGlobalBin(dir: string | undefined): void {
+  extraBinDir = dir?.trim() || undefined;
+}
 
 export interface BackendHost {
   readonly context: vscode.ExtensionContext;
@@ -18,9 +26,9 @@ export interface BackendHost {
   readonly onStatus: (status: RuntimeStatus) => void;
 }
 
-/** 进程环境变量，加上 VS Code 的代理设置（模型请求由底层自己发出）。 */
+/** 进程环境变量，加上 npm 全局可执行目录及 VS Code 的代理设置（模型请求由底层自己发出）。 */
 export function processEnvWithProxy(extra: Readonly<Record<string, string>> = {}): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env, ...extra };
+  const env = envWithExtraPath({ ...process.env, ...extra }, extraBinDir, process.platform);
   const proxy = vscode.workspace.getConfiguration('http').get<string>('proxy');
   if (proxy) {
     env.HTTPS_PROXY ??= proxy;

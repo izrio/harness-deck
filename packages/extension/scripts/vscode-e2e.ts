@@ -88,6 +88,7 @@ await writeFile(
     'workbench.startupEditor': 'none',
     'workbench.colorTheme': 'Default Dark Modern',
     'workbench.tips.enabled': false,
+    'harnessDeck.ui.showTurnChanges': true,
   }),
 );
 await writeFile(join(data, 'Machine', 'settings.json'), JSON.stringify({ 'harnessDeck.dsh.path': cli.dsh }));

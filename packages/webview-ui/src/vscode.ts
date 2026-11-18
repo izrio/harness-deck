@@ -1,4 +1,4 @@
-import type { WebviewToHost } from '@harness-deck/shared';
+import type { WebviewToHost, WorkbenchModule } from '@harness-deck/shared';
 
 /** Webview 本地保存的状态（输入框草稿等），刷新和隐藏后仍在。 */
 export interface PersistedState {
@@ -13,6 +13,10 @@ export interface PersistedState {
   readonly dockOpen?: 'todos' | 'changes' | undefined;
   /** 被隐藏时的会话改动签名；改动变化后重新显示。 */
   readonly changesDismissed?: string;
+  /** 工作台当前选中的顶层模块。 */
+  readonly activeModule?: WorkbenchModule;
+  /** 会话模块左侧按项目分组面板是否展开。 */
+  readonly sessionsSidebarOpen?: boolean;
 }
 
 /** 第一次用到时才取（acquireVsCodeApi 每个页面只能调一次；测试里没有它）。 */

@@ -9,10 +9,10 @@
  * - plan → 待办，usage_update → 上下文用量，available_commands_update → 斜杠命令，
  *   config_option_update / current_mode_update → 模型和模式，session_info_update → 标题。
  */
-import { joinLabel, splitLabel, type Item, type LineStats } from '@harness-deck/shared';
+import { joinLabel, type Item, type LineStats } from '@harness-deck/shared';
 import { splitContext } from '../vm/context.ts';
 import { countLines, lineStats, sumStats } from '../vm/diffs.ts';
-import { activityLabel, toolVariant } from '../vm/toolRows.ts';
+import { activityLabel, summarizeExplore, toolVariant } from '../vm/toolRows.ts';
 import { displayPath } from '../vm/paths.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
 import { t } from '../i18n.ts';
@@ -564,19 +564,7 @@ function outputOf(call: AcpToolCall): string | undefined {
   return text.length > OUTPUT_LIMIT ? `${text.slice(0, OUTPUT_LIMIT)}\n${t('output.truncated')}` : text;
 }
 
-function summarize(group: Explore): Explore {
-  let reads = 0;
-  let searches = 0;
-  for (const entry of group.entries) {
-    const tool = splitLabel(entry.label).name;
-    if (/read|cat|view/iu.test(tool)) reads++;
-    else searches++;
-  }
-  const parts = [reads ? t('explore.reads', reads) : '', searches ? t('explore.searches', searches) : ''].filter(Boolean);
-  const statuses = group.entries.map((e) => e.status);
-  const status = statuses.includes('running') ? 'running' : statuses.every((s) => s === 'error') ? 'error' : 'ok';
-  return { ...group, summary: parts.join(t('explore.separator')), status };
-}
+  const summarize = summarizeExplore;
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');

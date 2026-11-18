@@ -18,7 +18,9 @@ export interface ChatViewHost {
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'harnessDeck.chatView';
+  static readonly panelId = 'harnessDeck.workbenchPanel';
   private view: vscode.WebviewView | undefined;
+  private panel: vscode.WebviewPanel | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -27,14 +29,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
-    const webviewRoot = vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview');
-    view.webview.options = { enableScripts: true, localResourceRoots: [webviewRoot] };
-    view.webview.html = renderHtml(view.webview, webviewRoot, this.host.locale?.() ?? 'zh');
-    view.webview.onDidReceiveMessage((raw: unknown) => {
-      const message = parseWebviewMessage(raw);
-      if (message) this.host.onMessage(message);
-      else this.host.log('Webview：丢弃格式不对的消息');
-    });
+    this.mountWebview(view.webview);
     view.onDidDispose(() => {
       if (this.view === view) this.view = undefined;
     });
@@ -45,13 +40,51 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.host.onViewVisible();
   }
 
+  /** 在编辑器标签页中打开全宽工作台面板，与侧边栏共享同一状态流。 */
+  openPanel(title: string): void {
+    if (this.panel) {
+      this.panel.title = title;
+      this.panel.reveal(vscode.ViewColumn.One);
+      this.host.onViewVisible();
+      return;
+    }
+    const webviewRoot = vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview');
+    const panel = vscode.window.createWebviewPanel(
+      ChatViewProvider.panelId,
+      title,
+      vscode.ViewColumn.One,
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [webviewRoot] },
+    );
+    this.panel = panel;
+    this.mountWebview(panel.webview);
+    panel.onDidDispose(() => {
+      if (this.panel === panel) this.panel = undefined;
+    });
+    panel.onDidChangeViewState(() => {
+      if (panel.visible) this.host.onViewVisible();
+    });
+    this.host.onViewVisible();
+  }
+
+  private mountWebview(webview: vscode.Webview): void {
+    const webviewRoot = vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview');
+    webview.options = { enableScripts: true, localResourceRoots: [webviewRoot] };
+    webview.html = renderHtml(webview, webviewRoot, this.host.locale?.() ?? 'zh');
+    webview.onDidReceiveMessage((raw: unknown) => {
+      const message = parseWebviewMessage(raw);
+      if (message) this.host.onMessage(message);
+      else this.host.log('Webview：丢弃格式不对的消息');
+    });
+  }
+
   get visible(): boolean {
-    return this.view?.visible ?? false;
+    return Boolean(this.view?.visible || this.panel?.visible);
   }
 
   /** 视图还没打开时丢弃消息：Webview 加载后会发 ready 取完整快照。 */
   post(message: HostToWebview): void {
     void this.view?.webview.postMessage(message);
+    void this.panel?.webview.postMessage(message);
   }
 }
 

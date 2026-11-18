@@ -1,19 +1,20 @@
 /**
- * 对话流：贴底滚动（用户停在底部时跟随新内容，往上翻时不打扰）、加载更早的历史、"思考中"提示。
- * 往上翻了一段之后右下角出现「滚动到底部」按钮；翻上去时又来了新内容，按钮上有提示点。
+ * 对话流（Beautiful UI 流式布局 + 悬浮回底胶囊按钮）：
+ * 贴底滚动（用户停在底部时跟随新内容，往上翻时不打扰）、加载更早的历史、运行状态。
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
+import { cn } from '../lib/utils.ts';
+import { Button } from './ui/Button.tsx';
+import { LoaderGrid } from './ui/LoaderGrid.tsx';
+import { Shimmer } from './ui/Shimmer.tsx';
 import { InteractionCard } from './Interactions.tsx';
 import { ItemView } from './Items.tsx';
 import { RunStatus } from './RunStatus.tsx';
 import { ArrowDownIcon, ArrowUpIcon, SpinnerIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
-/**
- * 给读屏的播报：只在状态变化时说一句（开始回复、回复完了、在等你处理），不逐字念流式输出的内容。
- */
 function Announcer({ running, waiting }: { running: boolean; waiting: boolean }) {
   const t = useT();
   const previous = useRef({ running, waiting });
@@ -24,7 +25,7 @@ function Announcer({ running, waiting }: { running: boolean; waiting: boolean })
     if (waiting && !before.waiting) setMessage(t('a11y.needsYou'));
     else if (running && !before.running) setMessage(t('a11y.replyStarted'));
     else if (!running && before.running) setMessage(t('a11y.replyDone'));
-  }, [running, waiting]);
+  }, [running, waiting, t]);
   return (
     <div className="sr-only" role="status" aria-live="polite" data-testid="announcer">
       {message}
@@ -33,7 +34,6 @@ function Announcer({ running, waiting }: { running: boolean; waiting: boolean })
 }
 
 const STICK_THRESHOLD = 48;
-/** 离底部超过这个距离才显示「滚动到底部」按钮（刚往上滚一点时不打扰）。 */
 const BUTTON_THRESHOLD = 240;
 
 export function Thread() {
@@ -47,7 +47,6 @@ export function Thread() {
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [unseen, setUnseen] = useState(false);
 
-  // 切换会话时回到底部
   useLayoutEffect(() => {
     stick.current = true;
     setFarFromBottom(false);
@@ -59,8 +58,6 @@ export function Thread() {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   });
 
-  // 翻上去的时候有新内容（多了条目、最后一条换了、多了审批或提问）：按钮上显示提示点。
-  // 只看这几样：同一批条目重新下发、加载更早的消息都不算新内容
   const lastId = items.at(-1)?.id;
   const seen = useRef({ lastId, interactions: interactions.length });
   useEffect(() => {
@@ -90,39 +87,55 @@ export function Thread() {
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   };
 
-
   return (
-    <div className="thread-wrap">
-    {/* 不做成 live region：流式输出时每来一段文字读屏都会播报。状态变化由下面的 Announcer 单独播报 */}
-    <div className="thread" ref={scroller} role="region" aria-label={t('thread.label')} aria-busy={session.running} tabIndex={-1}>
-      {session.sync === 'disconnected' ? (
-        <div className="thread__sync" role="status">
-          <SpinnerIcon />
-          <span>{t('thread.reconnecting')}</span>
-        </div>
-      ) : null}
-      {session.hasOlder ? (
-        <div className="thread__older">
-          <button type="button" className="link-button" disabled={session.loadingOlder} onClick={() => postToHost({ type: 'loadOlder', payload: {} })}>
-            {session.loadingOlder ? <SpinnerIcon /> : <ArrowUpIcon />}
-            {session.loadingOlder ? t('thread.loading') : t('thread.older')}
-          </button>
-        </div>
-      ) : null}
-      {items.map((item) => (
-        <ItemView key={item.id} item={item} />
-      ))}
-      {interactions.map((interaction) => (
-        <InteractionCard key={interaction.id} interaction={interaction} />
-      ))}
-      <RunStatus />
-    </div>
+    <div className="thread-wrap relative flex min-h-0 flex-1 flex-col">
+      <div className="thread" ref={scroller} role="region" aria-label={t('thread.label')} aria-busy={session.running} tabIndex={-1}>
+        {session.sync === 'disconnected' ? (
+          <div className="thread__sync flex items-center justify-center gap-2 self-center rounded-full bg-surface px-3 py-1.5 text-[12px] shadow-card" role="status">
+            <LoaderGrid />
+            <Shimmer>{t('thread.reconnecting')}</Shimmer>
+          </div>
+        ) : null}
+        {session.hasOlder ? (
+          <div className="thread__older flex justify-center">
+            <Button
+              variant="secondary"
+              size="xs"
+              className="link-button text-ink-2"
+              disabled={session.loadingOlder}
+              onClick={() => postToHost({ type: 'loadOlder', payload: {} })}
+            >
+              {session.loadingOlder ? <SpinnerIcon className="size-3.5" /> : <ArrowUpIcon className="size-3.5" />}
+              {session.loadingOlder ? t('thread.loading') : t('thread.older')}
+            </Button>
+          </div>
+        ) : null}
+        {items.map((item) => (
+          <ItemView key={item.id} item={item} />
+        ))}
+        {interactions.map((interaction) => (
+          <InteractionCard key={interaction.id} interaction={interaction} />
+        ))}
+        <RunStatus />
+      </div>
       <Announcer running={session.running} waiting={interactions.length > 0} />
       {farFromBottom ? (
-        <button type="button" className={`to-bottom ${unseen ? 'to-bottom--unseen' : ''}`} title={t('thread.toBottom')} aria-label={t('thread.toBottom')} data-testid="to-bottom" onClick={toBottom}>
-          <ArrowDownIcon />
-          {unseen ? <span className="to-bottom__dot" aria-label={t('thread.newContent')} /> : null}
-        </button>
+        <Button
+          variant="secondary"
+          size="icon"
+          className={cn(
+            'to-bottom absolute right-3.5 bottom-3 z-10 size-8 rounded-full shadow-raised text-ink',
+            unseen && 'to-bottom--unseen',
+          )}
+          style={{ animation: 'to-bottom-in 160ms cubic-bezier(0.23,1,0.32,1) both' }}
+          title={t('thread.toBottom')}
+          aria-label={t('thread.toBottom')}
+          data-testid="to-bottom"
+          onClick={toBottom}
+        >
+          <ArrowDownIcon className="size-4" />
+          {unseen ? <span className="to-bottom__dot absolute top-0.5 right-0.5 size-2 rounded-full border-2 border-surface bg-accent" aria-label={t('thread.newContent')} /> : null}
+        </Button>
       ) : null}
     </div>
   );

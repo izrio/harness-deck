@@ -106,13 +106,13 @@ describe('Claude 底层', () => {
       loadSessions: () => [],
       saveSessions: () => undefined,
       signInHint: '在终端运行 claude 并输入 /login 登录。',
-      backends: () => ({ items: [{ id: 'claude', name: 'Claude', kind: 'acp' }], active: 'claude' }),
+      backends: () => ({ items: [{ id: 'claude', name: 'Claude Code', kind: 'acp' }], active: 'claude' }),
     });
     controller.setLink(link, { authMethods: [] });
     await controller.handle({ type: 'sendMessage', payload: { text: 'hi', includeActive: false } });
     const items = (controller as unknown as { currentProjection(): AcpSessionProjection }).currentProjection().snapshotItems();
     const notice = items.find((i): i is Extract<Item, { kind: 'notice' }> => i.kind === 'notice');
-    expect(notice?.text).toContain('Claude 需要登录。在终端运行 claude 并输入 /login 登录。');
+    expect(notice?.text).toContain('Claude Code 需要登录。在终端运行 claude 并输入 /login 登录。');
     // 没有登录方式：不调用 authenticate，也不重发
     expect(requests.filter((m) => m === 'session/prompt')).toHaveLength(1);
     expect(requests).not.toContain('authenticate');

@@ -7,6 +7,9 @@
  * 做法是把片段从**当前**文件反向应用回去。文件之后又被改过、片段定位不唯一时放弃，不猜测——错的 Diff 比没有更糟。
  */
 import { diffLines } from 'diff';
+import type { LineStats } from '@harness-deck/shared';
+
+export type { LineStats };
 
 export interface ToolDiff {
   readonly oldText: string | null;
@@ -19,11 +22,6 @@ export interface Hunk {
   readonly newStart: number;
   readonly newLines: number;
   readonly lines: readonly string[];
-}
-
-export interface LineStats {
-  readonly additions: number;
-  readonly deletions: number;
 }
 
 /** 两段文本之间的增删行数。 */

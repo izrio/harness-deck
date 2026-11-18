@@ -1,10 +1,11 @@
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 // 入口固定为 index.js / index.css，由 ChatViewProvider 生成的 HTML 直接引用；
 // 代码高亮的语言包按需加载，输出到 chunks/。base 用相对路径，让动态 import 相对 index.js 解析。
 export default defineConfig({
-  plugins: [react()],
+  plugins: [tailwindcss(), react()],
   base: './',
   build: {
     outDir: '../extension/dist/webview',

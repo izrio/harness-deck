@@ -60,6 +60,7 @@ export class InteractionService {
     client: DshClient,
     private readonly onChange: () => void,
     private readonly log: (line: string) => void = () => undefined,
+    private readonly isHiddenSession?: (sessionId: string) => boolean,
   ) {
     this.disposers.push(
       client.events.onWaterfall('approval/request', (request, signal) => this.hold(request, signal, 'approval')),
@@ -106,6 +107,9 @@ export class InteractionService {
   }
 
   private hold(request: WaterfallRequest, signal: AbortSignal, kind: Pending['kind']): Promise<WaterfallOutcome> {
+    if (this.isHiddenSession?.(request.agentId)) {
+      return Promise.resolve({ kind: 'next' });
+    }
     const parsed = kind === 'approval' ? approvalSchema.safeParse(request.request) : questionSchema.safeParse(request.request);
     if (!parsed.success) {
       // 看不懂的请求交给下一个回答方（例如同时打开的 dsh Web UI），不能让 dsh 一直等

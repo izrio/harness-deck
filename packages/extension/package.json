@@ -52,6 +52,11 @@
     },
     "commands": [
       {
+        "command": "harnessDeck.openWorkbench",
+        "title": "%command.openWorkbench%",
+        "category": "Harness Deck"
+      },
+      {
         "command": "harnessDeck.openChat",
         "title": "%command.openChat%",
         "category": "Harness Deck"
@@ -133,7 +138,7 @@
         "harnessDeck.dsh.path": {
           "type": "string",
           "default": "",
-          "scope": "machine-overridable",
+          "scope": "machine",
           "markdownDescription": "%config.runtime.path%"
         },
         "harnessDeck.dsh.profile": {
@@ -143,6 +148,7 @@
         },
         "harnessDeck.backends": {
           "type": "array",
+          "scope": "machine",
           "markdownDescription": "%config.backends%",
           "default": [],
           "items": {
@@ -221,23 +227,64 @@
           "default": "",
           "markdownDescription": "%config.ui.fontFamily%"
         },
+        "harnessDeck.ui.lineHeight": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 2.4,
+          "markdownDescription": "%config.ui.lineHeight%"
+        },
+        "harnessDeck.ui.paragraphSpacing": {
+          "type": "number",
+          "default": -1,
+          "minimum": -1,
+          "maximum": 32,
+          "markdownDescription": "%config.ui.paragraphSpacing%"
+        },
+        "harnessDeck.ui.contentWidth": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 1600,
+          "markdownDescription": "%config.ui.contentWidth%"
+        },
         "harnessDeck.ui.codeFontFamily": {
           "type": "string",
           "default": "",
           "markdownDescription": "%config.ui.codeFontFamily%"
         },
-        "harnessDeck.ui.palette": {
+        "harnessDeck.ui.terminalFontSize": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 24,
+          "markdownDescription": "%config.ui.terminalFontSize%"
+        },
+        "harnessDeck.ui.terminalLineHeight": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 2.4,
+          "markdownDescription": "%config.ui.terminalLineHeight%"
+        },
+        "harnessDeck.ui.colorScheme": {
           "type": "string",
           "enum": [
-            "soft",
-            "theme"
+            "slate",
+            "warm",
+            "forest",
+            "violet",
+            "rose"
           ],
-          "enumDescriptions": [
-            "%config.ui.palette.soft%",
-            "%config.ui.palette.theme%"
+          "markdownEnumDescriptions": [
+            "%config.ui.colorScheme.slate%",
+            "%config.ui.colorScheme.warm%",
+            "%config.ui.colorScheme.forest%",
+            "%config.ui.colorScheme.violet%",
+            "%config.ui.colorScheme.rose%"
           ],
-          "default": "soft",
-          "markdownDescription": "%config.ui.palette%"
+          "default": "slate",
+          "markdownDescription": "%config.ui.colorScheme%"
         },
         "harnessDeck.backendTrace": {
           "type": "boolean",
@@ -248,6 +295,95 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "%config.ui.showTurnChanges%"
+        },
+        "harnessDeck.ui.theme": {
+          "type": "string",
+          "enum": [
+            "system",
+            "light",
+            "dark"
+          ],
+          "markdownEnumDescriptions": [
+            "%config.ui.theme.system%",
+            "%config.ui.theme.light%",
+            "%config.ui.theme.dark%"
+          ],
+          "default": "system",
+          "markdownDescription": "%config.ui.theme%"
+        },
+        "harnessDeck.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.notifications.enabled%"
+        },
+        "harnessDeck.notifications.onlyWhenUnfocused": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.notifications.onlyWhenUnfocused%"
+        },
+        "harnessDeck.notifications.onAttention": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.notifications.onAttention%"
+        },
+        "harnessDeck.notifications.onTurnComplete": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.notifications.onTurnComplete%"
+        },
+        "harnessDeck.notifications.onUnexpectedExit": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.notifications.onUnexpectedExit%"
+        },
+        "harnessDeck.notifications.onScheduledComplete": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.notifications.onScheduledComplete%"
+        },
+        "harnessDeck.schedules.permission": {
+          "type": "string",
+          "enum": [
+            "danger-full-access",
+            "workspace-write",
+            "read-only"
+          ],
+          "markdownEnumDescriptions": [
+            "%config.schedules.permission.full%",
+            "%config.schedules.permission.workspace%",
+            "%config.schedules.permission.read%"
+          ],
+          "default": "danger-full-access",
+          "markdownDescription": "%config.schedules.permission%"
+        },
+        "harnessDeck.projects": {
+          "type": "object",
+          "scope": "application",
+          "default": {},
+          "markdownDescription": "%config.projects%",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "copyFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "setupCommands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verifyCommands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     },

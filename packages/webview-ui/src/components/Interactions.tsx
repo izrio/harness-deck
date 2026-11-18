@@ -1,11 +1,16 @@
 /**
- * 等待用户处理的请求，显示在对话流末尾：审批（dsh 要越过沙箱执行命令或修改文件）和提问（ask_user_question）。
- * 回答后由 Host 回传给 dsh，卡片随 Host 推送的列表消失。
+ * 交互卡片（严格对齐 Beautiful UI ApprovalCard：`primitive-card-pad` / `primitive-card-footer` / `GlideMenu` / `RollingDigits` / `Button`）。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { PendingInteraction, QuestionView } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
+import { cn } from '../lib/utils.ts';
+import { Button } from './ui/Button.tsx';
+import { Textarea } from './ui/FormControls.tsx';
+import { GlideMenu } from './ui/GlideMenu.tsx';
+import { TerminalBlock } from './ui/TerminalBlock.tsx';
+import { ValuePill } from './ui/ValuePill.tsx';
 import { Markdown } from './Markdown.tsx';
 import {
   ArrowLeftIcon,
@@ -35,6 +40,71 @@ export function InteractionCard({ interaction }: { interaction: PendingInteracti
   return <QuestionCard item={interaction} />;
 }
 
+/** Beautiful UI odometer digits */
+function RollingDigits({ value }: { value: string }) {
+  const prevRef = useRef(value);
+  const [oldVal, setOldVal] = useState(value);
+  const [newVal, setNewVal] = useState(value);
+  const [rolling, setRolling] = useState(false);
+  const [shifted, setShifted] = useState(false);
+  const [dir, setDir] = useState<'up' | 'down'>('up');
+
+  useEffect(() => {
+    if (prevRef.current === value) return;
+    const from = prevRef.current;
+    prevRef.current = value;
+    const fromN = Number.parseInt(/\d+/u.exec(from)?.[0] ?? '', 10);
+    const toN = Number.parseInt(/\d+/u.exec(value)?.[0] ?? '', 10);
+    setDir(Number.isFinite(fromN) && Number.isFinite(toN) && toN < fromN ? 'down' : 'up');
+    setOldVal(from);
+    setNewVal(value);
+    setRolling(true);
+    setShifted(false);
+
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setShifted(true));
+    });
+    const done = setTimeout(() => {
+      setRolling(false);
+      setOldVal(value);
+      setShifted(false);
+    }, 260);
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      clearTimeout(done);
+    };
+  }, [value]);
+
+  const chars = rolling ? newVal : oldVal;
+  return (
+    <>
+      {Array.from({ length: chars.length }, (_, i) => {
+        const o = oldVal[i] ?? '';
+        const n = chars[i] ?? '';
+        if (!rolling || o === n) return <span key={`${i}-${n}`}>{n}</span>;
+        const top = dir === 'down' ? n : o;
+        const bottom = dir === 'down' ? o : n;
+        const restY = dir === 'down' ? '0' : '-1em';
+        const startY = dir === 'down' ? '-1em' : '0';
+        return (
+          <span key={`${i}-${o}-${n}-${dir}`} className="relative inline-block h-[1em] overflow-hidden align-[-0.05em] leading-[1em]">
+            <span
+              className="flex flex-col transition-transform duration-250"
+              style={{ transform: `translateY(${shifted ? restY : startY})` }}
+            >
+              <span className="h-[1em] leading-[1em]">{top}</span>
+              <span className="h-[1em] leading-[1em]">{bottom}</span>
+            </span>
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
 function ApprovalCard({ item }: { item: Of<'approval'> }) {
   const [sent, setSent] = useState<'allow' | 'allowAlways' | 'reject' | undefined>();
   const t = useT();
@@ -46,56 +116,71 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
   };
   const title = item.subjectKind === 'command' ? t('approval.command') : item.subjectKind === 'file' ? t('approval.file') : t('approval.tool', item.toolName);
   return (
-    <section className="interaction interaction--approval" aria-label={t('approval.label')} data-testid="approval-card">
-      <header className="interaction__header">
-        <ShieldIcon />
-        <span>{title}</span>
-      </header>
-      {item.subjectKind === 'command' && item.subject ? <pre className="interaction__command">{item.subject}</pre> : null}
-      {item.subjectKind === 'file' && item.subject ? (
-        <button type="button" className="link-button interaction__file" onClick={() => postToHost({ type: 'openFile', payload: { path: item.subject ?? '' } })}>
-          {item.subject}
-        </button>
-      ) : null}
-      {item.reason && item.reason !== item.subject ? <p className="interaction__reason">{item.reason}</p> : null}
-      {/* 「越过沙箱、只对这一次生效」是 dsh 的审批语义，其他底层不显示 */}
-      {isDsh ? <p className="interaction__hint">{t('approval.hint')}</p> : null}
-      {blocked ? (
-        <div className="interaction__warning" role="alert">
-          <span>{t('approval.dirty', item.dirtyFiles.join(', '))}</span>
-          <button type="button" className="link-button" onClick={() => postToHost({ type: 'saveAll', payload: {} })}>
-            <SaveIcon />
-            {t('dirty.saveAll')}
-          </button>
-        </div>
-      ) : null}
-      <div className="interaction__actions">
-        <button type="button" className="button" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
-          {sent === 'allow' ? <SpinnerIcon /> : <CheckIcon />}
-          {t('approval.allow')}
-        </button>
-        {item.allowAlways ? (
-          <button type="button" className="button button--secondary" disabled={sent !== undefined || blocked} title={t('approval.allowAlwaysTitle')} onClick={() => respond('allowAlways')}>
-            {sent === 'allowAlways' ? <SpinnerIcon /> : null}
-            {item.allowAlways}
+    <section
+      className="interaction interaction--approval overflow-hidden rounded-card bg-surface shadow-card"
+      aria-label={t('approval.label')}
+      data-testid="approval-card"
+      style={{ animation: 'fade-up 340ms cubic-bezier(0.23,1,0.32,1) both' }}
+    >
+      <div className="primitive-card-pad flex flex-col gap-2.5">
+        <header className="interaction__header flex items-center gap-2 text-[14px] font-medium text-ink">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-orange-tint text-orange">
+            <ShieldIcon className="size-3.5" />
+          </span>
+          <span>{title}</span>
+        </header>
+        {item.subjectKind === 'command' && item.subject ? (
+          <TerminalBlock text={item.subject} className="interaction__command max-h-40 text-ink" />
+        ) : null}
+        {item.subjectKind === 'file' && item.subject ? (
+          <button
+            type="button"
+            className="self-start rounded-chip bg-field px-2 py-1 font-mono text-[12px] text-accent-ink shadow-hairline hover:underline [overflow-wrap:anywhere]"
+            onClick={() => postToHost({ type: 'openFile', payload: { path: item.subject ?? '' } })}
+          >
+            {item.subject}
           </button>
         ) : null}
-        <button type="button" className="button button--secondary" disabled={sent !== undefined} onClick={() => respond('reject')}>
-          {sent === 'reject' ? <SpinnerIcon /> : <CloseIcon />}
-          {t('approval.reject')}
-        </button>
+        {item.reason && item.reason !== item.subject ? <p className="interaction__reason m-0 text-[13px] text-ink">{item.reason}</p> : null}
+        {isDsh ? <p className="m-0 text-[12px] text-ink-2">{t('approval.hint')}</p> : null}
+        {blocked ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-control bg-orange-tint px-2.5 py-2 text-[12px] text-orange shadow-[0_0_0_1px_color-mix(in_srgb,var(--orange)_28%,transparent)]" role="alert">
+            <span>{t('approval.dirty', item.dirtyFiles.join(', '))}</span>
+            <button type="button" className="inline-flex items-center gap-1 font-medium text-accent-ink hover:underline" onClick={() => postToHost({ type: 'saveAll', payload: {} })}>
+              <SaveIcon className="size-3.5" />
+              {t('dirty.saveAll')}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div className="interaction__actions primitive-card-footer flex flex-wrap items-center gap-1.5 border-t border-line">
         {item.previewable ? (
-          <button type="button" className="toolbar-button interaction__preview" onClick={() => postToHost({ type: 'previewApproval', payload: { id: item.id } })}>
-            <EyeIcon />
+          <Button variant="quiet" size="sm" className="interaction__preview mr-auto text-ink-2" onClick={() => postToHost({ type: 'previewApproval', payload: { id: item.id } })}>
+            <EyeIcon className="size-3.5" />
             <span>{t('approval.preview')}</span>
-          </button>
+          </Button>
+        ) : (
+          <span className="mr-auto" />
+        )}
+        <Button variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => respond('reject')}>
+          {sent === 'reject' ? <SpinnerIcon className="size-3.5" /> : <CloseIcon className="size-3.5" />}
+          {t('approval.reject')}
+        </Button>
+        {item.allowAlways ? (
+          <Button variant="secondary" size="sm" disabled={sent !== undefined || blocked} title={t('approval.allowAlwaysTitle')} onClick={() => respond('allowAlways')}>
+            {sent === 'allowAlways' ? <SpinnerIcon className="size-3.5" /> : null}
+            {item.allowAlways}
+          </Button>
         ) : null}
+        <Button variant="accent" size="sm" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
+          {sent === 'allow' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
+          {t('approval.allow')}
+        </Button>
       </div>
     </section>
   );
 }
 
-/** 计划审阅：显示 dsh 提交的计划，批准后退出计划模式开始执行，或者写反馈让它继续完善。 */
 function PlanReviewCard({ id, question }: { id: string; question: QuestionView }) {
   const t = useT();
   const [feedback, setFeedback] = useState<string | undefined>();
@@ -105,57 +190,44 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
     setSent(selected === intent.approve ? 'approve' : 'keep');
     postToHost({ type: 'answerQuestion', payload: { id, answers: [{ id: question.id, selected: [selected], ...(custom ? { custom } : {}) }] } });
   };
-  const keep = intent.keepPlanning ?? question.options.find((o) => o.label !== intent.approve)?.label ?? 'Keep planning';
+  const keep = intent.keepPlanning ?? question.options.find((o) => o.label !== intent.approve)?.label ?? t('plan.keep');
   return (
-    <section className="interaction interaction--plan" aria-label={t('plan.label')} data-testid="plan-review-card">
-      <header className="interaction__header">
-        <PlanIcon />
-        <span>{t('plan.title')}</span>
-      </header>
-      {question.detail ? (
-        <div className="interaction__plan">
-          <Markdown text={question.detail} />
-        </div>
-      ) : null}
-      {feedback !== undefined ? (
-        <textarea
-          className="question__custom interaction__feedback"
-          rows={3}
-          autoFocus
-          value={feedback}
-          placeholder={t('plan.feedbackPlaceholder')}
-          aria-label={t('plan.feedbackLabel')}
-          disabled={sent !== undefined}
-          onChange={(event) => setFeedback(event.target.value)}
-        />
-      ) : null}
-      <div className="interaction__actions">
-        {feedback === undefined ? (
-          <>
-            <button type="button" className="button" disabled={sent !== undefined} onClick={() => answer(intent.approve)}>
-              {sent === 'approve' ? <SpinnerIcon /> : <CheckIcon />}
-              {t('plan.approve')}
-            </button>
-            <button type="button" className="button button--secondary" disabled={sent !== undefined} onClick={() => setFeedback('')}>
-              <PencilIcon />
-              {t('plan.keep')}
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="button" disabled={sent !== undefined} onClick={() => answer(keep, feedback.trim() || undefined)}>
-              {sent === 'keep' ? <SpinnerIcon /> : <SendIcon />}
-              {t('plan.sendFeedback')}
-            </button>
-            <button type="button" className="button button--secondary" disabled={sent !== undefined} onClick={() => setFeedback(undefined)}>
-              <ReplyIcon />
-              {t('plan.back')}
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          className="link-button interaction__skip"
+    <section
+      className="interaction overflow-hidden rounded-card bg-surface shadow-card"
+      aria-label={t('plan.label')}
+      data-testid="plan-review-card"
+      style={{ animation: 'fade-up 340ms var(--ease-out-strong) both' }}
+    >
+      <div className="primitive-card-pad flex flex-col gap-2.5">
+        <header className="flex items-center gap-2 text-[14px] font-medium text-ink">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-tint text-accent-ink">
+            <PlanIcon className="size-3.5" />
+          </span>
+          <span>{t('plan.title')}</span>
+        </header>
+        {question.detail ? (
+          <div className="max-h-80 overflow-auto rounded-control bg-inset/60 p-3 shadow-hairline">
+            <Markdown text={question.detail} />
+          </div>
+        ) : null}
+        {feedback !== undefined ? (
+          <Textarea
+            className="resize-y text-[13px]"
+            rows={3}
+            autoFocus
+            value={feedback}
+            placeholder={t('plan.feedbackPlaceholder')}
+            aria-label={t('plan.feedbackLabel')}
+            disabled={sent !== undefined}
+            onChange={(event) => setFeedback(event.target.value)}
+          />
+        ) : null}
+      </div>
+      <div className="interaction__actions primitive-card-footer flex flex-wrap items-center gap-1.5 border-t border-line">
+        <Button
+          variant="quiet"
+          size="sm"
+          className="interaction__skip mr-auto text-ink-2"
           disabled={sent !== undefined}
           title={t('plan.replyTitle')}
           onClick={() => {
@@ -163,9 +235,32 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
             postToHost({ type: 'answerQuestion', payload: { id, cancelled: true } });
           }}
         >
-          {sent === 'reply' ? <SpinnerIcon /> : <ChatIcon />}
+          {sent === 'reply' ? <SpinnerIcon className="size-3.5" /> : <ChatIcon className="size-3.5" />}
           {t('plan.reply')}
-        </button>
+        </Button>
+        {feedback === undefined ? (
+          <>
+            <Button variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback('')}>
+              <PencilIcon className="size-3.5" />
+              {t('plan.keep')}
+            </Button>
+            <Button variant="accent" size="sm" disabled={sent !== undefined} onClick={() => answer(intent.approve)}>
+              {sent === 'approve' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
+              {t('plan.approve')}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback(undefined)}>
+              <ReplyIcon className="size-3.5" />
+              {t('plan.back')}
+            </Button>
+            <Button variant="accent" size="sm" disabled={sent !== undefined} onClick={() => answer(keep, feedback.trim() || undefined)}>
+              {sent === 'keep' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
+              {t('plan.sendFeedback')}
+            </Button>
+          </>
+        )}
       </div>
     </section>
   );
@@ -176,13 +271,9 @@ interface Draft {
   readonly custom: string;
 }
 
-/** 单选时选中后自动进入下一题的延迟：让选中状态先显示出来。 */
 const ADVANCE_DELAY_MS = 220;
 
-/**
- * 提问卡片。多个问题时逐题回答：顶部是进度（第几题、每题一个可点击的步骤点），底部「上一题 / 下一题」，
- * 最后一题才「提交」，一次把所有回答交给 dsh。单选题选中后自动进入下一题。
- */
+/** 对齐 Beautiful UI ApprovalCard 提问流。 */
 function QuestionCard({ item }: { item: Of<'question'> }) {
   const t = useT();
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -208,7 +299,6 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
 
   const submit = () => {
     if (!complete || sent) {
-      // 还有没回答的题：跳到第一道
       const missing = questions.findIndex((question) => !answered(question));
       if (missing >= 0) goTo(missing);
       return;
@@ -242,110 +332,143 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
     }
   };
 
-  /** 步骤点的提示：问题和已选的回答。 */
   const summary = (question: QuestionView) => {
     const d = draftOf(question);
     const answer = [...d.selected, d.custom.trim()].filter(Boolean).join(t('question.separator'));
-    return answer ? `${question.header ?? question.question}：${answer}` : (question.header ?? question.question);
+    return answer ? `${question.header ?? question.question}${t('question.summaryColon')}${answer}` : (question.header ?? question.question);
   };
 
   return (
-    <section className="interaction interaction--question" aria-label={t('question.label')} data-testid="question-card">
-      <header className="interaction__header question-card__header">
-        <span className="question-card__icon">
-          <QuestionIcon />
-        </span>
-        <span className="question-card__title">{t('question.title')}</span>
+    <section
+      className="interaction interaction--question overflow-hidden rounded-card bg-surface shadow-card"
+      aria-label={t('question.label')}
+      data-testid="question-card"
+      style={{ animation: 'fade-up 340ms cubic-bezier(0.23,1,0.32,1) both' }}
+    >
+      <div className="primitive-card-pad">
+        <header className="interaction__header question-card__header mb-2 flex items-center gap-2 text-[12.5px] font-medium text-ink-2">
+          <QuestionIcon className="size-3.5 shrink-0 text-accent-ink" />
+          <span className="question-card__title min-w-0 flex-1">{t('question.title')}</span>
+          {total > 1 ? (
+            <span className="question-card__count inline-flex items-center text-[12px] font-medium text-ink-3 tabular-nums" data-testid="question-step">
+              <RollingDigits value={t('question.step', index + 1, total)} />
+            </span>
+          ) : null}
+        </header>
         {total > 1 ? (
-          <span className="question-card__count" data-testid="question-step">
-            {t('question.step', index + 1, total)}
-          </span>
-        ) : null}
-      </header>
-      {total > 1 ? (
-        <div className="question-steps" role="tablist" aria-label={t('question.steps')}>
-          {questions.map((question, i) => (
-            <button
-              key={question.id}
-              type="button"
-              role="tab"
-              aria-selected={i === index}
-              aria-label={t('question.goTo', i + 1)}
-              title={summary(question)}
-              className={`question-steps__dot ${i === index ? 'question-steps__dot--current' : ''} ${answered(question) ? 'question-steps__dot--done' : ''}`}
-              disabled={sent !== undefined}
-              onClick={() => goTo(i)}
-            />
-          ))}
-        </div>
-      ) : null}
-      <fieldset key={q.id} className="question" disabled={sent !== undefined}>
-        <legend className="question__title">
-          {q.header ? <span className="question__header">{q.header}</span> : null}
-          <span className="question__text">{q.question}</span>
-        </legend>
-        {q.detail ? <p className="question__detail">{q.detail}</p> : null}
-        {q.multiSelect ? <p className="question__mode">{t('question.multi')}</p> : null}
-        {q.options.length > 0 ? (
-          <div className="question__options" role={q.multiSelect ? 'group' : 'radiogroup'}>
-            {q.options.map((option) => {
-              const active = draft.selected.includes(option.label);
-              return (
-                <button
-                  key={option.label}
-                  type="button"
-                  role={q.multiSelect ? 'checkbox' : 'radio'}
-                  aria-checked={active}
-                  className={`question__option ${active ? 'question__option--active' : ''}`}
-                  onClick={() => toggle(option.label)}
-                >
-                  <span className={`question__mark ${q.multiSelect ? 'question__mark--box' : ''}`} aria-hidden>
-                    {active ? <CheckIcon /> : null}
-                  </span>
-                  <span className="question__body">
-                    <span className="question__label">{option.label}</span>
-                    {option.description ? <span className="question__description">{option.description}</span> : null}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="question-steps mb-2.5 flex gap-1" role="tablist" aria-label={t('question.steps')}>
+            {questions.map((question, i) => (
+              <button
+                key={question.id}
+                type="button"
+                role="tab"
+                aria-selected={i === index}
+                aria-label={t('question.goTo', i + 1)}
+                title={summary(question)}
+                className={cn(
+                  'question-steps__dot h-1 flex-1 rounded-full transition-colors duration-150 disabled:cursor-default',
+                  i === index
+                    ? 'question-steps__dot--current bg-ink'
+                    : answered(question)
+                      ? 'question-steps__dot--done bg-[color-mix(in_srgb,var(--ink)_35%,transparent)]'
+                      : 'bg-line-strong',
+                )}
+                disabled={sent !== undefined}
+                onClick={() => goTo(i)}
+              />
+            ))}
           </div>
         ) : null}
-        <input
-          className="question__custom"
-          value={draft.custom}
-          placeholder={q.options.length > 0 ? t('question.other') : t('question.answer')}
-          aria-label={t('question.answerLabel', q.question)}
-          autoFocus={index > 0 && q.options.length === 0}
-          onChange={(event) => setDrafts({ ...drafts, [q.id]: { ...draft, custom: event.target.value } })}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.nativeEvent.isComposing) next();
-          }}
-        />
-      </fieldset>
-      <div className="interaction__actions question-card__actions">
-        <button type="button" className="link-button question-card__skip" disabled={sent !== undefined} onClick={skip}>
-          {sent === 'skip' ? <SpinnerIcon /> : <FastForwardIcon />}
+        <fieldset key={q.id} className="question m-0 min-w-0 border-0 p-0" disabled={sent !== undefined} style={{ animation: 'fade-in 200ms ease-out both' }}>
+          <legend className="question__title mb-2 flex flex-wrap items-baseline gap-1.5 p-0">
+            {q.header ? <ValuePill className="question__header text-[11px]">{q.header}</ValuePill> : null}
+            <span className="question__text text-[14px] font-medium text-ink">{q.question}</span>
+          </legend>
+          {q.detail ? <p className="question__detail mt-0 mb-2 text-[12.5px] text-ink-2">{q.detail}</p> : null}
+          {q.multiSelect ? <p className="question__mode mt-0 mb-1.5 text-[11.5px] text-ink-3">{t('question.multi')}</p> : null}
+          {q.options.length > 0 ? (
+            <GlideMenu className="question__options mb-1 flex flex-col gap-1" highlightClassName="inset-x-0 rounded-control bg-hover">
+              <div role={q.multiSelect ? 'group' : 'radiogroup'} className="flex flex-col gap-1">
+                {q.options.map((option) => {
+                  const active = draft.selected.includes(option.label);
+                  return (
+                    <button
+                      key={option.label}
+                      type="button"
+                      data-menu-row
+                      role={q.multiSelect ? 'checkbox' : 'radio'}
+                      aria-checked={active}
+                      className={cn(
+                        'question__option relative z-10 flex items-center gap-2 rounded-control py-1.5 pr-2 pl-1.5 text-left transition-colors duration-100',
+                        active && 'question__option--active',
+                      )}
+                      onClick={() => toggle(option.label)}
+                    >
+                      <span
+                        className={cn(
+                          'question__mark flex size-4 shrink-0 items-center justify-center transition-colors duration-200',
+                          q.multiSelect ? 'question__mark--box rounded-[5px]' : 'rounded-full',
+                          active ? 'bg-ink text-canvas' : 'text-transparent shadow-[inset_0_0_0_1.5px_var(--line-strong)]',
+                        )}
+                        aria-hidden
+                      >
+                        {q.multiSelect ? (
+                          <CheckIcon className="size-3" strokeWidth={2.8} />
+                        ) : (
+                          <span className="size-1.5 rounded-full bg-canvas transition-transform duration-200" style={{ transform: active ? 'scale(1)' : 'scale(0)' }} />
+                        )}
+                      </span>
+                      <span className="question__body flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className={cn('question__label text-[13px] leading-none transition-colors duration-200', active ? 'text-ink' : 'text-ink-2')}>
+                          {option.label}
+                        </span>
+                        {option.description ? <span className="question__description text-[11.5px] text-ink-3">{option.description}</span> : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </GlideMenu>
+          ) : null}
+          <label className="relative z-10 flex items-center rounded-control px-1.5 py-1 transition-colors duration-100 hover:bg-hover">
+            <input
+              className="question__custom min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+              value={draft.custom}
+              placeholder={q.options.length > 0 ? t('question.other') : t('question.answer')}
+              aria-label={t('question.answerLabel', q.question)}
+              autoFocus={index > 0 && q.options.length === 0}
+              onChange={(event) => setDrafts({ ...drafts, [q.id]: { ...draft, custom: event.target.value } })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) next();
+              }}
+            />
+          </label>
+        </fieldset>
+      </div>
+      <div className="interaction__actions question-card__actions primitive-card-footer flex items-center justify-between gap-2 border-t border-line">
+        <Button variant="ghost" size="sm" className="question-card__skip" disabled={sent !== undefined} onClick={skip}>
+          {sent === 'skip' ? <SpinnerIcon className="size-3.5" /> : <FastForwardIcon className="size-3.5" />}
           {total > 1 ? t('question.skipAll') : t('question.skip')}
-        </button>
-        <span className="question-card__spacer" />
-        {total > 1 && index > 0 ? (
-          <button type="button" className="button button--secondary" disabled={sent !== undefined} onClick={() => goTo(index - 1)}>
-            <ArrowLeftIcon />
-            {t('question.prev')}
-          </button>
-        ) : null}
-        {last ? (
-          <button type="button" className="button" disabled={!complete || sent !== undefined} onClick={submit}>
-            {sent === 'submit' ? <SpinnerIcon /> : <SendIcon />}
-            {t('question.submit')}
-          </button>
-        ) : (
-          <button type="button" className="button" disabled={!answered(q) || sent !== undefined} onClick={next}>
-            {t('question.next')}
-            <ArrowRightIcon />
-          </button>
-        )}
+        </Button>
+        <div className="flex items-center gap-1.5">
+          {total > 1 && index > 0 ? (
+            <Button variant="secondary" size="sm" disabled={sent !== undefined} onClick={() => goTo(index - 1)}>
+              <ArrowLeftIcon className="size-3.5" />
+              {t('question.prev')}
+            </Button>
+          ) : null}
+          {last ? (
+            <Button variant="accent" size="sm" disabled={!complete || sent !== undefined} onClick={submit}>
+              {sent === 'submit' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
+              {t('question.submit')}
+            </Button>
+          ) : (
+            <Button variant="accent" size="sm" disabled={!answered(q) || sent !== undefined} onClick={next}>
+              {t('question.next')}
+              <ArrowRightIcon className="size-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
     </section>
   );

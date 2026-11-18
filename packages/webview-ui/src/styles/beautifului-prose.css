@@ -1,0 +1,404 @@
+/* ---------- Beautiful UI Prose, Markdown & Controls ---------- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px max(14px, calc((100% - var(--content-width)) / 2)) 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.thread > * {
+  flex-shrink: 0;
+}
+
+.thread > .user,
+.thread > .assistant,
+.thread > .activity,
+.thread > .changes {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
+
+/* ---------- Shared Reading & Chat Prose (.markdown & .prose-surface) ----------
+ * Shared across:
+ * 1) Chat Replies (AssistantMessage, SubagentRow)
+ * 2) Plans (PlanReviewCard)
+ * 3) Markdown File Previews (MarkdownPreviewModal & Settings Live Sample)
+ */
+
+.markdown {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--prose-font-family);
+  font-size: var(--prose-font-size);
+  line-height: var(--prose-line-height);
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote {
+  margin: var(--prose-paragraph-spacing) 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.45em;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li + li {
+  margin-top: 0.25em;
+}
+
+.markdown strong,
+.markdown b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  color: var(--ink);
+  margin: calc(var(--prose-paragraph-spacing) * 1.35) 0 calc(var(--prose-paragraph-spacing) * 0.55);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.markdown h1 {
+  font-size: 1.24em;
+}
+
+.markdown h2 {
+  font-size: 1.14em;
+}
+
+.markdown h3 {
+  font-size: 1.06em;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+
+.markdown a {
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.markdown a:hover {
+  text-decoration: underline;
+}
+
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink-2);
+}
+
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: calc(var(--prose-paragraph-spacing) * 1.2) 0;
+}
+
+.inline-code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--inset);
+  color: var(--ink);
+  box-shadow: var(--shadow-hairline);
+  font-family: var(--font-mono);
+  font-size: 0.87em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+button.inline-code--link {
+  font-size: 0.87em;
+  line-height: inherit;
+  color: var(--accent-ink);
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+button.inline-code--link:hover {
+  background: var(--hover-2);
+  text-decoration: underline;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin: var(--prose-paragraph-spacing) 0;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.markdown th,
+.markdown td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown th {
+  font-weight: 500;
+  color: var(--ink-3);
+  font-size: 0.88em;
+}
+
+.md-image-placeholder {
+  color: var(--ink-3);
+}
+
+/* ---------- Terminal & Command Output Surface ---------- */
+
+.terminal-surface {
+  font-family: var(--font-mono);
+  font-size: var(--terminal-font-size);
+  line-height: var(--terminal-line-height);
+}
+
+/* Shiki dual-theme token colors */
+.shiki span {
+  color: var(--shiki-light);
+}
+
+.dark .shiki span {
+  color: var(--shiki-dark);
+}
+
+/* Streaming caret at end of active assistant paragraph */
+.cursor,
+.assistant--streaming .markdown > :is(p, h1, h2, h3, h4, h5, h6, blockquote):last-child::after,
+.assistant--streaming .markdown > :is(ul, ol):last-child > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  border-radius: 1px;
+  vertical-align: text-bottom;
+  background: var(--ink);
+  animation: caret-blink 1s step-end infinite;
+}
+
+.assistant--streaming .markdown:has(> :is(p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol):last-child) + .cursor {
+  display: none;
+}
+
+/* ---------- Context ring ---------- */
+
+.context-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-ring__track {
+  stroke: var(--line-strong);
+}
+
+.context-ring__value {
+  stroke: var(--accent);
+  transition: stroke-dasharray 0.3s ease;
+}
+
+.context-ring--medium .context-ring__value {
+  stroke: var(--orange);
+}
+
+.context-ring--high .context-ring__value {
+  stroke: var(--red);
+}
+
+.context-ring--high {
+  color: var(--red);
+}
+
+/* ---------- Composer resize handle ---------- */
+
+.composer__resize {
+  position: absolute;
+  top: -5px;
+  left: 16px;
+  right: 16px;
+  height: 9px;
+  z-index: 2;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.composer__resize::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 32px;
+  height: 3px;
+  margin-left: -16px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.composer__resize:hover::after,
+.composer__resize:focus-visible::after,
+body.resizing .composer__resize::after {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.composer__resize:focus-visible {
+  outline: none;
+}
+
+body.resizing {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+/* ---------- Switch toggle ---------- */
+
+.bui-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+}
+
+.bui-switch:disabled {
+  cursor: default;
+}
+
+.bui-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bui-switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.2);
+  transition: transform 0.18s var(--ease-out-strong);
+}
+
+.bui-switch:checked {
+  background: var(--accent);
+}
+
+.bui-switch:checked::before {
+  transform: translateX(14px);
+}
+
+/* ---------- Utility ---------- */
+
+.tabs {
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 400px) {
+  .permission-picker__text {
+    display: none;
+  }
+}
+
+.skeleton {
+  border-radius: var(--radius-control);
+  background: linear-gradient(90deg, var(--field) 25%, var(--hover-2) 50%, var(--field) 75%);
+  background-size: 200% 100%;
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+  background: oklch(0 0 0 / 0.68);
+  backdrop-filter: blur(6px);
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-overlay);
+  object-fit: contain;
+}

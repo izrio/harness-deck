@@ -46,6 +46,19 @@ export class EditorContext {
     return true;
   }
 
+  /** 通过文件选择器把磁盘文件固定到下一条消息的上下文中（按路径去重）。 */
+  pinFiles(paths: readonly string[]): number {
+    let added = 0;
+    for (const filePath of paths) {
+      const normalized = filePath.trim();
+      if (!normalized) continue;
+      if (this.pinned.some((p) => p.kind === 'file' && p.path === normalized)) continue;
+      this.pinned.push({ kind: 'file', path: normalized, id: `pin-${++this.counter}` });
+      added++;
+    }
+    return added;
+  }
+
   unpin(id: string): void {
     this.pinned = this.pinned.filter((p) => p.id !== id);
   }

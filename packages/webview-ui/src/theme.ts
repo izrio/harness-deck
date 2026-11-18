@@ -1,88 +1,181 @@
 /**
- * 强调色：按钮、输入框边框、焦点、链接、进度条共用。
- *
- * 不少主题把 button.background、focusBorder 设成灰色或透明，直接用它们时发送按钮、输入框边框就没了颜色。
- * 这里按顺序取第一个"有颜色"的主题色（不透明、有一定饱和度、不太暗也不太亮），设成 CSS 变量 `--accent`，
- * 并按亮度配一个文字色 `--accent-foreground`。主题切换时 VS Code 会改 <html> 的 style 和 <body> 的 class，届时重新计算。
+ * 主题与整套配色同步：
+ * - 主题模式支持浅色（light）、深色（dark）与跟随系统（system），同步到 `html.dark`；
+ * - 5 套整套界面配色（slate / warm / forest / violet / rose），同步到 `html[data-color-scheme]`，
+ *   每套配色内置完整的浅色与深色令牌体系，随主题切换自动过渡，且绝不改变阅读与聊天排版参数。
  */
+import type { ColorSchemeId } from '@harness-deck/shared';
 
-/** 依次尝试的主题色：主按钮 → 焦点边框 → 链接 → 进度条 → 图表蓝。 */
-export const ACCENT_CANDIDATES = [
-  '--vscode-button-background',
-  '--vscode-focusBorder',
-  '--vscode-textLink-foreground',
-  '--vscode-progressBar-background',
-  '--vscode-charts-blue',
-] as const;
+export type ThemeMode = 'system' | 'light' | 'dark';
 
-const FALLBACK = { accent: '#3794ff', foreground: '#ffffff' };
-
-export type Rgba = readonly [number, number, number, number];
-
-/** 解析 getComputedStyle 给出的 `rgb(r, g, b)` / `rgba(r, g, b, a)`（也接受空格分隔的新写法）。 */
-export function parseRgb(value: string): Rgba | undefined {
-  const match = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/u.exec(value.trim());
-  if (!match) return undefined;
-  const alpha = match[4] === undefined ? 1 : match[4].endsWith('%') ? Number.parseFloat(match[4]) / 100 : Number.parseFloat(match[4]);
-  return [Number(match[1]), Number(match[2]), Number(match[3]), alpha];
+export interface SwatchHalf {
+  readonly canvas: string;
+  readonly surface: string;
+  readonly ink: string;
+  readonly inkMuted: string;
+  readonly accent: string;
+  readonly line: string;
 }
 
-/** 能当强调色：基本不透明、有颜色（HSL 饱和度够）、亮度适中。 */
-export function isVivid([r, g, b, a]: Rgba): boolean {
-  if (a < 0.6) return false;
-  const max = Math.max(r, g, b) / 255;
-  const min = Math.min(r, g, b) / 255;
-  const lightness = (max + min) / 2;
-  if (lightness < 0.18 || lightness > 0.88) return false;
-  const saturation = max === min ? 0 : (max - min) / (1 - Math.abs(2 * lightness - 1));
-  return saturation >= 0.3;
+export interface ColorSchemeSwatch {
+  readonly id: ColorSchemeId;
+  readonly light: SwatchHalf;
+  readonly dark: SwatchHalf;
 }
 
-/** 强调色上的文字：亮的强调色配深色字，否则白字。 */
-export function foregroundFor([r, g, b]: Rgba): string {
-  const channel = (c: number) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-  return luminance > 0.45 ? '#1e1e1e' : '#ffffff';
-}
+/** 5 套整套界面配色的左浅右深色卡预览定义（与 beautifului-foundation.css 中的 oklch 令牌一一对应）。 */
+export const COLOR_SCHEME_SWATCHES: readonly ColorSchemeSwatch[] = [
+  {
+    id: 'slate',
+    light: {
+      canvas: '#f1f4f8',
+      surface: '#ffffff',
+      ink: '#1b212c',
+      inkMuted: '#687385',
+      accent: '#2b74eb',
+      line: '#e3e8ef',
+    },
+    dark: {
+      canvas: '#191b22',
+      surface: '#22252f',
+      ink: '#eef1f7',
+      inkMuted: '#8f98a8',
+      accent: '#579cf9',
+      line: '#2f3441',
+    },
+  },
+  {
+    id: 'warm',
+    light: {
+      canvas: '#f5efe5',
+      surface: '#fdfaf4',
+      ink: '#2a211b',
+      inkMuted: '#7a6c60',
+      accent: '#c45d38',
+      line: '#e7ddd0',
+    },
+    dark: {
+      canvas: '#1e1a17',
+      surface: '#28231e',
+      ink: '#f4ede3',
+      inkMuted: '#a5988b',
+      accent: '#e07f56',
+      line: '#38312b',
+    },
+  },
+  {
+    id: 'forest',
+    light: {
+      canvas: '#ecf3ef',
+      surface: '#fafdfb',
+      ink: '#182720',
+      inkMuted: '#5e7469',
+      accent: '#198560',
+      line: '#dce7e1',
+    },
+    dark: {
+      canvas: '#151e1a',
+      surface: '#1e2924',
+      ink: '#e8f3ee',
+      inkMuted: '#8ba398',
+      accent: '#44b98d',
+      line: '#2b3a33',
+    },
+  },
+  {
+    id: 'violet',
+    light: {
+      canvas: '#f3eff9',
+      surface: '#fcfaff',
+      ink: '#231c30',
+      inkMuted: '#6f6682',
+      accent: '#6e4de0',
+      line: '#e4ddf0',
+    },
+    dark: {
+      canvas: '#1b1725',
+      surface: '#241f31',
+      ink: '#f1ecf8',
+      inkMuted: '#9b91b0',
+      accent: '#9f82f6',
+      line: '#332c44',
+    },
+  },
+  {
+    id: 'rose',
+    light: {
+      canvas: '#f8eff1',
+      surface: '#fefafb',
+      ink: '#2c1d22',
+      inkMuted: '#7d666e',
+      accent: '#cc4368',
+      line: '#ebdadd',
+    },
+    dark: {
+      canvas: '#20181b',
+      surface: '#2b2025',
+      ink: '#f6ebee',
+      inkMuted: '#aa9299',
+      accent: '#e87393',
+      line: '#3b2d33',
+    },
+  },
+];
 
-/**
- * 选出强调色。
- * @param resolve - 把 CSS 变量名解析成计算后的颜色字符串；变量不存在时返回 undefined 或透明色。
- */
-export function pickAccent(resolve: (name: string) => string | undefined): { accent: string; foreground: string } {
-  for (const name of ACCENT_CANDIDATES) {
-    const value = resolve(name);
-    const rgba = value ? parseRgb(value) : undefined;
-    if (rgba && isVivid(rgba)) return { accent: `rgb(${rgba[0]}, ${rgba[1]}, ${rgba[2]})`, foreground: foregroundFor(rgba) };
+let currentThemeMode: ThemeMode = 'system';
+
+export function detectDarkTheme(): boolean {
+  if (typeof document !== 'undefined') {
+    const cls = document.body.classList;
+    if (cls.contains('vscode-dark') || cls.contains('vscode-high-contrast')) return true;
+    if (cls.contains('vscode-light') || cls.contains('vscode-high-contrast-light')) return false;
   }
-  return FALLBACK;
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : false;
 }
 
-/** 计算并设置强调色，之后跟随主题变化。返回停止监听的函数。 */
+/** 根据主题模式解析最终是否为暗色。 */
+export function resolveIsDark(mode: ThemeMode = 'system'): boolean {
+  if (mode === 'dark') return true;
+  if (mode === 'light') return false;
+  return detectDarkTheme();
+}
+
+/** 将指定主题模式立即应用到 `html.dark`（不影响阅读与聊天排版参数）。 */
+export function applyThemeMode(mode: ThemeMode = 'system'): void {
+  currentThemeMode = mode;
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('dark', resolveIsDark(mode));
+  }
+}
+
+/** 将指定整套配色方案应用到 `html[data-color-scheme]`（随 `html.dark` 自动切换浅/深色）。 */
+export function applyColorScheme(scheme: ColorSchemeId = 'slate'): void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.colorScheme = scheme;
+  }
+}
+
+/** 监听 VS Code `body` 类名及系统主题变化，实时同步 `html.dark`。 */
 export function watchAccent(): () => void {
-  const probe = document.createElement('span');
-  probe.style.display = 'none';
-  document.body.appendChild(probe);
-  const resolve = (name: string) => {
-    probe.style.color = `var(${name}, transparent)`;
-    return getComputedStyle(probe).color;
-  };
   const apply = () => {
-    const { accent, foreground } = pickAccent(resolve);
-    const style = document.documentElement.style;
-    // 只在变化时写入：写 style 本身也会触发下面的监听
-    if (style.getPropertyValue('--accent') !== accent) style.setProperty('--accent', accent);
-    if (style.getPropertyValue('--accent-foreground') !== foreground) style.setProperty('--accent-foreground', foreground);
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', resolveIsDark(currentThemeMode));
+    }
   };
   apply();
-  const observer = new MutationObserver(apply);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
-  observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  const observer = typeof document !== 'undefined' ? new MutationObserver(apply) : undefined;
+  if (typeof document !== 'undefined' && document.body) {
+    observer?.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  }
+  const media =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-color-scheme: dark)')
+      : undefined;
+  media?.addEventListener('change', apply);
   return () => {
-    observer.disconnect();
-    probe.remove();
+    observer?.disconnect();
+    media?.removeEventListener('change', apply);
   };
 }

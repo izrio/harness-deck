@@ -133,8 +133,6 @@ const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
 // ---- 控制器和代理进程 ----
 let page: Page | undefined;
 const activeBackend = agent === 'omp' ? 'oh-my-pi' : agent;
-let backendChosen = false;
-const backendMessages: string[] = [];
 let stored: StoredSession[] = [];
 let activeSessionId: string | undefined;
 const workbench: Workbench = { ...noWorkbench, readFile: (path) => readFile(path, 'utf8').catch(() => undefined) };
@@ -150,17 +148,17 @@ const controller = new AcpController({
   // 和 backend/acp.ts 一样：停掉进程再启动、initialize、setLink（单会话代理切换会话时会用到）
   restartRuntime: () => void restartAgent(),
   singleSession: agent === 'codebuddy',
-  // 和 extension.ts 一样：第一次使用时 needsChoice；dsh 假装没装，用来检查安装命令的显示
+  // dsh 假装没装，用来检查设置页安装按钮的显示
   backends: () => ({
     items: [
-      { id: 'dsh', name: 'DeepSeek', kind: 'dsh', available: false, installCommand: 'npm install -g @deepseek-ai/dsh' },
-      { id: 'oh-my-pi', name: 'oh-my-pi', kind: 'acp', command: 'omp acp', available: agent === 'omp' },
-      { id: 'codebuddy', name: 'CodeBuddy', kind: 'acp', command: 'codebuddy --acp', available: agent === 'codebuddy' },
-      { id: 'claude', name: 'Claude', kind: 'acp', command: 'claude-agent-acp', available: agent === 'claude' },
+      { id: 'dsh', name: 'DeepSeek', kind: 'dsh', available: false, npmPackage: '@deepseek-ai/dsh', installCommand: 'npm install -g @deepseek-ai/dsh' },
+      { id: 'oh-my-pi', name: 'Pi', kind: 'acp', command: 'omp acp', available: agent === 'omp', npmPackage: '@oh-my-pi/pi-coding-agent' },
+      { id: 'codebuddy', name: 'CodeBuddy', kind: 'acp', command: 'codebuddy --acp', available: agent === 'codebuddy', npmPackage: '@tencent-ai/codebuddy-code' },
+      { id: 'claude', name: 'Claude Code', kind: 'acp', command: 'claude-agent-acp', available: agent === 'claude', npmPackage: '@agentclientprotocol/claude-agent-acp' },
     ],
     active: activeBackend,
     workspace: basename(workspace),
-    ...(backendChosen ? {} : { needsChoice: true }),
+    nodeEnv: { checked: true, hasNode: true, hasNpm: true, nodeVersion: 'v22.0.0', npmVersion: '10.0.0' },
   }),
   loadActiveSessionId: () => activeSessionId,
   saveActiveSessionId: (id) => void (activeSessionId = id),
@@ -238,10 +236,8 @@ try {
   page.on('pageerror', (error) => errors.push(String(error)));
   await page.exposeFunction('__toHost', (json: never) => {
     const message = parseWebviewMessage(JSON.parse(json as string));
-    // 选择底层由 extension.ts 处理：这里只记下来，标记已经选过
-    if (message?.type === 'selectBackend' || message?.type === 'dismissBackendChoice') {
-      backendMessages.push(message.type === 'selectBackend' ? message.payload.id : 'later');
-      backendChosen = true;
+    // 选择底层由 extension.ts 处理
+    if (message?.type === 'selectBackend') {
       controller.backendsChanged();
       return;
     }
@@ -262,36 +258,24 @@ try {
   // CodeBuddy 的 initialize 没有 agentInfo，有登录方式
   else check('CodeBuddy 启动，initialize 返回登录方式', (init.authMethods?.length ?? 0) > 1, JSON.stringify(init.authMethods));
 
-  // 1b. 第一次使用：选择底层的卡片
-  const chooser = page.getByTestId('backend-chooser');
-  await chooser.waitFor({ timeout: 10_000 }).then(
-    () => check('第一次打开显示选择底层的卡片', true),
-    () => check('第一次打开显示选择底层的卡片', false),
-  );
-  check('卡片列出 dsh、oh-my-pi、CodeBuddy、Claude', (await chooser.locator('.backend-option').count()) === 4);
-  const current = chooser.locator(`[data-testid="backend-option-${activeBackend}"]`);
-  check('当前底层标为「当前」并显示已安装', (await current.getAttribute('aria-checked')) === 'true' && (await current.innerText()).includes('已安装'), await current.innerText());
-  check('没装的底层显示安装命令', (await chooser.locator('.backend-option__install', { hasText: 'npm install -g @deepseek-ai/dsh' }).count()) === 1);
-  await shot('00-welcome');
-  await current.click();
+  // 1b. 首次使用直接显示首页；点智能体标签进入设置页
   await page.locator('.home').waitFor({ timeout: 10_000 }).then(
-    () => check('选好后显示首页', true),
-    () => check('选好后显示首页', false),
+    () => check('首次打开不展示选择智能体，直接显示首页', true),
+    () => check('首次打开不展示选择智能体，直接显示首页', false),
   );
-  check('选择发给了 Host', backendMessages.join(',') === activeBackend, backendMessages.join(','));
   const homeBackend = page.getByTestId('home-backend');
-  check('首页显示当前底层和工作区', (await homeBackend.innerText()).includes({ omp: 'oh-my-pi', codebuddy: 'CodeBuddy', claude: 'Claude' }[agent]) && (await page.locator('.home__chip', { hasText: basename(workspace) }).count()) === 1);
+  check('首页显示当前智能体和工作区', (await homeBackend.innerText()).includes({ omp: 'Pi', codebuddy: 'CodeBuddy', claude: 'Claude Code' }[agent]) && (await page.locator('.home__chip', { hasText: basename(workspace) }).count()) === 1);
+  check('首页用各个智能体的官方图标', (await page.locator('.home__chip [data-logo]').count()) === 1);
   await homeBackend.click();
-  await chooser.waitFor({ timeout: 5_000 });
-  check('点首页的底层标签打开选择卡片（不是欢迎卡片，可以返回）', (await chooser.locator('[data-testid="backend-later"]').count()) === 0);
-  await chooser.getByRole('button', { name: '返回' }).click();
+  const settingsPage = page.getByTestId('settings-page');
+  await settingsPage.waitFor({ timeout: 5_000 });
+  check('设置页列出 dsh、Pi、CodeBuddy、Claude Code', (await settingsPage.locator('.settings-backend').count()) === 4);
+  const current = settingsPage.locator(`[data-testid="settings-backend-${activeBackend}"]`);
+  check('当前智能体标为「当前使用」并显示已安装', (await current.innerText()).includes('当前使用') && (await current.innerText()).includes('已安装'), await current.innerText());
+  check('没装的智能体显示安装按钮', (await settingsPage.locator('[data-testid="install-backend-dsh"]').count()) === 1);
+  await shot('00-settings');
+  await page.getByTestId('settings-back').click();
   await page.locator('.home').waitFor({ timeout: 5_000 });
-  check('卡片和首页用各个底层的官方图标', (await page.locator('.home__chip [data-logo]').count()) === 1);
-  await page.getByRole('button', { name: '更多' }).click();
-  const backendItems = page.locator('.more-menu .menu-item [data-logo]');
-  check('菜单里的底层带官方图标', (await backendItems.count()) === 4, String(await backendItems.count()));
-  await shot('00b-menu');
-  await page.keyboard.press('Escape');
 
   // 2. 草稿会话：发消息前模型和模式就能用
   await page.getByTestId('model-picker').locator('.toolbar-button__text', { hasText: modelLabel }).waitFor({ timeout: 60_000 }).then(

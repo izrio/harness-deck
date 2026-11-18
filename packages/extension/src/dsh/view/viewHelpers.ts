@@ -5,7 +5,6 @@ import type { Item, ModelOption, ModelState, SessionHeader } from '@harness-deck
 import type { ModelCatalog, ModelSelection } from '../DshClient.ts';
 import { RemoteError } from '../remote/errors.ts';
 import { t } from '../../i18n.ts';
-import type { SelectionContext } from '../../vm/context.ts';
 
 export const newSessionTitle = (): string => t('session.new');
 
@@ -109,11 +108,6 @@ export function goalOf(projections: Readonly<Record<string, unknown>>): Pick<Ses
       ...(goal.blockedReason?.message ? { blockedReason: goal.blockedReason.message } : {}),
     },
   };
-}
-
-export function withoutDiagnostics(selection: SelectionContext): SelectionContext {
-  const { diagnostics: _omit, ...rest } = selection;
-  return rest;
 }
 
 export function describe(error: unknown): string {

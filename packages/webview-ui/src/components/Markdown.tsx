@@ -1,11 +1,14 @@
 /**
  * Markdown 渲染。不启用原始 HTML（react-markdown 默认就不渲染），链接一律交给 Host 校验后在外部打开。
+ * 行内 Markdown 文件路径支持一键在面板内打开「Markdown 文件预览」（共用阅读与聊天排版参数）。
  */
 import { memo, type ComponentProps, type MouseEvent } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { requestMarkdownPreview } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { CodeBlock } from './CodeBlock.tsx';
+import { EyeIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
 function openLink(event: MouseEvent<HTMLAnchorElement>, href: string | undefined): void {
@@ -55,13 +58,33 @@ export function parseFileRef(text: string): FileRefTarget | undefined {
   return { path: match[1], ...(startLine ? { startLine } : {}), ...(startLine && endLine && endLine >= startLine ? { endLine } : {}) };
 }
 
-/** 回复里提到的文件：点击在编辑器里打开（带行号时定位过去）。文件不存在时由 Host 提示。 */
+/** 回复里提到的文件：点击在编辑器里打开；如果是 Markdown 文件，右侧附带面板内预览按钮。 */
 function FileRef({ text, file }: { text: string; file: FileRefTarget }) {
   const t = useT();
+  const isMd = /\.(?:md|markdown|mdx)$/iu.test(file.path);
   return (
-    <button type="button" className="inline-code inline-code--link" title={t('file.open', file.path)} onClick={() => postToHost({ type: 'openFile', payload: file })}>
-      {text}
-    </button>
+    <span className="inline-flex items-center gap-0.5 align-baseline">
+      <button
+        type="button"
+        className="inline-code inline-code--link"
+        title={t('file.open', file.path)}
+        onClick={() => postToHost({ type: 'openFile', payload: file })}
+      >
+        {text}
+      </button>
+      {isMd ? (
+        <button
+          type="button"
+          className="inline-flex size-4.5 items-center justify-center rounded-[4px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-accent-ink"
+          title={t('markdown.preview', file.path)}
+          aria-label={t('markdown.preview', file.path)}
+          data-testid={`preview-md-${file.path}`}
+          onClick={() => requestMarkdownPreview(file.path)}
+        >
+          <EyeIcon className="size-3" />
+        </button>
+      ) : null}
+    </span>
   );
 }
 

@@ -478,35 +478,28 @@ try {
   await page.getByTestId('tabs').locator('.tab').nth(1).locator('.tab__close').click();
   await page.waitForTimeout(200);
 
-  // 2b3. 字体与字号：「…」菜单里直接调整
-  const bodySize = () => page!.evaluate(() => Number.parseFloat(getComputedStyle(document.body).fontSize));
-  const sizeBefore = await bodySize();
-  await page.getByRole('button', { name: '更多' }).click();
-  await page.getByRole('menuitem', { name: /字体与字号/u }).click();
+  // 2b3. 多 Tab 设置页、阅读与聊天字号与 5 套整套配色：点顶栏设置按钮进入
+  const proseSize = () =>
+    page!.evaluate(() => {
+      const el = document.querySelector('.markdown') ?? document.body;
+      return Number.parseFloat(getComputedStyle(el).fontSize);
+    });
+  const sizeBefore = await proseSize();
+  await page.getByTestId('settings-button').click();
   await page.getByTestId('appearance-panel').waitFor({ timeout: 5_000 });
   await page.getByRole('button', { name: '增大字号' }).click();
   await page.getByRole('button', { name: '增大字号' }).click();
-  check('字体面板里加大字号立即生效', (await bodySize()) === sizeBefore + 2, `${sizeBefore} → ${await bodySize()}`);
+  check('阅读与聊天面板里加大字号立即生效', (await proseSize()) === sizeBefore + 2, `${sizeBefore} → ${await proseSize()}`);
   await shot('14c-appearance');
-  // 护眼配色：默认打开，正文比主题前景色暗一些；关掉后直接用主题前景色
-  const textColors = () =>
-    page!.evaluate(() => {
-      const probe = document.createElement('span');
-      probe.style.color = 'var(--vscode-foreground)';
-      document.body.append(probe);
-      const theme = getComputedStyle(probe).color;
-      probe.remove();
-      return { palette: document.documentElement.dataset.palette, body: getComputedStyle(document.body).color, theme };
-    });
-  const soft = await textColors();
-  check('默认是护眼配色：正文颜色比主题前景色柔和', soft.palette === 'soft' && soft.body !== soft.theme, JSON.stringify(soft));
-  await page.getByTestId('appearance-soft').click();
-  const themed = await textColors();
-  check('关掉护眼配色后正文用主题前景色', themed.palette === 'theme' && themed.body === themed.theme, JSON.stringify(themed));
-  await page.getByRole('button', { name: '恢复默认' }).click();
-  check('恢复默认后回到原来的字号', (await bodySize()) === sizeBefore);
-  check('恢复默认后回到护眼配色', (await textColors()).palette === 'soft');
-  await page.keyboard.press('Escape');
+  // 5 套整套界面配色：切换配色不会改变阅读与聊天字号
+  const schemeState = () => page!.evaluate(() => document.documentElement.dataset.colorScheme);
+  check('默认配色方案为 slate', (await schemeState()) === 'slate');
+  await page.getByTestId('palette-card-warm').click();
+  check('切换到暖砂琥珀配色且不改变阅读字号', (await schemeState()) === 'warm' && (await proseSize()) === sizeBefore + 2);
+  await page.getByTestId('palette-card-slate').click();
+  await page.getByTestId('prose-reset').click();
+  check('恢复排版默认后回到原来的字号', (await proseSize()) === sizeBefore);
+  await page.getByTestId('settings-back').click();
 
   // 2c. 审批：允许
   await send('E2E_APPROVE 装一下依赖');
@@ -760,10 +753,12 @@ try {
   );
   await page.waitForFunction(() => !document.querySelector('[aria-label="停止生成"]'), undefined, { timeout: 30_000 });
 
-  // 2l. 重命名
+  // 2l. 重命名（设置 -> 界面 -> 交互与上下文）
   inputAnswers.push('E2E 重命名的会话');
-  await page.getByRole('button', { name: '更多' }).click();
-  await page.getByRole('menuitem', { name: '重命名会话' }).click();
+  await page.getByTestId('settings-button').click();
+  await page.getByTestId('settings-tab-interface').click();
+  await page.getByRole('button', { name: '重命名会话' }).click();
+  await page.getByTestId('settings-back').click();
   await page.locator('.header__title', { hasText: 'E2E 重命名的会话' }).waitFor({ timeout: 10_000 }).then(
     () => check('重命名会话', true),
     () => check('重命名会话', false),
@@ -779,10 +774,10 @@ try {
   await page.waitForTimeout(2_200);
   const secondTick = await runStatus.innerText().catch(() => '');
   check('运行中显示运行状态和已用时间，每秒刷新', /秒/u.test(firstTick) && firstTick !== secondTick, `${firstTick} → ${secondTick}`);
-  // 系统要求减少动画（Windows 关了动画效果、远程桌面）时，加载中的转圈仍然要转
+  // 系统要求减少动画（Windows 关了动画效果、远程桌面）时，加载中的指示器仍然工作
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  const spinning = await runStatus.locator('.spin').evaluate((el) => el.getAnimations().some((a) => a.playState === 'running'));
-  check('减少动画模式下加载转圈仍在转', spinning);
+  const activeAnim = await runStatus.evaluate((el) => el.getAnimations({ subtree: true }).some((a) => a.playState === 'running'));
+  check('减少动画模式下运行状态指示器仍在动画', activeAnim);
   await page.emulateMedia({ reducedMotion: null });
   await shot('07-running');
   await stop.click();

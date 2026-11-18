@@ -1,13 +1,13 @@
 /**
- * 底层的图标：内置底层用各自的官方图标（来源见 assets/backends/README.md），设置里加的 ACP 代理用名称首字母。
+ * 底层的图标（Beautiful UI Monogram & Tile 风格）。
  */
 import type { BackendView } from '@harness-deck/shared';
+import { cn } from '../lib/utils.ts';
 import claude from '../assets/backends/claude.svg?inline';
 import codebuddy from '../assets/backends/codebuddy.png?inline';
 import deepseek from '../assets/backends/deepseek.svg?inline';
 import ohMyPi from '../assets/backends/oh-my-pi.png?inline';
 
-/** tile：图标本身没有底色（DeepSeek 的鲸鱼、Claude 的星芒），放在白色圆角方块里。 */
 const LOGOS: Readonly<Record<string, { readonly src: string; readonly tile?: boolean }>> = {
   dsh: { src: deepseek, tile: true },
   'oh-my-pi': { src: ohMyPi },
@@ -17,21 +17,38 @@ const LOGOS: Readonly<Record<string, { readonly src: string; readonly tile?: boo
 
 export function BackendLogo({ backend, size = 'md' }: { readonly backend: Pick<BackendView, 'id' | 'name'>; readonly size?: 'sm' | 'md' }) {
   const logo = LOGOS[backend.id];
+  const sizeCls = size === 'sm' ? 'size-4 rounded-[4px]' : 'size-8.5 rounded-[9px]';
   if (logo) {
     return (
-      <span className={`backend-logo backend-logo--${size} ${logo.tile ? 'backend-logo--tile' : ''}`} aria-hidden="true" data-logo={backend.id}>
-        <img src={logo.src} alt="" draggable={false} />
+      <span
+        className={cn(
+          'backend-logo inline-flex shrink-0 items-center justify-center overflow-hidden',
+          `backend-logo--${size}`,
+          sizeCls,
+          logo.tile && cn('backend-logo--tile bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]', size === 'sm' ? 'p-[1px]' : 'p-[5px]'),
+        )}
+        aria-hidden="true"
+        data-logo={backend.id}
+      >
+        <img src={logo.src} alt="" draggable={false} className="block size-full object-contain" />
       </span>
     );
   }
   return (
-    <span className={`backend-logo backend-logo--${size} backend-logo--monogram`} aria-hidden="true">
+    <span
+      className={cn(
+        'backend-logo backend-logo--monogram inline-flex shrink-0 items-center justify-center overflow-hidden bg-ink font-semibold text-canvas',
+        `backend-logo--${size}`,
+        sizeCls,
+        size === 'sm' ? 'text-[8px] tracking-normal' : 'text-[11.5px] tracking-wide',
+      )}
+      aria-hidden="true"
+    >
       {monogram(backend.name)}
     </span>
   );
 }
 
-/** 名称的首字母：多个词取前两个词的首字母，CodeBuddy 这样的驼峰名取两个大写字母，否则取前两个字符。 */
 export function monogram(name: string): string {
   const words = name.split(/[\s_-]+/u).filter(Boolean);
   if (words.length > 1) return words.slice(0, 2).map((w) => w[0]).join('').toUpperCase();

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { RuntimeStatus } from './runtime.ts';
-import { IMAGE_MEDIA_TYPES, MAX_IMAGE_BASE64, MAX_IMAGES } from './limits.ts';
+import { COLOR_SCHEMES, IMAGE_MEDIA_TYPES, MAX_IMAGE_BASE64, MAX_IMAGES, TASK_COLUMNS } from './limits.ts';
 import type {
   AppearanceState,
   CommandView,
@@ -9,13 +9,18 @@ import type {
   ContextState,
   FileCandidate,
   Item,
+  MarkdownPreviewData,
   ModelState,
   PendingInteraction,
   PermissionState,
+  PreferencesState,
+  ProjectsState,
   SessionHeader,
   SessionListItem,
   BackendsState,
   TabsState,
+  WorkbenchModule,
+  WorkbenchState,
   WorkspaceState,
 } from './viewModel.ts';
 
@@ -41,6 +46,26 @@ const diffRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('turn'), seq: z.number().int().nonnegative(), index: z.number().int().nonnegative() }),
   z.object({ kind: z.literal('session'), path: z.string().min(1).max(4_096) }),
 ]);
+
+const scheduleFrequencySchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('daily'), time: z.string().regex(/^\d{2}:\d{2}$/u) }),
+  z.object({
+    kind: z.literal('weekly'),
+    days: z.array(z.number().int().min(1).max(7)).min(1).max(7),
+    time: z.string().regex(/^\d{2}:\d{2}$/u),
+  }),
+  z.object({ kind: z.literal('interval'), minutes: z.number().int().min(5).max(10_080) }),
+  z.object({ kind: z.literal('once'), runAt: z.number().int().positive() }),
+]);
+
+const agentToolsSchema = z.object({
+  permissionPreset: z.enum(['read-only', 'workspace-write', 'danger-full-access']),
+  readSearch: z.boolean(),
+  editWrite: z.boolean(),
+  bashCommand: z.boolean(),
+  webFetch: z.boolean(),
+  mcpTools: z.boolean(),
+});
 
 export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready'), payload: empty }),
@@ -114,24 +139,210 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openSettings'), payload: empty }),
   /** 切换底层（设置里配置的 dsh / ACP 代理）。 */
   z.object({ type: z.literal('selectBackend'), payload: z.object({ id: z.string().min(1).max(100) }) }),
-  /** 第一次使用时的底层选择卡片：「稍后再说」，保持当前底层，不再询问。 */
-  z.object({ type: z.literal('dismissBackendChoice'), payload: empty }),
-  /** 面板里的字体设置：写入 VS Code 设置 harnessDeck.ui.*；null 表示恢复默认（跟随 VS Code）。 */
+  /** 重新探测系统的 Node.js / npm 以及各底层安装状态。 */
+  z.object({ type: z.literal('checkBackendEnv'), payload: empty }),
+  /** 获取某个底层的可用 npm 版本列表。 */
+  z.object({ type: z.literal('fetchBackendVersions'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  /** 通过 npm 安装或切换某个底层的版本。 */
+  z.object({
+    type: z.literal('installBackend'),
+    payload: z.object({ id: z.string().min(1).max(100), version: z.string().min(1).max(100).optional() }),
+  }),
+  /** 通过 npm 卸载某个底层。 */
+  z.object({ type: z.literal('uninstallBackend'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  /** 新增或更新外部 ACP 智能体配置（写入 harnessDeck.backends）。 */
+  z.object({
+    type: z.literal('upsertBackendProfile'),
+    payload: z.object({
+      id: z.string().min(1).max(100),
+      name: z.string().min(1).max(100),
+      command: z.string().min(1).max(1_000),
+      args: z.array(z.string().max(1_000)).max(100),
+      env: z.record(z.string().min(1).max(200), z.string().max(4_000)),
+      installHint: z.string().max(1_000).optional(),
+      singleSession: z.boolean().optional(),
+    }),
+  }),
+  /** 删除自定义外部智能体，或移除对内置 ACP 智能体的覆盖。 */
+  z.object({ type: z.literal('deleteBackendProfile'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  /** 面板里的外观与排版设置：写入 VS Code 设置 harnessDeck.ui.*；null 表示恢复默认。 */
   z.object({
     type: z.literal('setAppearance'),
     payload: z.object({
+      theme: z.enum(['system', 'light', 'dark']).nullable().optional(),
+      colorScheme: z.enum(COLOR_SCHEMES).nullable().optional(),
       fontSize: z.number().int().min(8).max(32).nullable().optional(),
       fontFamily: z.string().max(500).nullable().optional(),
+      lineHeight: z.number().min(1.2).max(2.4).nullable().optional(),
+      paragraphSpacing: z.number().int().min(0).max(32).nullable().optional(),
+      contentWidth: z.number().int().min(520).max(1600).nullable().optional(),
       codeFontFamily: z.string().max(500).nullable().optional(),
-      palette: z.enum(['soft', 'theme']).nullable().optional(),
+      terminalFontSize: z.number().int().min(9).max(24).nullable().optional(),
+      terminalLineHeight: z.number().min(1.1).max(2.4).nullable().optional(),
     }),
   }),
+  /** 在面板内读取并预览 Markdown 文件。 */
+  z.object({ type: z.literal('previewMarkdown'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
+  /** 设置页里的通用偏好、定时权限、系统通知与诊断高级设置：写入 VS Code 设置。 */
+  z.object({
+    type: z.literal('setPreferences'),
+    payload: z.object({
+      language: z.enum(['auto', 'zh', 'en']).optional(),
+      includeActiveEditor: z.boolean().optional(),
+      showTurnChanges: z.boolean().optional(),
+      schedulePermission: z.enum(['danger-full-access', 'workspace-write', 'read-only']).optional(),
+      notifications: z
+        .object({
+          enabled: z.boolean().optional(),
+          onlyWhenUnfocused: z.boolean().optional(),
+          onAttention: z.boolean().optional(),
+          onTurnComplete: z.boolean().optional(),
+          onUnexpectedExit: z.boolean().optional(),
+          onScheduledComplete: z.boolean().optional(),
+        })
+        .optional(),
+      advanced: z
+        .object({
+          dshPath: z.string().max(1_000).optional(),
+          dshProfile: z.string().max(200).optional(),
+          backendTrace: z.boolean().optional(),
+        })
+        .optional(),
+    }),
+  }),
+  /** 发送测试系统通知。 */
+  z.object({ type: z.literal('testNotification'), payload: empty }),
+  /** 更新某个项目的 worktree 配置（复制文件、准备命令、验收命令）。 */
+  z.object({
+    type: z.literal('setProjectWorktreeConfig'),
+    payload: z.object({
+      path: z.string().min(1).max(4_096),
+      copyFiles: z.array(z.string().max(1_000)).max(200),
+      setupCommands: z.array(z.string().max(2_000)).max(50),
+      verifyCommands: z.array(z.string().max(2_000)).max(50),
+    }),
+  }),
+  /** 选择并添加一个本地项目目录到最近项目列表。 */
+  z.object({ type: z.literal('addRecentProject'), payload: empty }),
+  /** 从最近项目列表中移除（不删除磁盘文件）。 */
+  z.object({ type: z.literal('removeRecentProject'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
+  /** 在 VS Code 中打开对应项目目录。 */
+  z.object({ type: z.literal('openProject'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
+  /** 为项目创建 git worktree 并执行复制文件与准备命令。 */
+  z.object({
+    type: z.literal('createWorktree'),
+    payload: z.object({ path: z.string().min(1).max(4_096), branch: z.string().min(1).max(200).optional() }),
+  }),
+  /** 执行项目的验收命令。 */
+  z.object({ type: z.literal('runProjectVerify'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
+  /** 输入框 `+` 菜单：选择文件加入上下文。 */
+  z.object({ type: z.literal('pickFiles'), payload: empty }),
   z.object({
     type: z.literal('openFile'),
     payload: z.object({ path: z.string().min(1), startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional() }),
   }),
   z.object({ type: z.literal('selectPermission'), payload: z.object({ preset: z.string().min(1) }) }),
   z.object({ type: z.literal('saveAll'), payload: empty }),
+  /** 在编辑器标签页中打开全宽工作台面板。 */
+  z.object({ type: z.literal('openWorkbenchPanel'), payload: empty }),
+  /** 总览未读项已读标记。 */
+  z.object({
+    type: z.literal('markUnreadRead'),
+    payload: z.object({ id: z.string().min(1).max(500).optional(), all: z.boolean().optional() }),
+  }),
+  /** 定时模块：新增或编辑定时任务规则。 */
+  z.object({
+    type: z.literal('upsertSchedule'),
+    payload: z.object({
+      id: z.string().min(1).max(100).optional(),
+      name: z.string().min(1).max(200),
+      prompt: z.string().min(1).max(50_000),
+      frequency: scheduleFrequencySchema,
+      backendId: z.string().min(1).max(100),
+      projectPath: z.string().min(1).max(4_096).optional(),
+      enabled: z.boolean().optional(),
+    }),
+  }),
+  z.object({ type: z.literal('toggleSchedule'), payload: z.object({ id: z.string().min(1).max(100), enabled: z.boolean() }) }),
+  z.object({ type: z.literal('deleteSchedule'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({ type: z.literal('runScheduleNow'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({
+    type: z.literal('markScheduleRunRead'),
+    payload: z.object({ ruleId: z.string().min(1).max(100), runId: z.string().min(1).max(100) }),
+  }),
+  /** 智能体模块：新增或编辑智能体预设、直接开启会话或委派任务。 */
+  z.object({
+    type: z.literal('upsertAgent'),
+    payload: z.object({
+      id: z.string().min(1).max(100).optional(),
+      name: z.string().min(1).max(120),
+      specialty: z.string().min(1).max(400),
+      instructions: z.string().max(50_000),
+      backendId: z.string().min(1).max(100),
+      provider: z.string().max(100).optional(),
+      model: z.string().max(200).optional(),
+      reasoningEffort: z.string().max(100).optional(),
+      tools: agentToolsSchema,
+    }),
+  }),
+  z.object({ type: z.literal('deleteAgent'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({
+    type: z.literal('startAgentSession'),
+    payload: z.object({
+      agentId: z.string().min(1).max(100),
+      projectPath: z.string().min(1).max(4_096).optional(),
+      initialPrompt: z.string().max(50_000).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('delegateToAgent'),
+    payload: z.object({
+      agentId: z.string().min(1).max(100),
+      prompt: z.string().min(1).max(50_000),
+      projectPath: z.string().min(1).max(4_096).optional(),
+      runImmediately: z.boolean().optional(),
+    }),
+  }),
+  /** 任务看板模块：创建任务、状态流转、顺序调整与顺序自动执行。 */
+  z.object({
+    type: z.literal('createTask'),
+    payload: z.object({
+      title: z.string().max(240).optional(),
+      prompt: z.string().min(1).max(50_000),
+      projectPath: z.string().min(1).max(4_096),
+      backendId: z.string().min(1).max(100),
+      provider: z.string().max(100).optional(),
+      model: z.string().max(200).optional(),
+      reasoningEffort: z.string().max(100).optional(),
+      agentId: z.string().min(1).max(100).optional(),
+      autoStart: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('updateTaskStatus'),
+    payload: z.object({ id: z.string().min(1).max(100), status: z.enum(TASK_COLUMNS) }),
+  }),
+  z.object({
+    type: z.literal('reorderTask'),
+    payload: z.object({ id: z.string().min(1).max(100), direction: z.enum(['up', 'down']) }),
+  }),
+  z.object({ type: z.literal('deleteTask'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({ type: z.literal('clearDoneTasks'), payload: empty }),
+  z.object({ type: z.literal('setTaskQueueAutoRun'), payload: z.object({ autoRun: z.boolean() }) }),
+  z.object({ type: z.literal('runTaskNow'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  /** 会话模块：按项目分组新建会话或打开指定项目下的会话。 */
+  z.object({
+    type: z.literal('startProjectSession'),
+    payload: z.object({ projectPath: z.string().min(1).max(4_096), backendId: z.string().min(1).max(100).optional() }),
+  }),
+  z.object({
+    type: z.literal('openProjectSession'),
+    payload: z.object({
+      projectPath: z.string().min(1).max(4_096),
+      sessionId: z.string().min(1).max(500),
+      backendId: z.string().min(1).max(100).optional(),
+    }),
+  }),
 ]);
 
 export type WebviewToHost = z.infer<typeof webviewToHostSchema>;
@@ -151,7 +362,10 @@ export interface HostSnapshot {
   readonly commands: readonly CommandView[];
   readonly locale: Locale;
   readonly appearance: AppearanceState;
+  readonly preferences?: PreferencesState;
   readonly backends: BackendsState;
+  readonly projects?: ProjectsState;
+  readonly workbench?: WorkbenchState;
 }
 
 /**
@@ -180,7 +394,13 @@ export type HostToWebview =
   | { readonly type: 'context'; readonly payload: ContextState }
   | { readonly type: 'locale'; readonly payload: Locale }
   | { readonly type: 'appearance'; readonly payload: AppearanceState }
+  | { readonly type: 'preferences'; readonly payload: PreferencesState }
   | { readonly type: 'backends'; readonly payload: BackendsState }
+  | { readonly type: 'projects'; readonly payload: ProjectsState }
+  | { readonly type: 'workbench'; readonly payload: WorkbenchState }
+  | { readonly type: 'switchWorkbenchModule'; readonly payload: { readonly module: WorkbenchModule } }
+  | { readonly type: 'markdownPreview'; readonly payload: MarkdownPreviewData }
+  | { readonly type: 'navigateToSession'; readonly payload: { readonly sessionId?: string } }
   | { readonly type: 'diffOpened'; readonly payload: { readonly token: number } }
   | { readonly type: 'imageData'; readonly payload: { readonly attachmentId: string; readonly dataUrl?: string } }
   | { readonly type: 'commands'; readonly payload: readonly CommandView[] }

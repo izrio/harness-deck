@@ -1,34 +1,42 @@
-/** 一行顶栏：会话标题（点击切换会话）、新建、更多菜单。 */
-import { useCallback, useMemo, useState } from 'react';
-import { useView } from '../store.ts';
+/**
+ * 工作台顶栏：
+ * - 第一层：五大核心模块导航（总览 / 定时 / 智能体 / 任务 / 会话）+ 新建会话 / 全宽工作台 / 设置按钮
+ * - 第二层（会话模块激活且设置未打开时）：当前会话标题与快速会话搜索浮层（SearchList + GlideMenu）
+ */
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react';
+import { WORKBENCH_MODULES, type WorkbenchModule } from '@harness-deck/shared/limits';
+import { closeSettingsPage, setActiveModule, toggleSettingsPage, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
+import { cn } from '../lib/utils.ts';
+import { GlideMenu } from './ui/GlideMenu.tsx';
 import {
+  AgentIcon,
   ChatIcon,
   CheckIcon,
   ChevronDownIcon,
-  FolderIcon,
-  GlobeIcon,
-  KeyIcon,
-  LogIcon,
-  MoreIcon,
-  PencilIcon,
+  ClockIcon,
+  CloseIcon,
+  DashboardIcon,
+  ExpandPanelIcon,
+  KanbanIcon,
   PlusIcon,
-  RefreshIcon,
   SearchIcon,
+  SettingsIcon,
   SpinnerIcon,
-  TextSizeIcon,
 } from './icons.tsx';
-import { BackendLogo } from './BackendLogo.tsx';
 import { MenuItem, Popover } from './Popover.tsx';
-import { AppearancePanel } from './AppearancePanel.tsx';
-import { useT, type Translate } from '../i18n.ts';
+import { useT, type MessageKey, type Translate } from '../i18n.ts';
 
 export function Header() {
   const session = useView((s) => s.session);
   const sessions = useView((s) => s.sessions);
-  const backends = useView((s) => s.backends);
-  const isDsh = (backends.items.find((b) => b.id === backends.active)?.kind ?? 'dsh') === 'dsh';
-  const [menu, setMenu] = useState<'sessions' | 'more' | 'appearance' | undefined>();
+  const settingsOpen = useView((s) => s.settingsOpen);
+  const activeModule = useView((s) => s.activeModule);
+  const overview = useView((s) => s.workbench.overview);
+  const tasks = useView((s) => s.workbench.tasks.items);
+  const schedules = useView((s) => s.workbench.schedules);
+
+  const [menu, setMenu] = useState<'sessions' | undefined>();
   const [query, setQuery] = useState('');
   const close = useCallback(() => setMenu(undefined), []);
   const t = useT();
@@ -38,124 +46,257 @@ export function Header() {
     return q ? sessions.filter((s) => s.title.toLowerCase().includes(q)) : sessions;
   }, [sessions, query]);
 
+  const overviewBadge = overview.waiting.length + overview.unread.length;
+  const tasksActiveCount = tasks.filter((item) => item.status === 'in_progress' || item.status === 'review').length;
+  const schedulesRunning = schedules.some((r) => r.lastStatus === 'running');
+
+  const onNavKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const idx = WORKBENCH_MODULES.indexOf(activeModule);
+    const nextIdx =
+      e.key === 'ArrowRight'
+        ? (idx + 1) % WORKBENCH_MODULES.length
+        : (idx - 1 + WORKBENCH_MODULES.length) % WORKBENCH_MODULES.length;
+    const nextMod = WORKBENCH_MODULES[nextIdx]!;
+    setActiveModule(nextMod);
+  };
+
+  const renderModuleIcon = (mod: WorkbenchModule) => {
+    switch (mod) {
+      case 'overview':
+        return <DashboardIcon className="size-3.5 shrink-0" />;
+      case 'schedules':
+        return <ClockIcon className="size-3.5 shrink-0" />;
+      case 'agents':
+        return <AgentIcon className="size-3.5 shrink-0" />;
+      case 'tasks':
+        return <KanbanIcon className="size-3.5 shrink-0" />;
+      case 'sessions':
+        return <ChatIcon className="size-3.5 shrink-0" />;
+    }
+  };
+
   return (
-    <header className="header">
-      <div className="header__title-wrap">
-        <button
-          type="button"
-          className="header__title"
-          aria-haspopup="dialog"
-          aria-expanded={menu === 'sessions'}
-          onClick={() => {
-            setQuery('');
-            setMenu(menu === 'sessions' ? undefined : 'sessions');
-          }}
-          title={session.title}
+    <header className="header flex shrink-0 flex-col border-b border-line bg-surface">
+      {/* 顶层：五大工作台模块导航 + 快捷动作 */}
+      <div className="flex items-center justify-between gap-1 px-2 py-1.5">
+        <div
+          role="tablist"
+          aria-label={t('wb.nav.label')}
+          data-testid="workbench-nav"
+          onKeyDown={onNavKeyDown}
+          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
         >
-          {session.sync === 'opening' && session.id ? (
-            <SpinnerIcon className="header__spinner" />
-          ) : session.running ? (
-            <span className="dot dot--running" aria-label={t('header.running')} />
-          ) : null}
-          <span className="header__title-text">{session.title}</span>
-          <ChevronDownIcon />
-        </button>
-        <Popover open={menu === 'sessions'} onClose={close} className="sessions-menu" label={t('header.sessions')}>
-          <div className="sessions-menu__search">
-            <SearchIcon />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('header.search')} aria-label={t('header.search')} />
-          </div>
-          <div role="menu" className="sessions-menu__list">
-            {session.listLoading && sessions.length === 0 ? (
-              <div className="menu-empty menu-empty--loading">
-                <SpinnerIcon />
-                {t('header.loadingSessions')}
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="menu-empty">{sessions.length === 0 ? t('header.noSessions') : t('header.noMatch')}</div>
-            ) : null}
-            {filtered.map((s) => (
-              <MenuItem
-                key={s.id}
-                active={s.id === session.id}
-                icon={s.running ? <SpinnerIcon /> : s.id === session.id ? <CheckIcon /> : <ChatIcon />}
-                hint={s.needsAttention ? <span className="dot dot--attention" title={t('approval.label')} /> : relativeTime(s.updatedAt, t)}
-                onSelect={() => {
+          {WORKBENCH_MODULES.map((mod) => {
+            const active = !settingsOpen && activeModule === mod;
+            return (
+              <button
+                key={mod}
+                type="button"
+                role="tab"
+                data-testid={`workbench-tab-${mod}`}
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                className={cn(
+                  'inline-flex shrink-0 items-center gap-1 rounded-[6px] px-2 py-1 text-[12px] font-medium transition-colors duration-100',
+                  active
+                    ? 'bg-field text-ink shadow-hairline'
+                    : 'text-ink-3 hover:bg-hover hover:text-ink-2',
+                )}
+                onClick={() => {
                   close();
-                  postToHost({ type: 'switchSession', payload: { sessionId: s.id } });
+                  setActiveModule(mod);
                 }}
               >
-                {s.title}
-              </MenuItem>
-            ))}
-          </div>
-        </Popover>
-      </div>
-      <button type="button" className="icon-button" aria-label={t('header.new')} title={t('header.newTab')} onClick={() => postToHost({ type: 'newSession', payload: {} })}>
-        <PlusIcon />
-      </button>
-      <div className="header__more">
-        <button type="button" className="icon-button" aria-label={t('header.more')} title={t('header.more')} aria-expanded={menu === 'more'} onClick={() => setMenu(menu === 'more' ? undefined : 'more')}>
-          <MoreIcon />
-        </button>
-        <Popover open={menu === 'more'} onClose={close} className="more-menu" label={t('header.moreActions')}>
-          <div role="menu">
-            {session.id ? (
-              <MenuItem icon={<PencilIcon />} onSelect={() => (close(), postToHost({ type: 'renameSession', payload: {} }))}>
-                {t('header.rename')}
-              </MenuItem>
-            ) : null}
-            {session.folder ? (
-              <MenuItem icon={<FolderIcon />} hint={session.folder} onSelect={() => (close(), postToHost({ type: 'selectFolder', payload: {} }))}>
-                {t('header.folder')}
-              </MenuItem>
-            ) : null}
-            {isDsh ? (
-              <>
-                <MenuItem icon={<KeyIcon />} onSelect={() => (close(), postToHost({ type: 'configureApiKey', payload: {} }))}>
-                  {t('apiKey.configure')}
-                </MenuItem>
-                <MenuItem icon={<GlobeIcon />} onSelect={() => (close(), postToHost({ type: 'openWebUI', payload: {} }))}>
-                  {t('header.openWebUI')}
-                </MenuItem>
-              </>
-            ) : null}
-            <MenuItem icon={<RefreshIcon />} onSelect={() => (close(), postToHost({ type: 'restartRuntime', payload: {} }))}>
-              {t('header.restart')}
-            </MenuItem>
-            <MenuItem icon={<LogIcon />} onSelect={() => (close(), postToHost({ type: 'showLogs', payload: {} }))}>
-              {t('header.logs')}
-            </MenuItem>
-            <MenuItem icon={<TextSizeIcon />} onSelect={() => setMenu('appearance')}>
-              {t('header.appearance')}
-            </MenuItem>
-            {backends.items.length > 1 ? (
-              <>
-                <div className="menu-heading" data-testid="backend-heading">
-                  {t('header.backend')}
-                </div>
-                {backends.items.map((backend) => (
-                  <MenuItem
-                    key={backend.id}
-                    active={backend.id === backends.active}
-                    icon={<BackendLogo backend={backend} size="sm" />}
-                    hint={backend.id === backends.active ? <CheckIcon /> : backend.kind === 'acp' ? 'ACP' : undefined}
-                    onSelect={() => {
-                      close();
-                      if (backend.id !== backends.active) postToHost({ type: 'selectBackend', payload: { id: backend.id } });
-                    }}
+                {renderModuleIcon(mod)}
+                <span>{t(`wb.nav.${mod}` as MessageKey)}</span>
+                {mod === 'overview' && overviewBadge > 0 ? (
+                  <span
+                    className={cn(
+                      'ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-semibold text-white',
+                      overview.waiting.length > 0 ? 'bg-orange' : 'bg-accent',
+                    )}
                   >
-                    {backend.name}
-                  </MenuItem>
-                ))}
-              </>
-            ) : null}
-          </div>
-        </Popover>
-        <Popover open={menu === 'appearance'} onClose={close} className="more-menu appearance-menu" label={t('header.appearance')}>
-          <AppearancePanel onClose={close} />
-        </Popover>
+                    {overviewBadge}
+                  </span>
+                ) : null}
+                {mod === 'schedules' && schedulesRunning ? (
+                  <span className="size-1.5 rounded-full bg-accent" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} />
+                ) : null}
+                {mod === 'tasks' && tasksActiveCount > 0 ? (
+                  <span className="ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full bg-accent/15 px-1 text-[10px] leading-4 font-semibold text-accent-ink">
+                    {tasksActiveCount}
+                  </span>
+                ) : null}
+                {mod === 'sessions' && session.running ? (
+                  <span className="size-1.5 rounded-full bg-accent" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            aria-label={t('header.new')}
+            title={t('header.newTab')}
+            className="flex size-6.5 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink-2"
+            onClick={() => {
+              close();
+              setActiveModule('sessions');
+              postToHost({ type: 'newSession', payload: {} });
+            }}
+          >
+            <PlusIcon className="size-4" />
+          </button>
+          <button
+            type="button"
+            data-testid="open-workbench-panel-btn"
+            aria-label={t('wb.openPanel')}
+            title={t('wb.openPanel')}
+            className="flex size-6.5 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink-2"
+            onClick={() => {
+              close();
+              postToHost({ type: 'openWorkbenchPanel', payload: {} });
+            }}
+          >
+            <ExpandPanelIcon className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            data-testid="settings-button"
+            aria-label={t('header.settings')}
+            title={t('header.settings')}
+            aria-pressed={settingsOpen}
+            className={cn(
+              'flex size-6.5 items-center justify-center rounded-[6px] transition-colors duration-100',
+              settingsOpen
+                ? 'bg-field text-ink shadow-hairline'
+                : 'text-ink-3 hover:bg-hover hover:text-ink-2',
+            )}
+            onClick={() => {
+              close();
+              toggleSettingsPage();
+            }}
+          >
+            <SettingsIcon className="size-4" />
+          </button>
+        </div>
       </div>
+
+      {/* 第二层（会话模块下）：当前会话标题与快速搜索浮层 */}
+      {!settingsOpen && activeModule === 'sessions' ? (
+        <div className="flex items-center justify-between border-t border-line/60 px-2 py-1">
+          <div className="header__title-wrap relative min-w-0 flex-1">
+            <button
+              type="button"
+              className="header__title flex max-w-full items-center gap-1.5 rounded-[6px] px-2 py-[2px] text-[12.5px] font-medium text-ink transition-colors duration-100 hover:bg-hover"
+              aria-haspopup="dialog"
+              aria-expanded={menu === 'sessions'}
+              onClick={() => {
+                setQuery('');
+                setMenu(menu === 'sessions' ? undefined : 'sessions');
+              }}
+              title={session.title}
+            >
+              {session.sync === 'opening' && session.id ? (
+                <SpinnerIcon className="header__spinner size-3.5 shrink-0 text-ink-3" />
+              ) : session.running ? (
+                <span
+                  className="dot dot--running inline-block size-2 shrink-0 rounded-full bg-accent"
+                  style={{ animation: 'pulse 1.4s ease-in-out infinite' }}
+                  aria-label={t('header.running')}
+                />
+              ) : null}
+              <span className="header__title-text truncate">{session.title}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 text-ink-3" />
+            </button>
+
+            <Popover
+              open={menu === 'sessions'}
+              onClose={close}
+              className="sessions-menu left-0 w-[min(340px,calc(100vw-16px))] p-0"
+              label={t('header.sessions')}
+            >
+              <div className="sessions-menu__search flex h-10 items-center gap-2 border-b border-line px-3 transition-colors duration-100 hover:bg-hover">
+                <SearchIcon className="size-3.5 shrink-0 text-ink-3" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t('header.search')}
+                  aria-label={t('header.search')}
+                  className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+                />
+                {query ? (
+                  <button
+                    type="button"
+                    aria-label={t('common.close')}
+                    onClick={() => setQuery('')}
+                    className="flex size-5 items-center justify-center rounded-full text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink"
+                    style={{ animation: 'fade-in 150ms ease-out both' }}
+                  >
+                    <CloseIcon className="size-3" />
+                  </button>
+                ) : null}
+              </div>
+              <div role="menu" className="sessions-menu__list max-h-80 overflow-y-auto p-1">
+                {session.listLoading && sessions.length === 0 ? (
+                  <div className="menu-empty menu-empty--loading flex items-center gap-2 px-2 py-3 text-[12.5px] text-ink-3">
+                    <SpinnerIcon className="size-3.5" />
+                    {t('header.loadingSessions')}
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <div className="menu-empty flex flex-col items-center justify-center gap-1 px-4 py-6 text-center">
+                    <span className="mb-1 flex size-8 items-center justify-center rounded-control bg-inset text-ink-3 shadow-hairline">
+                      <SearchIcon className="size-3.5" />
+                    </span>
+                    <span className="text-[12.5px] font-medium text-ink">
+                      {sessions.length === 0 ? t('header.noSessions') : t('header.noMatch')}
+                    </span>
+                  </div>
+                ) : (
+                  <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
+                    {filtered.map((s) => (
+                      <MenuItem
+                        key={s.id}
+                        active={s.id === session.id}
+                        icon={
+                          s.running ? (
+                            <SpinnerIcon className="size-3.5" />
+                          ) : s.id === session.id ? (
+                            <CheckIcon className="size-3.5" />
+                          ) : (
+                            <ChatIcon className="size-3.5" />
+                          )
+                        }
+                        hint={
+                          s.needsAttention ? (
+                            <span
+                              className="dot dot--attention inline-block size-2 rounded-full bg-orange"
+                              title={t('approval.label')}
+                            />
+                          ) : (
+                            relativeTime(s.updatedAt, t)
+                          )
+                        }
+                        onSelect={() => {
+                          close();
+                          closeSettingsPage();
+                          postToHost({ type: 'switchSession', payload: { sessionId: s.id } });
+                        }}
+                      >
+                        {s.title}
+                      </MenuItem>
+                    ))}
+                  </GlideMenu>
+                )}
+              </div>
+            </Popover>
+          </div>
+        </div>
+      ) : null}
     </header>
   );
 }

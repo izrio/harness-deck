@@ -5,7 +5,13 @@
  * 推送按约 30ms 合并，流式输出时不会产生消息风暴。不依赖 vscode API，便于测试。
  */
 import { isAbsolute, resolve } from 'node:path';
-import { renderDelay, type ChatBackendController, type ControllerHostOptions } from '../../backend/types.ts';
+import {
+  renderDelay,
+  type ChatBackendController,
+  type ControllerHostOptions,
+  type CrossProjectSession,
+  type ProgrammaticSessionRequest,
+} from '../../backend/types.ts';
 import type {
   CommandView,
   ConnectionState,
@@ -236,6 +242,10 @@ export class ChatController implements ChatBackendController {
     if (path === this.workspacePath) return;
     this.workspacePath = path;
     this.editorContext.clearPinned();
+    this.changes.clear();
+    this.turnDiffs.clear();
+    this.subagentParents.clear();
+    this.subagentLabels.clear();
     this.activeId = this.options.loadActiveSessionId();
     this.staleService = undefined;
     this.staleStream = undefined;
@@ -254,12 +264,22 @@ export class ChatController implements ChatBackendController {
     this.disposeBackground();
     this.service?.dispose();
     this.interactions?.dispose();
+    this.changes.clear();
+    this.turnDiffs.clear();
+    this.subagentParents.clear();
+    this.subagentLabels.clear();
   }
 
   /** 界面语言变化（设置 `harnessDeck.ui.language`）：通知 Webview，Host 生成的文字重新计算。 */
   /** 界面字号或字体的设置变化时调用。 */
   appearanceChanged(): void {
     this.options.post({ type: 'appearance', payload: this.options.appearance?.() ?? {} });
+  }
+
+  preferencesChanged(): void {
+    if (this.options.preferences) {
+      this.options.post({ type: 'preferences', payload: this.options.preferences() });
+    }
   }
 
   localeChanged(): void {
@@ -327,7 +347,7 @@ export class ChatController implements ChatBackendController {
     this.summaryQueue = [];
     this.scheduleRender();
     if (!client) return;
-    this.interactions = new InteractionService(client, () => this.scheduleRender(), this.options.log);
+    this.interactions = new InteractionService(client, () => this.scheduleRender(), this.options.log, this.options.isHiddenSession);
     const origin = client.credential?.origin;
     if (origin !== this.changesOrigin) {
       this.changes.clear();
@@ -340,6 +360,7 @@ export class ChatController implements ChatBackendController {
       workspacePath: this.workspacePath,
       onChange: () => this.scheduleRender(),
       log: this.options.log,
+      ...(this.options.isHiddenSession ? { isHiddenSession: this.options.isHiddenSession } : {}),
     });
     this.service = service;
     // 只校验初始化开始时就已打开的会话；初始化期间新建的会话不在刚读到的列表里，不能误判为已删除
@@ -347,14 +368,14 @@ export class ChatController implements ChatBackendController {
     void service.init().then(
       () => {
         if (generation !== this.serviceGeneration) return;
-        if (this.activeId !== restoredId) return;
-        // 上次打开的会话已经不在列表里（被删除或不属于这个工作区）时，回到新对话
         // 斜杠命令目录与会话无关，任选一个已有会话读取，新对话里也能补全 dsh 命令
         const anySession = service.sessions.find((s) => s.sessionId === restoredId)?.sessionId ?? service.sessions[0]?.sessionId;
         if (anySession) this.loadCommands(anySession);
         // 已经不存在的会话（被删除或不属于这个工作区）不再保留标签
         const known = (id: string) => service.sessions.some((s) => s.sessionId === id) || this.parentOf(id) !== undefined;
         this.tabs.prune(known);
+        if (this.activeId !== restoredId) return;
+        // 上次打开的会话已经不在列表里（被删除或不属于这个工作区）时，回到新对话
         if (restoredId && !known(restoredId)) {
           this.options.log(`上次打开的会话 ${restoredId} 已不存在，改为新对话`);
           this.setActive(undefined);
@@ -389,12 +410,21 @@ export class ChatController implements ChatBackendController {
       commands: view.commands,
       locale: getLocale(),
       appearance: this.options.appearance?.() ?? {},
+      ...(this.options.preferences ? { preferences: this.options.preferences() } : {}),
       backends: this.options.backends?.() ?? { items: [], active: '' },
+      ...(this.options.projects ? { projects: this.options.projects() } : {}),
+      ...(this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
     };
   }
 
   backendsChanged(): void {
     this.options.post({ type: 'backends', payload: this.options.backends?.() ?? { items: [], active: '' } });
+  }
+
+  projectsChanged(): void {
+    if (this.options.projects) {
+      this.options.post({ type: 'projects', payload: this.options.projects() });
+    }
   }
 
   async handle(message: WebviewToHost): Promise<void> {
@@ -498,6 +528,58 @@ export class ChatController implements ChatBackendController {
           this.appearanceChanged();
         }
         return;
+      case 'setPreferences':
+        try {
+          await this.options.setPreferences?.(message.payload);
+        } catch (error) {
+          this.toast('error', t('preferences.failed', describe(error)));
+          this.preferencesChanged();
+        }
+        return;
+      case 'selectBackend':
+      case 'checkBackendEnv':
+      case 'fetchBackendVersions':
+      case 'installBackend':
+      case 'uninstallBackend':
+      case 'upsertBackendProfile':
+      case 'deleteBackendProfile':
+      case 'testNotification':
+      case 'setProjectWorktreeConfig':
+      case 'addRecentProject':
+      case 'removeRecentProject':
+      case 'openProject':
+      case 'createWorktree':
+      case 'runProjectVerify':
+      case 'previewMarkdown':
+      case 'openWorkbenchPanel':
+      case 'markUnreadRead':
+      case 'upsertSchedule':
+      case 'toggleSchedule':
+      case 'deleteSchedule':
+      case 'runScheduleNow':
+      case 'markScheduleRunRead':
+      case 'upsertAgent':
+      case 'deleteAgent':
+      case 'startAgentSession':
+      case 'delegateToAgent':
+      case 'createTask':
+      case 'updateTaskStatus':
+      case 'reorderTask':
+      case 'deleteTask':
+      case 'clearDoneTasks':
+      case 'setTaskQueueAutoRun':
+      case 'runTaskNow':
+      case 'startProjectSession':
+      case 'openProjectSession':
+        return;
+      case 'pickFiles': {
+        const picked = await this.options.pickFiles?.();
+        if (picked && picked.length > 0 && this.editorContext.pinFiles(picked) > 0) {
+          this.scheduleRender();
+          this.options.post({ type: 'focusComposer', payload: {} });
+        }
+        return;
+      }
       case 'openFile': {
         const { path, startLine, endLine } = message.payload;
         return this.workbench.openFile(this.absolute(path), startLine ? { startLine, ...(endLine ? { endLine } : {}) } : undefined);
@@ -1030,7 +1112,23 @@ export class ChatController implements ChatBackendController {
 
   /** 计算当前视图并推送变化的部分。 */
   render(): void {
-    this.publisher.publish(this.refresh());
+    const view = this.refresh();
+    this.publisher.publish(view);
+    const lastItem = view.items.at(-1);
+    const turnAborted =
+      (lastItem?.kind === 'turnDone' && !lastItem.completed) ||
+      (lastItem?.kind === 'notice' && (lastItem.level === 'error' || lastItem.text === t('notice.stopped')));
+    const hasTurnOutput = view.items.some((item) => item.kind === 'assistant' || item.kind === 'turnDone');
+    this.options.onSessionObserve?.({
+      ...(view.session.id ? { sessionId: view.session.id } : {}),
+      title: view.session.title,
+      running: view.session.running,
+      sync: view.session.sync,
+      interactionIds: view.interactions.map((i) => i.id),
+      ...(turnAborted ? { turnAborted: true } : {}),
+      ...(hasTurnOutput ? { hasTurnOutput: true } : {}),
+      ...(view.session.goal ? { goalPhase: view.session.goal.phase, goalObjective: view.session.goal.objective } : {}),
+    });
   }
 
   /**
@@ -1193,6 +1291,87 @@ export class ChatController implements ChatBackendController {
   modelState(): ModelState {
     const projections = this.activeId && this.service ? this.service.projections(this.activeId) : {};
     return buildModelState(projections, this.service?.models, this.draftModel);
+  }
+
+  /** 所有工作区的非隐藏顶层会话（供工作台按项目分组会话展示）。 */
+  allWorkspaceSessions(): readonly CrossProjectSession[] {
+    const service = this.service?.initialized ? this.service : this.staleService;
+    if (!service) return [];
+    const attention = this.interactions?.sessionsNeedingAttention() ?? new Set<string>();
+    return service.allSessions.map((s) => ({
+      id: s.sessionId,
+      title: titleOf(service.projections(s.sessionId), []),
+      cwd: s.cwd ?? this.workspacePath,
+      updatedAt: s.updatedAt,
+      running: s.running,
+      ...(attention.has(s.sessionId) ? { needsAttention: true } : {}),
+    }));
+  }
+
+  /** 由智能体或顺序看板任务发起一个新会话并可选发送首条消息。 */
+  async startProgrammaticSession(req: ProgrammaticSessionRequest): Promise<string | undefined> {
+    const service = await this.waitForService(20_000);
+    if (!service) {
+      this.toast('error', t('notConnected'));
+      return undefined;
+    }
+    if (req.permissionPreset === DANGER_PRESET && !req.skipPermissionConfirm) {
+      const ok = await this.workbench.confirm(t('danger.title'), t('danger.detail'), t('danger.allow'));
+      if (!ok) return undefined;
+    }
+    this.tabs.openNew();
+    const sessionId = await service.createSession();
+    this.setActive(sessionId);
+    if (req.title?.trim()) {
+      await service.rename(sessionId, req.title.trim()).catch(() => undefined);
+    }
+    if (req.model?.model) {
+      const resolvedProvider =
+        req.model.provider ||
+        service.models?.groups.find((g) => g.models.some((m) => m.id === req.model!.model))?.id ||
+        service.models?.default?.provider ||
+        'deepseek';
+      await service
+        .selectModel(sessionId, {
+          provider: resolvedProvider,
+          model: req.model.model,
+          ...(req.model.reasoningEffort ? { reasoningEffort: req.model.reasoningEffort } : {}),
+        })
+        .catch((error: unknown) => this.options.log(`为程序化会话设置模型失败：${describe(error)}`));
+    }
+    if (req.permissionPreset && req.permissionPreset !== service.permissions?.defaultPreset) {
+      await service
+        .setPermission(sessionId, req.permissionPreset)
+        .catch((error: unknown) => this.options.log(`为程序化会话设置权限失败：${describe(error)}`));
+    }
+    if (req.prompt?.trim()) {
+      await service.prompt(sessionId, req.prompt.trim());
+    }
+    this.scheduleRender();
+    return sessionId;
+  }
+
+  latestAssistantText(sessionId: string): string | undefined {
+    const targetStream =
+      this.stream?.sessionId === sessionId ? this.stream : this.background.get(sessionId);
+    if (!targetStream) return undefined;
+    const projected = projectEvents({ events: targetStream.journal.events, workspacePath: this.workspacePath });
+    for (let i = projected.items.length - 1; i >= 0; i--) {
+      const item = projected.items[i];
+      if (item?.kind === 'assistant' && item.markdown.trim()) {
+        return item.markdown.trim();
+      }
+    }
+    return undefined;
+  }
+
+  private async waitForService(timeoutMs: number): Promise<SessionService | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.service?.initialized) return this.service;
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    return this.service?.initialized ? this.service : undefined;
   }
 
   private viewContext(): ViewContext {

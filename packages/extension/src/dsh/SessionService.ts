@@ -35,6 +35,8 @@ export interface SessionServiceOptions {
   readonly workspacePath: string;
   readonly onChange: () => void;
   readonly log?: (line: string) => void;
+  /** 定时任务创建的后台会话：不列入左侧会话列表或跨项目分组列表。 */
+  readonly isHiddenSession?: (sessionId: string) => boolean;
 }
 
 const LIST_EVENTS = ['api-session/added', 'api-session/removed', 'api-session/status', 'api-session/activity'];
@@ -42,6 +44,7 @@ const LIST_EVENTS = ['api-session/added', 'api-session/removed', 'api-session/st
 export class SessionService {
   private workspaceId: string | undefined;
   private summaries: SessionSummaryWire[] = [];
+  private allSummaries: SessionSummaryWire[] = [];
   /** 子代理会话 → 父会话。 */
   private children = new Map<string, string>();
   private readonly projectionValues = new Map<string, Record<string, unknown>>();
@@ -72,9 +75,14 @@ export class SessionService {
     return this.permissionCatalog;
   }
 
-  /** 当前工作区的会话，按最近更新排序；空白会话不列出。 */
+  /** 当前工作区的会话，按最近更新排序；空白会话与隐藏会话不列出。 */
   get sessions(): readonly SessionSummaryWire[] {
     return this.summaries;
+  }
+
+  /** 所有工作区目录下的非空白、非子代理、非定时隐藏会话（供工作台按项目分组展示）。 */
+  get allSessions(): readonly SessionSummaryWire[] {
+    return this.allSummaries;
   }
 
   /** 子代理会话的父会话 id；不是子代理会话（或还没读到）时为 undefined。子代理会话不出现在会话列表里。 */
@@ -232,14 +240,16 @@ export class SessionService {
   private async refreshList(): Promise<void> {
     try {
       const all = await this.client.listSessions(this.abort.signal);
+      const isHidden = this.options.isHiddenSession;
       this.children = new Map(
         all.filter((summary) => summary.parentSessionId && isInside(this.options.workspacePath, summary.cwd)).map((summary) => [summary.sessionId, summary.parentSessionId!]),
       );
-      this.summaries = all
-        .filter((summary) => !summary.blank && summary.origin !== 'subagent' && !summary.parentSessionId)
-        .filter((summary) => isInside(this.options.workspacePath, summary.cwd))
+      const visibleTopLevel = all
+        .filter((summary) => !summary.blank && summary.origin !== 'subagent' && !summary.parentSessionId && !isHidden?.(summary.sessionId))
         .sort((a, b) => b.updatedAt - a.updatedAt);
-      for (const summary of this.summaries) {
+      this.allSummaries = visibleTopLevel;
+      this.summaries = visibleTopLevel.filter((summary) => isInside(this.options.workspacePath, summary.cwd));
+      for (const summary of visibleTopLevel) {
         const values = projectionValuesOf(summary.projections);
         // 列表里的是缓存值，只补充缺失的键，不覆盖实时投影
         if (values) this.projectionValues.set(summary.sessionId, { ...values, ...this.projectionValues.get(summary.sessionId) });

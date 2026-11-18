@@ -30,12 +30,20 @@ import type {
   WebviewToHost,
 } from '@harness-deck/shared';
 import { isAbsolute, resolve } from 'node:path';
-import { renderDelay, type ChatBackendController, type ControllerHostOptions } from '../backend/types.ts';
+import {
+  renderDelay,
+  type ChatBackendController,
+  type ControllerHostOptions,
+  type CrossProjectSession,
+  type ProgrammaticSessionRequest,
+} from '../backend/types.ts';
 import { getLocale, t } from '../i18n.ts';
 import {
+  CONTEXT_OPEN,
   isTemplate,
   parseSlash,
   pluginCommands,
+  splitContext,
   templatePrompt,
   withContext,
   type ContextAttachment,
@@ -48,7 +56,7 @@ import { TabsModel } from '../vm/TabsModel.ts';
 import { ViewPublisher, type ControllerView } from '../vm/ViewPublisher.ts';
 import { noWorkbench, type Workbench } from '../vm/workbench.ts';
 import { AcpError } from './connection.ts';
-import { AcpSessionProjection, type AcpConfigOption, type AcpDiff, type AcpToolCall } from './projection.ts';
+import { AcpSessionProjection, type AcpCommand, type AcpConfigOption, type AcpDiff, type AcpToolCall } from './projection.ts';
 
 /** 和代理通话的接口（测试里用假的）。 */
 export interface AcpLink {
@@ -157,6 +165,9 @@ export class AcpController implements ChatBackendController {
   private rebinding: { readonly sessionId: string; readonly done: (ok: boolean) => void } | undefined;
   /** 对话面板里打开的标签；当前标签的会话就是 activeId，新对话的标签（没有 sessionId）用草稿会话。 */
   private readonly tabs: TabsModel;
+  /** 同一进程里最近收到的选项和命令：切换/新建标签等待 session/new 或 session/load 返回期间沿用，避免反复显示「正在读取模型…」。 */
+  private cachedConfigOptions: readonly AcpConfigOption[] = [];
+  private cachedCommands: readonly AcpCommand[] = [];
   private workspacePath: string;
   private renderTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly publisher: ViewPublisher;
@@ -196,12 +207,14 @@ export class AcpController implements ChatBackendController {
     this.init = init;
     this.connection = link ? 'connected' : 'idle';
     this.options.post({ type: 'connection', payload: this.connection });
-    // 新进程里会话要重新加载；草稿会话作废
+    // 新进程里会话要重新加载；草稿会话和选项缓存作废
     this.projections.clear();
     this.loading.clear();
     this.draftId = undefined;
     this.creatingDraft = undefined;
     this.bound = undefined;
+    this.cachedConfigOptions = [];
+    this.cachedCommands = [];
     this.cancelPermissions();
     if (link) {
       void this.refreshList();
@@ -224,6 +237,7 @@ export class AcpController implements ChatBackendController {
     if (!sessionId || !update) return;
     const projection = this.projectionFor(sessionId);
     projection.apply(update);
+    this.cacheProjectionDefaults(projection);
     if (update.sessionUpdate === 'session_info_update' && projection.title) this.remember(sessionId, projection.title);
     this.scheduleRender();
   }
@@ -268,12 +282,89 @@ export class AcpController implements ChatBackendController {
       commands: view.commands,
       locale: getLocale(),
       appearance: this.options.appearance?.() ?? {},
+      ...(this.options.preferences ? { preferences: this.options.preferences() } : {}),
       backends: this.backends(),
+      ...(this.options.projects ? { projects: this.options.projects() } : {}),
+      ...(this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
     };
   }
 
   modelState(): ModelState {
     return this.modelsOf(this.currentProjection());
+  }
+
+  allWorkspaceSessions(): readonly CrossProjectSession[] {
+    const waiting = new Set([...this.permissions.values()].map((p) => p.sessionId));
+    return this.compute().sessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      cwd: this.workspacePath,
+      updatedAt: s.updatedAt,
+      running: s.running,
+      ...(waiting.has(s.id) ? { needsAttention: true } : {}),
+    }));
+  }
+
+  async startProgrammaticSession(req: ProgrammaticSessionRequest): Promise<string | undefined> {
+    const link = await this.waitForLink(20_000);
+    if (!link) {
+      this.toast('error', t('notConnected'));
+      return undefined;
+    }
+    this.tabs.openNew();
+    const sessionId = await this.ensureDraft();
+    if (!sessionId) return undefined;
+
+    this.activeId = sessionId;
+    this.draftId = undefined;
+    this.options.saveActiveSessionId(sessionId);
+    this.tabs.setCurrentSession(sessionId);
+    if (req.title?.trim()) {
+      this.remember(sessionId, req.title.trim(), true);
+    }
+    if (req.model?.model) {
+      await this.selectModel(req.model.model, req.model.reasoningEffort);
+    }
+    if (req.permissionPreset) {
+      const modeOpt = this.modeOption(this.projectionFor(sessionId));
+      if (modeOpt?.options?.length) {
+        const candidate =
+          req.permissionPreset === 'danger-full-access'
+            ? modeOpt.options.find((o) => isUnrestrictedMode(o.value, o.name))?.value
+            : req.permissionPreset === 'read-only'
+              ? modeOpt.options.find((o) => /plan|read[-_]?only/iu.test(o.value))?.value
+              : undefined;
+        if (candidate && candidate !== modeOpt.currentValue) {
+          await this.setOption(sessionId, modeOpt.id, candidate).catch(() => undefined);
+        }
+      }
+    }
+    if (req.prompt?.trim()) {
+      if (!req.title?.trim()) this.remember(sessionId, req.prompt.trim());
+      void this.prompt(this.link ?? link, sessionId, req.prompt.trim(), []);
+    }
+    this.scheduleRender();
+    return sessionId;
+  }
+
+  latestAssistantText(sessionId: string): string | undefined {
+    const items = this.projections.get(sessionId)?.snapshotItems() ?? [];
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (item?.kind === 'assistant' && item.markdown.trim()) {
+        return item.markdown.trim();
+      }
+    }
+    return undefined;
+  }
+
+  private async waitForLink(timeoutMs: number): Promise<AcpLink | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.link) return this.link;
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    return this.link;
   }
 
   workspaceChanged(): void {
@@ -289,14 +380,32 @@ export class AcpController implements ChatBackendController {
     this.options.post({ type: 'appearance', payload: this.options.appearance?.() ?? {} });
   }
 
+  preferencesChanged(): void {
+    if (this.options.preferences) {
+      this.options.post({ type: 'preferences', payload: this.options.preferences() });
+    }
+  }
+
   backendsChanged(): void {
     this.options.post({ type: 'backends', payload: this.backends() });
+  }
+
+  projectsChanged(): void {
+    if (this.options.projects) {
+      this.options.post({ type: 'projects', payload: this.options.projects() });
+    }
   }
 
   setWorkspace(path: string): void {
     if (path === this.workspacePath) return;
     this.workspacePath = path;
     this.editorContext.clearPinned();
+    this.cancelPermissions();
+    this.stored = [...(this.options.loadSessions() ?? [])];
+    this.listed = [];
+    this.loading.clear();
+    this.creatingDraft = undefined;
+    this.bound = undefined;
     this.activeId = this.options.loadActiveSessionId();
     this.draftId = undefined;
     this.projections.clear();
@@ -439,13 +548,62 @@ export class AcpController implements ChatBackendController {
           this.appearanceChanged();
         }
         return;
+      case 'setPreferences':
+        try {
+          await this.options.setPreferences?.(message.payload);
+        } catch (error) {
+          this.toast('error', t('preferences.failed', describe(error)));
+          this.preferencesChanged();
+        }
+        return;
       case 'loadImage':
         // 历史消息里的图片：ACP 没有读取附件的方法
         this.options.post({ type: 'imageData', payload: { attachmentId: message.payload.attachmentId } });
         return;
       case 'selectBackend':
-      case 'dismissBackendChoice':
+      case 'checkBackendEnv':
+      case 'fetchBackendVersions':
+      case 'installBackend':
+      case 'uninstallBackend':
+      case 'upsertBackendProfile':
+      case 'deleteBackendProfile':
+      case 'testNotification':
+      case 'setProjectWorktreeConfig':
+      case 'addRecentProject':
+      case 'removeRecentProject':
+      case 'openProject':
+      case 'createWorktree':
+      case 'runProjectVerify':
+      case 'previewMarkdown':
+      case 'openWorkbenchPanel':
+      case 'markUnreadRead':
+      case 'upsertSchedule':
+      case 'toggleSchedule':
+      case 'deleteSchedule':
+      case 'runScheduleNow':
+      case 'markScheduleRunRead':
+      case 'upsertAgent':
+      case 'deleteAgent':
+      case 'startAgentSession':
+      case 'delegateToAgent':
+      case 'createTask':
+      case 'updateTaskStatus':
+      case 'reorderTask':
+      case 'deleteTask':
+      case 'clearDoneTasks':
+      case 'setTaskQueueAutoRun':
+      case 'runTaskNow':
+      case 'startProjectSession':
+      case 'openProjectSession':
         return;
+      case 'pickFiles': {
+        const picked = await this.options.pickFiles?.();
+        if (picked && picked.length > 0 && this.editorContext.pinFiles(picked) > 0) {
+          this.scheduleRender();
+          this.options.post({ type: 'focusComposer', payload: {} });
+        }
+        return;
+      }
     }
   }
 
@@ -489,6 +647,7 @@ export class AcpController implements ChatBackendController {
     try {
       const result = await link.request<{ configOptions?: AcpConfigOption[] } | null>('session/load', { sessionId, cwd: this.workspacePath, mcpServers: [] });
       projection.setConfigOptions(result?.configOptions);
+      this.cacheProjectionDefaults(projection);
       // 新进程里第一个加载的会话收到实时更新
       if (this.options.singleSession && this.link === link && this.bound === undefined) this.bound = sessionId;
       if (this.rebinding?.sessionId === sessionId) this.finishRebind(this.bound === sessionId);
@@ -516,8 +675,8 @@ export class AcpController implements ChatBackendController {
       .then(
         async (id) => {
           if (this.link !== link) return id;
-          this.draftId = id;
           await this.applyPreferredModel(id);
+          if (this.link === link) this.draftId = id;
           return id;
         },
         (error: unknown) => {
@@ -547,7 +706,9 @@ export class AcpController implements ChatBackendController {
       if (!(await this.signIn(link))) throw new Error(this.authRequiredText(error));
       result = await link.request('session/new', params);
     }
-    this.projectionFor(result.sessionId).setConfigOptions(result.configOptions);
+    const projection = this.projectionFor(result.sessionId);
+    projection.setConfigOptions(result.configOptions);
+    this.cacheProjectionDefaults(projection);
     if (this.options.singleSession && this.link === link) this.bound = result.sessionId;
     return result.sessionId;
   }
@@ -747,6 +908,7 @@ export class AcpController implements ChatBackendController {
       ...sent.map((image) => ({ type: 'image', mimeType: image.mediaType, data: image.data })),
     ];
     const send = () => link.request<{ stopReason?: string } | null>('session/prompt', { sessionId, prompt: content });
+    let endedNormally = false;
     try {
       let result: { stopReason?: string } | null;
       try {
@@ -756,16 +918,17 @@ export class AcpController implements ChatBackendController {
         if (!isAuthRequired(error) || !(await this.signIn(link).catch(() => false))) throw error;
         result = await send();
       }
-      projection.endTurn(Date.now(), result?.stopReason ?? 'end_turn');
+      const stopReason = result?.stopReason ?? 'end_turn';
+      projection.endTurn(Date.now(), stopReason);
+      endedNormally = stopReason !== 'cancelled';
     } catch (error) {
       projection.endTurn(Date.now(), undefined, isAuthRequired(error) ? this.authRequiredText(error) : describe(error));
     }
     this.remember(sessionId, this.titleOf(sessionId));
     void this.refreshList();
     this.scheduleRender();
-    // 本地排队的消息：上一轮结束后依次发送
-    // 代理已经退出时队列原样留着（界面上仍显示排队中），不能取出来又发不出去
-    const next = this.link ? this.queues.get(sessionId)?.shift() : undefined;
+    // 本地排队的消息：仅在上一轮正常结束（未被停止或报错）时自动发送；停止后保留在队列里等用户点击「现在发送」
+    const next = endedNormally && this.link ? this.queues.get(sessionId)?.shift() : undefined;
     if (next && this.link) await this.prompt(this.link, sessionId, next.text, next.images);
     // 单会话代理：回复期间点了新对话，草稿会话这时才建
     else if (this.options.singleSession && this.link && this.activeId === undefined && this.draftId === undefined) void this.ensureDraft();
@@ -785,9 +948,24 @@ export class AcpController implements ChatBackendController {
     if (!sessionId || !queue) return;
     const index = queue.findIndex((q) => q.id === payload.itemId);
     if (index < 0) return;
-    if (payload.action === 'remove') queue.splice(index, 1);
-    else if (payload.action === 'edit') queue[index] = { ...queue[index]!, text: payload.text };
-    else if (payload.action === 'send' || payload.action === 'steer') {
+    if (payload.action === 'remove') {
+      queue.splice(index, 1);
+    } else if (payload.action === 'edit') {
+      const original = queue[index]!;
+      const at = original.text.lastIndexOf(`\n\n${CONTEXT_OPEN}\n`);
+      const text = at >= 0 ? `${payload.text}${original.text.slice(at)}` : payload.text;
+      queue[index] = { ...original, text };
+    } else if (payload.action === 'send') {
+      const [item] = queue.splice(index, 1);
+      if (!item) return;
+      const running = this.currentProjection()?.running ?? false;
+      if (!running && this.link) {
+        this.scheduleRender();
+        void this.prompt(this.link, sessionId, item.text, item.images);
+        return;
+      }
+      queue.unshift(item);
+    } else if (payload.action === 'steer') {
       // 没有插队：移到队首，当前回复结束后最先发送
       const [item] = queue.splice(index, 1);
       queue.unshift(item!);
@@ -797,16 +975,25 @@ export class AcpController implements ChatBackendController {
 
   // ---------------------------------------------------------------- 模型、模式
 
+  private cacheProjectionDefaults(projection: AcpSessionProjection): void {
+    if (projection.configOptions.length > 0) this.cachedConfigOptions = projection.configOptions;
+    if (projection.commands.length > 0) this.cachedCommands = projection.commands;
+  }
+
+  private effectiveOptions(projection = this.currentProjection()): readonly AcpConfigOption[] {
+    return projection?.configOptions.length ? projection.configOptions : this.cachedConfigOptions;
+  }
+
   private modelOption(projection = this.currentProjection()): AcpConfigOption | undefined {
-    return projection?.configOptions.find((o) => o.category === 'model' || o.id === 'model');
+    return this.effectiveOptions(projection).find((o) => o.category === 'model' || o.id === 'model');
   }
 
   private effortOption(projection = this.currentProjection()): AcpConfigOption | undefined {
-    return projection?.configOptions.find((o) => o.category === 'thought_level' || o.id === 'thought_level' || o.id === 'reasoning_effort');
+    return this.effectiveOptions(projection).find((o) => o.category === 'thought_level' || o.id === 'thought_level' || o.id === 'reasoning_effort');
   }
 
   private modeOption(projection = this.currentProjection()): AcpConfigOption | undefined {
-    return projection?.configOptions.find((o) => o.category === 'mode' || o.id === 'mode');
+    return this.effectiveOptions(projection).find((o) => o.category === 'mode' || o.id === 'mode');
   }
 
   private modelsOf(projection: AcpSessionProjection | undefined): ModelState {
@@ -814,9 +1001,16 @@ export class AcpController implements ChatBackendController {
     if (!model?.options?.length) return { options: [] };
     const effort = this.effortOption(projection);
     const efforts = (effort?.options ?? []).map((o) => ({ id: o.value, name: o.name ?? o.value }));
+    const usingFallback = !projection?.configOptions.length;
+    const preferred = usingFallback && !this.activeId ? this.options.loadPreferredModel?.() : undefined;
+    const activeModel =
+      preferred && model.options.some((o) => o.value === preferred.model) ? preferred.model : model.currentValue;
+    const activeEffort =
+      preferred && activeModel === preferred.model && preferred.effort && efforts.some((e) => e.id === preferred.effort)
+        ? preferred.effort
+        : effort?.currentValue;
     // 当前模型不在代理给的选项里（CodeBuddy 接第三方模型、命令行 --model 指定）：补在最前面，选择器才显示得出来
-    const current = model.currentValue;
-    const options = current && !model.options.some((o) => o.value === current) ? [{ value: current, name: current }, ...model.options] : model.options;
+    const options = activeModel && !model.options.some((o) => o.value === activeModel) ? [{ value: activeModel, name: activeModel }, ...model.options] : model.options;
     return {
       options: options.map((o: { value: string; name?: string; description?: string }) => ({
         provider: 'acp',
@@ -825,22 +1019,23 @@ export class AcpController implements ChatBackendController {
         group: o.value.includes('/') ? o.value.slice(0, o.value.indexOf('/')) : this.agentName(),
         ...(o.description && o.description !== o.value ? { description: o.description } : {}),
         // 思考等级是会话级的设置：挂在当前模型下
-        efforts: o.value === model.currentValue ? efforts : [],
-        ...(o.value === model.currentValue && effort?.currentValue ? { defaultEffort: effort.currentValue } : {}),
+        efforts: o.value === activeModel ? efforts : [],
+        ...(o.value === activeModel && activeEffort ? { defaultEffort: activeEffort } : {}),
       })),
-      ...(model.currentValue ? { current: { provider: 'acp', model: model.currentValue, ...(effort?.currentValue ? { reasoningEffort: effort.currentValue } : {}) } } : {}),
+      ...(activeModel ? { current: { provider: 'acp', model: activeModel, ...(activeEffort ? { reasoningEffort: activeEffort } : {}) } } : {}),
     };
   }
 
   private async selectModel(model: string, effort?: string): Promise<void> {
+    this.options.savePreferredModel?.({ model, ...(effort ? { effort } : {}) });
+    this.scheduleRender();
     const sessionId = this.currentId() ?? (await this.ensureDraft());
-    const option = this.modelOption();
+    const option = this.modelOption(this.currentProjection());
     if (!sessionId || !option) return;
     try {
       if (model !== option.currentValue) await this.setOption(sessionId, option.id, model);
-      const effortOption = this.effortOption();
+      const effortOption = this.effortOption(this.currentProjection());
       if (effort && effortOption && effort !== effortOption.currentValue) await this.setOption(sessionId, effortOption.id, effort);
-      this.options.savePreferredModel?.({ model, ...(effort ? { effort } : {}) });
       // 已经建好、还没用过的草稿会话也换过来
       if (this.draftId && this.draftId !== sessionId) await this.applyPreferredModel(this.draftId);
     } catch (error) {
@@ -887,7 +1082,9 @@ export class AcpController implements ChatBackendController {
 
   private async setOption(sessionId: string, configId: string, value: string): Promise<void> {
     const result = await this.link?.request<{ configOptions?: AcpConfigOption[] } | null>('session/set_config_option', { sessionId, configId, value });
-    this.projectionFor(sessionId).setConfigOptions(result?.configOptions);
+    const projection = this.projectionFor(sessionId);
+    projection.setConfigOptions(result?.configOptions);
+    this.cacheProjectionDefaults(projection);
     this.scheduleRender();
   }
 
@@ -977,6 +1174,20 @@ export class AcpController implements ChatBackendController {
     // 磁盘上的文件就是修改后的内容时右侧用真实文件（可以继续编辑）
     const current = await this.workbench.readFile(path);
     const created = diff.oldText === null;
+    if (diffs.length > 1 && current !== undefined) {
+      const samePathDiffs = diffs.filter((d) => this.absolute(d.path) === path);
+      const reversed = reverseToolDiffs(current, samePathDiffs);
+      if (reversed !== undefined) {
+        await this.workbench.openDiff({
+          kind: 'contents',
+          path,
+          before: created ? '' : reversed,
+          created,
+          scope: 'turn',
+        });
+        return;
+      }
+    }
     const whole = wholeFile(diff, current);
     await this.workbench.openDiff({
       kind: 'contents',
@@ -1037,7 +1248,23 @@ export class AcpController implements ChatBackendController {
   }
 
   render(): void {
-    this.publisher.publish(this.compute());
+    const view = this.compute();
+    this.publisher.publish(view);
+    const lastItem = view.items.at(-1);
+    const turnAborted =
+      (lastItem?.kind === 'turnDone' && !lastItem.completed) ||
+      (lastItem?.kind === 'notice' && lastItem.level === 'error');
+    const hasTurnOutput = view.items.some((item) => item.kind === 'assistant' || item.kind === 'turnDone');
+    this.options.onSessionObserve?.({
+      ...(view.session.id ? { sessionId: view.session.id } : {}),
+      title: view.session.title,
+      running: view.session.running,
+      sync: view.session.sync,
+      interactionIds: view.interactions.map((i) => i.id),
+      ...(turnAborted ? { turnAborted: true } : {}),
+      ...(hasTurnOutput ? { hasTurnOutput: true } : {}),
+      ...(view.session.goal ? { goalPhase: view.session.goal.phase, goalObjective: view.session.goal.objective } : {}),
+    });
   }
 
   private compute(): ControllerView {
@@ -1047,7 +1274,26 @@ export class AcpController implements ChatBackendController {
     const queue = sessionId ? (this.queues.get(sessionId) ?? []) : [];
     const items: Item[] = [
       ...(projection?.snapshotItems() ?? []),
-      ...queue.map((q): Item => ({ kind: 'user', id: `q:${q.id}`, text: q.text.replace(/\n*<ide_context[\s\S]*$/u, ''), pending: 'queued', queue: { itemId: q.id, target: 'next-turn' } })),
+      ...queue.map((q): Item => {
+        const parsed = splitContext(q.text);
+        return {
+          kind: 'user',
+          id: `q:${q.id}`,
+          text: parsed.text,
+          ...(parsed.attachments.length ? { attachments: parsed.attachments } : {}),
+          ...(q.images.length
+            ? {
+                images: q.images.map((img): ImageView => ({
+                  localId: img.localId,
+                  mediaType: img.mediaType,
+                  ...(img.name ? { name: img.name } : {}),
+                })),
+              }
+            : {}),
+          pending: 'queued',
+          queue: { itemId: q.id, target: 'next-turn' },
+        };
+      }),
     ];
     const usage = projection?.usage;
     const mode = this.modeOption(projection);
@@ -1078,16 +1324,20 @@ export class AcpController implements ChatBackendController {
         known.set(s.id, { id: s.id, title: s.title, updatedAt: s.updatedAt, ...state(s.id) });
       }
     }
-    const sessions = [...known.values()].filter((s) => s.id !== this.draftId).sort((a, b) => b.updatedAt - a.updatedAt);
+    const isHidden = this.options.isHiddenSession;
+    const sessions = [...known.values()]
+      .filter((s) => s.id !== this.draftId && !isHidden?.(s.id))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
     const interactions = [...this.permissions.values()].filter((p) => p.sessionId === sessionId).map((p) => this.interactionOf(p));
     const permissions: PermissionState = {
       options: (mode?.options ?? []).map((o) => o.value),
       ...(mode?.currentValue ? { current: mode.currentValue } : {}),
       labels: Object.fromEntries((mode?.options ?? []).map((o) => [o.value, { name: o.name ?? o.value, ...(o.description ? { description: o.description } : {}) }])),
     };
+    const agentCommands = projection?.commands.length ? projection.commands : this.cachedCommands;
     const commands: CommandView[] = [
       ...pluginCommands().map((c) => ({ ...c, source: 'plugin' as const })),
-      ...(projection?.commands ?? []).map((c) => ({
+      ...agentCommands.map((c) => ({
         name: c.name,
         description: c.description ?? '',
         ...(c.input?.hint ? { hint: c.input.hint } : {}),

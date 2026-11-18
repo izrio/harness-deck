@@ -1,17 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { HostToWebview } from '@harness-deck/shared';
-import { applyHostMessage, requestPrefill, useView } from './store.ts';
+import { applyHostMessage, closeMarkdownPreview, openSettingsPage, requestPrefill, useView } from './store.ts';
+import { applyColorScheme, applyThemeMode } from './theme.ts';
 import { postToHost } from './vscode.ts';
-import { BackendChooser } from './components/BackendChooser.tsx';
+import { Button } from './components/ui/Button.tsx';
+import { LoaderGrid } from './components/ui/LoaderGrid.tsx';
+import { Shimmer } from './components/ui/Shimmer.tsx';
 import { BackendLogo } from './components/BackendLogo.tsx';
 import { HarnessDeckLogo } from './components/HarnessDeckLogo.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Header } from './components/Header.tsx';
+import { MarkdownPreviewModal } from './components/MarkdownPreviewModal.tsx';
 import { RuntimeBanner } from './components/RuntimeBanner.tsx';
+import { SettingsPage } from './components/SettingsPage.tsx';
 import { TabBar } from './components/TabBar.tsx';
 import { Thread } from './components/Thread.tsx';
 import { Toasts } from './components/Toasts.tsx';
-import { BeakerIcon, BookIcon, BugIcon, ChevronDownIcon, DiffIcon, FolderIcon, GlobeIcon, KeyIcon, SpinnerIcon } from './components/icons.tsx';
+import { AgentsView } from './components/workbench/AgentsView.tsx';
+import { OverviewView } from './components/workbench/OverviewView.tsx';
+import { SchedulesView } from './components/workbench/SchedulesView.tsx';
+import { SessionsView } from './components/workbench/SessionsView.tsx';
+import { TasksView } from './components/workbench/TasksView.tsx';
+import { BeakerIcon, BookIcon, BugIcon, ChevronDownIcon, DiffIcon, FolderIcon, GlobeIcon, KeyIcon } from './components/icons.tsx';
 import type { MessageKey } from './i18n.ts';
 import { useT } from './i18n.ts';
 
@@ -25,45 +35,67 @@ export function App() {
 
   const runtime = useView((s) => s.runtime);
   const connection = useView((s) => s.connection);
+  const settingsOpen = useView((s) => s.settingsOpen);
+  const hasPreview = useView((s) => s.markdownPreview !== undefined);
+  const activeModule = useView((s) => s.activeModule);
   const empty = useView((s) => s.items.length === 0 && s.interactions.length === 0 && !s.session.running && !s.session.hasOlder);
   const failure = useView((s) => (s.session.sync === 'failed' ? s.session.failure : undefined));
-  // 打开已有会话、follow 还没拿到快照：显示加载中，而不是"新对话"的空状态
   const opening = useView((s) => s.session.id !== undefined && s.items.length === 0 && s.session.sync === 'opening');
   const t = useT();
   const appearance = useView((s) => s.appearance);
-  // 第一次使用：先选底层（选择卡片占满对话区；运行时横幅这时只会干扰）
-  const needsChoice = useView((s) => s.backends.needsChoice === true && s.backends.items.length > 1);
 
-  // 字号和字体通过 CSS 变量生效；不设置时样式表里跟随 VS Code（字号大 1px）
   useEffect(() => {
     const style = document.documentElement.style;
     const apply = (name: string, value: string | undefined) => (value ? style.setProperty(name, value) : style.removeProperty(name));
-    apply('--hd-font-size', appearance.fontSize ? `${appearance.fontSize}px` : undefined);
-    apply('--hd-font-family', appearance.fontFamily);
+
+    // 阅读与聊天：聊天回复、计划和 Markdown 文件预览共用，与主题和配色完全正交独立
+    apply('--prose-font-family', appearance.fontFamily);
+    apply('--prose-font-size', appearance.fontSize ? `${appearance.fontSize}px` : undefined);
+    apply('--prose-line-height', appearance.lineHeight ? String(appearance.lineHeight) : undefined);
+    apply('--prose-paragraph-spacing', appearance.paragraphSpacing !== undefined ? `${appearance.paragraphSpacing}px` : undefined);
+    apply('--content-width', appearance.contentWidth ? `${appearance.contentWidth}px` : undefined);
+
+    // 终端与代码
     apply('--hd-code-font-family', appearance.codeFontFamily);
-    // 配色：默认柔和，「跟随主题」时直接用主题前景色（见 styles/01-base.css 的文字层级变量）
-    document.documentElement.dataset.palette = appearance.palette ?? 'soft';
+    apply('--terminal-font-size', appearance.terminalFontSize ? `${appearance.terminalFontSize}px` : undefined);
+    apply('--terminal-line-height', appearance.terminalLineHeight ? String(appearance.terminalLineHeight) : undefined);
+
+    // 主题模式与 5 套整套界面配色
+    applyColorScheme(appearance.colorScheme ?? 'slate');
+    applyThemeMode(appearance.theme ?? 'system');
   }, [appearance]);
+
+  useEffect(() => {
+    if (settingsOpen && hasPreview) closeMarkdownPreview();
+  }, [settingsOpen, hasPreview]);
+
+  const overlayOpen = settingsOpen || hasPreview;
+  const hideChat = overlayOpen || activeModule !== 'sessions';
 
   return (
     <div className="app">
       <Header />
-      <TabBar />
-      {needsChoice ? null : <RuntimeBanner status={runtime} connection={connection} />}
-      {failure ? <div className="banner banner--warn banner--inline">{t('session.failed', failure)}</div> : null}
-      {needsChoice ? (
-        <div className="empty empty--chooser">
-          <BackendChooser welcome />
-        </div>
-      ) : opening ? (
-        <SessionLoading />
-      ) : empty ? (
-        <EmptyState />
-      ) : (
-        <Thread />
-      )}
-      <Toasts />
-      <Composer />
+      {settingsOpen ? <SettingsPage /> : hasPreview ? <MarkdownPreviewModal /> : null}
+      {!overlayOpen && activeModule === 'overview' ? <OverviewView /> : null}
+      {!overlayOpen && activeModule === 'schedules' ? <SchedulesView /> : null}
+      {!overlayOpen && activeModule === 'agents' ? <AgentsView /> : null}
+      {!overlayOpen && activeModule === 'tasks' ? <TasksView /> : null}
+      <SessionsView hidden={hideChat}>
+        <TabBar />
+        <RuntimeBanner status={runtime} connection={connection} />
+        {failure ? (
+          <div className="content-column mt-2">
+            <div className="banner flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12.5px] text-ink-2 shadow-card">
+              <span className="size-2 shrink-0 rounded-full bg-orange" />
+              <span>{t('session.failed', failure)}</span>
+            </div>
+          </div>
+        ) : null}
+        {opening ? <SessionLoading /> : empty ? <EmptyState /> : <Thread />}
+        {!hideChat ? <Toasts /> : null}
+        <Composer />
+      </SessionsView>
+      {hideChat ? <Toasts /> : null}
     </div>
   );
 }
@@ -73,21 +105,24 @@ function EmptyState() {
   const needsApiKey = useView((s) => s.models.needsApiKey === true && s.connection === 'connected');
   if (needsApiKey) {
     return (
-      <div className="empty" data-testid="api-key-setup">
-        <div className="home__logo home__logo--key" aria-hidden="true">
-          <KeyIcon />
+      <div className="empty flex min-h-0 flex-1 flex-col items-center justify-center px-5 py-6 text-center" data-testid="api-key-setup">
+        <div
+          className="mb-3 flex size-12 items-center justify-center rounded-window bg-surface text-ink shadow-raised"
+          aria-hidden="true"
+        >
+          <KeyIcon className="size-5" />
         </div>
-        <p className="empty__title">{t('apiKey.title')}</p>
-        <p className="empty__hint">{t('apiKey.hint')}</p>
-        <div className="empty__actions">
-          <button type="button" className="button" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
-            <KeyIcon />
+        <p className="mt-0 mb-1.5 text-[16px] font-semibold tracking-tight text-ink">{t('apiKey.title')}</p>
+        <p className="mx-auto my-0 max-w-72 text-[13px] leading-relaxed text-ink-2">{t('apiKey.hint')}</p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <Button variant="primary" size="md" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
+            <KeyIcon className="size-3.5" />
             {t('apiKey.configure')}
-          </button>
-          <button type="button" className="button button--secondary" onClick={() => postToHost({ type: 'openExternal', payload: { url: 'https://platform.deepseek.com/api_keys' } })}>
-            <GlobeIcon />
+          </Button>
+          <Button variant="secondary" size="md" onClick={() => postToHost({ type: 'openExternal', payload: { url: 'https://platform.deepseek.com/api_keys' } })}>
+            <GlobeIcon className="size-3.5" />
             {t('apiKey.get')}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -95,68 +130,75 @@ function EmptyState() {
   return <Home />;
 }
 
-/** 首页：标识、当前底层和工作区、示例任务、输入提示。点底层标签打开选择卡片。 */
+/** 首页（Beautiful UI Recommendation / Context 卡片网格 + 胶囊上下文芯片）。 */
 function Home() {
   const t = useT();
-  const [choosing, setChoosing] = useState(false);
   const backends = useView((s) => s.backends);
   const folder = backends.workspace;
   const current = backends.items.find((b) => b.id === backends.active);
-  if (choosing) {
-    return (
-      <div className="empty empty--chooser">
-        <BackendChooser welcome={false} onClose={() => setChoosing(false)} />
-      </div>
-    );
-  }
   return (
-    <div className="empty home">
-      <div className="home__hero">
-        <div className="home__logo" aria-hidden="true">
+    <div className="empty flex min-h-0 flex-1 flex-col justify-center overflow-y-auto px-5 py-6 text-center">
+      <div className="flex flex-col items-center">
+        <div className="mb-3" aria-hidden="true">
           <HarnessDeckLogo />
         </div>
-        <p className="empty__title">{t('empty.title')}</p>
-        <p className="empty__hint">{t('empty.hint')}</p>
-        <div className="home__context">
+        <p className="mt-0 mb-1.5 text-[17px] font-semibold tracking-tight text-ink">{t('empty.title')}</p>
+        <p className="mx-auto my-0 max-w-76 text-[13px] leading-relaxed text-ink-2">{t('empty.hint')}</p>
+        <div className="mt-3.5 flex flex-wrap justify-center gap-1.5">
           {current && backends.items.length > 1 ? (
-            <button type="button" className="home__chip home__chip--backend" data-testid="home-backend" title={t('home.switchBackend')} onClick={() => setChoosing(true)}>
+            <button
+              type="button"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-chip bg-surface px-2.5 py-1 text-[12px] font-medium text-ink shadow-card transition-colors duration-150 hover:bg-hover"
+              data-testid="home-backend"
+              title={t('home.switchBackend')}
+              onClick={() => openSettingsPage('agents')}
+            >
               <BackendLogo backend={current} size="sm" />
-              {current.name}
-              {current.available === false ? <span className="status-dot status-dot--missing" title={t('backend.missing')} /> : null}
-              <ChevronDownIcon />
+              <span>{current.name}</span>
+              {current.available === false ? <span className="size-1.5 rounded-full bg-orange" title={t('backend.missing')} /> : null}
+              <ChevronDownIcon className="size-3 text-ink-3" />
             </button>
           ) : null}
           {folder ? (
-            <span className="home__chip" title={folder}>
-              <FolderIcon />
-              {folder}
+            <span className="inline-flex max-w-full items-center gap-1.5 rounded-chip bg-field px-2.5 py-1 text-[12px] text-ink-2 shadow-hairline" title={folder}>
+              <FolderIcon className="size-3.5 shrink-0 text-ink-3" />
+              <span className="truncate">{folder}</span>
             </span>
           ) : null}
         </div>
       </div>
-      <div className="suggestions" data-testid="suggestions">
+
+      <div className="suggestions mx-auto mt-5 grid w-full max-w-[420px] grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2" data-testid="suggestions">
         {SUGGESTIONS.map(({ key, icon }) => (
-          <button key={key} type="button" className="suggestion" onClick={() => requestPrefill(t(`empty.suggest.${key}Prompt` as MessageKey))}>
-            <span className={`suggestion__icon suggestion__icon--${key}`}>{icon}</span>
-            <span className="suggestion__text">
-              <span className="suggestion__title">{t(`empty.suggest.${key}` as MessageKey)}</span>
-              <span className="suggestion__desc">{t(`empty.suggest.${key}Desc` as MessageKey)}</span>
+          <button
+            key={key}
+            type="button"
+            className="suggestion flex items-start gap-2.5 rounded-card bg-surface p-3 text-left text-ink shadow-card transition-[transform,background-color,box-shadow] duration-150 hover:-translate-y-px hover:bg-inset hover:shadow-raised active:translate-y-0"
+            onClick={() => requestPrefill(t(`empty.suggest.${key}Prompt` as MessageKey))}
+          >
+            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-control bg-field text-ink-2">
+              {icon}
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[12.5px] leading-snug font-medium text-ink">{t(`empty.suggest.${key}` as MessageKey)}</span>
+              <span className="text-[11.5px] leading-snug text-ink-3">{t(`empty.suggest.${key}Desc` as MessageKey)}</span>
             </span>
           </button>
         ))}
       </div>
-      <div className="home__tips" aria-hidden="true">
-        <span>
-          <kbd>@</kbd>
+
+      <div className="mt-5 flex flex-wrap justify-center gap-x-3.5 gap-y-1.5 text-[11.5px] text-ink-3" aria-hidden="true">
+        <span className="inline-flex items-center gap-1">
+          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">@</kbd>
           {t('home.tips.mention')}
         </span>
-        <span>
-          <kbd>/</kbd>
+        <span className="inline-flex items-center gap-1">
+          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">/</kbd>
           {t('home.tips.command')}
         </span>
-        <span>
-          <kbd>⇧</kbd>
-          <kbd>↵</kbd>
+        <span className="inline-flex items-center gap-1">
+          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">⇧</kbd>
+          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">↵</kbd>
           {t('home.tips.newline')}
         </span>
       </div>
@@ -164,28 +206,26 @@ function Home() {
   );
 }
 
-/** 空状态的示例任务：点击后放进输入框，可以修改后发送。 */
 const SUGGESTIONS = [
-  { key: 'project', icon: <BookIcon /> },
-  { key: 'bugs', icon: <BugIcon /> },
-  { key: 'tests', icon: <BeakerIcon /> },
-  { key: 'commit', icon: <DiffIcon /> },
+  { key: 'project', icon: <BookIcon className="size-3.5" /> },
+  { key: 'bugs', icon: <BugIcon className="size-3.5" /> },
+  { key: 'tests', icon: <BeakerIcon className="size-3.5" /> },
+  { key: 'commit', icon: <DiffIcon className="size-3.5" /> },
 ] as const;
 
-/** 打开会话时的骨架屏。 */
 function SessionLoading() {
   const t = useT();
   return (
-    <div className="session-loading" role="status" aria-label={t('thread.opening')} data-testid="session-loading">
-      <div className="session-loading__label">
-        <SpinnerIcon />
-        <span>{t('thread.opening')}</span>
+    <div className="content-column flex flex-1 flex-col gap-3 py-4" role="status" aria-label={t('thread.opening')} data-testid="session-loading">
+      <div className="flex items-center gap-2 text-[12.5px]">
+        <LoaderGrid />
+        <Shimmer>{t('thread.opening')}</Shimmer>
       </div>
-      <div className="skeleton skeleton--bubble" />
-      <div className="skeleton skeleton--line" />
-      <div className="skeleton skeleton--line skeleton--short" />
-      <div className="skeleton skeleton--bubble" />
-      <div className="skeleton skeleton--line" />
+      <div className="skeleton h-8 w-[55%] self-end rounded-window" />
+      <div className="skeleton h-3 w-[90%]" />
+      <div className="skeleton h-3 w-[60%]" />
+      <div className="skeleton h-8 w-[45%] self-end rounded-window" />
+      <div className="skeleton h-3 w-[82%]" />
     </div>
   );
 }

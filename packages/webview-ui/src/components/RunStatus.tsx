@@ -1,11 +1,13 @@
 /**
- * 运行状态：dsh 处理这一轮时显示在对话流末尾——在做什么（思考 / 回复 / 执行工具 / 等你确认）和已经用了多久，每秒刷新。
- * 一轮结束后由 `turnDone` 条目显示总用时。
+ * 运行状态（Beautiful UI LoadingState 像素波纹 + Shimmer + 等宽计时器）。
  */
 import { useEffect, useState } from 'react';
 import type { Item } from '@harness-deck/shared';
 import { useView } from '../store.ts';
-import { CheckIcon, SpinnerIcon } from './icons.tsx';
+import { cn } from '../lib/utils.ts';
+import { LoaderGrid } from './ui/LoaderGrid.tsx';
+import { Shimmer } from './ui/Shimmer.tsx';
+import { CheckIcon } from './icons.tsx';
 import { useT, type Translate } from '../i18n.ts';
 
 /** 「12 秒」「1 分 23 秒」「1 小时 2 分」。 */
@@ -39,7 +41,6 @@ export function RunStatus() {
   const waiting = useView((s) => s.interactions.length > 0);
   const t = useT();
   const [now, setNow] = useState(() => Date.now());
-  /** dsh 没给开始时间（例如还没收到 turn/start）时，从这里看到运行开始计时。 */
   const [seenAt, setSeenAt] = useState<number | undefined>();
 
   useEffect(() => {
@@ -55,11 +56,29 @@ export function RunStatus() {
 
   if (!running) return null;
   const start = since ?? seenAt ?? now;
+  const label = activityOf(items, waiting, t);
   return (
-    <div className={`run-status ${waiting ? 'run-status--waiting' : ''}`} role="status" aria-label={t('thread.busy')} data-testid="run-status">
-      <span className="run-status__icon">{waiting ? <span className="dot dot--attention" /> : <SpinnerIcon />}</span>
-      <span className="run-status__label shimmer">{activityOf(items, waiting, t)}</span>
-      <span className="run-status__time">{formatDuration(now - start, t)}</span>
+    <div
+      className={cn(
+        'run-status flex w-fit max-w-full items-center gap-2.5 self-start rounded-full px-3 py-1.5 text-[12.5px]',
+        waiting
+          ? 'run-status--waiting bg-orange-tint text-orange shadow-[0_0_0_1px_color-mix(in_srgb,var(--orange)_34%,transparent)]'
+          : 'bg-surface text-ink shadow-card',
+      )}
+      role="status"
+      aria-label={t('thread.busy')}
+      data-testid="run-status"
+      style={{ animation: 'fade-up 220ms cubic-bezier(0.23,1,0.32,1) both' }}
+    >
+      <span className="run-status__icon inline-flex shrink-0">
+        {waiting ? <span className="dot dot--attention inline-block size-2 rounded-full bg-orange" /> : <LoaderGrid />}
+      </span>
+      <span className="run-status__label min-w-0 truncate font-medium">
+        {waiting ? label : <Shimmer>{label}</Shimmer>}
+      </span>
+      <span className="run-status__time shrink-0 font-mono text-[11.5px] text-ink-3 tabular-nums">
+        {formatDuration(now - start, t)}
+      </span>
     </div>
   );
 }
@@ -68,8 +87,12 @@ export function RunStatus() {
 export function TurnDone({ item }: { item: Extract<Item, { kind: 'turnDone' }> }) {
   const t = useT();
   return (
-    <div className="turn-done" data-testid="turn-done">
-      {item.completed ? <CheckIcon /> : null}
+    <div className="turn-done -mt-1 flex items-center gap-1.5 text-[12px] text-ink-3" data-testid="turn-done">
+      {item.completed ? (
+        <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-green-tint text-green">
+          <CheckIcon className="size-2.5" strokeWidth={2.5} />
+        </span>
+      ) : null}
       <span>{item.completed ? t('run.done', formatDuration(item.durationMs, t)) : t('run.took', formatDuration(item.durationMs, t))}</span>
     </div>
   );
