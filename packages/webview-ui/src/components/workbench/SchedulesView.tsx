@@ -24,9 +24,13 @@ import {
   TrashIcon,
 } from '../icons.tsx';
 import { Markdown } from '../Markdown.tsx';
-import { Button } from '../ui/Button.tsx';
-import { Input, Select, Textarea } from '../ui/FormControls.tsx';
-import { ValuePill } from '../ui/ValuePill.tsx';
+import { ValuePill } from '../beautifului/index.ts';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 
 interface ScheduleTemplate {
   readonly id: string;
@@ -231,7 +235,7 @@ export function SchedulesView() {
             <h2 className="m-0 text-[15px] font-semibold tracking-tight text-ink">{t('wb.schedules.title')}</h2>
             <p className="mt-0.5 mb-0 text-[12px] text-ink-3">{t('wb.schedules.subtitle')}</p>
           </div>
-          <Button variant="primary" size="sm" data-testid="schedule-new-btn" onClick={() => openCreateForm()}>
+          <Button type="button" size="sm" data-testid="schedule-new-btn" onClick={() => openCreateForm()}>
             <PlusIcon className="size-3.5" />
             <span>{t('wb.schedules.new')}</span>
           </Button>
@@ -243,45 +247,36 @@ export function SchedulesView() {
             <span>{t('wb.schedules.permissionBadge', permLabel)}</span>
           </div>
           <Button
-            variant="quiet"
+            type="button"
+            variant="ghost"
             size="xs"
             data-testid="schedule-open-settings"
-            onClick={() => openSettingsPage('agents')}
+            onClick={() => openSettingsPage('other')}
           >
             <SettingsIcon className="size-3" />
             <span>{t('wb.schedules.changeInSettings')}</span>
           </Button>
         </div>
 
-        {/* 二级切换：我的 / 模板 */}
-        <div className="flex items-center gap-1 self-start rounded-control bg-field p-1 shadow-hairline" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={subTab === 'mine'}
-            data-testid="schedules-subtab-mine"
-            className={cn(
-              'rounded-[6px] px-3 py-1 text-[12.5px] font-medium transition-colors duration-100',
-              subTab === 'mine' ? 'bg-surface text-ink shadow-card' : 'text-ink-3 hover:text-ink-2',
-            )}
-            onClick={() => setSubTab('mine')}
-          >
-            {t('wb.schedules.tabMine')} ({schedules.length})
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={subTab === 'templates'}
-            data-testid="schedules-subtab-templates"
-            className={cn(
-              'rounded-[6px] px-3 py-1 text-[12.5px] font-medium transition-colors duration-100',
-              subTab === 'templates' ? 'bg-surface text-ink shadow-card' : 'text-ink-3 hover:text-ink-2',
-            )}
-            onClick={() => setSubTab('templates')}
-          >
-            {t('wb.schedules.tabTemplates')} ({TEMPLATES.length})
-          </button>
-        </div>
+        {/* 二级切换：我的 / 模板（shadcn/ui Tabs） */}
+        <Tabs value={subTab} onValueChange={(v) => setSubTab(v as 'mine' | 'templates')}>
+          <TabsList>
+            <TabsTrigger
+              value="mine"
+              data-testid="schedules-subtab-mine"
+              onClick={() => setSubTab('mine')}
+            >
+              {t('wb.schedules.tabMine')} ({schedules.length})
+            </TabsTrigger>
+            <TabsTrigger
+              value="templates"
+              data-testid="schedules-subtab-templates"
+              onClick={() => setSubTab('templates')}
+            >
+              {t('wb.schedules.tabTemplates')} ({TEMPLATES.length})
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {/* 新建 / 编辑表单 */}
         {formOpen ? (
@@ -316,17 +311,18 @@ export function SchedulesView() {
               {/* 什么时候 */}
               <div className="flex flex-col gap-2">
                 <span className="text-[12px] font-medium text-ink-2">{t('wb.schedules.fieldWhen')}</span>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <Select
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 [&_[data-slot=native-select-wrapper]]:w-full">
+                  <NativeSelect
+                    size="sm"
                     data-testid="schedule-select-freq"
                     value={freqKind}
                     onChange={(e) => setFreqKind(e.target.value as ScheduleFrequency['kind'])}
                   >
-                    <option value="daily">{t('wb.schedules.freqDaily')}</option>
-                    <option value="weekly">{t('wb.schedules.freqWeekly')}</option>
-                    <option value="interval">{t('wb.schedules.freqInterval')}</option>
-                    <option value="once">{t('wb.schedules.freqOnce')}</option>
-                  </Select>
+                    <NativeSelectOption value="daily">{t('wb.schedules.freqDaily')}</NativeSelectOption>
+                    <NativeSelectOption value="weekly">{t('wb.schedules.freqWeekly')}</NativeSelectOption>
+                    <NativeSelectOption value="interval">{t('wb.schedules.freqInterval')}</NativeSelectOption>
+                    <NativeSelectOption value="once">{t('wb.schedules.freqOnce')}</NativeSelectOption>
+                  </NativeSelect>
 
                   {freqKind === 'daily' || freqKind === 'weekly' ? (
                     <Input
@@ -360,66 +356,64 @@ export function SchedulesView() {
                 {freqKind === 'weekly' ? (
                   <div className="flex flex-wrap gap-1.5 pt-0.5">
                     {[1, 2, 3, 4, 5, 6, 7].map((d) => (
-                      <button
+                      <Button
                         key={d}
                         type="button"
+                        variant={weekDays.includes(d) ? 'default' : 'outline'}
+                        size="xs"
                         aria-pressed={weekDays.includes(d)}
-                        className={cn(
-                          'flex h-7 min-w-7 items-center justify-center rounded-control px-2 text-[12px] font-medium transition-colors duration-100',
-                          weekDays.includes(d)
-                            ? 'bg-accent text-white'
-                            : 'bg-field text-ink-2 shadow-hairline hover:bg-hover',
-                        )}
                         onClick={() => toggleWeekDay(d)}
                       >
                         {t(`wb.schedules.day${d}` as MessageKey)}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 ) : null}
               </div>
 
               {/* 使用什么 harness 执行 + 项目 */}
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 [&_[data-slot=native-select-wrapper]]:w-full">
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.schedules.fieldHarness')}</span>
-                  <Select
+                  <NativeSelect
+                    size="sm"
                     data-testid="schedule-select-harness"
                     value={backendId}
                     onChange={(e) => setBackendId(e.target.value)}
                   >
                     {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
-                      <option key={b.id} value={b.id}>
+                      <NativeSelectOption key={b.id} value={b.id}>
                         {b.name}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </Select>
+                  </NativeSelect>
                 </label>
 
                 {projectOptions.length > 0 ? (
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('wb.schedules.fieldProject')}</span>
-                    <Select
+                    <NativeSelect
+                      size="sm"
                       data-testid="schedule-select-project"
                       value={projectPath}
                       onChange={(e) => setProjectPath(e.target.value)}
                     >
                       {projectOptions.map(([path, label]) => (
-                        <option key={path} value={path}>
+                        <NativeSelectOption key={path} value={path}>
                           {label} ({path})
-                        </option>
+                        </NativeSelectOption>
                       ))}
-                    </Select>
+                    </NativeSelect>
                   </label>
                 ) : null}
               </div>
 
               <div className="flex justify-end gap-2 border-t border-line pt-2.5">
-                <Button variant="secondary" size="sm" onClick={() => setFormOpen(false)}>
+                <Button type="button" variant="outline" size="sm" onClick={() => setFormOpen(false)}>
                   {t('common.cancel')}
                 </Button>
                 <Button
-                  variant="primary"
+                  type="button"
                   size="sm"
                   data-testid="schedule-submit-btn"
                   disabled={!name.trim() || !prompt.trim()}
@@ -469,14 +463,12 @@ export function SchedulesView() {
                           <p className="mt-1 mb-0 line-clamp-2 text-[12px] text-ink-2">{rule.prompt}</p>
                         </div>
 
-                        <input
-                          type="checkbox"
-                          role="switch"
+                        <Switch
                           aria-label={rule.name}
-                          className="bui-switch shrink-0"
+                          className="shrink-0"
                           checked={rule.enabled}
-                          onChange={(e) =>
-                            postToHost({ type: 'toggleSchedule', payload: { id: rule.id, enabled: e.target.checked } })
+                          onCheckedChange={(enabled) =>
+                            postToHost({ type: 'toggleSchedule', payload: { id: rule.id, enabled } })
                           }
                         />
                       </div>
@@ -494,7 +486,8 @@ export function SchedulesView() {
 
                         <div className="flex items-center gap-1.5">
                           <Button
-                            variant="secondary"
+                            type="button"
+                            variant="outline"
                             size="xs"
                             data-testid={`schedule-history-toggle-${rule.id}`}
                             onClick={() => setExpandedRuleId(historyOpen ? undefined : rule.id)}
@@ -510,7 +503,8 @@ export function SchedulesView() {
                             ) : null}
                           </Button>
                           <Button
-                            variant="secondary"
+                            type="button"
+                            variant="outline"
                             size="xs"
                             data-testid={`schedule-run-now-${rule.id}`}
                             disabled={rule.lastStatus === 'running'}
@@ -527,16 +521,18 @@ export function SchedulesView() {
                             <span>{t('wb.schedules.runNow')}</span>
                           </Button>
                           <Button
-                            variant="quiet"
-                            size="xs"
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
                             aria-label={t('common.edit')}
                             onClick={() => openEditForm(rule)}
                           >
                             <PencilIcon className="size-3.5" />
                           </Button>
                           <Button
-                            variant="quiet"
-                            size="xs"
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
                             aria-label={t('common.delete')}
                             onClick={() => postToHost({ type: 'deleteSchedule', payload: { id: rule.id } })}
                           >
@@ -646,7 +642,8 @@ export function SchedulesView() {
                 </div>
                 <div className="flex justify-end">
                   <Button
-                    variant="secondary"
+                    type="button"
+                    variant="outline"
                     size="xs"
                     data-testid={`use-template-${tpl.id}`}
                     onClick={() =>

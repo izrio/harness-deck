@@ -127,8 +127,8 @@ let currentThemeMode: ThemeMode = 'system';
 export function detectDarkTheme(): boolean {
   if (typeof document !== 'undefined') {
     const cls = document.body.classList;
-    if (cls.contains('vscode-dark') || cls.contains('vscode-high-contrast')) return true;
-    if (cls.contains('vscode-light') || cls.contains('vscode-high-contrast-light')) return false;
+    if (cls.contains('vscode-dark') || cls.contains('vscode-high-contrast') || cls.contains('ide-dark')) return true;
+    if (cls.contains('vscode-light') || cls.contains('vscode-high-contrast-light') || cls.contains('ide-light')) return false;
   }
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
     ? window.matchMedia('(prefers-color-scheme: dark)').matches

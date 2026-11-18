@@ -528,8 +528,9 @@ CRLF 文件先统一成 LF 计算，结果再转回 CRLF。增删行数用 jsdif
 
 ### 5.5 Webview UI
 
-- **技术栈**：React 18 + TypeScript + Vite；状态用 `useSyncExternalStore` 自己管（Host 推送，Webview 只做按 id 的增量合并，不需要状态库）；Markdown 用 `react-markdown` + `remark-gfm`；代码高亮用 `shiki`（按需加载语言）
-- **样式**：只用 VS Code 主题 CSS 变量，自动适配亮色、暗色和高对比度主题；遵循 [3.1](#31-界面设计原则) 的原则
+- **技术栈**：React 19 + TypeScript + Vite + Tailwind CSS v4；状态用 `useSyncExternalStore` 自己管（Host 推送，Webview 只做按 id 的增量合并，不需要状态库）；Markdown 用 `react-markdown` + `remark-gfm`；代码高亮用 `shiki`（按需加载语言）
+- **组件库规范（仅限 `shadcn-ui` 与 `beautifului`，禁止新造组件）**：通用基础交互控件统一使用 `shadcn-ui`（`src/components/ui/`，通过 `shadcn` CLI 管理）；AI 对话专属组件使用 `beautifului`（`src/components/beautifului/` 及对话复合组件），严禁手写自造基础 UI 组件
+- **样式**：基于 `beautifului-foundation.css` 的浅/深主题与 5 套配色令牌（同时桥接 `shadcn-ui` 语义变量），遵循 [3.1](#31-界面设计原则) 的原则
 - **主要组件**：
   - `Header`：会话标题（下拉切换会话、搜索）、新建、更多菜单
   - `Thread`：条目列表，屏幕外的条目用 `content-visibility: auto` 跳过布局和绘制（没有做虚拟列表），顶部有「加载更早的消息」
@@ -732,7 +733,8 @@ dsh 负责沙箱、审批和文件/命令边界，插件负责下面这些：
 | `harnessDeck.ui.language` | `auto` / `zh` / `en`，默认 `auto` | 界面语言；`auto` 跟随 VS Code 的显示语言 |
 | `harnessDeck.ui.fontSize` | number / `0` | 对话面板字号（px）；`0` 跟随 VS Code，比工作台字号大 1px |
 | `harnessDeck.ui.fontFamily` / `harnessDeck.ui.codeFontFamily` | string / `""` | 对话面板字体 / 代码与路径的字体；为空时跟随 VS Code。通过 `appearance` 消息下发，Webview 设置成 CSS 变量（`--hd-*`） |
-| `harnessDeck.ui.palette` | `soft` / `theme`，默认 `soft` | 配色：柔和的文字颜色，或直接用主题前景色 |
+| `harnessDeck.ui.theme` | `system` / `light` / `dark`，默认 `system` | 界面主题模式 |
+| `harnessDeck.ui.colorScheme` | `slate` / `warm` / `forest` / `violet` / `rose`，默认 `slate` | 整套界面配色方案，随主题自动切换浅色与深色 |
 | `harnessDeck.ui.showTurnChanges` | boolean / `false` | 每轮结束时在对话流里显示改动汇总卡片（dsh） |
 
 ### 8.2 命令
@@ -821,7 +823,7 @@ dsh-vscode-copilot/
 | 包管理 | pnpm workspace | 多包共享类型 |
 | 插件打包 | esbuild（CJS，`vscode` 设为 external） | 快，产物单文件 |
 | Webview 构建 | Vite | 开发时热更新，生产构建体积小 |
-| UI | React 18，状态用 `useSyncExternalStore` | 状态由 Host 推送，Webview 只做按 id 的增量合并，不需要状态库 |
+| UI | React 19 + Tailwind CSS v4 + `shadcn-ui`（通用基础控件）+ `beautifului`（AI 对话专属组件），状态用 `useSyncExternalStore` | 只用这两个组件库、禁止自造基础组件；状态由 Host 推送，Webview 只做按 id 的增量合并 |
 | Markdown / 高亮 | react-markdown + remark-gfm + shiki（JS 正则引擎，语言包按需加载，输出 token 由 React 渲染） | 与 VS Code 高亮效果一致；不用 innerHTML，不受 CSP 的内联样式限制 |
 | dsh 协议 | 自写精简客户端 + `ws` | 见 [D5](#d5-自写精简-remote-客户端兼容一个版本范围) |
 | 数据校验 | zod | dsh 入站数据和 Bridge 消息都校验 |
@@ -1045,6 +1047,11 @@ Claude 通过 Claude Code 的官方 ACP 适配器 `claude-agent-acp`（`@agentcl
 - 没有登录方式（`authMethods` 为空），没登录时 `session/prompt` 才返回 -32000。底层配置的 `signInHint` 用来在对话里说明怎么登录（`claude` → `/login`，或 `ANTHROPIC_API_KEY`）；有登录方式的代理则登录后重发这一轮。
 - 默认模式是 Auto（由 Claude 判断要不要问）；`echo`、`ls` 这类只读命令在 Manual 模式下也不问。
 - 端到端测试用 `ANTHROPIC_BASE_URL` 指向本地假模型，并且不把运行环境自己的 `ANTHROPIC_*` / `CLAUDE_*` 变量传给代理。
+
+### 15.0b OpenCode 与 ZCode
+
+- **OpenCode**（`opencode acp`，npm 包 `opencode-ai`）：通过原生内置的 ACP 子命令接入。`acp/projection.ts` 与 `AcpController.ts` 兼容其驼峰文件参数 `filePath`、`patch` 修改工具、`todowrite` 待办工具，以及 `session/new` / `session/load` 返回的 `models` / `modes` 字段（通过 `session/set_model`、`session/set_mode` 切换）。
+- **ZCode**（`zcode app-server --stdio`，源码位于 `src/zcode/`）：直接对接智谱 ZCode 官方无头 NDJSON 协议（信封不含 `jsonrpc` 字段）。自动探测 `harnessDeck.zcode.path`、`PATH` 中的 `zcode`（含 `zcode-app-cli`）或 ZCode 桌面端内置的 `resources/glm/zcode.cjs`；支持 `session/requestRuntimePreferences` 握手、`interaction/requestPermission` 审批、`interaction/requestUserInput` 提问卡片与计划审阅、`session/steer` 运行中插队，以及 `-32004` 空闲逐出自动 `session/resume` 恢复。
 
 ### 15.1 CodeBuddy 的差异
 

@@ -34,7 +34,7 @@ export function parseArguments(raw: unknown): Record<string, unknown> {
 }
 
 /** 表示目标文件的参数名（各家工具叫法不同）。 */
-export const FILE_KEYS = ['file_path', 'notebook_path', 'file', 'filename', 'target_file', 'filepath'] as const;
+export const FILE_KEYS = ['file_path', 'filePath', 'notebook_path', 'file', 'filename', 'target_file', 'filepath'] as const;
 
 /** 字符串数组参数；元素也可以是带 path 的对象。 */
 export function stringList(args: Readonly<Record<string, unknown>>, ...keys: string[]): string[] {

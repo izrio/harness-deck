@@ -5,7 +5,8 @@ import type { NotificationPreferences } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
 import { setPreferencesLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { Button } from '../ui/Button.tsx';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { BellIcon } from '../icons.tsx';
 
 const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
@@ -37,7 +38,8 @@ export function NotificationSettings() {
             <p className="mt-0.5 mb-0 text-[11.5px] text-ink-3">{t('settings.notifications.desc')}</p>
           </div>
           <Button
-            variant="secondary"
+            type="button"
+            variant="outline"
             size="xs"
             data-testid="notif-test-btn"
             onClick={() => postToHost({ type: 'testNotification', payload: {} })}
@@ -128,20 +130,18 @@ function SwitchRow({
   readonly onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-3 aria-disabled:cursor-default aria-disabled:opacity-50" aria-disabled={disabled}>
+    <div className="flex items-center justify-between gap-3 aria-disabled:opacity-50" aria-disabled={disabled}>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
         <span className="text-ink">{label}</span>
         <span className="text-[11.5px] text-ink-3">{hint}</span>
       </span>
-      <input
-        type="checkbox"
-        role="switch"
-        className="bui-switch"
+      <Switch
         data-testid={testId}
+        aria-label={label}
         checked={checked}
         disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
+        onCheckedChange={onChange}
       />
-    </label>
+    </div>
   );
 }

@@ -3,7 +3,7 @@
  * 上面是上下文标签和图片缩略图、中间是多行输入、下面是工具条（模型、权限、上下文用量、发送/停止）。
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import type { PromptImage } from '@harness-deck/shared';
+import type { CommandView, PromptImage } from '@harness-deck/shared';
 import { IMAGE_MEDIA_TYPES, MAX_IMAGES, type ImageMediaType } from '@harness-deck/shared/limits';
 import { registerLocalImage, showToast, useView } from '../store.ts';
 import { ImageThumb } from './Images.tsx';
@@ -13,12 +13,12 @@ import { cn } from '../lib/utils.ts';
 import { Completion, type CompletionItem } from './Completion.tsx';
 import { ContextChips } from './ContextChips.tsx';
 import { ContextRing } from './ContextRing.tsx';
-import { AgentIcon, ArrowUpIcon, CloseIcon, FileIcon, ImageIcon, PlanIcon, PlusIcon, StopIcon } from './icons.tsx';
+import { AgentIcon, ArrowUpIcon, CloseIcon, FileIcon, PlanIcon, PlusIcon, StopIcon } from './icons.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { PermissionPicker } from './PermissionPicker.tsx';
-import { MenuItem, Popover } from './Popover.tsx';
 import { StatusDock } from './StatusDock.tsx';
-import { GlideMenu } from './ui/GlideMenu.tsx';
+import { GlideMenu, MenuItem } from './beautifului/index.ts';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useT } from '../i18n.ts';
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
@@ -53,7 +53,7 @@ export function matchCommands<T extends { readonly name: string }>(commands: rea
   const starts: T[] = [];
   const contains: T[] = [];
   for (const command of commands) {
-    const at = command.name.toLowerCase().indexOf(q);
+    const at = command.name.replace(/^\/+/u, '').toLowerCase().indexOf(q);
     if (at === 0) starts.push(command);
     else if (at > 0) contains.push(command);
   }
@@ -76,10 +76,21 @@ export function Composer() {
   const connected = useView((s) => s.connection === 'connected');
   const focusRequests = useView((s) => s.focusRequests);
   const prefill = useView((s) => s.prefill);
+  const pendingImages = useView((s) => s.pendingImages);
   const context = useView((s) => s.context);
-  const commands = useView((s) => s.commands);
+  const backendCommands = useView((s) => s.commands);
+  const chatCommands = useView((s) => s.preferences.chatCommands);
   const candidates = useView((s) => s.fileCandidates);
   const t = useT();
+  const commands = useMemo<readonly CommandView[]>(() => {
+    const custom: CommandView[] = (chatCommands ?? []).map((c) => ({
+      name: c.name,
+      description: c.description?.trim() || c.prompt.replace(/\s+/gu, ' ').trim(),
+      source: 'custom',
+      prompt: c.prompt,
+    }));
+    return [...backendCommands, ...custom];
+  }, [backendCommands, chatCommands]);
   const tabKey = useView((s) => s.tabs.active);
   const [images, setImages] = useState<PromptImage[]>([]);
   const imageStash = useRef(new Map<string, PromptImage[]>());
@@ -177,6 +188,18 @@ export function Composer() {
     });
   }, [prefill]);
 
+  const handledPendingImages = useRef(0);
+  useEffect(() => {
+    if (pendingImages.n === 0 || pendingImages.n === handledPendingImages.current || pendingImages.images.length === 0) return;
+    handledPendingImages.current = pendingImages.n;
+    const incoming = pendingImages.images;
+    setImages((current) => {
+      const existing = new Set(current.map((i) => i.localId));
+      const fresh = incoming.filter((i) => !existing.has(i.localId));
+      return fresh.length ? [...current, ...fresh].slice(0, MAX_IMAGES) : current;
+    });
+  }, [pendingImages]);
+
   const trigger = dismissedFor === text ? undefined : triggerAt(text, caret);
   const fileQuery = trigger?.kind === 'file' ? trigger.token.query : undefined;
 
@@ -192,14 +215,17 @@ export function Composer() {
 
   const items: CompletionItem[] = useMemo(() => {
     if (trigger?.kind === 'command') {
-      return matchCommands(commands, trigger.query).map((c) => ({
-        key: `${c.source}:${c.name}`,
-        icon: 'command',
-        label: `/${c.name}`,
-        ...(c.source === 'skill' ? { tag: 'skill' } : {}),
-        ...(c.hint ? { hint: c.hint } : {}),
-        detail: c.description,
-      }));
+      return matchCommands(commands, trigger.query).map((c) => {
+        const name = c.name.replace(/^\/+/u, '');
+        return {
+          key: `${c.source}:${c.name}`,
+          icon: 'command',
+          label: `/${name}`,
+          ...(c.source === 'skill' ? { tag: 'skill' } : c.source === 'custom' ? { tag: t('settings.commands.badge') } : {}),
+          ...(c.hint ? { hint: c.hint } : {}),
+          detail: c.description,
+        };
+      });
     }
     if (trigger?.kind === 'file' && candidates.requestId >= 0) {
       return candidates.items.map((c) => {
@@ -213,14 +239,14 @@ export function Composer() {
       });
     }
     return [];
-  }, [trigger?.kind, trigger?.kind === 'command' ? trigger.query : undefined, commands, candidates]);
+  }, [trigger?.kind, trigger?.kind === 'command' ? trigger.query : undefined, commands, candidates, t]);
 
   useEffect(() => setSelected(0), [items.length, trigger?.kind, fileQuery]);
 
   const complete =
     trigger?.kind === 'file'
       ? candidates.items.some((c) => c.kind === 'file' && c.path === trigger.token.query)
-      : trigger?.kind === 'command' && commands.some((c) => c.name.toLowerCase() === trigger.query.toLowerCase());
+      : trigger?.kind === 'command' && commands.some((c) => c.source !== 'custom' && c.name.replace(/^\/+/u, '').toLowerCase() === trigger.query.toLowerCase());
   const menuOpen = trigger !== undefined && !complete && (items.length > 0 || trigger.kind === 'file');
 
   const replaceRange = (start: number, end: number, insertion: string) => {
@@ -235,7 +261,13 @@ export function Composer() {
     if (!trigger) return;
     if (trigger.kind === 'command') {
       const command = matchCommands(commands, trigger.query)[index];
-      if (command) replaceRange(0, caret, `/${command.name} `);
+      if (command) {
+        replaceRange(
+          0,
+          caret,
+          command.prompt !== undefined ? command.prompt : `/${command.name.replace(/^\/+/u, '')} `,
+        );
+      }
       return;
     }
     const candidate = candidates.items[index];
@@ -428,22 +460,44 @@ export function Composer() {
         />
         <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
           <div className="relative">
-            <button
-              type="button"
-              data-testid="composer-attach-btn"
-              disabled={!connected || readOnly}
-              aria-label={t('composer.attach')}
-              title={t('composer.attach')}
-              aria-haspopup="menu"
-              aria-expanded={attachOpen}
-              className={cn(
-                'inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40',
-                attachOpen && 'bg-field text-ink shadow-hairline',
-              )}
-              onClick={() => setAttachOpen((v) => !v)}
-            >
-              <PlusIcon className="size-4" />
-            </button>
+            <Popover open={attachOpen} onOpenChange={setAttachOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="composer-attach-btn"
+                  disabled={!connected || readOnly}
+                  aria-label={t('composer.attach')}
+                  title={t('composer.attach')}
+                  className={cn(
+                    'inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40',
+                    attachOpen && 'bg-field text-ink shadow-hairline',
+                  )}
+                >
+                  <PlusIcon className="size-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                side="top"
+                align="start"
+                sideOffset={6}
+                aria-label={t('composer.attach')}
+                className="w-44 min-w-[168px] rounded-card p-1 shadow-raised"
+              >
+                <div role="menu" data-testid="composer-attach-menu">
+                  <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
+                    <MenuItem
+                      icon={<FileIcon className="size-3.5" />}
+                      onSelect={() => {
+                        setAttachOpen(false);
+                        postToHost({ type: 'pickFiles', payload: {} });
+                      }}
+                    >
+                      {t('composer.attachFile')}
+                    </MenuItem>
+                  </GlideMenu>
+                </div>
+              </PopoverContent>
+            </Popover>
             <input
               ref={imageInputRef}
               type="file"
@@ -457,35 +511,6 @@ export function Composer() {
                 if (picked.length > 0) void addImages(picked);
               }}
             />
-            <Popover
-              open={attachOpen}
-              onClose={() => setAttachOpen(false)}
-              label={t('composer.attach')}
-              className="top-auto bottom-[calc(100%+6px)] left-0 w-44 min-w-[168px]"
-            >
-              <div role="menu" data-testid="composer-attach-menu">
-                <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
-                  <MenuItem
-                    icon={<FileIcon className="size-3.5" />}
-                    onSelect={() => {
-                      setAttachOpen(false);
-                      postToHost({ type: 'pickFiles', payload: {} });
-                    }}
-                  >
-                    {t('composer.attachFile')}
-                  </MenuItem>
-                  <MenuItem
-                    icon={<ImageIcon className="size-3.5" />}
-                    onSelect={() => {
-                      setAttachOpen(false);
-                      imageInputRef.current?.click();
-                    }}
-                  >
-                    {t('composer.attachImage')}
-                  </MenuItem>
-                </GlideMenu>
-              </div>
-            </Popover>
           </div>
           <ModelPicker disabled={!connected || readOnly} />
           <PermissionPicker disabled={!connected || readOnly} />

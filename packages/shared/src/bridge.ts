@@ -7,6 +7,7 @@ import type {
   Locale,
   ConnectionState,
   ContextState,
+  ExtensionsState,
   FileCandidate,
   Item,
   MarkdownPreviewData,
@@ -15,6 +16,8 @@ import type {
   PermissionState,
   PreferencesState,
   ProjectsState,
+  ProviderModelItem,
+  ProvidersState,
   SessionHeader,
   SessionListItem,
   BackendsState,
@@ -65,6 +68,28 @@ const agentToolsSchema = z.object({
   bashCommand: z.boolean(),
   webFetch: z.boolean(),
   mcpTools: z.boolean(),
+});
+
+const chatCommandSchema = z.object({
+  name: z.string().min(1).max(80),
+  prompt: z.string().min(1).max(50_000),
+  description: z.string().max(300).optional(),
+});
+
+const mcpTransportSchema = z.enum(['stdio', 'http', 'sse']);
+
+const mcpServerPayloadSchema = z.object({
+  id: z.string().min(1).max(120).optional(),
+  name: z.string().min(1).max(120),
+  transport: mcpTransportSchema,
+  command: z.string().max(1_000).optional(),
+  args: z.array(z.string().max(1_000)).max(100).optional(),
+  env: z.record(z.string().min(1).max(200), z.string().max(8_000)).optional(),
+  url: z.string().max(2_000).optional(),
+  headers: z.record(z.string().min(1).max(200), z.string().max(8_000)).optional(),
+  enabled: z.boolean().optional(),
+  agents: z.array(z.string().min(1).max(100)).max(100),
+  importedFrom: z.string().max(200).optional(),
 });
 
 export const webviewToHostSchema = z.discriminatedUnion('type', [
@@ -205,9 +230,13 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
         .object({
           dshPath: z.string().max(1_000).optional(),
           dshProfile: z.string().max(200).optional(),
+          zcodePath: z.string().max(1_000).optional(),
+          claudePath: z.string().max(1_000).optional(),
+          piPath: z.string().max(1_000).optional(),
           backendTrace: z.boolean().optional(),
         })
         .optional(),
+      chatCommands: z.array(chatCommandSchema).max(200).readonly().optional(),
     }),
   }),
   /** 发送测试系统通知。 */
@@ -343,11 +372,133 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       backendId: z.string().min(1).max(100).optional(),
     }),
   }),
+  /** 设置 -> 扩展 -> 技能（Agent Skills，SKILL.md）。 */
+  z.object({
+    type: z.literal('scanGitSkills'),
+    payload: z.object({
+      repoUrl: z.string().min(1).max(2_000),
+      ref: z.string().max(200).optional(),
+      subpath: z.string().max(1_000).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('installGitSkills'),
+    payload: z.object({
+      repoUrl: z.string().min(1).max(2_000),
+      ref: z.string().max(200).optional(),
+      subpath: z.string().max(1_000).optional(),
+      selectedSubpaths: z.array(z.string().max(1_000)).max(200).optional(),
+      agents: z.array(z.string().min(1).max(100)).max(100).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('updateSkill'),
+    payload: z.object({
+      id: z.string().min(1).max(120),
+      enabled: z.boolean().optional(),
+      agents: z.array(z.string().min(1).max(100)).max(100).nullable().optional(),
+    }),
+  }),
+  z.object({ type: z.literal('syncSkill'), payload: z.object({ id: z.string().min(1).max(120) }) }),
+  z.object({ type: z.literal('deleteSkill'), payload: z.object({ id: z.string().min(1).max(120) }) }),
+  /** 设置 -> 扩展 -> MCP 服务器统一管理与导入。 */
+  z.object({ type: z.literal('upsertMcpServer'), payload: mcpServerPayloadSchema }),
+  z.object({
+    type: z.literal('toggleMcpServer'),
+    payload: z.object({
+      id: z.string().min(1).max(120),
+      enabled: z.boolean().optional(),
+      agents: z.array(z.string().min(1).max(100)).max(100).optional(),
+    }),
+  }),
+  z.object({ type: z.literal('deleteMcpServer'), payload: z.object({ id: z.string().min(1).max(120) }) }),
+  z.object({ type: z.literal('scanAgentMcpConfigs'), payload: empty }),
+  z.object({ type: z.literal('pickMcpConfigFile'), payload: empty }),
+  z.object({
+    type: z.literal('importMcpServers'),
+    payload: z.object({
+      servers: z
+        .array(
+          z.object({
+            name: z.string().min(1).max(120),
+            transport: mcpTransportSchema,
+            command: z.string().max(1_000).optional(),
+            args: z.array(z.string().max(1_000)).max(100).optional(),
+            env: z.record(z.string().min(1).max(200), z.string().max(8_000)).optional(),
+            url: z.string().max(2_000).optional(),
+            headers: z.record(z.string().min(1).max(200), z.string().max(8_000)).optional(),
+            importedFrom: z.string().max(200).optional(),
+          }),
+        )
+        .min(1)
+        .max(200),
+      agents: z.array(z.string().min(1).max(100)).max(100),
+    }),
+  }),
+  /** 设置 -> Agent -> 服务商：管理第三方编程套餐与自定义模型接口，并绑定到智能体。 */
+  z.object({
+    type: z.literal('upsertProvider'),
+    payload: z.object({
+      id: z.string().max(100).optional(),
+      name: z.string().min(1).max(120),
+      presetId: z.string().max(100).optional(),
+      /** undefined 表示保留已有密钥；空字符串表示清除密钥；非空字符串写入本机 SecretStorage。 */
+      apiKey: z.string().max(4_000).optional(),
+      anthropicUrl: z.string().max(2_000).optional(),
+      openaiChatUrl: z.string().max(2_000).optional(),
+      openaiResponsesUrl: z.string().max(2_000).optional(),
+      convertOpenaiToAnthropic: z.boolean().optional(),
+      models: z
+        .array(
+          z.object({
+            id: z.string().min(1).max(200),
+            name: z.string().max(200).optional(),
+            contextWindow: z.string().max(50).optional(),
+            maxOutputTokens: z.string().max(50).optional(),
+            efforts: z.array(z.string().max(60)).max(20).readonly().optional(),
+            vision: z.boolean().optional(),
+          }),
+        )
+        .max(200),
+      defaultModel: z.string().max(200).optional(),
+      smallModel: z.string().max(200).optional(),
+      boundBackendIds: z.array(z.string().min(1).max(100)).max(100),
+      boundAgentIds: z.array(z.string().min(1).max(100)).max(100).optional(),
+    }),
+  }),
+  z.object({ type: z.literal('deleteProvider'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  /** 设置 -> Agent -> 服务商：启停本地协议转换网关（OpenAI 兼容 -> Claude Anthropic，默认关闭）。 */
+  z.object({
+    type: z.literal('setProtocolGateway'),
+    payload: z.object({ enabled: z.boolean() }),
+  }),
+  z.object({
+    type: z.literal('bindProviderAgents'),
+    payload: z.object({
+      id: z.string().min(1).max(100),
+      boundBackendIds: z.array(z.string().min(1).max(100)).max(100),
+      boundAgentIds: z.array(z.string().min(1).max(100)).max(100).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('fetchProviderModels'),
+    payload: z.object({
+      requestId: z.number().int(),
+      providerId: z.string().max(100).optional(),
+      apiKey: z.string().max(4_000).optional(),
+      anthropicUrl: z.string().max(2_000).optional(),
+      openaiChatUrl: z.string().max(2_000).optional(),
+      openaiResponsesUrl: z.string().max(2_000).optional(),
+    }),
+  }),
 ]);
 
 export type WebviewToHost = z.infer<typeof webviewToHostSchema>;
 
+export type HostIdeKind = 'vscode' | 'jetbrains';
+
 export interface HostSnapshot {
+  readonly hostKind?: HostIdeKind;
   readonly runtime: RuntimeStatus;
   readonly connection: ConnectionState;
   readonly sessions: readonly SessionListItem[];
@@ -364,7 +515,9 @@ export interface HostSnapshot {
   readonly appearance: AppearanceState;
   readonly preferences?: PreferencesState;
   readonly backends: BackendsState;
+  readonly providers?: ProvidersState;
   readonly projects?: ProjectsState;
+  readonly extensions?: ExtensionsState;
   readonly workbench?: WorkbenchState;
 }
 
@@ -396,7 +549,13 @@ export type HostToWebview =
   | { readonly type: 'appearance'; readonly payload: AppearanceState }
   | { readonly type: 'preferences'; readonly payload: PreferencesState }
   | { readonly type: 'backends'; readonly payload: BackendsState }
+  | { readonly type: 'providers'; readonly payload: ProvidersState }
+  | {
+      readonly type: 'providerModelsFetched';
+      readonly payload: { readonly requestId: number; readonly models: readonly ProviderModelItem[]; readonly error?: string };
+    }
   | { readonly type: 'projects'; readonly payload: ProjectsState }
+  | { readonly type: 'extensions'; readonly payload: ExtensionsState }
   | { readonly type: 'workbench'; readonly payload: WorkbenchState }
   | { readonly type: 'switchWorkbenchModule'; readonly payload: { readonly module: WorkbenchModule } }
   | { readonly type: 'markdownPreview'; readonly payload: MarkdownPreviewData }
@@ -406,6 +565,7 @@ export type HostToWebview =
   | { readonly type: 'commands'; readonly payload: readonly CommandView[] }
   | { readonly type: 'fileCandidates'; readonly payload: { readonly requestId: number; readonly items: readonly FileCandidate[] } }
   | { readonly type: 'toast'; readonly payload: { readonly level: 'info' | 'error'; readonly text: string } }
+  | { readonly type: 'attachImages'; readonly payload: { readonly images: readonly PromptImage[] } }
   /** 消息没能发出去（没连上、建不了会话…）：输入框发送时已经清空，把文字放回去。 */
   | { readonly type: 'restoreDraft'; readonly payload: { readonly text: string } }
   | { readonly type: 'focusComposer'; readonly payload: Record<string, never> };

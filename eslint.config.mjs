@@ -33,6 +33,25 @@ export default tseslint.config(
       'react-hooks/rules-of-hooks': 'error',
       // 这里的 effect 大多有意只在某几个值变化时运行（见各处注释），依赖检查只提示不拦
       'react-hooks/exhaustive-deps': 'off',
+      // 组件库边界：只允许使用 shadcn-ui（src/components/ui 小写官方组件）与 beautifului，禁止引入第三方组件库或手写自造 UI 组件
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@mui/*', 'antd', 'antd/*', '@chakra-ui/*', '@mantine/*', '@arco-design/*', '@headlessui/*', 'naive-ui', 'primereact/*'],
+              message: '项目组件库仅允许使用 shadcn-ui 与 beautifului，禁止引入其他 UI 组件库（见 AGENTS.md）。',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'ImportDeclaration[source.value=/(?:^|\\/)ui\\/[A-Z]/]',
+          message: 'src/components/ui/ 仅限通过 shadcn CLI 安装的官方小写组件文件，禁止手写新造基础组件（见 AGENTS.md）。',
+        },
+      ],
     },
   },
   {

@@ -1,7 +1,8 @@
 /**
  * 控制器用到的纯函数：标题、上下文用量、待办、目标、模型状态、错误提示等。从投影值计算视图，不保存状态。
  */
-import type { Item, ModelOption, ModelState, SessionHeader } from '@harness-deck/shared';
+import type { Item, ModelOption, ModelState, ProviderConfig, SessionHeader } from '@harness-deck/shared';
+import { providerModelOptions } from '../../providers/ProviderStore.ts';
 import type { ModelCatalog, ModelSelection } from '../DshClient.ts';
 import { RemoteError } from '../remote/errors.ts';
 import { t } from '../../i18n.ts';
@@ -13,10 +14,22 @@ export function buildModelState(
   projections: Readonly<Record<string, unknown>>,
   catalog: ModelCatalog | undefined,
   draftModel: ModelSelection | undefined,
+  boundProvider?: ProviderConfig,
 ): ModelState {
   const options: ModelOption[] = [];
+  const boundOptions = boundProvider ? providerModelOptions(boundProvider) : [];
+  const seenKeys = new Set<string>();
+
+  for (const opt of boundOptions) {
+    seenKeys.add(`${opt.provider}::${opt.model}`);
+    options.push(opt);
+  }
+
   for (const group of catalog?.groups ?? []) {
     for (const model of group.models) {
+      const key = `${group.id}::${model.id}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
       options.push({
         provider: group.id,
         model: model.id,
@@ -29,8 +42,16 @@ export function buildModelState(
     }
   }
   const selection = (projections.modelSelection as { next?: ModelSelection } | undefined)?.next;
-  const current = selection ?? draftModel ?? (catalog?.default?.provider && catalog.default.model ? (catalog.default as ModelSelection) : undefined);
-  const needsApiKey = catalog !== undefined && options.length === 0;
+  const boundDefault: ModelSelection | undefined =
+    boundProvider && (boundProvider.defaultModel || boundProvider.models[0]?.id)
+      ? { provider: boundProvider.id, model: boundProvider.defaultModel ?? boundProvider.models[0]!.id }
+      : undefined;
+  const current =
+    selection ??
+    draftModel ??
+    boundDefault ??
+    (catalog?.default?.provider && catalog.default.model ? (catalog.default as ModelSelection) : undefined);
+  const needsApiKey = catalog !== undefined && options.length === 0 && !boundProvider;
   return {
     ...(needsApiKey ? { needsApiKey } : {}),
     options,

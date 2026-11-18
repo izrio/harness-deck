@@ -7,9 +7,16 @@
 import type { ChildProcess } from 'node:child_process';
 import type { RuntimeStatus } from '@harness-deck/shared';
 import { launchRuntime, LaunchError, probeVersion, stopRuntime, type LaunchedRuntime } from './launch.ts';
-import { locateDsh } from './locate.ts';
+import { locateDsh, verifyExecutableFile, type ExecutableStat } from './locate.ts';
 import { checkVersionSupport, MINIMUM_DSH_VERSION } from './version.ts';
 import { t } from '../i18n.ts';
+
+export interface CachedDshExecutable {
+  readonly command: string;
+  readonly version?: string;
+  readonly mtimeMs?: number;
+  readonly size?: number;
+}
 
 export interface RuntimeConfig {
   readonly configuredPath?: string;
@@ -19,6 +26,9 @@ export interface RuntimeConfig {
   /** 启动器级参数，例如测试时的 `--patch`。 */
   readonly launcherArgs?: readonly string[];
   readonly readyTimeoutMs?: number;
+  /** 已缓存的可执行文件路径与版本元数据；命中时跳过 PATH 扫描与重复 `--version` 探测。 */
+  readonly cachedExecutable?: CachedDshExecutable;
+  readonly onResolvedExecutable?: (resolved: CachedDshExecutable | undefined) => void;
 }
 
 export interface RuntimeEndpoint {
@@ -28,7 +38,7 @@ export interface RuntimeEndpoint {
 }
 
 export interface RuntimeManagerOptions {
-  readonly getConfig: () => RuntimeConfig;
+  readonly getConfig: () => RuntimeConfig | Promise<RuntimeConfig>;
   readonly log: (line: string) => void;
   readonly runtimeLog?: (line: string, stream: 'stdout' | 'stderr') => void;
   /** 连续失败多少次后停止自动重启。 */
@@ -119,10 +129,11 @@ export class RuntimeManager {
   }
 
   private async doStart(): Promise<RuntimeEndpoint | undefined> {
-    const config = this.options.getConfig();
     const abort = new AbortController();
     this.startAbort = abort;
     try {
+      const config = await this.options.getConfig();
+      if (abort.signal.aborted) return undefined;
       return await this.launch(config, abort.signal);
     } finally {
       if (this.startAbort === abort) this.startAbort = undefined;
@@ -130,22 +141,53 @@ export class RuntimeManager {
   }
 
   private async launch(config: RuntimeConfig, signal: AbortSignal): Promise<RuntimeEndpoint | undefined> {
-    this.setStatus({ kind: 'locating' });
-    const located = await locateDsh({ configuredPath: config.configuredPath, env: config.env, platform: process.platform });
-    if (signal.aborted) return undefined;
-    if (located.kind === 'notFound') {
-      this.options.log(located.configuredPathInvalid ? '设置项 harnessDeck.dsh.path 指向的文件不存在或不可执行' : 'PATH 中找不到 dsh');
-      this.setStatus({ kind: 'notInstalled' });
-      return undefined;
-    }
-    this.options.log(`使用 dsh：${located.command}（来源：${located.source === 'setting' ? '设置项' : 'PATH'}）`);
+    let commandPath: string | undefined;
+    let statMeta: ExecutableStat | undefined;
+    let version: string | undefined;
 
-    let version: string;
-    try {
-      version = await probeVersion(located.command, config.env, undefined, signal);
-    } catch (error) {
+    if (config.cachedExecutable) {
+      const verified = await verifyExecutableFile(config.cachedExecutable.command, process.platform);
       if (signal.aborted) return undefined;
-      return this.failed(error);
+      if (verified) {
+        commandPath = verified.command;
+        statMeta = verified;
+        if (
+          config.cachedExecutable.version &&
+          config.cachedExecutable.mtimeMs === verified.mtimeMs &&
+          config.cachedExecutable.size === verified.size
+        ) {
+          version = config.cachedExecutable.version;
+        }
+      } else {
+        config.onResolvedExecutable?.(undefined);
+      }
+    }
+
+    if (!commandPath) {
+      this.setStatus({ kind: 'locating' });
+      const located = await locateDsh({ configuredPath: config.configuredPath, env: config.env, platform: process.platform });
+      if (signal.aborted) return undefined;
+      if (located.kind === 'notFound') {
+        this.options.log(located.configuredPathInvalid ? '设置项 harnessDeck.dsh.path 指向的文件不存在或不可执行' : 'PATH 中找不到 dsh');
+        config.onResolvedExecutable?.(undefined);
+        this.setStatus({ kind: 'notInstalled' });
+        return undefined;
+      }
+      this.options.log(`使用 dsh：${located.command}（来源：${located.source === 'setting' ? '设置项' : 'PATH'}）`);
+      commandPath = located.command;
+      statMeta = await verifyExecutableFile(commandPath, process.platform);
+      if (signal.aborted) return undefined;
+    } else {
+      this.options.log(`使用缓存的 dsh：${commandPath}`);
+    }
+
+    if (!version) {
+      try {
+        version = await probeVersion(commandPath, config.env, undefined, signal);
+      } catch (error) {
+        if (signal.aborted) return undefined;
+        return this.failed(error);
+      }
     }
     const support = checkVersionSupport(version);
     if (support.kind !== 'supported') {
@@ -154,11 +196,17 @@ export class RuntimeManager {
       return undefined;
     }
 
+    config.onResolvedExecutable?.({
+      command: commandPath,
+      version,
+      ...(statMeta ? { mtimeMs: statMeta.mtimeMs, size: statMeta.size } : {}),
+    });
+
     this.setStatus({ kind: 'starting', version });
     let launched: LaunchedRuntime;
     try {
       launched = await launchRuntime({
-        command: located.command,
+        command: commandPath,
         profile: config.profile,
         launcherArgs: config.launcherArgs,
         cwd: config.cwd,

@@ -18,16 +18,34 @@ export type LocateResult =
   | { readonly kind: 'found'; readonly command: string; readonly source: 'setting' | 'path' }
   | { readonly kind: 'notFound'; readonly configuredPathInvalid: boolean };
 
-async function isExecutableFile(path: string, platform: NodeJS.Platform): Promise<boolean> {
+export interface ExecutableStat {
+  readonly command: string;
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+/**
+ * 校验可执行文件路径是否仍然存在且可执行，成功时返回文件元数据（用于快速命中缓存并检测文件是否更新）。
+ */
+export async function verifyExecutableFile(
+  path: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): Promise<ExecutableStat | undefined> {
+  const trimmed = path?.trim();
+  if (!trimmed) return undefined;
   try {
-    const info = await stat(path);
-    if (!info.isFile()) return false;
+    const info = await stat(trimmed);
+    if (!info.isFile()) return undefined;
     // Windows 没有可执行位，存在即可
-    if (platform !== 'win32') await access(path, constants.X_OK);
-    return true;
+    if (platform !== 'win32') await access(trimmed, constants.X_OK);
+    return { command: trimmed, mtimeMs: info.mtimeMs, size: info.size };
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+async function isExecutableFile(path: string, platform: NodeJS.Platform): Promise<boolean> {
+  return (await verifyExecutableFile(path, platform)) !== undefined;
 }
 
 function candidateNames(name: string, platform: NodeJS.Platform, env: LocateOptions['env']): string[] {

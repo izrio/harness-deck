@@ -19,6 +19,7 @@ import type {
   HostSnapshot,
   ModelState,
   PermissionState,
+  ProviderConfig,
   RuntimeStatus,
   SessionHeader,
   SessionListItem,
@@ -44,6 +45,7 @@ import {
 } from '../../vm/context.ts';
 import { project, projectEvents, type EventsProjection, type FileStep, type Projection, type ToolCallInfo } from './projector.ts';
 import { EditorContext, type GatherOptions } from '../../vm/EditorContext.ts';
+import { attachPickedPaths } from '../../vm/pickedFiles.ts';
 import { TabsModel } from '../../vm/TabsModel.ts';
 import { lineStats, reverseHunks, reverseToolDiffs } from '../../vm/diffs.ts';
 import { noWorkbench, type Workbench } from '../../vm/workbench.ts';
@@ -63,6 +65,7 @@ import {
 
 export { friendlyError, plainTitle } from './viewHelpers.ts';
 import { getLocale, t } from '../../i18n.ts';
+import { skillsForBackend } from '../../extensions/skillService.ts';
 
 export interface ChatControllerOptions extends ControllerHostOptions {
   readonly workspacePath: string;
@@ -80,6 +83,8 @@ export interface ChatControllerOptions extends ControllerHostOptions {
    * 关掉时改动只在输入框上方的会话改动栏里显示，汇总仍会读取，用于打开 Diff。
    */
   readonly showTurnChanges?: () => boolean;
+  /** 当前绑定到 dsh 的第三方服务商配置（若有）。 */
+  readonly boundProvider?: () => ProviderConfig | undefined;
 }
 
 /** 同时读取改动汇总的请求数：打开长会话时不一次发出几十个请求，把 dsh 堵住（点开 Diff 的请求要排在后面）。 */
@@ -391,10 +396,7 @@ export class ChatController implements ChatBackendController {
     );
   }
 
-  /** Webview 加载（或重新加载）后取完整快照；之后的增量都相对于这份快照。 */
-  snapshot(): HostSnapshot {
-    const view = this.refresh();
-    this.publisher.reset(view);
+  private buildSnapshot(view: ControllerView, includeWorkbench: boolean): HostSnapshot {
     return {
       runtime: this.runtime,
       connection: this.connection,
@@ -412,19 +414,46 @@ export class ChatController implements ChatBackendController {
       appearance: this.options.appearance?.() ?? {},
       ...(this.options.preferences ? { preferences: this.options.preferences() } : {}),
       backends: this.options.backends?.() ?? { items: [], active: '' },
+      ...(this.options.providers ? { providers: this.options.providers() } : {}),
       ...(this.options.projects ? { projects: this.options.projects() } : {}),
-      ...(this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
+      ...(this.options.extensions ? { extensions: this.options.extensions() } : {}),
+      ...(includeWorkbench && this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
     };
+  }
+
+  /** Webview 加载（或重新加载）后取完整快照；之后的增量都相对于这份快照。 */
+  snapshot(): HostSnapshot {
+    const view = this.refresh();
+    this.publisher.reset(view);
+    return this.buildSnapshot(view, true);
+  }
+
+  peekSnapshot(): HostSnapshot {
+    return this.buildSnapshot(this.buildView().view, false);
   }
 
   backendsChanged(): void {
     this.options.post({ type: 'backends', payload: this.options.backends?.() ?? { items: [], active: '' } });
   }
 
+  providersChanged(): void {
+    if (this.options.providers) {
+      this.options.post({ type: 'providers', payload: this.options.providers() });
+    }
+    this.scheduleRender();
+  }
+
   projectsChanged(): void {
     if (this.options.projects) {
       this.options.post({ type: 'projects', payload: this.options.projects() });
     }
+  }
+
+  extensionsChanged(): void {
+    if (this.options.extensions) {
+      this.options.post({ type: 'extensions', payload: this.options.extensions() });
+    }
+    this.scheduleRender();
   }
 
   async handle(message: WebviewToHost): Promise<void> {
@@ -571,13 +600,29 @@ export class ChatController implements ChatBackendController {
       case 'runTaskNow':
       case 'startProjectSession':
       case 'openProjectSession':
+      case 'scanGitSkills':
+      case 'installGitSkills':
+      case 'updateSkill':
+      case 'syncSkill':
+      case 'deleteSkill':
+      case 'upsertMcpServer':
+      case 'toggleMcpServer':
+      case 'deleteMcpServer':
+      case 'scanAgentMcpConfigs':
+      case 'pickMcpConfigFile':
+      case 'importMcpServers':
+      case 'upsertProvider':
+      case 'deleteProvider':
+      case 'bindProviderAgents':
+      case 'fetchProviderModels':
         return;
       case 'pickFiles': {
         const picked = await this.options.pickFiles?.();
-        if (picked && picked.length > 0 && this.editorContext.pinFiles(picked) > 0) {
-          this.scheduleRender();
-          this.options.post({ type: 'focusComposer', payload: {} });
-        }
+        attachPickedPaths(picked, this.editorContext, {
+          post: (msg) => this.options.post(msg),
+          toast: (level, text) => this.toast(level, text),
+          scheduleRender: () => this.scheduleRender(),
+        });
         return;
       }
       case 'openFile': {
@@ -1232,18 +1277,27 @@ export class ChatController implements ChatBackendController {
       ...(currentPermission ? { current: currentPermission } : {}),
     };
 
+    const baseCommands: CommandView[] = [
+      ...pluginCommands().map((c) => ({ ...c, source: 'plugin' as const })),
+      ...this.dshCommands,
+    ];
+    const takenNames = new Set(baseCommands.map((c) => c.name));
+    const extraSkillCommands: CommandView[] = skillsForBackend(this.options.extensions?.().skills.items ?? [], 'dsh')
+      .filter((s) => !takenNames.has(s.name))
+      .map((s) => ({ name: s.name, description: s.description, source: 'skill' as const }));
+
     const view: ControllerView = {
       sessionKey: sessionId ?? '',
       sessions,
       tabs: this.tabsState(service, session, attention),
       session,
       items: this.options.showTurnChanges?.() === false ? projection.items.filter((item) => item.kind !== 'changes') : projection.items,
-      models: buildModelState(projections, service?.models, this.draftModel),
+      models: buildModelState(projections, service?.models, this.draftModel, this.options.boundProvider?.()),
       interactions,
       permissions,
       workspace: { dirtyFiles: this.workbench.dirtyFiles().length },
       context: this.editorContext.state(),
-      commands: [...pluginCommands().map((c) => ({ ...c, source: 'plugin' as const })), ...this.dshCommands],
+      commands: [...baseCommands, ...extraSkillCommands],
     };
     return { view, projection, sessionId, service, canLoadChanges: streamLive && !showingStale };
   }

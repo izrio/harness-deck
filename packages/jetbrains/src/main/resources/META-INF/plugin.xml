@@ -1,0 +1,97 @@
+<idea-plugin>
+    <id>io.github.izrio.harnessdeck</id>
+    <name>Harness Deck</name>
+    <vendor>izrio</vendor>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="harness-deck-terminal.xml">org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+            id="Harness Deck"
+            anchor="right"
+            icon="/icons/harness-deck.svg"
+            factoryClass="io.harnessdeck.jetbrains.ui.HarnessDeckToolWindowFactory"/>
+
+        <fileEditorProvider implementation="io.harnessdeck.jetbrains.ui.HarnessDeckWorkbenchEditorProvider"/>
+
+        <statusBarWidgetFactory
+            id="HarnessDeckStatusBar"
+            implementation="io.harnessdeck.jetbrains.ui.HarnessDeckStatusBarWidgetFactory"/>
+
+        <notificationGroup
+            id="Harness Deck"
+            displayType="BALLOON"/>
+
+        <applicationConfigurable
+            parentId="tools"
+            instance="io.harnessdeck.jetbrains.settings.HarnessDeckConfigurable"
+            id="io.harnessdeck.settings"
+            displayName="Harness Deck"/>
+    </extensions>
+
+    <actions>
+        <group id="HarnessDeck.EditorPopup" text="Harness Deck" popup="true">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+            <action id="HarnessDeck.ExplainSelection"
+                    class="io.harnessdeck.jetbrains.actions.ExplainSelectionAction"
+                    text="Explain This Code"
+                    description="Explain the selected code or active file with Harness Deck"/>
+            <action id="HarnessDeck.FixSelection"
+                    class="io.harnessdeck.jetbrains.actions.FixSelectionAction"
+                    text="Fix This Code"
+                    description="Find and fix problems in the selected code (includes diagnostics)"/>
+            <action id="HarnessDeck.TestSelection"
+                    class="io.harnessdeck.jetbrains.actions.TestSelectionAction"
+                    text="Write Tests for This Code"
+                    description="Write and run tests for the selected code"/>
+            <separator/>
+            <action id="HarnessDeck.AddToChat"
+                    class="io.harnessdeck.jetbrains.actions.AddToChatAction"
+                    text="Add to Chat"
+                    description="Pin the active file or selection to Harness Deck chat context"/>
+        </group>
+
+        <group id="HarnessDeck.ToolsMenu" text="Harness Deck" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="HarnessDeck.OpenWorkbench"
+                    class="io.harnessdeck.jetbrains.actions.OpenWorkbenchAction"
+                    text="Open Workbench"/>
+            <action id="HarnessDeck.OpenChat"
+                    class="io.harnessdeck.jetbrains.actions.OpenChatAction"
+                    text="Open Chat"/>
+            <action id="HarnessDeck.NewSession"
+                    class="io.harnessdeck.jetbrains.actions.NewSessionAction"
+                    text="New Chat"/>
+            <action id="HarnessDeck.Interrupt"
+                    class="io.harnessdeck.jetbrains.actions.InterruptAction"
+                    text="Stop Generation"/>
+            <separator/>
+            <action id="HarnessDeck.SelectBackend"
+                    class="io.harnessdeck.jetbrains.actions.SelectBackendAction"
+                    text="Switch Agent"/>
+            <action id="HarnessDeck.SelectModel"
+                    class="io.harnessdeck.jetbrains.actions.SelectModelAction"
+                    text="Switch Model"/>
+            <action id="HarnessDeck.SelectFolder"
+                    class="io.harnessdeck.jetbrains.actions.SelectFolderAction"
+                    text="Select Folder for Chat"/>
+            <action id="HarnessDeck.RenameSession"
+                    class="io.harnessdeck.jetbrains.actions.RenameSessionAction"
+                    text="Rename Session"/>
+            <action id="HarnessDeck.ConfigureApiKey"
+                    class="io.harnessdeck.jetbrains.actions.ConfigureApiKeyAction"
+                    text="Set API Key"/>
+            <separator/>
+            <action id="HarnessDeck.OpenWebUI"
+                    class="io.harnessdeck.jetbrains.actions.OpenWebUIAction"
+                    text="Open dsh Web UI in Browser"/>
+            <action id="HarnessDeck.RestartRuntime"
+                    class="io.harnessdeck.jetbrains.actions.RestartRuntimeAction"
+                    text="Restart Agent"/>
+            <action id="HarnessDeck.ShowLogs"
+                    class="io.harnessdeck.jetbrains.actions.ShowLogsAction"
+                    text="Show Logs"/>
+        </group>
+    </actions>
+</idea-plugin>

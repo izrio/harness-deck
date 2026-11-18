@@ -6,9 +6,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { Button } from './ui/Button.tsx';
-import { LoaderGrid } from './ui/LoaderGrid.tsx';
-import { Shimmer } from './ui/Shimmer.tsx';
+import { Button } from '@/components/ui/button';
+import { LoaderGrid, Shimmer } from './beautifului/index.ts';
 import { InteractionCard } from './Interactions.tsx';
 import { ItemView } from './Items.tsx';
 import { RunStatus } from './RunStatus.tsx';
@@ -99,7 +98,8 @@ export function Thread() {
         {session.hasOlder ? (
           <div className="thread__older flex justify-center">
             <Button
-              variant="secondary"
+              type="button"
+              variant="outline"
               size="xs"
               className="link-button text-ink-2"
               disabled={session.loadingOlder}
@@ -110,9 +110,23 @@ export function Thread() {
             </Button>
           </div>
         ) : null}
-        {items.map((item) => (
-          <ItemView key={item.id} item={item} />
-        ))}
+        {items.map((item, index) => {
+          const prev = index > 0 ? items[index - 1] : undefined;
+          const next = items[index + 1];
+          const mergeTurnDone = next?.kind === 'turnDone' && item.kind === 'assistant' && !item.streaming && Boolean(item.markdown);
+          const turnDoneCopyText =
+            item.kind === 'turnDone' && prev?.kind === 'assistant' && !prev.streaming && prev.markdown
+              ? prev.markdown
+              : undefined;
+          return (
+            <ItemView
+              key={item.id}
+              item={item}
+              hideAssistantActions={mergeTurnDone}
+              {...(turnDoneCopyText !== undefined ? { turnDoneCopyText } : {})}
+            />
+          );
+        })}
         {interactions.map((interaction) => (
           <InteractionCard key={interaction.id} interaction={interaction} />
         ))}
@@ -121,10 +135,11 @@ export function Thread() {
       <Announcer running={session.running} waiting={interactions.length > 0} />
       {farFromBottom ? (
         <Button
-          variant="secondary"
-          size="icon"
+          type="button"
+          variant="outline"
+          size="icon-sm"
           className={cn(
-            'to-bottom absolute right-3.5 bottom-3 z-10 size-8 rounded-full shadow-raised text-ink',
+            'to-bottom absolute right-3.5 bottom-3 z-10 size-8 rounded-full bg-surface shadow-raised text-ink',
             unseen && 'to-bottom--unseen',
           )}
           style={{ animation: 'to-bottom-in 160ms cubic-bezier(0.23,1,0.32,1) both' }}

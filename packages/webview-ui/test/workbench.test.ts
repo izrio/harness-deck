@@ -349,7 +349,14 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 会话�
       },
     });
 
-    // 新建智能体
+    // 新建与编辑智能体使用 Modal 弹窗（支持 Escape / 遮罩关闭）
+    fireEvent.click(screen.getByTestId('agent-new-btn'));
+    const newAgentModal = screen.getByTestId('agent-form');
+    expect(newAgentModal.getAttribute('role')).toBe('dialog');
+    expect(newAgentModal.getAttribute('aria-modal')).toBe('true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('agent-form')).toBeNull();
+
     fireEvent.click(screen.getByTestId('agent-new-btn'));
     fireEvent.change(screen.getByTestId('agent-input-name'), { target: { value: '安全审计员' } });
     fireEvent.change(screen.getByTestId('agent-input-specialty'), { target: { value: 'CSP 与依赖安全审计' } });
@@ -357,6 +364,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 会话�
     fireEvent.change(screen.getByTestId('agent-select-backend'), { target: { value: 'claude' } });
     fireEvent.change(screen.getByTestId('agent-select-model'), { target: { value: 'deepseek::deepseek-reasoner' } });
     fireEvent.click(screen.getByTestId('agent-submit-btn'));
+    expect(screen.queryByTestId('agent-form')).toBeNull();
 
     expect(posted).toContainEqual(
       expect.objectContaining({
@@ -371,9 +379,16 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 会话�
         }),
       }),
     );
+
+    fireEvent.click(screen.getByTestId('agent-edit-builtin-architect'));
+    const editAgentModal = screen.getByTestId('agent-form');
+    expect(editAgentModal.getAttribute('aria-modal')).toBe('true');
+    expect((screen.getByTestId('agent-input-name') as HTMLInputElement).value).toBe('架构规划师');
+    fireEvent.click(editAgentModal.querySelector('[data-slot="dialog-close"]') as HTMLElement);
+    expect(screen.queryByTestId('agent-form')).toBeNull();
   });
 
-  it('任务模块：四列看板（待执行/执行中/待验收/已完成），支持选项目/Harness/模型创建任务、按顺序执行与验收通过', () => {
+  it('任务模块：四列看板（待执行/执行中/待验收/已完成），支持弹窗新增任务（标题在第一项）、按顺序执行与验收通过', () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
     fireEvent.click(screen.getByTestId('workbench-tab-tasks'));
@@ -383,16 +398,35 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 会话�
     expect(screen.getByTestId('kanban-col-review')).toBeTruthy();
     expect(screen.getByTestId('kanban-col-done')).toBeTruthy();
 
-    // 在待执行列写下一个任务，选项目、选 harness、选模型创建
+    // 默认不内联渲染创建表单，点击「新增任务」打开 Modal 弹窗（支持 Escape 关闭）
+    expect(screen.queryByTestId('kanban-task-creator')).toBeNull();
+    fireEvent.click(screen.getByTestId('task-new-btn'));
+    const taskModal = screen.getByTestId('kanban-task-creator');
+    expect(taskModal.getAttribute('role')).toBe('dialog');
+    expect(taskModal.getAttribute('aria-modal')).toBe('true');
+
+    // 验证标题输入框位于任务内容输入之前（表单第一个）
+    const titleInput = screen.getByTestId('task-input-title');
+    const promptTextarea = screen.getByTestId('task-input-prompt');
+    expect(titleInput.compareDocumentPosition(promptTextarea) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('kanban-task-creator')).toBeNull();
+
+    // 点击「待执行」列头 + 按钮也可打开新增任务弹窗，填写标题、内容、项目、Harness 与模型后创建并关闭弹窗
+    fireEvent.click(screen.getByTestId('kanban-todo-add-btn'));
+    fireEvent.change(screen.getByTestId('task-input-title'), { target: { value: '搜索优化' } });
     fireEvent.change(screen.getByTestId('task-input-prompt'), { target: { value: '实现跨项目会话搜索优化' } });
     fireEvent.change(screen.getByTestId('task-select-project'), { target: { value: '/repo/beta' } });
     fireEvent.change(screen.getByTestId('task-select-harness'), { target: { value: 'claude' } });
     fireEvent.change(screen.getByTestId('task-select-model'), { target: { value: 'deepseek::deepseek-reasoner' } });
     fireEvent.click(screen.getByTestId('task-create-btn'));
+    expect(screen.queryByTestId('kanban-task-creator')).toBeNull();
 
     expect(posted).toContainEqual({
       type: 'createTask',
       payload: {
+        title: '搜索优化',
         prompt: '实现跨项目会话搜索优化',
         projectPath: '/repo/beta',
         backendId: 'claude',
@@ -432,5 +466,115 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 会话�
       type: 'openProjectSession',
       payload: { projectPath: '/repo/beta', sessionId: 's2', backendId: 'claude' },
     });
+
+    // 双行条目展示底层标识与相对时间
+    const s2Button = screen.getByTestId('grouped-session-s2');
+    expect(s2Button.textContent).toContain('Beta 接口设计');
+    expect(s2Button.textContent).toContain('Claude Code');
+
+    // 搜索框过滤并支持一键清除
+    const sidebar = screen.getByTestId('project-sessions-sidebar');
+    const searchInput = sidebar.querySelector('input[aria-label="搜索会话"]') as HTMLInputElement;
+    expect(searchInput).toBeTruthy();
+    fireEvent.change(searchInput, { target: { value: 'Claude' } });
+    expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
+    expect(screen.getByTestId('grouped-session-s2')).toBeTruthy();
+    fireEvent.click(sidebar.querySelector('button[aria-label="关闭"]') as HTMLElement);
+    expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
+
+    // 折叠与展开项目分组
+    const alphaToggle = screen.getByTestId('project-group-alpha').querySelector('button') as HTMLElement;
+    fireEvent.click(alphaToggle);
+    expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
+    fireEvent.click(alphaToggle);
+    expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
+
+    // 收起与重新展开侧边栏
+    fireEvent.click(screen.getByTestId('toggle-project-groups'));
+    expect(screen.queryByTestId('project-sessions-sidebar')).toBeNull();
+    fireEvent.click(screen.getByTestId('toggle-project-groups'));
+    expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
+  });
+
+  it('顶栏移除左侧会话下拉选择，在设置按钮左侧展示历史按钮并跳转独立会话列表页', () => {
+    render(createElement(App));
+    host({ type: 'snapshot', payload: workbenchSnapshot() });
+    fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
+
+    // 1. 顶部左侧不再出现会话选择下拉按钮
+    expect(document.querySelector('.header__title')).toBeNull();
+    expect(document.querySelector('.sessions-menu')).toBeNull();
+
+    // 2. 历史按钮位于设置按钮紧邻左侧
+    const actions = screen.getByTestId('header-actions');
+    const buttons: HTMLElement[] = [...actions.querySelectorAll('button')];
+    const historyBtn = screen.getByTestId('history-button');
+    const settingsBtn = screen.getByTestId('settings-button');
+    expect(buttons.indexOf(historyBtn)).toBe(buttons.indexOf(settingsBtn) - 1);
+
+    // 3. 在会话输入草稿后点击历史按钮，跳转独立会话列表页，且保留输入框草稿
+    const textarea = screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '历史页返回后仍在的草稿', selectionStart: 11 } });
+
+    fireEvent.click(historyBtn);
+    expect(screen.getByTestId('session-history-page')).toBeTruthy();
+    expect(historyBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('history-grouped-list')).toBeTruthy();
+    expect(screen.getByTestId('history-session-s1')).toBeTruthy();
+    expect(screen.getByTestId('history-session-s2')).toBeTruthy();
+
+    // 4. 搜索过滤会话
+    const search = screen.getByTestId('history-search') as HTMLInputElement;
+    fireEvent.change(search, { target: { value: 'Beta' } });
+    expect(screen.queryByTestId('history-session-s1')).toBeNull();
+    expect(screen.getByTestId('history-session-s2')).toBeTruthy();
+
+    // 5. 返回按钮关闭会话列表页并保留草稿
+    fireEvent.click(screen.getByTestId('history-back'));
+    expect(screen.queryByTestId('session-history-page')).toBeNull();
+    expect((screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).value).toBe('历史页返回后仍在的草稿');
+
+    // 6. 再次进入历史页并点击会话，打开会话并自动切回对话界面
+    fireEvent.click(historyBtn);
+    fireEvent.click(screen.getByTestId('history-session-s2'));
+    expect(screen.queryByTestId('session-history-page')).toBeNull();
+    expect(posted).toContainEqual({
+      type: 'openProjectSession',
+      payload: { projectPath: '/repo/beta', sessionId: 's2', backendId: 'claude' },
+    });
+
+    // 7. 与设置页互斥，且支持 Escape 关闭
+    fireEvent.click(historyBtn);
+    expect(screen.getByTestId('session-history-page')).toBeTruthy();
+    fireEvent.click(settingsBtn);
+    expect(screen.queryByTestId('session-history-page')).toBeNull();
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    fireEvent.click(historyBtn);
+    expect(screen.queryByTestId('settings-page')).toBeNull();
+    expect(screen.getByTestId('session-history-page')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('session-history-page')).toBeNull();
+  });
+
+  it('无工作台分组（纯会话模式）时历史页展示扁平会话列表并发送 switchSession', () => {
+    const snap = workbenchSnapshot();
+    const { workbench: _w, ...standalone } = snap;
+    render(createElement(App));
+    host({
+      type: 'snapshot',
+      payload: {
+        ...standalone,
+        sessions: [
+          { id: 's1', title: '性能优化分析', updatedAt: Date.now() - 5_000, running: false },
+          { id: 's2', title: '修复测试断言', updatedAt: Date.now() - 20_000, running: false },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByTestId('history-button'));
+    expect(screen.getByTestId('history-flat-list')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('history-session-s2'));
+    expect(screen.queryByTestId('session-history-page')).toBeNull();
+    expect(posted).toContainEqual({ type: 'switchSession', payload: { sessionId: 's2' } });
   });
 });

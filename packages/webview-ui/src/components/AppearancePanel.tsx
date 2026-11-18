@@ -9,9 +9,10 @@ import { cn } from '../lib/utils.ts';
 import { setAppearanceLocal, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { Markdown } from './Markdown.tsx';
-import { Button } from './ui/Button.tsx';
-import { Input, Stepper } from './ui/FormControls.tsx';
-import { ValuePill } from './ui/ValuePill.tsx';
+import { ValuePill } from './beautifului/index.ts';
+import { Button } from '@/components/ui/button';
+import { ButtonGroup, ButtonGroupText } from '@/components/ui/button-group';
+import { Input } from '@/components/ui/input';
 
 const MIN_SIZE = 10;
 const MAX_SIZE = 24;
@@ -69,6 +70,7 @@ function applyProsePatch(current: AppearanceState, patch: ProsePatch): void {
 
 export function AppearancePanel() {
   const t = useT();
+  const hostKind = useView((s) => s.hostKind);
   const appearance = useView((s) => s.appearance);
   const size = appearance.fontSize ?? DEFAULT_SIZE;
   const lineHeight = appearance.lineHeight ?? DEFAULT_LINE_HEIGHT;
@@ -141,7 +143,7 @@ export function AppearancePanel() {
                       : 'bg-field text-ink-2 shadow-hairline hover:bg-hover hover:text-ink',
                   )}
                 >
-                  {t(preset.labelKey)}
+                  {t(preset.id === 'vscode' && hostKind === 'jetbrains' ? 'settings.appearance.fontPreset.ide' : preset.labelKey)}
                 </button>
               );
             })}
@@ -163,16 +165,31 @@ export function AppearancePanel() {
         <span className="text-[12.5px] font-medium text-ink">{t('appearance.size')}</span>
         <div className="flex items-center gap-2">
           {appearance.fontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-          <Stepper
-            valueLabel={`${size}px`}
-            valueTestId="appearance-size"
-            canDecrease={size > MIN_SIZE}
-            canIncrease={size < MAX_SIZE}
-            decreaseLabel={t('appearance.smaller')}
-            increaseLabel={t('appearance.larger')}
-            onDecrease={() => setSize(size - 1)}
-            onIncrease={() => setSize(size + 1)}
-          />
+          <ButtonGroup>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('appearance.smaller')}
+              disabled={size <= MIN_SIZE}
+              onClick={() => setSize(size - 1)}
+            >
+              −
+            </Button>
+            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="appearance-size">
+              {size}px
+            </ButtonGroupText>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('appearance.larger')}
+              disabled={size >= MAX_SIZE}
+              onClick={() => setSize(size + 1)}
+            >
+              +
+            </Button>
+          </ButtonGroup>
         </div>
       </div>
 
@@ -181,16 +198,31 @@ export function AppearancePanel() {
         <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.lineHeight')}</span>
         <div className="flex items-center gap-2">
           {appearance.lineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-          <Stepper
-            valueLabel={lineHeight.toFixed(1)}
-            valueTestId="prose-line-height"
-            canDecrease={lineHeight > MIN_LINE_HEIGHT + 0.01}
-            canIncrease={lineHeight < MAX_LINE_HEIGHT - 0.01}
-            decreaseLabel={t('settings.appearance.lineHeightSmaller')}
-            increaseLabel={t('settings.appearance.lineHeightLarger')}
-            onDecrease={() => setLineHeight(lineHeight - 0.1)}
-            onIncrease={() => setLineHeight(lineHeight + 0.1)}
-          />
+          <ButtonGroup>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('settings.appearance.lineHeightSmaller')}
+              disabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
+              onClick={() => setLineHeight(lineHeight - 0.1)}
+            >
+              −
+            </Button>
+            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="prose-line-height">
+              {lineHeight.toFixed(1)}
+            </ButtonGroupText>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('settings.appearance.lineHeightLarger')}
+              disabled={lineHeight >= MAX_LINE_HEIGHT - 0.01}
+              onClick={() => setLineHeight(lineHeight + 0.1)}
+            >
+              +
+            </Button>
+          </ButtonGroup>
         </div>
       </div>
 
@@ -199,16 +231,31 @@ export function AppearancePanel() {
         <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.paragraphSpacing')}</span>
         <div className="flex items-center gap-2">
           {appearance.paragraphSpacing === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-          <Stepper
-            valueLabel={`${paragraphSpacing}px`}
-            valueTestId="prose-paragraph-spacing"
-            canDecrease={paragraphSpacing > MIN_SPACING}
-            canIncrease={paragraphSpacing < MAX_SPACING}
-            decreaseLabel={t('settings.appearance.paragraphSpacingSmaller')}
-            increaseLabel={t('settings.appearance.paragraphSpacingLarger')}
-            onDecrease={() => setParagraphSpacing(paragraphSpacing - 2)}
-            onIncrease={() => setParagraphSpacing(paragraphSpacing + 2)}
-          />
+          <ButtonGroup>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('settings.appearance.paragraphSpacingSmaller')}
+              disabled={paragraphSpacing <= MIN_SPACING}
+              onClick={() => setParagraphSpacing(paragraphSpacing - 2)}
+            >
+              −
+            </Button>
+            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="prose-paragraph-spacing">
+              {paragraphSpacing}px
+            </ButtonGroupText>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('settings.appearance.paragraphSpacingLarger')}
+              disabled={paragraphSpacing >= MAX_SPACING}
+              onClick={() => setParagraphSpacing(paragraphSpacing + 2)}
+            >
+              +
+            </Button>
+          </ButtonGroup>
         </div>
       </div>
 
@@ -220,33 +267,48 @@ export function AppearancePanel() {
             {WIDTH_PRESETS.map((preset) => {
               const selected = contentWidth === preset.width;
               return (
-                <button
+                <Button
                   key={preset.width}
                   type="button"
+                  variant={selected ? 'secondary' : 'ghost'}
+                  size="xs"
                   data-testid={`width-preset-${preset.width}`}
                   onClick={() => setContentWidth(preset.width)}
                   className={cn(
-                    'rounded-full px-2 py-0.5 text-[11px] transition-colors duration-100',
-                    selected
-                      ? 'bg-accent-tint font-medium text-accent-ink shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]'
-                      : 'bg-field text-ink-2 shadow-hairline hover:bg-hover hover:text-ink',
+                    'rounded-full px-2 text-[11px]',
+                    selected && 'bg-accent-tint text-accent-ink',
                   )}
                 >
                   {t(preset.labelKey)}
-                </button>
+                </Button>
               );
             })}
           </div>
-          <Stepper
-            valueLabel={`${contentWidth}px`}
-            valueTestId="prose-content-width"
-            canDecrease={contentWidth > MIN_WIDTH}
-            canIncrease={contentWidth < MAX_WIDTH}
-            decreaseLabel={t('settings.appearance.contentWidthSmaller')}
-            increaseLabel={t('settings.appearance.contentWidthLarger')}
-            onDecrease={() => setContentWidth(contentWidth - 40)}
-            onIncrease={() => setContentWidth(contentWidth + 40)}
-          />
+          <ButtonGroup>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('settings.appearance.contentWidthSmaller')}
+              disabled={contentWidth <= MIN_WIDTH}
+              onClick={() => setContentWidth(contentWidth - 40)}
+            >
+              −
+            </Button>
+            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="prose-content-width">
+              {contentWidth}px
+            </ButtonGroupText>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-xs"
+              aria-label={t('settings.appearance.contentWidthLarger')}
+              disabled={contentWidth >= MAX_WIDTH}
+              onClick={() => setContentWidth(contentWidth + 40)}
+            >
+              +
+            </Button>
+          </ButtonGroup>
         </div>
       </div>
 
@@ -257,7 +319,7 @@ export function AppearancePanel() {
       </div>
 
       <div className="flex items-center justify-end">
-        <Button variant="ghost" size="xs" data-testid="prose-reset" onClick={resetProse}>
+        <Button type="button" variant="ghost" size="xs" data-testid="prose-reset" onClick={resetProse}>
           {t('appearance.reset')}
         </Button>
       </div>

@@ -1,17 +1,17 @@
 import { useEffect } from 'react';
 import type { HostToWebview } from '@harness-deck/shared';
-import { applyHostMessage, closeMarkdownPreview, openSettingsPage, requestPrefill, useView } from './store.ts';
+import { applyHostMessage, openSettingsPage, requestPrefill, useView } from './store.ts';
 import { applyColorScheme, applyThemeMode } from './theme.ts';
 import { postToHost } from './vscode.ts';
-import { Button } from './components/ui/Button.tsx';
-import { LoaderGrid } from './components/ui/LoaderGrid.tsx';
-import { Shimmer } from './components/ui/Shimmer.tsx';
+import { Button } from '@/components/ui/button';
+import { LoaderGrid, Shimmer } from './components/beautifului/index.ts';
 import { BackendLogo } from './components/BackendLogo.tsx';
 import { HarnessDeckLogo } from './components/HarnessDeckLogo.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Header } from './components/Header.tsx';
 import { MarkdownPreviewModal } from './components/MarkdownPreviewModal.tsx';
 import { RuntimeBanner } from './components/RuntimeBanner.tsx';
+import { SessionHistoryPage } from './components/SessionHistoryPage.tsx';
 import { SettingsPage } from './components/SettingsPage.tsx';
 import { TabBar } from './components/TabBar.tsx';
 import { Thread } from './components/Thread.tsx';
@@ -33,8 +33,10 @@ export function App() {
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
+  const ready = useView((s) => s.ready);
   const runtime = useView((s) => s.runtime);
   const connection = useView((s) => s.connection);
+  const historyOpen = useView((s) => s.historyOpen);
   const settingsOpen = useView((s) => s.settingsOpen);
   const hasPreview = useView((s) => s.markdownPreview !== undefined);
   const activeModule = useView((s) => s.activeModule);
@@ -65,24 +67,20 @@ export function App() {
     applyThemeMode(appearance.theme ?? 'system');
   }, [appearance]);
 
-  useEffect(() => {
-    if (settingsOpen && hasPreview) closeMarkdownPreview();
-  }, [settingsOpen, hasPreview]);
-
-  const overlayOpen = settingsOpen || hasPreview;
+  const overlayOpen = settingsOpen || historyOpen || hasPreview;
   const hideChat = overlayOpen || activeModule !== 'sessions';
 
   return (
     <div className="app">
       <Header />
-      {settingsOpen ? <SettingsPage /> : hasPreview ? <MarkdownPreviewModal /> : null}
+      {hasPreview ? <MarkdownPreviewModal /> : settingsOpen ? <SettingsPage /> : historyOpen ? <SessionHistoryPage /> : null}
       {!overlayOpen && activeModule === 'overview' ? <OverviewView /> : null}
       {!overlayOpen && activeModule === 'schedules' ? <SchedulesView /> : null}
       {!overlayOpen && activeModule === 'agents' ? <AgentsView /> : null}
       {!overlayOpen && activeModule === 'tasks' ? <TasksView /> : null}
       <SessionsView hidden={hideChat}>
         <TabBar />
-        <RuntimeBanner status={runtime} connection={connection} />
+        {ready ? <RuntimeBanner status={runtime} connection={connection} /> : null}
         {failure ? (
           <div className="content-column mt-2">
             <div className="banner flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12.5px] text-ink-2 shadow-card">
@@ -115,11 +113,11 @@ function EmptyState() {
         <p className="mt-0 mb-1.5 text-[16px] font-semibold tracking-tight text-ink">{t('apiKey.title')}</p>
         <p className="mx-auto my-0 max-w-72 text-[13px] leading-relaxed text-ink-2">{t('apiKey.hint')}</p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button variant="primary" size="md" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
+          <Button type="button" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
             <KeyIcon className="size-3.5" />
             {t('apiKey.configure')}
           </Button>
-          <Button variant="secondary" size="md" onClick={() => postToHost({ type: 'openExternal', payload: { url: 'https://platform.deepseek.com/api_keys' } })}>
+          <Button type="button" variant="outline" onClick={() => postToHost({ type: 'openExternal', payload: { url: 'https://platform.deepseek.com/api_keys' } })}>
             <GlobeIcon className="size-3.5" />
             {t('apiKey.get')}
           </Button>

@@ -2,7 +2,7 @@
  * 工作台 · 任务模块（TasksView）
  *
  * 四列看板：待执行（todo）、执行中（in_progress）、待验收（review）、已完成（done）。
- * 支持在「待执行」列直接编写下一个任务，选择项目、选择 Harness、选择模型（及可选智能体）创建任务，
+ * 点击「新增任务」或「待执行」列头 + 按钮弹出 Modal 创建任务，选择项目、Harness、模型（及可选智能体），
  * 并开启「按顺序执行」自动依次调度队列。
  */
 import { useEffect, useState } from 'react';
@@ -17,6 +17,7 @@ import {
   ArrowUpIcon,
   ChatIcon,
   CheckIcon,
+  KanbanIcon,
   PlayIcon,
   PlusIcon,
   ReplyIcon,
@@ -24,15 +25,27 @@ import {
   TerminalIcon,
   TrashIcon,
 } from '../icons.tsx';
-import { Button } from '../ui/Button.tsx';
-import { Input, Select, Textarea } from '../ui/FormControls.tsx';
-import { ValuePill } from '../ui/ValuePill.tsx';
+import { ValuePill } from '../beautifului/index.ts';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 
 export function TasksView() {
   const t = useT();
   const board = useView((s) => s.workbench.tasks);
   const agents = useView((s) => s.workbench.agents);
   const backends = useView((s) => s.backends);
+  const providers = useView((s) => s.providers.items);
   const models = useView((s) => s.models);
   const projects = useView((s) => s.projects);
 
@@ -43,13 +56,27 @@ export function TasksView() {
   const [backendId, setBackendId] = useState(backends.active || 'dsh');
   const [modelKey, setModelKey] = useState('');
   const [agentId, setAgentId] = useState('');
-  const [composerExpanded, setComposerExpanded] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     if (!projectPath && defaultProject) {
       setProjectPath(defaultProject);
     }
   }, [projectPath, defaultProject]);
+
+  const openCreateModal = () => {
+    setTitle('');
+    setPrompt('');
+    setProjectPath(defaultProject);
+    setBackendId(backends.active || 'dsh');
+    setModelKey('');
+    setAgentId('');
+    setCreateOpen(true);
+  };
+
+  const closeCreateModal = () => {
+    setCreateOpen(false);
+  };
 
   const projectOptions = (() => {
     const map = new Map<string, string>();
@@ -64,6 +91,30 @@ export function TasksView() {
       if (!map.has(r.path)) map.set(r.path, r.name);
     }
     return [...map.entries()];
+  })();
+
+  const mergedModels = (() => {
+    const seen = new Set<string>();
+    const list: { key: string; label: string }[] = [];
+    const orderedProviders = [
+      ...providers.filter((p) => p.boundBackendIds.includes(backendId)),
+      ...providers.filter((p) => !p.boundBackendIds.includes(backendId)),
+    ];
+    for (const p of orderedProviders) {
+      for (const m of p.models) {
+        const key = `${p.id}::${m.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push({ key, label: `${m.name || m.id} (${p.name})` });
+      }
+    }
+    for (const m of models.options) {
+      const key = `${m.provider}::${m.model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      list.push({ key, label: `${m.name} (${m.group})` });
+    }
+    return list;
   })();
 
   const parseSelectedModel = () => {
@@ -96,6 +147,7 @@ export function TasksView() {
     });
     setPrompt('');
     setTitle('');
+    setCreateOpen(false);
   };
 
   const todoTasks = board.items.filter((item) => item.status === 'todo');
@@ -115,21 +167,20 @@ export function TasksView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-control border border-line bg-surface px-2.5 py-1 text-[12px] text-ink shadow-hairline">
+          <div className="inline-flex items-center gap-2 rounded-control border border-line bg-surface px-2.5 py-1 text-[12px] text-ink shadow-hairline">
             <span>{t('wb.tasks.autoRun')}</span>
-            <input
-              type="checkbox"
-              role="switch"
-              className="bui-switch"
+            <Switch
+              size="sm"
               data-testid="tasks-auto-run-switch"
+              aria-label={t('wb.tasks.autoRun')}
               checked={board.autoRun}
-              onChange={(e) => postToHost({ type: 'setTaskQueueAutoRun', payload: { autoRun: e.target.checked } })}
+              onCheckedChange={(autoRun) => postToHost({ type: 'setTaskQueueAutoRun', payload: { autoRun } })}
             />
-          </label>
+          </div>
 
           {todoTasks.length > 0 && !hasRunning ? (
             <Button
-              variant="primary"
+              type="button"
               size="xs"
               data-testid="tasks-start-queue-btn"
               onClick={() => postToHost({ type: 'runTaskNow', payload: { id: todoTasks[0]!.id } })}
@@ -141,7 +192,8 @@ export function TasksView() {
 
           {hasDone ? (
             <Button
-              variant="quiet"
+              type="button"
+              variant="ghost"
               size="xs"
               data-testid="tasks-clear-done-btn"
               onClick={() => postToHost({ type: 'clearDoneTasks', payload: {} })}
@@ -150,8 +202,166 @@ export function TasksView() {
               <span>{t('wb.tasks.clearDone')}</span>
             </Button>
           ) : null}
+
+          <Button type="button" size="sm" data-testid="task-new-btn" onClick={openCreateModal}>
+            <PlusIcon className="size-3.5" />
+            <span>{t('wb.tasks.new')}</span>
+          </Button>
         </div>
       </div>
+
+      {/* 新增任务模态弹窗（标题位于表单第一项） */}
+      <Dialog open={createOpen} onOpenChange={(open) => !open && closeCreateModal()}>
+        <DialogContent data-testid="kanban-task-creator" aria-modal="true" className="sm:max-w-[540px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[14px]">
+              <KanbanIcon className="size-4 text-accent-ink" />
+              <span>{t('wb.tasks.new')}</span>
+            </DialogTitle>
+            <DialogDescription className="sr-only">{t('wb.tasks.subtitle')}</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.fieldTitle')}</span>
+              <Input
+                data-testid="task-input-title"
+                value={title}
+                placeholder={t('wb.tasks.newTitlePlaceholder')}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.fieldPrompt')}</span>
+              <Textarea
+                data-testid="task-input-prompt"
+                rows={4}
+                value={prompt}
+                placeholder={t('wb.tasks.newPlaceholder')}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    handleCreateTask(false);
+                  }
+                }}
+              />
+            </label>
+
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 [&_[data-slot=native-select-wrapper]]:w-full">
+              {projectOptions.length > 0 ? (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectProject')}</span>
+                  <NativeSelect
+                    size="sm"
+                    data-testid="task-select-project"
+                    aria-label={t('wb.tasks.selectProject')}
+                    value={projectPath}
+                    onChange={(e) => setProjectPath(e.target.value)}
+                  >
+                    {projectOptions.map(([path, label]) => (
+                      <NativeSelectOption key={path} value={path}>
+                        {label}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+              ) : null}
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectHarness')}</span>
+                <NativeSelect
+                  size="sm"
+                  data-testid="task-select-harness"
+                  aria-label={t('wb.tasks.selectHarness')}
+                  value={backendId}
+                  onChange={(e) => setBackendId(e.target.value)}
+                >
+                  {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
+                    <NativeSelectOption key={b.id} value={b.id}>
+                      {b.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectModel')}</span>
+                <NativeSelect
+                  size="sm"
+                  data-testid="task-select-model"
+                  aria-label={t('wb.tasks.selectModel')}
+                  value={modelKey}
+                  onChange={(e) => setModelKey(e.target.value)}
+                >
+                  <NativeSelectOption value="">{t('wb.tasks.modelAuto')}</NativeSelectOption>
+                  {mergedModels.map((m) => (
+                    <NativeSelectOption key={m.key} value={m.key}>
+                      {m.label}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </label>
+
+              {agents.length > 0 ? (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectAgent')}</span>
+                  <NativeSelect
+                    size="sm"
+                    data-testid="task-select-agent"
+                    aria-label={t('wb.tasks.selectAgent')}
+                    value={agentId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setAgentId(nextId);
+                      const chosen = agents.find((a) => a.id === nextId);
+                      if (chosen) {
+                        setBackendId(chosen.backendId);
+                        if (chosen.model) setModelKey(`${chosen.provider ?? ''}::${chosen.model}`);
+                      }
+                    }}
+                  >
+                    <NativeSelectOption value="">{t('wb.tasks.agentNone')}</NativeSelectOption>
+                    {agents.map((a) => (
+                      <NativeSelectOption key={a.id} value={a.id}>
+                        {a.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+              ) : null}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" data-testid="task-cancel-btn" onClick={closeCreateModal}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="task-create-run-btn"
+              disabled={!prompt.trim()}
+              onClick={() => handleCreateTask(true)}
+            >
+              <PlayIcon className="size-3" />
+              <span>{t('wb.tasks.runNow')}</span>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="task-create-btn"
+              disabled={!prompt.trim()}
+              onClick={() => handleCreateTask(false)}
+            >
+              <PlusIcon className="size-3" />
+              <span>{t('wb.tasks.add')}</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 四列响应式看板：宽屏四列并排，窄侧边栏纵向堆叠可滚动 */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto min-[900px]:grid-cols-4 min-[900px]:overflow-x-auto">
@@ -186,10 +396,13 @@ export function TasksView() {
                 </div>
                 {col === 'todo' ? (
                   <Button
-                    variant="quiet"
-                    size="xs"
-                    aria-expanded={composerExpanded}
-                    onClick={() => setComposerExpanded((v) => !v)}
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    data-testid="kanban-todo-add-btn"
+                    aria-label={t('wb.tasks.new')}
+                    title={t('wb.tasks.new')}
+                    onClick={openCreateModal}
                   >
                     <PlusIcon className="size-3.5" />
                   </Button>
@@ -197,127 +410,6 @@ export function TasksView() {
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2.5">
-                {/* 在「待执行」列顶部内联写下一个任务：选项目、选 harness、选模型创建任务 */}
-                {col === 'todo' && composerExpanded ? (
-                  <div
-                    className="flex flex-col gap-2 rounded-control border border-line bg-field/60 p-2.5"
-                    data-testid="kanban-task-creator"
-                  >
-                    <Textarea
-                      data-testid="task-input-prompt"
-                      rows={2}
-                      value={prompt}
-                      placeholder={t('wb.tasks.newPlaceholder')}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      onKeyDown={(e) => {
-                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                          e.preventDefault();
-                          handleCreateTask(false);
-                        }
-                      }}
-                    />
-                    <Input
-                      data-testid="task-input-title"
-                      value={title}
-                      placeholder={t('wb.tasks.newTitlePlaceholder')}
-                      onChange={(e) => setTitle(e.target.value)}
-                    />
-
-                    <div className="grid grid-cols-1 gap-1.5">
-                      {projectOptions.length > 0 ? (
-                        <Select
-                          data-testid="task-select-project"
-                          aria-label={t('wb.tasks.selectProject')}
-                          value={projectPath}
-                          onChange={(e) => setProjectPath(e.target.value)}
-                        >
-                          {projectOptions.map(([path, label]) => (
-                            <option key={path} value={path}>
-                              {t('wb.tasks.selectProject')}: {label}
-                            </option>
-                          ))}
-                        </Select>
-                      ) : null}
-
-                      <Select
-                        data-testid="task-select-harness"
-                        aria-label={t('wb.tasks.selectHarness')}
-                        value={backendId}
-                        onChange={(e) => setBackendId(e.target.value)}
-                      >
-                        {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {t('wb.tasks.selectHarness')}: {b.name}
-                          </option>
-                        ))}
-                      </Select>
-
-                      <Select
-                        data-testid="task-select-model"
-                        aria-label={t('wb.tasks.selectModel')}
-                        value={modelKey}
-                        onChange={(e) => setModelKey(e.target.value)}
-                      >
-                        <option value="">
-                          {t('wb.tasks.selectModel')}: {t('wb.tasks.modelAuto')}
-                        </option>
-                        {models.options.map((m) => (
-                          <option key={`${m.provider}::${m.model}`} value={`${m.provider}::${m.model}`}>
-                            {m.name} ({m.group})
-                          </option>
-                        ))}
-                      </Select>
-
-                      {agents.length > 0 ? (
-                        <Select
-                          data-testid="task-select-agent"
-                          aria-label={t('wb.tasks.selectAgent')}
-                          value={agentId}
-                          onChange={(e) => {
-                            const nextId = e.target.value;
-                            setAgentId(nextId);
-                            const chosen = agents.find((a) => a.id === nextId);
-                            if (chosen) {
-                              setBackendId(chosen.backendId);
-                              if (chosen.model) setModelKey(`${chosen.provider ?? ''}::${chosen.model}`);
-                            }
-                          }}
-                        >
-                          <option value="">{t('wb.tasks.agentNone')}</option>
-                          {agents.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.name}
-                            </option>
-                          ))}
-                        </Select>
-                      ) : null}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-1.5 pt-0.5">
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        data-testid="task-create-run-btn"
-                        disabled={!prompt.trim()}
-                        onClick={() => handleCreateTask(true)}
-                      >
-                        <PlayIcon className="size-3" />
-                        <span>{t('wb.tasks.runNow')}</span>
-                      </Button>
-                      <Button
-                        variant="primary"
-                        size="xs"
-                        data-testid="task-create-btn"
-                        disabled={!prompt.trim()}
-                        onClick={() => handleCreateTask(false)}
-                      >
-                        <PlusIcon className="size-3" />
-                        <span>{t('wb.tasks.add')}</span>
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-
                 {items.length === 0 ? (
                   <div className="py-4 text-center text-[12px] text-ink-3">{t('wb.tasks.emptyCol')}</div>
                 ) : (
@@ -386,8 +478,9 @@ export function TasksView() {
                             <>
                               <div className="flex items-center gap-0.5">
                                 <Button
-                                  variant="quiet"
-                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
                                   disabled={idx === 0}
                                   title={t('wb.tasks.moveUp')}
                                   aria-label={t('wb.tasks.moveUp')}
@@ -398,8 +491,9 @@ export function TasksView() {
                                   <ArrowUpIcon className="size-3" />
                                 </Button>
                                 <Button
-                                  variant="quiet"
-                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
                                   disabled={idx === items.length - 1}
                                   title={t('wb.tasks.moveDown')}
                                   aria-label={t('wb.tasks.moveDown')}
@@ -411,7 +505,8 @@ export function TasksView() {
                                 </Button>
                               </div>
                               <Button
-                                variant="secondary"
+                                type="button"
+                                variant="outline"
                                 size="xs"
                                 disabled={hasRunning}
                                 data-testid={`task-run-${task.id}`}
@@ -427,7 +522,8 @@ export function TasksView() {
                             <div className="flex w-full items-center justify-between gap-1">
                               {task.sessionId ? (
                                 <Button
-                                  variant="secondary"
+                                  type="button"
+                                  variant="outline"
                                   size="xs"
                                   onClick={() =>
                                     postToHost({
@@ -445,7 +541,8 @@ export function TasksView() {
                                 </Button>
                               ) : <span />}
                               <Button
-                                variant="quiet"
+                                type="button"
+                                variant="ghost"
                                 size="xs"
                                 onClick={() =>
                                   postToHost({ type: 'updateTaskStatus', payload: { id: task.id, status: 'review' } })
@@ -461,7 +558,8 @@ export function TasksView() {
                               <div className="flex items-center gap-1">
                                 {task.sessionId ? (
                                   <Button
-                                    variant="quiet"
+                                    type="button"
+                                    variant="ghost"
                                     size="xs"
                                     onClick={() =>
                                       postToHost({
@@ -480,7 +578,8 @@ export function TasksView() {
                                 ) : null}
                                 {hasVerify ? (
                                   <Button
-                                    variant="quiet"
+                                    type="button"
+                                    variant="ghost"
                                     size="xs"
                                     onClick={() =>
                                       postToHost({ type: 'runProjectVerify', payload: { path: task.projectPath } })
@@ -493,8 +592,9 @@ export function TasksView() {
                               </div>
                               <div className="flex items-center gap-1">
                                 <Button
-                                  variant="quiet"
-                                  size="xs"
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
                                   title={t('wb.tasks.sendBack')}
                                   aria-label={t('wb.tasks.sendBack')}
                                   onClick={() =>
@@ -504,7 +604,7 @@ export function TasksView() {
                                   <ReplyIcon className="size-3" />
                                 </Button>
                                 <Button
-                                  variant="primary"
+                                  type="button"
                                   size="xs"
                                   data-testid={`task-approve-${task.id}`}
                                   onClick={() =>
@@ -522,7 +622,8 @@ export function TasksView() {
                             <div className="flex w-full items-center justify-between gap-1">
                               {task.sessionId ? (
                                 <Button
-                                  variant="quiet"
+                                  type="button"
+                                  variant="ghost"
                                   size="xs"
                                   onClick={() =>
                                     postToHost({
@@ -540,8 +641,9 @@ export function TasksView() {
                                 </Button>
                               ) : <span />}
                               <Button
-                                variant="quiet"
-                                size="xs"
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
                                 onClick={() =>
                                   postToHost({ type: 'updateTaskStatus', payload: { id: task.id, status: 'todo' } })
                                 }

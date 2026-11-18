@@ -21,6 +21,7 @@ beforeAll(async () => {
 afterEach(() => {
   cleanup();
   posted.length = 0;
+  store.resetStoreForTests();
 });
 
 const efforts = ['off', 'low', 'medium', 'high'].map((id) => ({ id, name: id[0]!.toUpperCase() + id.slice(1) }));
@@ -40,36 +41,43 @@ function setModels() {
 }
 
 describe('模型选择', () => {
-  it('第一级每个模型一行，当前模型带勾并显示当前思考等级', () => {
+  it('上面选择模型，下面同步展示当前模型的思考等级滑块', () => {
     setModels();
     render(createElement(ModelPicker, { disabled: false }));
     fireEvent.click(screen.getByTestId('model-picker'));
-    const items = document.querySelectorAll('.model-menu .model-item');
+
+    const items = document.querySelectorAll('[data-testid="model-list"] .model-item');
     expect([...items].map((el) => el.querySelector('.menu-item__label')?.textContent)).toEqual(['V4.1-Flash', 'V4-Flash-0731']);
-    const active = document.querySelector('.model-menu .menu-item--active');
+    const active = document.querySelector('[data-testid="model-list"] .menu-item--active');
     expect(active?.textContent).toContain('V4.1-Flash');
     expect(active?.querySelector('.model-item__check svg')).not.toBeNull();
     expect(active?.querySelector('.menu-item__hint')?.textContent).toBe('Medium');
+
+    const level = screen.getByTestId('effort-menu');
+    expect(screen.getByTestId('effort-active-label').textContent).toBe('Medium');
+    expect([...level.querySelectorAll('.model-effort-option .menu-item__label')].map((el) => el.textContent)).toEqual([
+      'Off',
+      'Low',
+      'Medium',
+      'High',
+    ]);
+    expect(level.querySelector('.menu-item--active')?.textContent).toBe('Medium');
   });
 
-  it('点有多个思考等级的模型进入第二级，选中后发送模型和思考等级', () => {
+  it('在下方思考等级区域点选等级直接发送模型和思考等级', () => {
     setModels();
     render(createElement(ModelPicker, { disabled: false }));
     fireEvent.click(screen.getByTestId('model-picker'));
-    fireEvent.click(screen.getByText('V4.1-Flash'));
-    expect(posted).toEqual([]);
-    const level = screen.getByTestId('effort-menu');
-    expect([...level.querySelectorAll('.model-item .menu-item__label')].map((el) => el.textContent)).toEqual(['Off', 'Low', 'Medium', 'High']);
-    expect(level.querySelector('.menu-item--active')?.textContent).toContain('Medium');
-    fireEvent.click(screen.getByText('High'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'High' }));
     expect(posted).toEqual([{ type: 'selectModel', payload: { provider: 'p', model: 'flash', reasoningEffort: 'high' } }]);
   });
 
-  it('只有一种思考等级的模型点一下就选中', () => {
+  it('只有一种或没有思考等级的模型点一下即选中并关闭浮层', () => {
     setModels();
     render(createElement(ModelPicker, { disabled: false }));
     fireEvent.click(screen.getByTestId('model-picker'));
     fireEvent.click(screen.getByText('V4-Flash-0731'));
     expect(posted).toEqual([{ type: 'selectModel', payload: { provider: 'p', model: 'old' } }]);
+    expect(screen.queryByTestId('model-list')).toBeNull();
   });
 });

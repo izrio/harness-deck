@@ -19,35 +19,59 @@ export interface AcpProfileSetting {
 
 /** 内置底层 DeepSeek（dsh，DeepSeek Harness）。id 保持 dsh：会话、标签等按 id 保存。 */
 export const DSH_PROFILE: BackendProfile = { id: 'dsh', kind: 'dsh', name: 'DeepSeek' };
+/** 内置底层 ZCode（智谱 Z.ai，通过 `zcode app-server --stdio` 接入）。 */
+export const ZCODE_PROFILE: Extract<BackendProfile, { kind: 'zcode' }> = { id: 'zcode', kind: 'zcode', name: 'ZCode' };
+/** 内置底层 Claude Code（Anthropic，通过 `claude -p --input-format stream-json --output-format stream-json` 原生接入）。 */
+export const CLAUDE_PROFILE: Extract<BackendProfile, { kind: 'claude' }> = { id: 'claude', kind: 'claude', name: 'Claude Code' };
+/** 内置底层 Pi（通过 `pi --mode rpc` 原生接入）。 */
+export const PI_PROFILE: Extract<BackendProfile, { kind: 'pi' }> = { id: 'pi', kind: 'pi', name: 'Pi' };
 
 type AcpProfile = Extract<BackendProfile, { kind: 'acp' }>;
 
+export type BuiltinHintId =
+  | 'pi'
+  | 'pi-sign-in'
+  | 'codebuddy'
+  | 'claude'
+  | 'claude-sign-in'
+  | 'opencode'
+  | 'opencode-sign-in'
+  | 'zcode'
+  | 'zcode-sign-in';
+
 /**
- * 内置的 ACP 代理。不放在设置的默认值里：用户改过 `harnessDeck.backends` 后，设置的默认值就不再生效，新加的内置项会看不到。
- * @param hint - 安装提示的文案（Host 侧 i18n）。
+ * 内置的智能体（原生 Pi / Claude Code / ZCode 与内置 ACP 代理）。
+ * 不放在设置的默认值里：用户改过 `harnessDeck.backends` 后，设置的默认值就不再生效，新加的内置项会看不到。
+ * @param hint - 安装与登录提示的文案（Host 侧 i18n）。
  */
-export function builtinProfiles(hint: (id: 'oh-my-pi' | 'codebuddy' | 'claude' | 'claude-sign-in') => string): AcpProfile[] {
+export function builtinProfiles(hint: (id: BuiltinHintId) => string): BackendProfile[] {
   return [
-    { id: 'oh-my-pi', kind: 'acp', name: 'Pi', command: 'omp', args: ['acp'], env: {}, installHint: hint('oh-my-pi') },
+    // Pi 原生通过 `pi --mode rpc` NDJSON 双向协议接入
+    { ...PI_PROFILE, installHint: hint('pi'), signInHint: hint('pi-sign-in') },
     // CodeBuddy 2.x 的 ACP 只给一个会话推送实时更新，见 BackendProfile.singleSession
     { id: 'codebuddy', kind: 'acp', name: 'CodeBuddy', command: 'codebuddy', args: ['--acp'], env: {}, installHint: hint('codebuddy'), singleSession: true },
-    // Claude Code 通过 ACP 官方适配器（Claude Agent SDK）接入；登录状态和 Claude Code 共用
-    { id: 'claude', kind: 'acp', name: 'Claude Code', command: 'claude-agent-acp', args: [], env: {}, installHint: hint('claude'), signInHint: hint('claude-sign-in') },
+    // Claude Code 原生通过 `claude -p` 流式 JSON 协议接入
+    { ...CLAUDE_PROFILE, installHint: hint('claude'), signInHint: hint('claude-sign-in') },
+    // OpenCode 原生内置 ACP 子命令（opencode acp）
+    { id: 'opencode', kind: 'acp', name: 'OpenCode', command: 'opencode', args: ['acp'], env: {}, installHint: hint('opencode'), signInHint: hint('opencode-sign-in') },
+    // 智谱 ZCode 原生通过 `zcode app-server --stdio` 专有协议接入
+    { ...ZCODE_PROFILE, installHint: hint('zcode'), signInHint: hint('zcode-sign-in') },
   ];
 }
 
 /**
  * 解析设置里的 ACP 底层。缺少名称或命令的项跳过；id 默认取名称，重复时只保留第一个。
  * @param log - 跳过的项写日志。
- * @param builtins - 内置的 ACP 代理：id 和设置里某一项相同时用设置里的那项（位置不变）。
+ * @param builtins - 内置的智能体：ACP 项在 id 和设置里某一项相同时用设置里的那项（位置不变）。
  */
-export function parseProfiles(raw: unknown, log: (line: string) => void = () => undefined, builtins: readonly AcpProfile[] = []): BackendProfile[] {
+export function parseProfiles(raw: unknown, log: (line: string) => void = () => undefined, builtins: readonly BackendProfile[] = []): BackendProfile[] {
   const fromSettings = parseSettings(raw, log);
   const overrides = new Map(fromSettings.map((p) => [p.id, p]));
   const builtinIds = new Set(builtins.map((p) => p.id));
   return [
     DSH_PROFILE,
     ...builtins.map((builtin) => {
+      if (builtin.kind !== 'acp') return builtin;
       const override = overrides.get(builtin.id);
       // 覆盖时没写安装提示，沿用内置的
       if (!override) return builtin;
@@ -63,9 +87,11 @@ export function parseProfiles(raw: unknown, log: (line: string) => void = () => 
   ];
 }
 
+const RESERVED_NATIVE_IDS = new Set<string>(['dsh', 'zcode', 'claude', 'pi']);
+
 function parseSettings(raw: unknown, log: (line: string) => void): AcpProfile[] {
   const profiles: AcpProfile[] = [];
-  const seen = new Set<string>(['dsh']);
+  const seen = new Set<string>(RESERVED_NATIVE_IDS);
   for (const item of Array.isArray(raw) ? (raw as AcpProfileSetting[]) : []) {
     const name = typeof item?.name === 'string' ? item.name.trim() : '';
     const command = typeof item?.command === 'string' ? item.command.trim() : '';
@@ -101,9 +127,11 @@ function parseSettings(raw: unknown, log: (line: string) => void): AcpProfile[] 
 /** 内置底层对应的 npm 包名（用于设置页点击安装、卸载、切换版本）。 */
 export const BACKEND_NPM_PACKAGES: Readonly<Record<string, string>> = {
   dsh: '@deepseek-ai/dsh',
-  'oh-my-pi': '@oh-my-pi/pi-coding-agent',
+  pi: '@earendil-works/pi-coding-agent',
   codebuddy: '@tencent-ai/codebuddy-code',
-  claude: '@agentclientprotocol/claude-agent-acp',
+  claude: '@anthropic-ai/claude-code',
+  opencode: 'opencode-ai',
+  zcode: 'zcode-app-cli',
 };
 
 /** 查找某个底层 id 对应的 npm 包名。 */
@@ -114,9 +142,11 @@ export function npmPackageFor(id: string): string | undefined {
 /** 内置底层的安装命令（供复制和提示）。 */
 const INSTALL_COMMANDS: Readonly<Record<string, string>> = {
   dsh: 'npm install -g @deepseek-ai/dsh',
-  'oh-my-pi': 'npm install -g @oh-my-pi/pi-coding-agent',
+  pi: 'npm install -g @earendil-works/pi-coding-agent',
   codebuddy: 'npm install -g @tencent-ai/codebuddy-code',
-  claude: 'npm install -g @agentclientprotocol/claude-agent-acp',
+  claude: 'npm install -g @anthropic-ai/claude-code',
+  opencode: 'npm install -g opencode-ai',
+  zcode: 'npm install -g zcode-app-cli',
 };
 
 export interface ProfileViewMeta {
@@ -149,8 +179,8 @@ export interface UpsertProfileInput {
 export function upsertBackendSetting(raw: unknown, input: UpsertProfileInput): AcpProfileSetting[] {
   const list = Array.isArray(raw) ? raw.filter((item): item is AcpProfileSetting => Boolean(item && typeof item === 'object')) : [];
   const rawId = normalizeProfileId(input.id || input.name) || 'custom-agent';
-  // dsh 为内置非 ACP 底层保留 id，避免新增自定义 ACP 代理时被 parseProfiles 跳过
-  const id = rawId === 'dsh' ? 'dsh-acp' : rawId;
+  // dsh / zcode / claude / pi 为内置非 ACP 底层保留 id，避免新增自定义 ACP 代理时被 parseProfiles 跳过
+  const id = RESERVED_NATIVE_IDS.has(rawId) ? `${rawId}-acp` : rawId;
   const entry: AcpProfileSetting = {
     id,
     name: input.name.trim(),
@@ -192,7 +222,7 @@ export function profileView(profile: BackendProfile, meta?: ProfileViewMeta | bo
   const info: ProfileViewMeta = typeof meta === 'boolean' ? { available: meta } : (meta ?? {});
   const installCommand = INSTALL_COMMANDS[profile.id];
   const npmPackage = BACKEND_NPM_PACKAGES[profile.id];
-  const isBuiltin = info.builtinIds ? info.builtinIds.has(profile.id) : profile.kind === 'dsh';
+  const isBuiltin = info.builtinIds ? info.builtinIds.has(profile.id) : profile.kind !== 'acp';
   const isOverridden = info.overriddenIds?.has(profile.id) ?? false;
   const isCustom = profile.kind === 'acp' && !isBuiltin;
   return {
@@ -219,6 +249,6 @@ export function profileView(profile: BackendProfile, meta?: ProfileViewMeta | bo
     ...(info.versionsError ? { versionsError: info.versionsError } : {}),
     ...(info.busy ? { busy: info.busy } : {}),
     ...(installCommand ? { installCommand } : {}),
-    ...(profile.kind === 'acp' && profile.installHint && !installCommand ? { installHint: profile.installHint } : {}),
+    ...(profile.kind !== 'dsh' && profile.installHint && !installCommand ? { installHint: profile.installHint } : {}),
   };
 }

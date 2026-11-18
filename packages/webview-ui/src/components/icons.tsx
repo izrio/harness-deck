@@ -364,6 +364,13 @@ export const ClockIcon = (p: IconProps) => (
     <path d="M8 5v3.2l2.3 1.4" />
   </svg>
 );
+export const HistoryIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M2.5 8a5.5 5.5 0 1 0 .7-2.8" />
+    <path d="M3.2 2.5v2.7h2.7" />
+    <path d="M8 5.2v2.9l2 1.2" />
+  </svg>
+);
 export const KanbanIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <rect x="2.3" y="3" width="3" height="10" rx="0.8" />
@@ -385,5 +392,15 @@ export const SidebarIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <rect x="2.2" y="3" width="11.6" height="10" rx="1.4" />
     <path d="M6.2 3v10" />
+  </svg>
+);
+export const PuzzleIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6.5 3.5a1.5 1.5 0 0 1 3 0V5h2a1 1 0 0 1 1 1v2h-1a1.5 1.5 0 0 0 0 3h1v2a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2Z" />
+  </svg>
+);
+export const PlugIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 2.5v3M10 2.5v3M4.2 5.5h7.6v2.3a3.8 3.8 0 0 1-3.8 3.8v2.4" />
   </svg>
 );

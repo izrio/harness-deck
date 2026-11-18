@@ -24,10 +24,11 @@ import {
   SunIcon,
   TerminalIcon,
 } from '../icons.tsx';
-import { Button } from '../ui/Button.tsx';
-import { Input, Select, Stepper } from '../ui/FormControls.tsx';
-import { TerminalBlock } from '../ui/TerminalBlock.tsx';
-import { ValuePill } from '../ui/ValuePill.tsx';
+import { ValuePill } from '../beautifului/index.ts';
+import { Button } from '@/components/ui/button';
+import { ButtonGroup, ButtonGroupText } from '@/components/ui/button-group';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
 const THEME_CARDS: readonly {
   readonly mode: ThemeMode;
@@ -57,6 +58,7 @@ const DEFAULT_TERM_LH = 1.6;
 
 export function AppearanceSettings() {
   const t = useT();
+  const hostKind = useView((s) => s.hostKind);
   const appearance = useView((s) => s.appearance);
   const preferences = useView((s) => s.preferences);
 
@@ -188,7 +190,9 @@ export function AppearanceSettings() {
                       </span>
                     ) : null}
                   </div>
-                  <span className="text-[11px] leading-snug text-ink-3">{t(descKey)}</span>
+                  <span className="text-[11px] leading-snug text-ink-3">
+                    {t(mode === 'system' && hostKind === 'jetbrains' ? 'settings.appearance.theme.systemDescIde' : descKey)}
+                  </span>
                 </button>
               );
             })}
@@ -291,16 +295,31 @@ export function AppearanceSettings() {
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalSize')}</span>
             <div className="flex items-center gap-2">
               {appearance.terminalFontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-              <Stepper
-                valueLabel={`${termSize}px`}
-                valueTestId="terminal-font-size"
-                canDecrease={termSize > MIN_TERM_SIZE}
-                canIncrease={termSize < MAX_TERM_SIZE}
-                decreaseLabel={t('settings.appearance.terminalSizeSmaller')}
-                increaseLabel={t('settings.appearance.terminalSizeLarger')}
-                onDecrease={() => updateTerminal({ terminalFontSize: Math.max(MIN_TERM_SIZE, termSize - 1) })}
-                onIncrease={() => updateTerminal({ terminalFontSize: Math.min(MAX_TERM_SIZE, termSize + 1) })}
-              />
+              <ButtonGroup>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-xs"
+                  aria-label={t('settings.appearance.terminalSizeSmaller')}
+                  disabled={termSize <= MIN_TERM_SIZE}
+                  onClick={() => updateTerminal({ terminalFontSize: Math.max(MIN_TERM_SIZE, termSize - 1) })}
+                >
+                  −
+                </Button>
+                <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="terminal-font-size">
+                  {termSize}px
+                </ButtonGroupText>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-xs"
+                  aria-label={t('settings.appearance.terminalSizeLarger')}
+                  disabled={termSize >= MAX_TERM_SIZE}
+                  onClick={() => updateTerminal({ terminalFontSize: Math.min(MAX_TERM_SIZE, termSize + 1) })}
+                >
+                  +
+                </Button>
+              </ButtonGroup>
             </div>
           </div>
 
@@ -308,26 +327,43 @@ export function AppearanceSettings() {
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalLineHeight')}</span>
             <div className="flex items-center gap-2">
               {appearance.terminalLineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-              <Stepper
-                valueLabel={termLineHeight.toFixed(1)}
-                valueTestId="terminal-line-height"
-                canDecrease={termLineHeight > MIN_TERM_LH + 0.01}
-                canIncrease={termLineHeight < MAX_TERM_LH - 0.01}
-                decreaseLabel={t('settings.appearance.terminalLineHeightSmaller')}
-                increaseLabel={t('settings.appearance.terminalLineHeightLarger')}
-                onDecrease={() => updateTerminal({ terminalLineHeight: Number((termLineHeight - 0.1).toFixed(1)) })}
-                onIncrease={() => updateTerminal({ terminalLineHeight: Number((termLineHeight + 0.1).toFixed(1)) })}
-              />
+              <ButtonGroup>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-xs"
+                  aria-label={t('settings.appearance.terminalLineHeightSmaller')}
+                  disabled={termLineHeight <= MIN_TERM_LH + 0.01}
+                  onClick={() => updateTerminal({ terminalLineHeight: Number((termLineHeight - 0.1).toFixed(1)) })}
+                >
+                  −
+                </Button>
+                <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="terminal-line-height">
+                  {termLineHeight.toFixed(1)}
+                </ButtonGroupText>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-xs"
+                  aria-label={t('settings.appearance.terminalLineHeightLarger')}
+                  disabled={termLineHeight >= MAX_TERM_LH - 0.01}
+                  onClick={() => updateTerminal({ terminalLineHeight: Number((termLineHeight + 0.1).toFixed(1)) })}
+                >
+                  +
+                </Button>
+              </ButtonGroup>
             </div>
           </div>
 
-          <TerminalBlock
+          <pre
             data-testid="terminal-live-preview"
-            text={'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
-          />
+            className="terminal-surface m-0 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink-2 shadow-hairline [overflow-wrap:anywhere]"
+          >
+            {'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
+          </pre>
 
           <div className="flex items-center justify-end">
-            <Button variant="ghost" size="xs" data-testid="terminal-reset" onClick={resetTerminal}>
+            <Button type="button" variant="ghost" size="xs" data-testid="terminal-reset" onClick={resetTerminal}>
               {t('settings.appearance.resetTerminal')}
             </Button>
           </div>
@@ -350,17 +386,21 @@ export function AppearanceSettings() {
 
         <div className="primitive-card-pad flex items-center justify-between gap-3">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.language')}</span>
-          <Select
-            wrapperClassName="w-44"
-            data-testid="pref-language"
-            aria-label={t('settings.language')}
-            value={preferences.language}
-            onChange={(e) => updateLanguage(e.target.value as PreferencesState['language'])}
-          >
-            <option value="auto">{t('settings.language.auto')}</option>
-            <option value="zh">{t('settings.language.zh')}</option>
-            <option value="en">{t('settings.language.en')}</option>
-          </Select>
+          <div className="w-44 [&_[data-slot=native-select-wrapper]]:w-full">
+            <NativeSelect
+              size="sm"
+              data-testid="pref-language"
+              aria-label={t('settings.language')}
+              value={preferences.language}
+              onChange={(e) => updateLanguage(e.target.value as PreferencesState['language'])}
+            >
+              <NativeSelectOption value="auto">
+                {t(hostKind === 'jetbrains' ? 'settings.language.autoIde' : 'settings.language.auto')}
+              </NativeSelectOption>
+              <NativeSelectOption value="zh">{t('settings.language.zh')}</NativeSelectOption>
+              <NativeSelectOption value="en">{t('settings.language.en')}</NativeSelectOption>
+            </NativeSelect>
+          </div>
         </div>
       </section>
     </div>

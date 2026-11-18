@@ -8,8 +8,8 @@ import { closeMarkdownPreview, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { ArrowLeftIcon, FileIcon, SpinnerIcon } from './icons.tsx';
 import { Markdown } from './Markdown.tsx';
-import { Button } from './ui/Button.tsx';
-import { ValuePill } from './ui/ValuePill.tsx';
+import { ValuePill } from './beautifului/index.ts';
+import { Button } from '@/components/ui/button';
 
 export function isMarkdownPath(path: string): boolean {
   return /\.(?:md|markdown|mdx)$/iu.test(path);
@@ -38,7 +38,7 @@ export function MarkdownPreviewModal() {
       data-testid="markdown-preview-modal"
     >
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-surface px-3">
-        <Button variant="ghost" size="xs" data-testid="markdown-preview-close" onClick={closeMarkdownPreview}>
+        <Button type="button" variant="ghost" size="xs" data-testid="markdown-preview-close" onClick={closeMarkdownPreview}>
           <ArrowLeftIcon className="size-3.5" />
           <span>{t('common.close')}</span>
         </Button>
@@ -48,7 +48,8 @@ export function MarkdownPreviewModal() {
           <ValuePill className="hidden truncate font-mono text-[10.5px] sm:inline-flex">{preview.path}</ValuePill>
         </div>
         <Button
-          variant="secondary"
+          type="button"
+          variant="outline"
           size="xs"
           data-testid="markdown-preview-open-editor"
           onClick={() => postToHost({ type: 'openFile', payload: { path: preview.path } })}

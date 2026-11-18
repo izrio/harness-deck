@@ -1,0 +1,3 @@
+<idea-plugin>
+    <!-- Optional Terminal plugin integration; TerminalRunnerHelper handles runtime detection gracefully -->
+</idea-plugin>

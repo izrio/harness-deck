@@ -6,11 +6,9 @@ import type { PendingInteraction, QuestionView } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { Button } from './ui/Button.tsx';
-import { Textarea } from './ui/FormControls.tsx';
-import { GlideMenu } from './ui/GlideMenu.tsx';
-import { TerminalBlock } from './ui/TerminalBlock.tsx';
-import { ValuePill } from './ui/ValuePill.tsx';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { GlideMenu, ValuePill } from './beautifului/index.ts';
 import { Markdown } from './Markdown.tsx';
 import {
   ArrowLeftIcon,
@@ -130,7 +128,9 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
           <span>{title}</span>
         </header>
         {item.subjectKind === 'command' && item.subject ? (
-          <TerminalBlock text={item.subject} className="interaction__command max-h-40 text-ink" />
+          <pre className="interaction__command terminal-surface m-0 max-h-40 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink shadow-hairline [overflow-wrap:anywhere]">
+            {item.subject}
+          </pre>
         ) : null}
         {item.subjectKind === 'file' && item.subject ? (
           <button
@@ -155,24 +155,24 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
       </div>
       <div className="interaction__actions primitive-card-footer flex flex-wrap items-center gap-1.5 border-t border-line">
         {item.previewable ? (
-          <Button variant="quiet" size="sm" className="interaction__preview mr-auto text-ink-2" onClick={() => postToHost({ type: 'previewApproval', payload: { id: item.id } })}>
+          <Button type="button" variant="ghost" size="sm" className="interaction__preview mr-auto text-ink-2" onClick={() => postToHost({ type: 'previewApproval', payload: { id: item.id } })}>
             <EyeIcon className="size-3.5" />
             <span>{t('approval.preview')}</span>
           </Button>
         ) : (
           <span className="mr-auto" />
         )}
-        <Button variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => respond('reject')}>
+        <Button type="button" variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => respond('reject')}>
           {sent === 'reject' ? <SpinnerIcon className="size-3.5" /> : <CloseIcon className="size-3.5" />}
           {t('approval.reject')}
         </Button>
         {item.allowAlways ? (
-          <Button variant="secondary" size="sm" disabled={sent !== undefined || blocked} title={t('approval.allowAlwaysTitle')} onClick={() => respond('allowAlways')}>
+          <Button type="button" variant="outline" size="sm" disabled={sent !== undefined || blocked} title={t('approval.allowAlwaysTitle')} onClick={() => respond('allowAlways')}>
             {sent === 'allowAlways' ? <SpinnerIcon className="size-3.5" /> : null}
             {item.allowAlways}
           </Button>
         ) : null}
-        <Button variant="accent" size="sm" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
+        <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
           {sent === 'allow' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
           {t('approval.allow')}
         </Button>
@@ -225,7 +225,8 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
       </div>
       <div className="interaction__actions primitive-card-footer flex flex-wrap items-center gap-1.5 border-t border-line">
         <Button
-          variant="quiet"
+          type="button"
+          variant="ghost"
           size="sm"
           className="interaction__skip mr-auto text-ink-2"
           disabled={sent !== undefined}
@@ -240,22 +241,22 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
         </Button>
         {feedback === undefined ? (
           <>
-            <Button variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback('')}>
+            <Button type="button" variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback('')}>
               <PencilIcon className="size-3.5" />
               {t('plan.keep')}
             </Button>
-            <Button variant="accent" size="sm" disabled={sent !== undefined} onClick={() => answer(intent.approve)}>
+            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={sent !== undefined} onClick={() => answer(intent.approve)}>
               {sent === 'approve' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
               {t('plan.approve')}
             </Button>
           </>
         ) : (
           <>
-            <Button variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback(undefined)}>
+            <Button type="button" variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback(undefined)}>
               <ReplyIcon className="size-3.5" />
               {t('plan.back')}
             </Button>
-            <Button variant="accent" size="sm" disabled={sent !== undefined} onClick={() => answer(keep, feedback.trim() || undefined)}>
+            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={sent !== undefined} onClick={() => answer(keep, feedback.trim() || undefined)}>
               {sent === 'keep' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
               {t('plan.sendFeedback')}
             </Button>
@@ -446,24 +447,24 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
         </fieldset>
       </div>
       <div className="interaction__actions question-card__actions primitive-card-footer flex items-center justify-between gap-2 border-t border-line">
-        <Button variant="ghost" size="sm" className="question-card__skip" disabled={sent !== undefined} onClick={skip}>
+        <Button type="button" variant="ghost" size="sm" className="question-card__skip" disabled={sent !== undefined} onClick={skip}>
           {sent === 'skip' ? <SpinnerIcon className="size-3.5" /> : <FastForwardIcon className="size-3.5" />}
           {total > 1 ? t('question.skipAll') : t('question.skip')}
         </Button>
         <div className="flex items-center gap-1.5">
           {total > 1 && index > 0 ? (
-            <Button variant="secondary" size="sm" disabled={sent !== undefined} onClick={() => goTo(index - 1)}>
+            <Button type="button" variant="outline" size="sm" disabled={sent !== undefined} onClick={() => goTo(index - 1)}>
               <ArrowLeftIcon className="size-3.5" />
               {t('question.prev')}
             </Button>
           ) : null}
           {last ? (
-            <Button variant="accent" size="sm" disabled={!complete || sent !== undefined} onClick={submit}>
+            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={!complete || sent !== undefined} onClick={submit}>
               {sent === 'submit' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
               {t('question.submit')}
             </Button>
           ) : (
-            <Button variant="accent" size="sm" disabled={!answered(q) || sent !== undefined} onClick={next}>
+            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={!answered(q) || sent !== undefined} onClick={next}>
               {t('question.next')}
               <ArrowRightIcon className="size-3.5" />
             </Button>

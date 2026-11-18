@@ -9,9 +9,9 @@ import { cn } from '../../lib/utils.ts';
 import { setProjectsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { FolderIcon, GitBranchIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
-import { Button } from '../ui/Button.tsx';
-import { Textarea } from '../ui/FormControls.tsx';
-import { ValuePill } from '../ui/ValuePill.tsx';
+import { ValuePill } from '../beautifului/index.ts';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
 const EMPTY_CONFIG: WorktreeProjectConfig = {
   copyFiles: [],
@@ -89,7 +89,8 @@ export function ProjectSettings() {
           <div className="flex shrink-0 items-center gap-1.5">
             {folder ? (
               <Button
-                variant="secondary"
+                type="button"
+                variant="outline"
                 size="xs"
                 data-testid="project-switch-folder-btn"
                 onClick={() => postToHost({ type: 'selectFolder', payload: {} })}
@@ -100,7 +101,8 @@ export function ProjectSettings() {
               </Button>
             ) : null}
             <Button
-              variant="secondary"
+              type="button"
+              variant="outline"
               size="xs"
               data-testid="project-add-btn"
               onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
@@ -145,7 +147,8 @@ export function ProjectSettings() {
                   <div className="flex shrink-0 items-center gap-1">
                     {!project.isCurrent ? (
                       <Button
-                        variant="secondary"
+                        type="button"
+                        variant="outline"
                         size="xs"
                         data-testid={`project-open-${index}`}
                         onClick={() => postToHost({ type: 'openProject', payload: { path: project.path } })}
@@ -154,8 +157,9 @@ export function ProjectSettings() {
                       </Button>
                     ) : null}
                     <Button
-                      variant="quiet"
-                      size="icon"
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       aria-label={t('settings.projects.remove')}
                       title={t('settings.projects.remove')}
                       data-testid={`project-remove-${index}`}
@@ -182,7 +186,8 @@ export function ProjectSettings() {
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <Button
-                variant="secondary"
+                type="button"
+                variant="outline"
                 size="xs"
                 data-testid="project-create-wt-btn"
                 onClick={() => postToHost({ type: 'createWorktree', payload: { path: activePath } })}
@@ -191,7 +196,8 @@ export function ProjectSettings() {
                 <span>{t('settings.projects.createWorktree')}</span>
               </Button>
               <Button
-                variant="secondary"
+                type="button"
+                variant="outline"
                 size="xs"
                 data-testid="project-run-verify-btn"
                 onClick={() => postToHost({ type: 'runProjectVerify', payload: { path: activePath } })}
@@ -244,7 +250,7 @@ export function ProjectSettings() {
 
             <div className="flex items-center justify-end gap-2">
               {justSaved ? <span className="text-[11.5px] text-green">{t('settings.projects.saved')}</span> : null}
-              <Button variant="primary" size="xs" data-testid="project-save-btn" onClick={saveConfig}>
+              <Button type="button" size="xs" data-testid="project-save-btn" onClick={saveConfig}>
                 {t('settings.projects.saveConfig')}
               </Button>
             </div>

@@ -146,6 +146,24 @@
           "default": "web",
           "markdownDescription": "%config.runtime.profile%"
         },
+        "harnessDeck.zcode.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "%config.zcode.path%"
+        },
+        "harnessDeck.claude.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "%config.claude.path%"
+        },
+        "harnessDeck.pi.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "%config.pi.path%"
+        },
         "harnessDeck.backends": {
           "type": "array",
           "scope": "machine",
@@ -377,6 +395,190 @@
                 }
               },
               "verifyCommands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "harnessDeck.chatCommands": {
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "markdownDescription": "%config.chatCommands%",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "prompt"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "markdownDescription": "%config.chatCommands.name%"
+              },
+              "description": {
+                "type": "string",
+                "markdownDescription": "%config.chatCommands.description%"
+              },
+              "prompt": {
+                "type": "string",
+                "markdownDescription": "%config.chatCommands.prompt%"
+              }
+            }
+          }
+        },
+        "harnessDeck.mcpServers": {
+          "type": "array",
+          "scope": "machine",
+          "default": [],
+          "markdownDescription": "%config.mcpServers%",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "transport"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "stdio",
+                  "http",
+                  "sse"
+                ]
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "url": {
+                "type": "string"
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "agents": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "importedFrom": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "harnessDeck.protocolGateway": {
+          "type": "boolean",
+          "scope": "application",
+          "default": false,
+          "markdownDescription": "%config.protocolGateway%"
+        },
+        "harnessDeck.providers": {
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "markdownDescription": "%config.providers%",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "presetId": {
+                "type": "string"
+              },
+              "anthropicUrl": {
+                "type": "string"
+              },
+              "openaiChatUrl": {
+                "type": "string"
+              },
+              "openaiResponsesUrl": {
+                "type": "string"
+              },
+              "convertOpenaiToAnthropic": {
+                "type": "boolean"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "contextWindow": {
+                      "type": "string"
+                    },
+                    "maxOutputTokens": {
+                      "type": "string"
+                    },
+                    "efforts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "vision": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              },
+              "defaultModel": {
+                "type": "string"
+              },
+              "smallModel": {
+                "type": "string"
+              },
+              "boundBackendIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "boundAgentIds": {
                 "type": "array",
                 "items": {
                   "type": "string"

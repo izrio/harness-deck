@@ -6,10 +6,9 @@ import { useState } from 'react';
 import { useView } from '../store.ts';
 import { loadState, postToHost, saveState } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { GlideMenu } from './ui/GlideMenu.tsx';
-import { ValuePill } from './ui/ValuePill.tsx';
+import { GlideMenu, Shimmer, TaskRows, ValuePill } from './beautifului/index.ts';
 import { ChangedFileButton, Stats } from './Items.tsx';
-import { CheckIcon, ChecklistIcon, ChevronRightIcon, CloseIcon, DiffIcon, SaveIcon, TargetIcon } from './icons.tsx';
+import { ChecklistIcon, ChevronRightIcon, CloseIcon, DiffIcon, SaveIcon, TargetIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
 type Panel = 'todos' | 'changes';
@@ -67,49 +66,30 @@ export function StatusDock() {
         </div>
       ) : null}
 
-      {panel === 'todos' && todos ? (
-        <ol className="todo-list dock__panel m-0 max-h-[min(40vh,260px)] list-none overflow-y-auto border-b border-line px-3 py-2" id="dock-panel">
-          {todos.map((todo, index) => (
-            <li key={index} className={cn('todo relative flex items-start gap-2.5 py-1 leading-snug', `todo--${todo.status}`)}>
-              {index > 0 ? <span aria-hidden className="absolute -top-1.5 left-2 h-2.5 w-px -translate-x-1/2 bg-line" /> : null}
-              <span
-                className={cn(
-                  'todo__mark mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full',
-                  todo.status === 'completed'
-                    ? 'bg-green text-white'
-                    : todo.status === 'in_progress'
-                      ? 'bg-surface text-accent-ink shadow-[inset_0_0_0_1.5px_var(--accent)]'
-                      : 'text-ink-3',
-                )}
-                aria-label={todo.status === 'completed' ? t('todo.completed') : todo.status === 'in_progress' ? t('todo.inProgress') : t('todo.pending')}
-              >
-                {todo.status === 'completed' ? (
-                  <CheckIcon className="size-2.5" strokeWidth={2.8} />
-                ) : todo.status === 'in_progress' && running ? (
-                  <span className="size-3 rounded-full border-[1.5px] border-line-strong border-t-accent" style={{ animation: 'spin 900ms linear infinite' }} />
-                ) : todo.status === 'in_progress' ? (
-                  <span className="size-1.5 rounded-full bg-accent" />
-                ) : (
-                  <span className="size-2.5 rounded-full border-[1.5px] border-line-strong" />
-                )}
-              </span>
-              <span
-                className={cn(
-                  'todo__text min-w-0 flex-1 [overflow-wrap:anywhere]',
-                  todo.status === 'completed'
-                    ? 'text-ink-3 line-through'
-                    : todo.status === 'in_progress'
-                      ? 'font-medium text-ink'
-                      : 'text-ink-2',
-                )}
-              >
-                {todo.content}
-              </span>
-              {todo.status === 'in_progress' ? <ValuePill tone="accent" className="todo__badge text-[10.5px]">{t('todo.inProgress')}</ValuePill> : null}
-            </li>
-          ))}
-        </ol>
-      ) : null}
+      <div
+        className="grid transition-[grid-template-rows,opacity] duration-300"
+        style={{
+          gridTemplateRows: panel === 'todos' && todos ? '1fr' : '0fr',
+          opacity: panel === 'todos' && todos ? 1 : 0,
+          transitionTimingFunction: 'var(--ease-out-strong)',
+        }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          {panel === 'todos' && todos ? (
+            <TaskRows
+              id="dock-panel"
+              items={todos}
+              active={running}
+              labels={{
+                completed: t('todo.completed'),
+                inProgress: t('todo.inProgress'),
+                pending: t('todo.pending'),
+              }}
+              className="dock__panel max-h-[min(40vh,260px)] overflow-y-auto border-b border-line p-1.5"
+            />
+          ) : null}
+        </div>
+      </div>
 
       {panel === 'changes' && shownChanges ? (
         <div className="dock__panel max-h-[min(40vh,260px)] overflow-y-auto border-b border-line p-1" id="dock-panel">
@@ -142,7 +122,17 @@ export function StatusDock() {
               <ChevronRightIcon className={cn('chevron size-3.5 shrink-0 text-ink-3 transition-transform duration-200', panel === 'todos' && 'chevron--open rotate-90')} />
               <ChecklistIcon className="todo-card__icon size-3.5 shrink-0 text-ink-2" />
               <span className="status-strip__label shrink-0 font-medium text-ink">{t('todo.title')}</span>
-              {panel !== 'todos' && current ? <span className="dock__seg-text min-w-0 flex-1 truncate text-ink-2">{current.content}</span> : <span className="dock__spacer flex-1" />}
+              {panel !== 'todos' && current ? (
+                <span className="dock__seg-text min-w-0 flex-1 truncate text-ink-2">
+                  {current.status === 'in_progress' && running ? (
+                    <Shimmer className="max-w-full truncate align-bottom">{current.content}</Shimmer>
+                  ) : (
+                    current.content
+                  )}
+                </span>
+              ) : (
+                <span className="dock__spacer flex-1" />
+              )}
               <ValuePill tone={done === todos.length ? 'green' : 'neutral'} className="todo-card__count text-[11px] tabular-nums">
                 {done}/{todos.length}
               </ValuePill>

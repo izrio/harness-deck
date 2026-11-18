@@ -12,7 +12,8 @@
     "test": "vitest run",
     "smoke": "pnpm --filter harness-deck run smoke",
     "package": "pnpm run build && pnpm --filter harness-deck run package",
-    "dev": "pnpm --parallel --filter @harness-deck/webview-ui --filter harness-deck run watch"
+    "dev": "pnpm --parallel --filter @harness-deck/webview-ui --filter harness-deck run watch",
+    "preview:web": "pnpm --filter @harness-deck/webview-ui run dev"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -19,8 +19,8 @@ import {
   QuestionIcon,
   SpinnerIcon,
 } from '../icons.tsx';
-import { Button } from '../ui/Button.tsx';
-import { ValuePill } from '../ui/ValuePill.tsx';
+import { ValuePill } from '../beautifului/index.ts';
+import { Button } from '@/components/ui/button';
 
 function formatShortTime(ts: number, t: Translate): string {
   const diffMin = Math.round((ts - Date.now()) / 60_000);
@@ -62,7 +62,8 @@ export function OverviewView() {
             <p className="mt-0.5 mb-0 text-[12px] text-ink-3">{t('wb.overview.subtitle')}</p>
           </div>
           <Button
-            variant="secondary"
+            type="button"
+            variant="outline"
             size="xs"
             onClick={() => postToHost({ type: 'openWorkbenchPanel', payload: {} })}
             title={t('wb.openPanel')}
@@ -106,7 +107,7 @@ export function OverviewView() {
                     {item.subtitle ? <div className="mt-0.5 truncate text-[11.5px] text-ink-2">{item.subtitle}</div> : null}
                   </div>
                   <Button
-                    variant="primary"
+                    type="button"
                     size="xs"
                     onClick={() => {
                       if (item.kind === 'task-review') {
@@ -160,7 +161,8 @@ export function OverviewView() {
                       </div>
                     </div>
                     <Button
-                      variant="secondary"
+                      type="button"
+                      variant="outline"
                       size="xs"
                       onClick={() => {
                         if (item.kind === 'schedule') {
@@ -191,7 +193,7 @@ export function OverviewView() {
                 <h3 className="m-0 text-[13px] font-semibold text-ink">{t('wb.overview.todos')}</h3>
                 <ValuePill>{overview.todos.length}</ValuePill>
               </div>
-              <Button variant="quiet" size="xs" onClick={() => setActiveModule('tasks')}>
+              <Button type="button" variant="ghost" size="xs" onClick={() => setActiveModule('tasks')}>
                 {t('wb.overview.openTasks')}
               </Button>
             </div>
@@ -282,7 +284,8 @@ export function OverviewView() {
               </div>
               {overview.unread.length > 0 ? (
                 <Button
-                  variant="quiet"
+                  type="button"
+                  variant="ghost"
                   size="xs"
                   data-testid="overview-mark-all-read"
                   onClick={() => postToHost({ type: 'markUnreadRead', payload: { all: true } })}
@@ -322,8 +325,9 @@ export function OverviewView() {
                       <div className="mt-0.5 truncate text-[11.5px] text-ink-2">{item.summary}</div>
                     </button>
                     <Button
-                      variant="quiet"
-                      size="xs"
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       title={t('wb.overview.markRead')}
                       aria-label={t('wb.overview.markRead')}
                       onClick={() => postToHost({ type: 'markUnreadRead', payload: { id: item.id } })}

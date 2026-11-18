@@ -1,12 +1,11 @@
 /**
  * 运行状态（Beautiful UI LoadingState 像素波纹 + Shimmer + 等宽计时器）。
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Item } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { cn } from '../lib/utils.ts';
-import { LoaderGrid } from './ui/LoaderGrid.tsx';
-import { Shimmer } from './ui/Shimmer.tsx';
+import { LoaderGrid, Shimmer } from './beautifului/index.ts';
 import { CheckIcon } from './icons.tsx';
 import { useT, type Translate } from '../i18n.ts';
 
@@ -83,17 +82,20 @@ export function RunStatus() {
   );
 }
 
-/** 一轮结束时的用时。 */
-export function TurnDone({ item }: { item: Extract<Item, { kind: 'turnDone' }> }) {
+/** 一轮结束时的用时（可合并上一条助手消息的操作栏到同一行）。 */
+export function TurnDone({ item, actions }: { item: Extract<Item, { kind: 'turnDone' }>; actions?: ReactNode }) {
   const t = useT();
   return (
-    <div className="turn-done -mt-1 flex items-center gap-1.5 text-[12px] text-ink-3" data-testid="turn-done">
-      {item.completed ? (
-        <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-green-tint text-green">
-          <CheckIcon className="size-2.5" strokeWidth={2.5} />
-        </span>
-      ) : null}
-      <span>{item.completed ? t('run.done', formatDuration(item.durationMs, t)) : t('run.took', formatDuration(item.durationMs, t))}</span>
+    <div className={cn('turn-done flex items-center gap-2 text-[12px] text-ink-3', actions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
+      {actions}
+      <span className="flex items-center gap-1.5">
+        {item.completed ? (
+          <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-green-tint text-green">
+            <CheckIcon className="size-2.5" strokeWidth={2.5} />
+          </span>
+        ) : null}
+        <span>{item.completed ? t('run.done', formatDuration(item.durationMs, t)) : t('run.took', formatDuration(item.durationMs, t))}</span>
+      </span>
     </div>
   );
 }

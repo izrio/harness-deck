@@ -4,10 +4,8 @@ import type { ConnectionState, RuntimeStatus } from '@harness-deck/shared';
 import { openSettingsPage } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { Button } from './ui/Button.tsx';
-import { LoaderGrid } from './ui/LoaderGrid.tsx';
-import { Shimmer } from './ui/Shimmer.tsx';
-import { TerminalBlock } from './ui/TerminalBlock.tsx';
+import { Button } from '@/components/ui/button';
+import { LoaderGrid, Shimmer } from './beautifului/index.ts';
 import { ErrorIcon, LogIcon, RefreshIcon, SettingsIcon } from './icons.tsx';
 import { useT, type Translate } from '../i18n.ts';
 
@@ -44,20 +42,21 @@ export function RuntimeBanner({ status, connection }: { status: RuntimeStatus; c
       {view.actions ? (
         <div className="banner__actions primitive-card-footer flex flex-wrap gap-2 border-t border-line">
           {canInstallInSettings ? (
-            <Button variant="primary" size="sm" data-testid="banner-open-settings" onClick={() => openSettingsPage('agents')}>
+            <Button type="button" size="sm" data-testid="banner-open-settings" onClick={() => openSettingsPage('agents')}>
               <SettingsIcon className="size-3.5" />
               {t('runtime.openSettings')}
             </Button>
           ) : null}
           <Button
-            variant={canInstallInSettings ? 'secondary' : 'primary'}
+            type="button"
+            variant={canInstallInSettings ? 'outline' : 'default'}
             size="sm"
             onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}
           >
             <RefreshIcon className="size-3.5" />
             {t('runtime.retry')}
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
+          <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
             <LogIcon className="size-3.5" />
             {t('runtime.logs')}
           </Button>
@@ -78,11 +77,13 @@ function BannerDetail({ text }: { text: string }) {
   return (
     <div className="text-[12.5px] text-ink-2 [overflow-wrap:anywhere]">
       {open ? (
-        <TerminalBlock text={text} className="mb-1.5 max-h-40 text-ink" />
+        <pre className="terminal-surface m-0 mb-1.5 max-h-40 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink shadow-hairline [overflow-wrap:anywhere]">
+          {text}
+        </pre>
       ) : (
         <p className="m-0 leading-relaxed">{summary}</p>
       )}
-      <Button variant="quiet" size="xs" className="mt-1 -ml-2 text-ink-2 hover:text-ink" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Button type="button" variant="ghost" size="xs" className="mt-1 -ml-2 text-ink-2 hover:text-ink" aria-expanded={open} onClick={() => setOpen(!open)}>
         {open ? t('banner.less') : t('banner.more')}
       </Button>
     </div>
@@ -101,6 +102,7 @@ interface BannerView {
 export function describe(status: RuntimeStatus, connection: ConnectionState, t: Translate): BannerView | undefined {
   switch (status.kind) {
     case 'idle':
+      return undefined;
     case 'locating':
       return { title: t('runtime.locating'), tone: 'info' };
     case 'starting':

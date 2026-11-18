@@ -8,11 +8,8 @@ import { splitMentions } from '../mentions.ts';
 import { diffKey, openDiff as trackDiff, requestMarkdownPreview, requestPrefill, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { Button } from './ui/Button.tsx';
-import { GlideMenu } from './ui/GlideMenu.tsx';
-import { Shimmer } from './ui/Shimmer.tsx';
-import { TerminalBlock } from './ui/TerminalBlock.tsx';
-import { ValuePill } from './ui/ValuePill.tsx';
+import { Button } from '@/components/ui/button';
+import { GlideMenu, Shimmer, ValuePill } from './beautifului/index.ts';
 import { attachmentLabel, openAttachment } from './ContextChips.tsx';
 import { isMarkdownPath } from './MarkdownPreviewModal.tsx';
 import { Markdown } from './Markdown.tsx';
@@ -49,12 +46,20 @@ import { useT } from '../i18n.ts';
 
 type Of<K extends Item['kind']> = Extract<Item, { kind: K }>;
 
-export const ItemView = memo(function ItemView({ item }: { item: Item }) {
+export const ItemView = memo(function ItemView({
+  item,
+  hideAssistantActions = false,
+  turnDoneCopyText,
+}: {
+  item: Item;
+  hideAssistantActions?: boolean;
+  turnDoneCopyText?: string;
+}) {
   switch (item.kind) {
     case 'user':
       return <UserBubble item={item} />;
     case 'assistant':
-      return <AssistantMessage item={item} />;
+      return <AssistantMessage item={item} hideActions={hideAssistantActions} />;
     case 'activity':
       if (item.variant === 'subagent' && item.subagent) return <SubagentRow item={item} />;
       return item.variant === 'edit' ? <EditRow item={item} /> : <ActivityRow item={item} />;
@@ -65,7 +70,7 @@ export const ItemView = memo(function ItemView({ item }: { item: Item }) {
     case 'notice':
       return <Notice item={item} />;
     case 'turnDone':
-      return <TurnDone item={item} />;
+      return <TurnDone item={item} {...(turnDoneCopyText !== undefined ? { actions: <AssistantActions text={turnDoneCopyText} inline /> } : {})} />;
   }
 });
 
@@ -257,11 +262,11 @@ function QueueEditor({ item, onDone }: { item: Of<'user'>; onDone: () => void })
         }}
       />
       <div className="user__meta mt-1.5 flex items-center gap-1.5">
-        <Button variant="primary" size="xs" onClick={save}>
+        <Button type="button" size="xs" onClick={save}>
           <CheckIcon className="size-3" />
           {t('common.save')}
         </Button>
-        <Button variant="ghost" size="xs" onClick={onDone}>
+        <Button type="button" variant="ghost" size="xs" onClick={onDone}>
           <CloseIcon className="size-3" />
           {t('common.cancel')}
         </Button>
@@ -305,26 +310,26 @@ function UserText({ text }: { text: string }) {
   );
 }
 
-function AssistantMessage({ item }: { item: Of<'assistant'> }) {
+function AssistantMessage({ item, hideActions }: { item: Of<'assistant'>; hideActions?: boolean }) {
   const markdown = useDeferredValue(item.markdown);
   return (
     <div className={cn('assistant group/assistant relative min-w-0', item.streaming && item.markdown && 'assistant--streaming')}>
       {item.reasoning ? <Reasoning text={item.reasoning} active={item.streaming && !item.markdown} /> : null}
       {markdown ? <Markdown text={markdown} /> : null}
       {item.streaming && item.markdown ? <span className="cursor" aria-hidden /> : null}
-      {!item.streaming && item.markdown ? <AssistantActions text={item.markdown} /> : null}
+      {!item.streaming && item.markdown && !hideActions ? <AssistantActions text={item.markdown} /> : null}
     </div>
   );
 }
 
 /** 对齐 Beautiful UI StreamingText 底部操作图标行。 */
-function AssistantActions({ text }: { text: string }) {
+function AssistantActions({ text, inline = false }: { text: string; inline?: boolean }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timerRef.current), []);
   return (
-    <div className="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/assistant:opacity-100 focus-within:opacity-100">
+    <div className={cn('flex items-center gap-0.5', !inline && 'mt-1.5')}>
       <IconAction
         label={copied ? t('assistant.copied') : t('assistant.copy')}
         onClick={() =>
@@ -352,7 +357,7 @@ function Reasoning({ text, active }: { text: string; active: boolean }) {
     <div className="reasoning mb-1.5">
       <button
         type="button"
-        className="reasoning__toggle -mx-1.5 flex w-fit items-center gap-2 rounded-control px-1.5 py-1 text-[13px] font-medium text-ink-2 transition-colors duration-100 hover:bg-hover-2"
+        className="reasoning__toggle flex w-fit items-center gap-2 py-1 text-[13px] font-medium text-ink-2 transition-colors duration-100 hover:text-ink"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
@@ -429,7 +434,7 @@ function ActivityRow({ item }: { item: Of<'activity'> }) {
     <div className={cn('activity -my-1.5 text-[12.5px]', `activity--${item.status}`, command && 'activity--command')}>
       <button
         type="button"
-        className="activity__row group/row -mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2 disabled:cursor-default disabled:hover:bg-transparent"
+        className="activity__row group/row flex h-7 w-full min-w-0 items-center gap-2 text-left transition-colors duration-100 disabled:cursor-default"
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
         onClick={() => setOpen(!open)}
@@ -477,7 +482,9 @@ function ActivityRow({ item }: { item: Of<'activity'> }) {
       >
         <div className="min-h-0 overflow-hidden">
           {open && item.output ? (
-            <TerminalBlock text={item.output} className="activity__output mt-0.5 mb-1.5 ml-2 max-h-60" />
+            <pre className="activity__output terminal-surface m-0 mt-0.5 mb-1.5 ml-2 max-h-60 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink-2 shadow-hairline [overflow-wrap:anywhere]">
+              {item.output}
+            </pre>
           ) : null}
         </div>
       </div>
@@ -506,7 +513,7 @@ function EditRow({ item }: { item: Of<'activity'> }) {
     <div className={cn('activity activity--edit -my-1.5 text-[12.5px]', `activity--${item.status}`)}>
       <button
         type="button"
-        className="activity__row group/row -mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2 disabled:cursor-default disabled:hover:bg-transparent"
+        className="activity__row group/row flex h-7 w-full min-w-0 items-center gap-2 text-left transition-colors duration-100 disabled:cursor-default"
         disabled={!diff && !item.output}
         aria-expanded={expandable ? open : undefined}
         onClick={onClick}
@@ -555,7 +562,9 @@ function EditRow({ item }: { item: Of<'activity'> }) {
       >
         <div className="min-h-0 overflow-hidden">
           {open && item.output ? (
-            <TerminalBlock text={item.output} className="activity__output mt-0.5 mb-1.5 ml-2 max-h-60" />
+            <pre className="activity__output terminal-surface m-0 mt-0.5 mb-1.5 ml-2 max-h-60 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink-2 shadow-hairline [overflow-wrap:anywhere]">
+              {item.output}
+            </pre>
           ) : null}
         </div>
       </div>
@@ -593,7 +602,7 @@ function ExploreRow({ item }: { item: Of<'explore'> }) {
     <div className={cn('activity -my-1.5 text-[12.5px]', `activity--${item.status}`)}>
       <button
         type="button"
-        className="activity__row group/row -mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2"
+        className="activity__row group/row flex h-7 w-full min-w-0 items-center gap-2 text-left transition-colors duration-100"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >

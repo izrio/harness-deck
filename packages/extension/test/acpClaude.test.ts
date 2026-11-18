@@ -70,16 +70,17 @@ describe('Claude 的 ACP 帧', () => {
 });
 
 describe('Claude 底层', () => {
-  it('内置在 CodeBuddy 后面，带安装提示和登录说明，不是单会话代理', () => {
+  it('内置在 CodeBuddy 后面，原生以 claude -p 运行，带安装提示和登录说明', () => {
     const builtins = builtinProfiles((id) => `hint:${id}`);
-    expect(parseProfiles([], undefined, builtins).map((p) => p.id)).toEqual(['dsh', 'oh-my-pi', 'codebuddy', 'claude']);
-    expect(builtins.find((p) => p.id === 'claude')).toMatchObject({
-      command: 'claude-agent-acp',
-      args: [],
+    expect(parseProfiles([], undefined, builtins).map((p) => p.id)).toEqual(['dsh', 'pi', 'codebuddy', 'claude', 'opencode', 'zcode']);
+    const claude = builtins.find((p) => p.id === 'claude');
+    expect(claude).toMatchObject({
+      id: 'claude',
+      kind: 'claude',
+      name: 'Claude Code',
       installHint: 'hint:claude',
       signInHint: 'hint:claude-sign-in',
     });
-    expect(builtins.find((p) => p.id === 'claude')?.singleSession).toBeUndefined();
   });
 
   it('没登录时（发消息才发现，代理没有登录方式）显示登录说明，而不是代理的原话', async () => {

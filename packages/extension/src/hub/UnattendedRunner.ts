@@ -7,15 +7,33 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { AcpInitialize } from '../acp/AcpController.ts';
 import { AcpConnection, AcpError, AcpTimeoutError } from '../acp/connection.ts';
-import { AcpSessionProjection, type AcpConfigOption, type AcpToolCall } from '../acp/projection.ts';
+import {
+  AcpSessionProjection,
+  inputFilePath,
+  type AcpSessionMeta,
+  type AcpToolCall,
+} from '../acp/projection.ts';
 import type { BackendProfile } from '../backend/types.ts';
+import { ClaudeConnection } from '../claude/connection.ts';
+import { locateClaude } from '../claude/locate.ts';
+import { ClaudeSessionProjection } from '../claude/projection.ts';
+import { toAcpMcpServers, type PreparedBackendLaunch } from '../extensions/mcpService.ts';
+import { formatSkillsPromptCatalog } from '../extensions/skillService.ts';
 import { DshClient } from '../dsh/DshClient.ts';
 import type { WireEvent } from '../dsh/remote/follow.ts';
 import { projectEvents } from '../dsh/view/projector.ts';
-import { launchRuntime, stopRuntime, type LaunchedRuntime } from '../runtime/launch.ts';
+import { PiConnection, PiTimeoutError } from '../pi/connection.ts';
+import { locatePi } from '../pi/locate.ts';
+import { PiSessionProjection } from '../pi/projection.ts';
+import { launchRuntime, probeVersion, stopRuntime, type LaunchedRuntime } from '../runtime/launch.ts';
 import { locateDsh, locateExecutable } from '../runtime/locate.ts';
 import { checkVersionSupport, MINIMUM_DSH_VERSION } from '../runtime/version.ts';
-import { probeVersion } from '../runtime/launch.ts';
+import { canonicalTool } from '../vm/toolNames.ts';
+import { parseArguments, toolVariant } from '../vm/toolRows.ts';
+import { ZcodeConnection, ZcodeError, ZcodeTimeoutError } from '../zcode/connection.ts';
+import { defaultRuntimePreferences } from '../zcode/interactions.ts';
+import { locateZcode } from '../zcode/locate.ts';
+import { ZcodeSessionProjection } from '../zcode/projection.ts';
 
 const PROTOCOL_VERSION = 1;
 const INITIALIZE_TIMEOUT_MS = 30_000;
@@ -48,7 +66,20 @@ export interface UnattendedRunnerHost {
     readonly profile: string;
     readonly env: Readonly<Record<string, string | undefined>>;
   };
+  readonly getZcodeConfig?: () => {
+    readonly configuredPath: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  };
+  readonly getClaudeConfig?: () => {
+    readonly configuredPath: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  };
+  readonly getPiConfig?: () => {
+    readonly configuredPath: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  };
   readonly getEnvForProfile: (profileEnv?: Readonly<Record<string, string>>) => Readonly<Record<string, string | undefined>>;
+  readonly prepareBackendLaunch?: (profile: BackendProfile) => Promise<PreparedBackendLaunch>;
   readonly extensionVersion: string;
   readonly log: (line: string) => void;
   readonly runtimeLog?: (line: string, stream: 'stdout' | 'stderr') => void;
@@ -60,6 +91,15 @@ export class UnattendedRunner {
   async run(req: UnattendedRunRequest): Promise<UnattendedRunOutcome> {
     if (req.profile.kind === 'dsh') {
       return this.runDsh(req);
+    }
+    if (req.profile.kind === 'zcode') {
+      return this.runZcode(req.profile, req);
+    }
+    if (req.profile.kind === 'claude') {
+      return this.runClaude(req.profile, req);
+    }
+    if (req.profile.kind === 'pi') {
+      return this.runPi(req.profile, req);
     }
     return this.runAcp(req.profile, req);
   }
@@ -90,9 +130,11 @@ export class UnattendedRunner {
         if (support.kind !== 'supported') {
           return { status: 'failed', error: `Unsupported dsh version ${version} (minimum ${MINIMUM_DSH_VERSION})` };
         }
+        const prepared = await this.host.prepareBackendLaunch?.(req.profile);
         tempLaunched = await launchRuntime({
           command: located.command,
           profile: cfg.profile,
+          ...(prepared && prepared.launcherArgs.length > 0 ? { launcherArgs: prepared.launcherArgs } : {}),
           cwd: req.projectPath,
           env: cfg.env,
           onOutput: this.host.runtimeLog,
@@ -234,9 +276,12 @@ export class UnattendedRunner {
     const onExternalAbort = () => runAbort.abort(req.signal?.reason ?? new Error('Aborted'));
     req.signal?.addEventListener('abort', onExternalAbort, { once: true });
 
+    const prepared = await this.host.prepareBackendLaunch?.(profile);
+    const launchArgs = prepared && prepared.extraArgs.length > 0 ? [...profile.args, ...prepared.extraArgs] : profile.args;
+
     const conn = new AcpConnection({
       command: located.command,
-      args: profile.args,
+      args: launchArgs,
       cwd: req.projectPath,
       env,
       log: this.host.log,
@@ -269,7 +314,7 @@ export class UnattendedRunner {
 
     try {
       await conn.start();
-      await conn.request<AcpInitialize>(
+      const init = await conn.request<AcpInitialize>(
         'initialize',
         {
           protocolVersion: PROTOCOL_VERSION,
@@ -279,29 +324,47 @@ export class UnattendedRunner {
         INITIALIZE_TIMEOUT_MS,
       );
 
-      const created = await conn.request<{ sessionId: string; configOptions?: AcpConfigOption[] }>('session/new', {
-        cwd: req.projectPath,
-        mcpServers: [],
-      });
-      sessionId = created.sessionId;
-      req.onSessionCreated(sessionId);
-      projection.setConfigOptions(created.configOptions);
-
-      // 若底层暴露了 mode 选项，尝试切换到与权限预设对应的模式
-      const modeOpt = (created.configOptions ?? []).find((o) => o.category === 'mode' || o.id === 'mode');
-      if (modeOpt?.options?.length) {
-        const desiredMode = pickAcpModeValue(modeOpt.options, req.permission);
-        if (desiredMode && desiredMode !== modeOpt.currentValue) {
-          await conn
-            .request('session/set_config_option', { sessionId, configId: modeOpt.id, value: desiredMode })
-            .catch((err: unknown) => this.host.log(`设置 ACP 模式 ${desiredMode} 跳过：${describe(err)}`));
+      const mcpServers = toAcpMcpServers(prepared?.mcpServers ?? [], init?.agentCapabilities?.mcpCapabilities);
+      const extraSessionParams: Record<string, unknown> = {};
+      if (prepared?.skillBundleDir) {
+        if (init?.agentCapabilities?.sessionCapabilities?.additionalDirectories) {
+          extraSessionParams.additionalDirectories = [prepared.skillBundleDir];
+        }
+        if (prepared.skillMode === 'claude-meta') {
+          extraSessionParams._meta = { claudeCode: { options: { additionalDirectories: [prepared.skillBundleDir] } } };
         }
       }
 
+      const created = await conn.request<{ sessionId: string } & AcpSessionMeta>('session/new', {
+        cwd: req.projectPath,
+        mcpServers,
+        ...extraSessionParams,
+      });
+      sessionId = created.sessionId;
+      req.onSessionCreated(sessionId);
+      projection.setSessionMeta(created);
+
+      // 若底层暴露了 mode 选项，尝试切换到与权限预设对应的模式
+      const modeOpt = projection.configOptions.find((o) => o.category === 'mode' || o.id === 'mode');
+      if (modeOpt?.options?.length) {
+        const desiredMode = pickAcpModeValue(modeOpt.options, req.permission);
+        if (desiredMode && desiredMode !== modeOpt.currentValue) {
+          const setPromise =
+            modeOpt.legacyMethod === 'session/set_mode'
+              ? conn.request('session/set_mode', { sessionId, modeId: desiredMode })
+              : conn.request('session/set_config_option', { sessionId, configId: modeOpt.id, value: desiredMode });
+          await setPromise.catch((err: unknown) => this.host.log(`设置 ACP 模式 ${desiredMode} 跳过：${describe(err)}`));
+        }
+      }
+
+      const promptText =
+        prepared?.skillMode === 'prompt' && prepared.skills.length > 0
+          ? `${formatSkillsPromptCatalog(prepared.skills)}\n\n${req.prompt}`
+          : req.prompt;
       projection.startTurn(Date.now());
       const res = await conn.request<{ stopReason?: string } | null>('session/prompt', {
         sessionId,
-        prompt: [{ type: 'text', text: req.prompt }],
+        prompt: [{ type: 'text', text: promptText }],
       });
       projection.endTurn(Date.now(), res?.stopReason ?? 'end_turn');
 
@@ -320,6 +383,380 @@ export class UnattendedRunner {
       const msg =
         error instanceof AcpTimeoutError
           ? `ACP handshake timed out (${profile.command})`
+          : runAbort.signal.aborted
+            ? describe(runAbort.signal.reason ?? error)
+            : describe(error);
+      return {
+        status: 'failed',
+        ...(sessionId ? { sessionId } : {}),
+        error: msg,
+      };
+    } finally {
+      clearTimeout(timeout);
+      req.signal?.removeEventListener('abort', onExternalAbort);
+      runAbort.signal.removeEventListener('abort', abortListener);
+      await conn.dispose().catch(() => undefined);
+    }
+  }
+
+  private async runZcode(
+    profile: Extract<BackendProfile, { kind: 'zcode' }>,
+    req: UnattendedRunRequest,
+  ): Promise<UnattendedRunOutcome> {
+    const zcodeCfg = this.host.getZcodeConfig?.() ?? { configuredPath: '', env: this.host.getEnvForProfile() };
+    const located = await locateZcode({
+      configuredPath: zcodeCfg.configuredPath,
+      env: zcodeCfg.env,
+      platform: process.platform,
+      fallbackNodePath: process.execPath,
+    });
+    if (located.kind === 'notFound') {
+      return { status: 'failed', error: profile.installHint ?? 'zcode executable not found in PATH or settings' };
+    }
+
+    const projection = new ZcodeSessionProjection(req.projectPath);
+    let sessionId: string | undefined;
+    let resolveTurnDone: (() => void) | undefined;
+    let rejectTurnDone: ((err: Error) => void) | undefined;
+    const turnDone = new Promise<void>((resolveP, rejectP) => {
+      resolveTurnDone = resolveP;
+      rejectTurnDone = rejectP;
+    });
+
+    const runAbort = new AbortController();
+    const timeout = setTimeout(
+      () => runAbort.abort(new Error('Scheduled task timed out')),
+      req.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+    const onExternalAbort = () => runAbort.abort(req.signal?.reason ?? new Error('Aborted'));
+    req.signal?.addEventListener('abort', onExternalAbort, { once: true });
+
+    const conn = new ZcodeConnection({
+      command: located.command,
+      args: [...located.scriptArgs, 'app-server', '--stdio'],
+      cwd: req.projectPath,
+      env: { ...zcodeCfg.env, ...located.extraEnv },
+      log: this.host.log,
+      onStderr: (line) => this.host.runtimeLog?.(line, 'stderr'),
+      onNotification: (method, params) => {
+        const obj = params && typeof params === 'object' ? (params as Record<string, unknown>) : {};
+        const inner = obj.event && typeof obj.event === 'object' ? (obj.event as Record<string, unknown>) : undefined;
+        const sid = typeof obj.sessionId === 'string' ? obj.sessionId : typeof inner?.sessionId === 'string' ? inner.sessionId : sessionId;
+        if (sessionId && sid && sid !== sessionId) return;
+        const eventPayload = method === 'session/event' ? obj : { type: method, payload: obj };
+        projection.applyEvent(eventPayload);
+        const evType = typeof inner?.type === 'string' ? inner.type : typeof obj.type === 'string' ? obj.type : method;
+        if (evType === 'turn.completed' || evType === 'turn/end') {
+          resolveTurnDone?.();
+        } else if (evType === 'turn.failed') {
+          const last = projection.snapshotItems().at(-1);
+          const errText = last?.kind === 'notice' ? last.text : 'ZCode turn failed';
+          rejectTurnDone?.(new Error(errText));
+        }
+      },
+      onRequest: async (method, params) => {
+        if (method === 'session/requestRuntimePreferences') {
+          return defaultRuntimePreferences(true);
+        }
+        if (method === 'interaction/requestPermission' || method === 'session/requestPermission' || method === 'permission/request') {
+          return resolveZcodeUnattendedPermission(params, req.permission, req.projectPath);
+        }
+        if (method === 'interaction/requestUserInput' || method === 'session/requestUserInput' || method === 'askUserQuestion') {
+          return { action: 'cancel', cancelled: true };
+        }
+        if (method === 'provider/updateAccountConfig') {
+          return { ok: true };
+        }
+        throw new ZcodeError(method, -32601, `${method} is not supported by unattended runner`);
+      },
+      onExit: (code, signal, stderr) => {
+        this.host.log(`定时 ZCode 进程退出（${signal ?? code}）${stderr ? `：${stderr}` : ''}`);
+        rejectTurnDone?.(new Error(stderr || `ZCode exited (${signal ?? code})`));
+      },
+    });
+
+    const abortListener = () => {
+      if (sessionId && conn.running) {
+        void conn.request('session/stop', { sessionId }).catch(() => undefined);
+      }
+      rejectTurnDone?.(new Error(describe(runAbort.signal.reason ?? 'Scheduled task aborted')));
+      void conn.dispose();
+    };
+    runAbort.signal.addEventListener('abort', abortListener, { once: true });
+
+    try {
+      await conn.start();
+      const created = await conn.request<{ sessionId?: string; id?: string }>(
+        'session/create',
+        { workspace: { path: req.projectPath } },
+        INITIALIZE_TIMEOUT_MS,
+      );
+      sessionId = created?.sessionId ?? created?.id;
+      if (!sessionId) throw new Error('missing sessionId in session/create');
+      req.onSessionCreated(sessionId);
+      await conn.request('session/subscribe', { sessionId });
+
+      const desiredMode =
+        req.permission === 'danger-full-access'
+          ? 'yolo'
+          : req.permission === 'read-only'
+            ? 'plan'
+            : 'auto';
+      await conn.request('session/setMode', { sessionId, mode: desiredMode }).catch(() => undefined);
+
+      projection.startTurn(Date.now());
+      await conn.request('session/send', { sessionId, content: req.prompt });
+      await turnDone;
+
+      const assistantTexts = projection
+        .snapshotItems()
+        .filter((item): item is Extract<typeof item, { kind: 'assistant' }> => item.kind === 'assistant')
+        .map((item) => item.markdown.trim())
+        .filter(Boolean);
+
+      return {
+        status: 'succeeded',
+        sessionId,
+        output: assistantTexts.join('\n\n').slice(0, MAX_OUTPUT_CHARS),
+      };
+    } catch (error) {
+      const msg =
+        error instanceof ZcodeTimeoutError
+          ? 'ZCode handshake timed out'
+          : runAbort.signal.aborted
+            ? describe(runAbort.signal.reason ?? error)
+            : describe(error);
+      return {
+        status: 'failed',
+        ...(sessionId ? { sessionId } : {}),
+        error: msg,
+      };
+    } finally {
+      clearTimeout(timeout);
+      req.signal?.removeEventListener('abort', onExternalAbort);
+      runAbort.signal.removeEventListener('abort', abortListener);
+      await conn.dispose().catch(() => undefined);
+    }
+  }
+
+  private async runClaude(
+    profile: Extract<BackendProfile, { kind: 'claude' }>,
+    req: UnattendedRunRequest,
+  ): Promise<UnattendedRunOutcome> {
+    const cfg = this.host.getClaudeConfig?.() ?? { configuredPath: '', env: this.host.getEnvForProfile() };
+    const located = await locateClaude({
+      configuredPath: cfg.configuredPath,
+      env: cfg.env,
+      platform: process.platform,
+    });
+    if (located.kind === 'notFound') {
+      return { status: 'failed', error: profile.installHint ?? 'claude executable not found in PATH or settings' };
+    }
+
+    const prepared = await this.host.prepareBackendLaunch?.(profile);
+    const projection = new ClaudeSessionProjection(req.projectPath);
+    let sessionId: string | undefined;
+    let notifiedHidden = false;
+    let resolveTurnDone: (() => void) | undefined;
+    let rejectTurnDone: ((err: Error) => void) | undefined;
+    const turnDone = new Promise<void>((resolveP, rejectP) => {
+      resolveTurnDone = resolveP;
+      rejectTurnDone = rejectP;
+    });
+
+    const runAbort = new AbortController();
+    const timeout = setTimeout(
+      () => runAbort.abort(new Error('Scheduled task timed out')),
+      req.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+    const onExternalAbort = () => runAbort.abort(req.signal?.reason ?? new Error('Aborted'));
+    req.signal?.addEventListener('abort', onExternalAbort, { once: true });
+
+    const conn = new ClaudeConnection({
+      command: located.command,
+      permissionMode: req.permission === 'read-only' ? 'plan' : 'default',
+      extraArgs: prepared?.extraArgs ?? [],
+      cwd: req.projectPath,
+      env: cfg.env,
+      log: this.host.log,
+      onStderr: (line) => this.host.runtimeLog?.(line, 'stderr'),
+      onEvent: (event) => {
+        const sid =
+          typeof event.session_id === 'string' && event.session_id
+            ? event.session_id
+            : typeof event.sessionId === 'string' && event.sessionId
+              ? event.sessionId
+              : undefined;
+        if (sid && !notifiedHidden) {
+          sessionId = sid;
+          notifiedHidden = true;
+          req.onSessionCreated(sid);
+        }
+        projection.applyEvent(event);
+        if (event.type === 'result') {
+          if (event.is_error === true || (typeof event.subtype === 'string' && event.subtype.startsWith('error'))) {
+            const errText =
+              typeof event.result === 'string' && event.result.trim() ? event.result.trim() : 'Claude Code turn failed';
+            rejectTurnDone?.(new Error(errText));
+          } else {
+            resolveTurnDone?.();
+          }
+        }
+      },
+      onControlRequest: async (_reqId, request) => {
+        if (request.subtype !== 'can_use_tool') return {};
+        return resolveClaudeUnattendedPermission(request, req.permission, req.projectPath);
+      },
+      onExit: (code, signal, stderr) => {
+        this.host.log(`定时 Claude Code 进程退出（${signal ?? code}）${stderr ? `：${stderr}` : ''}`);
+        rejectTurnDone?.(new Error(stderr || `Claude Code exited (${signal ?? code})`));
+      },
+    });
+
+    const abortListener = () => {
+      if (conn.running) {
+        void conn.sendControlRequest({ subtype: 'interrupt' }, 3_000).catch(() => undefined);
+      }
+      rejectTurnDone?.(new Error(describe(runAbort.signal.reason ?? 'Scheduled task aborted')));
+      void conn.dispose();
+    };
+    runAbort.signal.addEventListener('abort', abortListener, { once: true });
+
+    try {
+      await conn.start();
+      projection.startTurn(Date.now());
+      conn.sendUserMessage(req.prompt);
+      await turnDone;
+
+      const assistantTexts = projection
+        .snapshotItems()
+        .filter((item): item is Extract<typeof item, { kind: 'assistant' }> => item.kind === 'assistant')
+        .map((item) => item.markdown.trim())
+        .filter(Boolean);
+
+      return {
+        status: 'succeeded',
+        ...(sessionId ? { sessionId } : {}),
+        output: assistantTexts.join('\n\n').slice(0, MAX_OUTPUT_CHARS),
+      };
+    } catch (error) {
+      return {
+        status: 'failed',
+        ...(sessionId ? { sessionId } : {}),
+        error: runAbort.signal.aborted ? describe(runAbort.signal.reason ?? error) : describe(error),
+      };
+    } finally {
+      clearTimeout(timeout);
+      req.signal?.removeEventListener('abort', onExternalAbort);
+      runAbort.signal.removeEventListener('abort', abortListener);
+      await conn.dispose().catch(() => undefined);
+    }
+  }
+
+  private async runPi(
+    profile: Extract<BackendProfile, { kind: 'pi' }>,
+    req: UnattendedRunRequest,
+  ): Promise<UnattendedRunOutcome> {
+    const cfg = this.host.getPiConfig?.() ?? { configuredPath: '', env: this.host.getEnvForProfile() };
+    const located = await locatePi({
+      configuredPath: cfg.configuredPath,
+      env: cfg.env,
+      platform: process.platform,
+    });
+    if (located.kind === 'notFound') {
+      return { status: 'failed', error: profile.installHint ?? 'pi executable not found in PATH or settings' };
+    }
+
+    const prepared = await this.host.prepareBackendLaunch?.(profile);
+    const projection = new PiSessionProjection(req.projectPath);
+    let sessionId: string | undefined;
+    let resolveTurnDone: (() => void) | undefined;
+    let rejectTurnDone: ((err: Error) => void) | undefined;
+    const turnDone = new Promise<void>((resolveP, rejectP) => {
+      resolveTurnDone = resolveP;
+      rejectTurnDone = rejectP;
+    });
+
+    const runAbort = new AbortController();
+    const timeout = setTimeout(
+      () => runAbort.abort(new Error('Scheduled task timed out')),
+      req.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+    const onExternalAbort = () => runAbort.abort(req.signal?.reason ?? new Error('Aborted'));
+    req.signal?.addEventListener('abort', onExternalAbort, { once: true });
+
+    const conn = new PiConnection({
+      command: located.command,
+      extraArgs: prepared?.extraArgs ?? [],
+      cwd: req.projectPath,
+      env: cfg.env,
+      log: this.host.log,
+      onStderr: (line) => this.host.runtimeLog?.(line, 'stderr'),
+      onEvent: (event) => {
+        projection.applyEvent(event);
+        if (event.type === 'agent_end') {
+          const last = projection.snapshotItems().at(-1);
+          if (last?.kind === 'notice' && last.level === 'error') {
+            rejectTurnDone?.(new Error(last.text));
+          } else {
+            resolveTurnDone?.();
+          }
+        }
+      },
+      onUiRequest: async (uiReq) => {
+        if (uiReq.method === 'confirm') {
+          return { confirmed: req.permission === 'danger-full-access' };
+        }
+        return { cancelled: true };
+      },
+      onExit: (code, signal, stderr) => {
+        this.host.log(`定时 Pi 进程退出（${signal ?? code}）${stderr ? `：${stderr}` : ''}`);
+        rejectTurnDone?.(new Error(stderr || `Pi exited (${signal ?? code})`));
+      },
+    });
+
+    const abortListener = () => {
+      if (conn.running) {
+        void conn.request('abort').catch(() => undefined);
+      }
+      rejectTurnDone?.(new Error(describe(runAbort.signal.reason ?? 'Scheduled task aborted')));
+      void conn.dispose();
+    };
+    runAbort.signal.addEventListener('abort', abortListener, { once: true });
+
+    try {
+      await conn.start();
+      const state = await conn.request<{ sessionId?: string }>('get_state', {}, INITIALIZE_TIMEOUT_MS);
+      sessionId = state?.sessionId;
+      if (sessionId) req.onSessionCreated(sessionId);
+
+      const promptBody =
+        req.permission === 'read-only'
+          ? `[Read-only Scheduled Run: Do not modify files or execute destructive commands.]\n\n${req.prompt}`
+          : req.prompt;
+
+      projection.startTurn(Date.now());
+      await conn.request('prompt', { message: promptBody });
+      await turnDone;
+
+      const assistantTexts = projection
+        .snapshotItems()
+        .filter((item): item is Extract<typeof item, { kind: 'assistant' }> => item.kind === 'assistant')
+        .map((item) => item.markdown.trim())
+        .filter(Boolean);
+
+      return {
+        status: 'succeeded',
+        ...(sessionId ? { sessionId } : {}),
+        output: assistantTexts.join('\n\n').slice(0, MAX_OUTPUT_CHARS),
+      };
+    } catch (error) {
+      const msg =
+        error instanceof PiTimeoutError
+          ? 'Pi RPC handshake timed out'
           : runAbort.signal.aborted
             ? describe(runAbort.signal.reason ?? error)
             : describe(error);
@@ -368,10 +805,7 @@ function resolveAcpUnattendedPermission(
     if (kind === 'read' || kind === 'search') {
       shouldAllow = true;
     } else if (kind === 'edit') {
-      const rawArgs = (toolCall?.rawInput ?? {}) as { file_path?: unknown; path?: unknown };
-      const target =
-        toolCall?.locations?.[0]?.path ??
-        (typeof rawArgs.file_path === 'string' ? rawArgs.file_path : typeof rawArgs.path === 'string' ? rawArgs.path : undefined);
+      const target = toolCall?.locations?.[0]?.path ?? inputFilePath(toolCall?.rawInput);
       if (target) {
         const abs = isAbsolute(target) ? resolve(target) : resolve(projectPath, target);
         const rel = relative(projectPath, abs);
@@ -384,6 +818,66 @@ function resolveAcpUnattendedPermission(
   return chosen
     ? { outcome: { outcome: 'selected', optionId: chosen.optionId } }
     : { outcome: { outcome: 'cancelled' } };
+}
+
+function resolveZcodeUnattendedPermission(
+  params: unknown,
+  permission: SchedulePermissionPreset,
+  projectPath: string,
+): { readonly decision: 'allow' | 'deny' } {
+  if (permission === 'danger-full-access') return { decision: 'allow' };
+  const raw = params && typeof params === 'object' ? (params as Record<string, unknown>) : {};
+  const toolName = typeof raw.toolName === 'string' ? raw.toolName : typeof raw.tool === 'string' ? raw.tool : '';
+  const variant = toolVariant(toolName);
+  if (variant === 'explore') return { decision: 'allow' };
+  if (permission === 'workspace-write' && variant === 'edit') {
+    const input = parseArguments(raw.input ?? raw.arguments ?? raw.args);
+    const target = inputFilePath(input);
+    if (target) {
+      const abs = isAbsolute(target) ? resolve(target) : resolve(projectPath, target);
+      const rel = relative(projectPath, abs);
+      if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+        return { decision: 'allow' };
+      }
+    }
+  }
+  return { decision: 'deny' };
+}
+
+function resolveClaudeUnattendedPermission(
+  request: Record<string, unknown>,
+  permission: SchedulePermissionPreset,
+  projectPath: string,
+): Record<string, unknown> {
+  const toolName =
+    typeof request.tool_name === 'string'
+      ? request.tool_name
+      : typeof request.toolName === 'string'
+        ? request.toolName
+        : 'tool';
+  const canon = canonicalTool(toolName);
+  if (canon === 'ask_user_question' || canon === 'exit_plan_mode') {
+    return { behavior: 'deny', message: 'Unattended scheduled run cannot answer interactive questions.' };
+  }
+  const input = parseArguments(request.input);
+  if (permission === 'danger-full-access') {
+    return { behavior: 'allow', updatedInput: input };
+  }
+  const variant = toolVariant(toolName);
+  if (variant === 'explore') {
+    return { behavior: 'allow', updatedInput: input };
+  }
+  if (permission === 'workspace-write' && variant === 'edit') {
+    const target = inputFilePath(input);
+    if (target) {
+      const abs = isAbsolute(target) ? resolve(target) : resolve(projectPath, target);
+      const rel = relative(projectPath, abs);
+      if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+        return { behavior: 'allow', updatedInput: input };
+      }
+    }
+  }
+  return { behavior: 'deny', message: `Denied by unattended schedule permission (${permission}).` };
 }
 
 function pickAcpModeValue(

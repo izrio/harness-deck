@@ -17,9 +17,20 @@ import {
   SendIcon,
   TrashIcon,
 } from '../icons.tsx';
-import { Button } from '../ui/Button.tsx';
-import { Input, Select, Textarea } from '../ui/FormControls.tsx';
-import { ValuePill } from '../ui/ValuePill.tsx';
+import { ValuePill } from '../beautifului/index.ts';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 
 const DEFAULT_TOOLS: AgentToolConfig = {
   permissionPreset: 'workspace-write',
@@ -34,6 +45,7 @@ export function AgentsView() {
   const t = useT();
   const agents = useView((s) => s.workbench.agents);
   const backends = useView((s) => s.backends);
+  const providers = useView((s) => s.providers.items);
   const models = useView((s) => s.models);
   const projects = useView((s) => s.projects);
 
@@ -63,6 +75,30 @@ export function AgentsView() {
     return [...map.entries()];
   })();
 
+  const mergedModels = (() => {
+    const seen = new Set<string>();
+    const list: { key: string; label: string }[] = [];
+    const orderedProviders = [
+      ...providers.filter((p) => p.boundBackendIds.includes(backendId)),
+      ...providers.filter((p) => !p.boundBackendIds.includes(backendId)),
+    ];
+    for (const p of orderedProviders) {
+      for (const m of p.models) {
+        const key = `${p.id}::${m.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push({ key, label: `${m.name || m.id} (${p.name})` });
+      }
+    }
+    for (const m of models.options) {
+      const key = `${m.provider}::${m.model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      list.push({ key, label: `${m.name} (${m.group})` });
+    }
+    return list;
+  })();
+
   const openCreate = () => {
     setEditingId(undefined);
     setName('');
@@ -83,6 +119,11 @@ export function AgentsView() {
     setModelKey(agent.model ? `${agent.provider ?? ''}::${agent.model}` : '');
     setTools(agent.tools);
     setFormOpen(true);
+  };
+
+  const closeForm = () => {
+    setFormOpen(false);
+    setEditingId(undefined);
   };
 
   const handleSave = () => {
@@ -138,21 +179,24 @@ export function AgentsView() {
             <h2 className="m-0 text-[15px] font-semibold tracking-tight text-ink">{t('wb.agents.title')}</h2>
             <p className="mt-0.5 mb-0 text-[12px] text-ink-3">{t('wb.agents.subtitle')}</p>
           </div>
-          <Button variant="primary" size="sm" data-testid="agent-new-btn" onClick={openCreate}>
+          <Button type="button" size="sm" data-testid="agent-new-btn" onClick={openCreate}>
             <PlusIcon className="size-3.5" />
             <span>{t('wb.agents.new')}</span>
           </Button>
         </div>
 
-        {/* 新建 / 编辑智能体表单 */}
-        {formOpen ? (
-          <section className="flex flex-col overflow-hidden rounded-card border border-accent/40 bg-surface shadow-raised" data-testid="agent-form">
-            <div className="primitive-card-bar border-b border-line bg-inset/50">
-              <h3 className="m-0 text-[13px] font-semibold text-ink">
-                {editingId ? t('wb.agents.edit') : t('wb.agents.new')}
-              </h3>
-            </div>
-            <div className="primitive-card-pad flex flex-col gap-3">
+        {/* 新建 / 编辑智能体模态弹窗 */}
+        <Dialog open={formOpen} onOpenChange={(open) => !open && closeForm()}>
+          <DialogContent data-testid="agent-form" aria-modal="true" className="sm:max-w-[560px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-[14px]">
+                <AgentIcon className="size-4 text-accent-ink" />
+                <span>{editingId ? t('wb.agents.edit') : t('wb.agents.new')}</span>
+              </DialogTitle>
+              <DialogDescription className="sr-only">{t('wb.agents.subtitle')}</DialogDescription>
+            </DialogHeader>
+
+            <div className="flex flex-col gap-3">
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldName')}</span>
@@ -185,41 +229,44 @@ export function AgentsView() {
                 />
               </label>
 
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 [&_[data-slot=native-select-wrapper]]:w-full">
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldBackend')}</span>
-                  <Select
+                  <NativeSelect
+                    size="sm"
                     data-testid="agent-select-backend"
                     value={backendId}
                     onChange={(e) => setBackendId(e.target.value)}
                   >
                     {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
-                      <option key={b.id} value={b.id}>
+                      <NativeSelectOption key={b.id} value={b.id}>
                         {b.name}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </Select>
+                  </NativeSelect>
                 </label>
 
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldModel')}</span>
-                  <Select
+                  <NativeSelect
+                    size="sm"
                     data-testid="agent-select-model"
                     value={modelKey}
                     onChange={(e) => setModelKey(e.target.value)}
                   >
-                    <option value="">{t('wb.agents.modelDefault')}</option>
-                    {models.options.map((m) => (
-                      <option key={`${m.provider}::${m.model}`} value={`${m.provider}::${m.model}`}>
-                        {m.name} ({m.group})
-                      </option>
+                    <NativeSelectOption value="">{t('wb.agents.modelDefault')}</NativeSelectOption>
+                    {mergedModels.map((m) => (
+                      <NativeSelectOption key={m.key} value={m.key}>
+                        {m.label}
+                      </NativeSelectOption>
                     ))}
-                  </Select>
+                  </NativeSelect>
                 </label>
 
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldPermission')}</span>
-                  <Select
+                  <NativeSelect
+                    size="sm"
                     data-testid="agent-select-permission"
                     value={tools.permissionPreset}
                     onChange={(e) =>
@@ -229,10 +276,10 @@ export function AgentsView() {
                       })
                     }
                   >
-                    <option value="read-only">{t('wb.schedules.permRead')}</option>
-                    <option value="workspace-write">{t('wb.schedules.permWorkspace')}</option>
-                    <option value="danger-full-access">{t('wb.schedules.permFull')}</option>
-                  </Select>
+                    <NativeSelectOption value="read-only">{t('wb.schedules.permRead')}</NativeSelectOption>
+                    <NativeSelectOption value="workspace-write">{t('wb.schedules.permWorkspace')}</NativeSelectOption>
+                    <NativeSelectOption value="danger-full-access">{t('wb.schedules.permFull')}</NativeSelectOption>
+                  </NativeSelect>
                 </label>
               </div>
 
@@ -253,39 +300,42 @@ export function AgentsView() {
                       key={key}
                       className="inline-flex cursor-pointer items-center gap-1.5 rounded-control border border-line bg-field px-2.5 py-1 text-[12px] text-ink"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={tools[key]}
-                        onChange={(e) => setTools({ ...tools, [key]: e.target.checked })}
+                        onCheckedChange={(checked) => setTools({ ...tools, [key]: Boolean(checked) })}
                       />
                       <span>{label}</span>
                     </label>
                   ))}
                 </div>
               </div>
-
-              <div className="flex justify-end gap-2 border-t border-line pt-2.5">
-                <Button variant="secondary" size="sm" onClick={() => setFormOpen(false)}>
-                  {t('common.cancel')}
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  data-testid="agent-submit-btn"
-                  disabled={!name.trim() || !specialty.trim()}
-                  onClick={handleSave}
-                >
-                  {t('common.save')}
-                </Button>
-              </div>
             </div>
-          </section>
-        ) : null}
+
+            <DialogFooter>
+              <Button type="button" variant="outline" size="sm" data-testid="agent-cancel-btn" onClick={closeForm}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="agent-submit-btn"
+                disabled={!name.trim() || !specialty.trim()}
+                onClick={handleSave}
+              >
+                {t('common.save')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* 智能体卡片网格 */}
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2" data-testid="agents-list">
           {agents.map((agent) => {
             const backendName = backends.items.find((b) => b.id === agent.backendId)?.name ?? agent.backendId;
+            const boundProvider =
+              providers.find((p) => (p.boundAgentIds ?? []).includes(agent.id)) ??
+              (agent.provider ? providers.find((p) => p.id === agent.provider) : undefined) ??
+              providers.find((p) => p.boundBackendIds.includes(agent.backendId));
             const isDelegating = delegatingId === agent.id;
             const permText =
               agent.tools.permissionPreset === 'read-only'
@@ -311,12 +361,20 @@ export function AgentsView() {
                       <div className="mt-1 text-[12px] font-medium text-ink-2">{agent.specialty}</div>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="quiet" size="xs" aria-label={t('common.edit')} onClick={() => openEdit(agent)}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        data-testid={`agent-edit-${agent.id}`}
+                        aria-label={t('common.edit')}
+                        onClick={() => openEdit(agent)}
+                      >
                         <PencilIcon className="size-3.5" />
                       </Button>
                       <Button
-                        variant="quiet"
-                        size="xs"
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
                         aria-label={t('common.delete')}
                         onClick={() => postToHost({ type: 'deleteAgent', payload: { id: agent.id } })}
                       >
@@ -331,6 +389,9 @@ export function AgentsView() {
 
                   <div className="flex flex-wrap gap-1 pt-0.5 text-[11px] text-ink-3">
                     <span className="rounded-chip bg-field px-2 py-0.5 shadow-hairline">{backendName}</span>
+                    {boundProvider ? (
+                      <span className="rounded-chip bg-field px-2 py-0.5 shadow-hairline">{boundProvider.name}</span>
+                    ) : null}
                     {agent.model ? (
                       <span className="rounded-chip bg-field px-2 py-0.5 font-mono shadow-hairline">{agent.model}</span>
                     ) : null}
@@ -339,7 +400,7 @@ export function AgentsView() {
 
                   <div className="flex items-center gap-2 border-t border-line pt-2.5">
                     <Button
-                      variant="primary"
+                      type="button"
                       size="xs"
                       data-testid={`agent-start-${agent.id}`}
                       onClick={() =>
@@ -356,7 +417,8 @@ export function AgentsView() {
                       <span>{t('wb.agents.startSession')}</span>
                     </Button>
                     <Button
-                      variant="secondary"
+                      type="button"
+                      variant="outline"
                       size="xs"
                       data-testid={`agent-delegate-toggle-${agent.id}`}
                       onClick={() => {
@@ -380,20 +442,22 @@ export function AgentsView() {
                       />
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         {projectOptions.length > 0 ? (
-                          <Select
-                            value={delegateProject}
-                            onChange={(e) => setDelegateProject(e.target.value)}
-                            wrapperClassName="min-w-36 flex-1"
-                          >
-                            {projectOptions.map(([path, label]) => (
-                              <option key={path} value={path}>
-                                {label}
-                              </option>
-                            ))}
-                          </Select>
+                          <div className="min-w-36 flex-1 [&_[data-slot=native-select-wrapper]]:w-full">
+                            <NativeSelect
+                              size="sm"
+                              value={delegateProject}
+                              onChange={(e) => setDelegateProject(e.target.value)}
+                            >
+                              {projectOptions.map(([path, label]) => (
+                                <NativeSelectOption key={path} value={path}>
+                                  {label}
+                                </NativeSelectOption>
+                              ))}
+                            </NativeSelect>
+                          </div>
                         ) : <span />}
                         <Button
-                          variant="primary"
+                          type="button"
                           size="xs"
                           data-testid={`agent-delegate-submit-${agent.id}`}
                           disabled={!delegatePrompt.trim()}

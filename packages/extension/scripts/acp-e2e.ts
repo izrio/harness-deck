@@ -354,11 +354,11 @@ try {
   }
 
   // 5. 会话列表、新对话、重新打开会话（session/load 回放）
-  await page.locator('.header__title').click();
-  const sessionItem = page.locator('.sessions-menu .menu-item', { hasText: 'HELLO 打个招呼' });
+  await page.getByTestId('history-button').click();
+  const sessionItem = page.locator('[data-testid="session-history-page"] .history-session-item', { hasText: 'HELLO 打个招呼' });
   await sessionItem.waitFor({ timeout: 10_000 }).then(
     () => check('会话列表里有这个会话（标题取第一条消息）', true),
-    async () => check('会话列表里有这个会话（标题取第一条消息）', false, await page!.locator('.sessions-menu').innerText().catch(() => '')),
+    async () => check('会话列表里有这个会话（标题取第一条消息）', false, await page!.getByTestId('session-history-page').innerText().catch(() => '')),
   );
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '新对话' }).click();
@@ -373,8 +373,8 @@ try {
     () => check('新对话开在新标签里，原来的会话还在', false),
   );
   await shot('04a-tabs');
-  await page.locator('.header__title').click();
-  await page.locator('.sessions-menu .menu-item', { hasText: 'HELLO 打个招呼' }).click();
+  await page.getByTestId('history-button').click();
+  await page.locator('[data-testid="session-history-page"] .history-session-item', { hasText: 'HELLO 打个招呼' }).click();
   await page.locator('.user', { hasText: 'HELLO 打个招呼' }).waitFor({ timeout: 30_000 }).then(
     () => check('重新打开会话：历史从代理回放', true),
     () => check('重新打开会话：历史从代理回放', false),

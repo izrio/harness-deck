@@ -1,7 +1,7 @@
 import { dismissToast, useView } from '../store.ts';
 import { useT } from '../i18n.ts';
 import { cn } from '../lib/utils.ts';
-import { Button } from './ui/Button.tsx';
+import { Button } from '@/components/ui/button';
 import { CloseIcon, ErrorIcon, InfoIcon } from './icons.tsx';
 
 /** 提示（Beautiful UI 浮层通知）：普通提示几秒后自动消失；错误一直留着，点右边的 × 关掉。 */
@@ -33,8 +33,9 @@ export function Toasts() {
             </span>
             <span className="toast__text min-w-0 flex-1 leading-snug [overflow-wrap:anywhere]">{toast.text}</span>
             <Button
-              variant="quiet"
-              size="icon"
+              type="button"
+              variant="ghost"
+              size="icon-xs"
               className="toast__close -mr-1 text-ink-3 hover:text-ink"
               onClick={() => dismissToast(toast.id)}
               aria-label={t('toast.close')}

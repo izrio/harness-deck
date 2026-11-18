@@ -10,7 +10,9 @@ import type {
   DiffRef,
   ConnectionState,
   ContextState,
+  ExtensionsState,
   FileCandidate,
+  HostIdeKind,
   Locale,
   HostToWebview,
   Item,
@@ -20,6 +22,9 @@ import type {
   PermissionState,
   PreferencesState,
   ProjectsState,
+  PromptImage,
+  ProviderModelItem,
+  ProvidersState,
   RuntimeStatus,
   SessionHeader,
   SessionListItem,
@@ -30,7 +35,17 @@ import type {
   WorkspaceState,
 } from '@harness-deck/shared';
 
-export type SettingsTab = 'interface' | 'agents' | 'projects';
+export type SettingsTab =
+  | 'appearance'
+  | 'notifications'
+  | 'agents'
+  | 'providers'
+  | 'skills'
+  | 'mcp'
+  | 'session'
+  | 'commands'
+  | 'projects'
+  | 'other';
 
 export interface Toast {
   readonly id: number;
@@ -39,6 +54,7 @@ export interface Toast {
 }
 
 export interface ViewState {
+  readonly hostKind: HostIdeKind;
   readonly ready: boolean;
   readonly runtime: RuntimeStatus;
   readonly connection: ConnectionState;
@@ -46,6 +62,16 @@ export interface ViewState {
   readonly tabs: TabsState;
   /** 可选的底层和当前底层。 */
   readonly backends: BackendsState;
+  /** 第三方编程套餐与自定义模型服务商及智能体绑定。 */
+  readonly providers: ProvidersState;
+  /** 技能（SKILL.md）与统一 MCP 服务器状态。 */
+  readonly extensions: ExtensionsState;
+  /** 最近一次「从接口获取模型」的结果。 */
+  readonly providerFetchResult?: {
+    readonly requestId: number;
+    readonly models: readonly ProviderModelItem[];
+    readonly error?: string;
+  };
   readonly session: SessionHeader;
   readonly sessionKey: string;
   readonly items: readonly Item[];
@@ -65,6 +91,8 @@ export interface ViewState {
    * replace：「编辑后重发」和示例任务，换掉输入框里的内容；restore：消息没发出去，放回原文，输入框里已经新写的内容保留在后面。
    */
   readonly prefill: { readonly text: string; readonly n: number; readonly mode: 'replace' | 'restore' };
+  /** Host 通过文件选择器传入的图片列表；`n` 每次递增，输入框据此追加。 */
+  readonly pendingImages: { readonly images: readonly PromptImage[]; readonly n: number };
   /** Host 要求聚焦输入框的次数，组件据此触发聚焦。 */
   readonly focusRequests: number;
   readonly appearance: AppearanceState;
@@ -74,6 +102,7 @@ export interface ViewState {
   readonly activeModule: WorkbenchModule;
   readonly moduleExplicit: boolean;
   readonly inspectScheduleRuleId?: string;
+  readonly historyOpen: boolean;
   readonly settingsOpen: boolean;
   readonly settingsTab: SettingsTab;
   readonly markdownPreview?: MarkdownPreviewData & { readonly loading?: boolean };
@@ -91,13 +120,49 @@ const emptyWorkbench: WorkbenchState = {
   sessionGroups: [],
 };
 
+function readInitialBackends(): BackendsState {
+  if (typeof (globalThis as { acquireVsCodeApi?: unknown }).acquireVsCodeApi !== 'function') {
+    return { items: [], active: 'dsh' };
+  }
+  try {
+    const saved = loadState().activeBackend;
+    if (saved?.id && saved.name) {
+      return {
+        items: [{ id: saved.id, name: saved.name, kind: saved.kind ?? 'acp' }],
+        active: saved.id,
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return { items: [], active: 'dsh' };
+}
+
+function persistActiveBackend(backends: BackendsState | undefined): void {
+  if (!backends) return;
+  const current = backends.items.find((b) => b.id === backends.active);
+  if (!current) return;
+  try {
+    saveState({ activeBackend: { id: current.id, name: current.name, kind: current.kind } });
+  } catch {
+    // 测试环境中 acquireVsCodeApi 未必已就绪，忽略本地持久化异常
+  }
+}
+
+function readInitialHostKind(): HostIdeKind {
+  return (globalThis as { __HARNESS_DECK_HOST__?: unknown }).__HARNESS_DECK_HOST__ === 'jetbrains' ? 'jetbrains' : 'vscode';
+}
+
 const initialState: ViewState = {
+  hostKind: readInitialHostKind(),
   ready: false,
   runtime: { kind: 'idle' },
   connection: 'idle',
   sessions: [],
   tabs: { items: [], active: '' },
-  backends: { items: [], active: 'dsh' },
+  backends: readInitialBackends(),
+  providers: { items: [], protocolGatewayEnabled: false },
+  extensions: { skills: { items: [] }, mcp: { servers: [] } },
   session: { title: '', running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
   sessionKey: '',
   items: [],
@@ -111,6 +176,7 @@ const initialState: ViewState = {
   fileCandidates: { requestId: -1, items: [] },
   toasts: [],
   prefill: { text: '', n: 0, mode: 'replace' },
+  pendingImages: { images: [], n: 0 },
   focusRequests: 0,
   appearance: {},
   preferences: {
@@ -131,13 +197,15 @@ const initialState: ViewState = {
       dshProfile: 'web',
       backendTrace: false,
     },
+    chatCommands: [],
   },
   projects: { recent: [], configs: {} },
   workbench: emptyWorkbench,
   activeModule: 'sessions',
   moduleExplicit: false,
+  historyOpen: false,
   settingsOpen: false,
-  settingsTab: 'interface',
+  settingsTab: 'appearance',
   images: {},
 };
 
@@ -180,10 +248,26 @@ export function setProjectsLocal(projects: ProjectsState): void {
   set({ projects });
 }
 
+/** 本地协议转换网关开关先在本地生效，Host 写完设置并启停网关后会推送完整 ProvidersState。 */
+export function setProtocolGatewayLocal(enabled: boolean): void {
+  set({
+    providers: {
+      ...state.providers,
+      protocolGatewayEnabled: enabled,
+      ...(enabled ? {} : { protocolGatewayOrigin: undefined }),
+    },
+  });
+}
+
+export function setExtensionsLocal(extensions: ExtensionsState): void {
+  set({ extensions });
+}
+
 export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRuleId?: string): void {
   set({
     activeModule,
     moduleExplicit: true,
+    historyOpen: false,
     settingsOpen: false,
     markdownPreview: undefined,
     inspectScheduleRuleId,
@@ -195,12 +279,31 @@ export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRu
   }
 }
 
-export function openSettingsPage(tab?: SettingsTab): void {
-  set({ settingsOpen: true, ...(tab ? { settingsTab: tab } : {}) });
+function normalizeSettingsTab(tab: SettingsTab | 'interface' | 'extensions'): SettingsTab {
+  if (tab === 'interface') return 'appearance';
+  if (tab === 'extensions') return 'skills';
+  return tab;
 }
 
-export function setSettingsTab(settingsTab: SettingsTab): void {
-  set({ settingsTab });
+export function openHistoryPage(): void {
+  set({ historyOpen: true, settingsOpen: false, markdownPreview: undefined });
+}
+
+export function closeHistoryPage(): void {
+  set({ historyOpen: false });
+}
+
+export function toggleHistoryPage(): void {
+  const nextOpen = !state.historyOpen;
+  set({ historyOpen: nextOpen, ...(nextOpen ? { settingsOpen: false, markdownPreview: undefined } : {}) });
+}
+
+export function openSettingsPage(tab?: SettingsTab | 'interface' | 'extensions'): void {
+  set({ settingsOpen: true, historyOpen: false, markdownPreview: undefined, ...(tab ? { settingsTab: normalizeSettingsTab(tab) } : {}) });
+}
+
+export function setSettingsTab(settingsTab: SettingsTab | 'interface' | 'extensions'): void {
+  set({ settingsTab: normalizeSettingsTab(settingsTab) });
 }
 
 export function closeSettingsPage(): void {
@@ -208,7 +311,8 @@ export function closeSettingsPage(): void {
 }
 
 export function toggleSettingsPage(): void {
-  set({ settingsOpen: !state.settingsOpen });
+  const nextOpen = !state.settingsOpen;
+  set({ settingsOpen: nextOpen, ...(nextOpen ? { historyOpen: false, markdownPreview: undefined } : {}) });
 }
 
 export function requestMarkdownPreview(path: string): void {
@@ -285,13 +389,16 @@ export function applyHostMessage(message: HostToWebview): void {
         }
         resolvedModule = savedMod ?? (p.workbench !== undefined ? 'overview' : 'sessions');
       }
+      const resolvedBackends = p.backends ?? state.backends;
+      persistActiveBackend(p.backends);
       set({
+        ...(p.hostKind ? { hostKind: p.hostKind } : {}),
         ready: true,
         runtime: p.runtime,
         connection: p.connection,
         sessions: p.sessions,
         tabs: p.tabs ?? { items: [], active: '' },
-        backends: p.backends ?? { items: [], active: 'dsh' },
+        backends: resolvedBackends,
         session: p.session,
         sessionKey: p.session.id ?? '',
         items: p.items,
@@ -305,6 +412,8 @@ export function applyHostMessage(message: HostToWebview): void {
         appearance: p.appearance ?? {},
         activeModule: resolvedModule,
         ...(p.preferences ? { preferences: p.preferences } : {}),
+        ...(p.providers ? { providers: p.providers } : {}),
+        ...(p.extensions ? { extensions: p.extensions } : {}),
         ...(p.projects ? { projects: p.projects } : {}),
         ...(p.workbench ? { workbench: p.workbench } : {}),
       });
@@ -323,7 +432,17 @@ export function applyHostMessage(message: HostToWebview): void {
       set({ tabs: message.payload });
       return;
     case 'backends':
+      persistActiveBackend(message.payload);
       set({ backends: message.payload });
+      return;
+    case 'providers':
+      set({ providers: message.payload });
+      return;
+    case 'extensions':
+      set({ extensions: message.payload });
+      return;
+    case 'providerModelsFetched':
+      set({ providerFetchResult: message.payload });
       return;
     case 'session':
       set({ session: message.payload });
@@ -367,7 +486,7 @@ export function applyHostMessage(message: HostToWebview): void {
       }
       return;
     case 'navigateToSession':
-      set({ activeModule: 'sessions', moduleExplicit: true, settingsOpen: false, markdownPreview: undefined });
+      set({ activeModule: 'sessions', moduleExplicit: true, historyOpen: false, settingsOpen: false, markdownPreview: undefined });
       return;
     case 'imageData':
       set({ images: { ...state.images, [message.payload.attachmentId]: message.payload.dataUrl ?? 'error' } });
@@ -404,8 +523,19 @@ export function applyHostMessage(message: HostToWebview): void {
       return;
     }
     case 'focusComposer':
-      set({ activeModule: 'sessions', moduleExplicit: true, settingsOpen: false, focusRequests: state.focusRequests + 1 });
+      set({ activeModule: 'sessions', moduleExplicit: true, historyOpen: false, settingsOpen: false, focusRequests: state.focusRequests + 1 });
       return;
+    case 'attachImages': {
+      const nextImages = { ...state.images };
+      for (const image of message.payload.images) {
+        nextImages[`local:${image.localId}`] = `data:${image.mediaType};base64,${image.data}`;
+      }
+      set({
+        images: nextImages,
+        pendingImages: { images: message.payload.images, n: state.pendingImages.n + 1 },
+      });
+      return;
+    }
     case 'restoreDraft':
       requestPrefill(message.payload.text, 'restore');
       return;

@@ -56,6 +56,31 @@ export interface AcpConfigOption {
   readonly type?: string;
   readonly currentValue?: string;
   readonly options?: readonly { readonly value: string; readonly name?: string; readonly description?: string }[];
+  /** 代理通过旧版 ACP 字段 models / modes 返回选项时，切换调用的对应 RPC 方法。 */
+  readonly legacyMethod?: 'session/set_model' | 'session/set_mode';
+}
+
+export interface AcpSessionMeta {
+  readonly configOptions?: readonly AcpConfigOption[] | null;
+  readonly models?: {
+    readonly currentModelId?: string | null;
+    readonly availableModels?: readonly { readonly modelId: string; readonly name?: string | null; readonly description?: string | null }[];
+  } | null;
+  readonly modes?: {
+    readonly currentModeId?: string | null;
+    readonly availableModes?: readonly { readonly id: string; readonly name?: string | null; readonly description?: string | null }[];
+  } | null;
+}
+
+/** 从工具调用的原始参数里提取目标文件路径（兼容 omp 的 path、Claude 的 file_path、OpenCode 的 filePath）。 */
+export function inputFilePath(rawInput: unknown): string | undefined {
+  if (!rawInput || typeof rawInput !== 'object') return undefined;
+  const args = rawInput as Record<string, unknown>;
+  for (const key of ['path', 'file_path', 'filePath', 'notebook_path']) {
+    const val = args[key];
+    if (typeof val === 'string' && val.trim()) return val;
+  }
+  return undefined;
 }
 
 export interface AcpCommand {
@@ -146,8 +171,8 @@ export class AcpSessionProjection {
     for (const call of this.tools.values()) {
       if (call.status !== 'completed' || this.variantOf(call) !== 'edit') continue;
       const diffs = (call.content ?? []).filter((c): c is Extract<AcpToolContent, { type: 'diff' }> => c.type === 'diff');
-      const args = (call.rawInput ?? {}) as { path?: unknown; file_path?: unknown; content?: unknown };
-      const fallbackPath = call.locations?.[0]?.path ?? (typeof args.path === 'string' ? args.path : typeof args.file_path === 'string' ? args.file_path : undefined);
+      const args = (call.rawInput ?? {}) as { content?: unknown };
+      const fallbackPath = call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
       const entries: { path: string; diff?: AcpDiff; stats: LineStats }[] = diffs.length
         ? diffs.map((d) => ({ path: d.path, diff: { path: d.path, oldText: d.oldText ?? null, newText: d.newText }, stats: lineStats(d.oldText ?? '', d.newText) }))
         : fallbackPath && typeof args.content === 'string'
@@ -237,9 +262,13 @@ export class AcpSessionProjection {
       case 'agent_thought_chunk':
         this.appendAssistant(update, 'reasoning');
         break;
-      case 'tool_call':
-        this.addTool(withName(update as unknown as AcpToolCall));
+      case 'tool_call': {
+        const call = withName(update as unknown as AcpToolCall);
+        const todos = todosOf(call);
+        if (todos) this.todos = todos;
+        this.addTool(call);
         break;
+      }
       case 'tool_call_update': {
         const call = withName(update as unknown as AcpToolCall);
         const todos = todosOf(call);
@@ -267,6 +296,9 @@ export class AcpSessionProjection {
       case 'current_mode_update':
         if (typeof update.currentModeId === 'string') this.setOption('mode', update.currentModeId);
         break;
+      case 'current_model_update':
+        if (typeof update.currentModelId === 'string') this.setOption('model', update.currentModelId);
+        break;
       case 'session_info_update':
         if (typeof update.title === 'string' && update.title.trim()) this.title = update.title.trim();
         break;
@@ -279,6 +311,21 @@ export class AcpSessionProjection {
   setConfigOptions(options: readonly AcpConfigOption[] | undefined): void {
     if (!options) return;
     this.configOptions = options;
+    this.changed();
+  }
+
+  /** 应用 session/new 或 session/load 返回的选项（同时兼容 configOptions 与旧版 ACP 的 models / modes 字段）。 */
+  setSessionMeta(meta: AcpSessionMeta | null | undefined): void {
+    if (!meta) return;
+    const merged = mergeSessionMeta(meta, this.configOptions);
+    if (merged) {
+      this.configOptions = merged;
+      this.changed();
+    }
+  }
+
+  updateOptionValue(categoryOrId: string, value: string): void {
+    this.setOption(categoryOrId, value);
     this.changed();
   }
 
@@ -412,8 +459,8 @@ export class AcpSessionProjection {
 
   /** 浏览行里的一步；读文件的那一步带上路径，点它打开文件。 */
   private exploreEntry(call: AcpToolCall): Explore['entries'][number] {
-    const args = (call.rawInput ?? {}) as { path?: unknown; file_path?: unknown };
-    const path = call.kind === 'read' ? (call.locations?.[0]?.path ?? (typeof args.file_path === 'string' ? args.file_path : typeof args.path === 'string' ? args.path : undefined)) : undefined;
+    const isRead = call.kind === 'read' || (call.name !== undefined && canonicalTool(call.name) === 'read');
+    const path = isRead ? (call.locations?.[0]?.path ?? inputFilePath(call.rawInput)) : undefined;
     return { id: call.toolCallId, label: this.label(call), status: statusOf(call.status), ...(path ? { path: displayPath(path, this.workspacePath) } : {}) };
   }
 
@@ -441,8 +488,8 @@ export class AcpSessionProjection {
     }
     if (variant === 'edit') {
       const diffs = (call.content ?? []).filter((c): c is Extract<AcpToolContent, { type: 'diff' }> => c.type === 'diff');
-      const args = (call.rawInput ?? {}) as { path?: unknown; file_path?: unknown; content?: unknown };
-      const path = diffs[0]?.path ?? call.locations?.[0]?.path ?? (typeof args.path === 'string' ? args.path : typeof args.file_path === 'string' ? args.file_path : undefined);
+      const args = (call.rawInput ?? {}) as { content?: unknown };
+      const path = diffs[0]?.path ?? call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
       const label = path ? displayPath(path, this.workspacePath) : (call.title ?? base.tool);
       let stats: LineStats | undefined;
       let created = false;
@@ -500,19 +547,87 @@ function isTodoTool(call: AcpToolCall): boolean {
   return call.name !== undefined && canonicalTool(call.name) === 'todo_write';
 }
 
-/** 待办工具完成时带的整张待办表（CodeBuddy：`_meta['codebuddy.ai/rawResponse'].todos`）。 */
+/** 待办工具携带的整张待办表（CodeBuddy：`_meta['codebuddy.ai/rawResponse'].todos`；OpenCode：`rawInput.todos`）。 */
 function todosOf(call: AcpToolCall): Todo[] | undefined {
-  if (!call._meta) return undefined;
-  for (const [key, value] of Object.entries(call._meta)) {
-    if (!key.endsWith('rawResponse') || !value || typeof value !== 'object') continue;
-    const todos = (value as { todos?: unknown }).todos;
-    if (!Array.isArray(todos)) continue;
-    return (todos as { content?: unknown; subject?: unknown; status?: unknown }[]).map((e) => ({
+  const toTodoList = (raw: unknown): Todo[] | undefined => {
+    if (!Array.isArray(raw)) return undefined;
+    return (raw as { content?: unknown; subject?: unknown; status?: unknown }[]).map((e) => ({
       content: typeof e.content === 'string' ? e.content : typeof e.subject === 'string' ? e.subject : '',
       status: e.status === 'completed' || e.status === 'in_progress' ? e.status : 'pending',
     }));
+  };
+  if (call._meta) {
+    for (const [key, value] of Object.entries(call._meta)) {
+      if (!key.endsWith('rawResponse') || !value || typeof value !== 'object') continue;
+      const list = toTodoList((value as { todos?: unknown }).todos);
+      if (list) return list;
+    }
+  }
+  if (isTodoTool(call) && call.rawInput && typeof call.rawInput === 'object') {
+    const list = toTodoList((call.rawInput as { todos?: unknown }).todos);
+    if (list) return list;
   }
   return undefined;
+}
+
+/** 把 session/new 或 session/load 返回的 configOptions 与旧版 ACP 的 models / modes 归一成 AcpConfigOption[]。 */
+export function mergeSessionMeta(
+  meta: AcpSessionMeta | null | undefined,
+  existing: readonly AcpConfigOption[] = [],
+): readonly AcpConfigOption[] | undefined {
+  if (!meta) return undefined;
+  const base = meta.configOptions ? [...meta.configOptions] : [...existing];
+  let changed = Boolean(meta.configOptions);
+
+  if (meta.models?.availableModels?.length && !base.some((o) => o.category === 'model' || o.id === 'model')) {
+    base.push({
+      id: 'model',
+      category: 'model',
+      ...(meta.models.currentModelId ? { currentValue: meta.models.currentModelId } : {}),
+      options: meta.models.availableModels.map((m) => ({
+        value: m.modelId,
+        ...(m.name ? { name: m.name } : {}),
+        ...(m.description ? { description: m.description } : {}),
+      })),
+      legacyMethod: 'session/set_model',
+    });
+    changed = true;
+  } else if (meta.models?.currentModelId) {
+    const cur = meta.models.currentModelId;
+    for (let i = 0; i < base.length; i++) {
+      const opt = base[i]!;
+      if ((opt.category === 'model' || opt.id === 'model') && opt.currentValue !== cur) {
+        base[i] = { ...opt, currentValue: cur };
+        changed = true;
+      }
+    }
+  }
+
+  if (meta.modes?.availableModes?.length && !base.some((o) => o.category === 'mode' || o.id === 'mode')) {
+    base.push({
+      id: 'mode',
+      category: 'mode',
+      ...(meta.modes.currentModeId ? { currentValue: meta.modes.currentModeId } : {}),
+      options: meta.modes.availableModes.map((m) => ({
+        value: m.id,
+        ...(m.name ? { name: m.name } : {}),
+        ...(m.description ? { description: m.description } : {}),
+      })),
+      legacyMethod: 'session/set_mode',
+    });
+    changed = true;
+  } else if (meta.modes?.currentModeId) {
+    const cur = meta.modes.currentModeId;
+    for (let i = 0; i < base.length; i++) {
+      const opt = base[i]!;
+      if ((opt.category === 'mode' || opt.id === 'mode') && opt.currentValue !== cur) {
+        base[i] = { ...opt, currentValue: cur };
+        changed = true;
+      }
+    }
+  }
+
+  return changed ? base : undefined;
 }
 
 /**

@@ -102,28 +102,83 @@ describe('输入框', () => {
     expect(posted.at(-1)).toMatchObject({ type: 'interrupt' });
   });
 
-  it('点击 + 展示菜单，支持上传文件与上传图片', async () => {
+  it('点击 + 展示合并后的「文件或文件夹」菜单，支持选中文件/文件夹与通过 Host 回传图片', async () => {
     render(createElement(Composer));
     host({ type: 'snapshot', payload: snapshot() });
 
     fireEvent.click(screen.getByTestId('composer-attach-btn'));
     expect(screen.getByTestId('composer-attach-menu')).toBeTruthy();
+    expect(screen.getAllByRole('menuitem')).toHaveLength(1);
+    expect(screen.queryByRole('menuitem', { name: '上传图片' })).toBeNull();
 
-    // 选择上传文件 -> 发送 pickFiles
-    fireEvent.click(screen.getByRole('menuitem', { name: '上传文件' }));
+    // 选择「文件或文件夹」-> 发送 pickFiles
+    fireEvent.click(screen.getByRole('menuitem', { name: '文件或文件夹' }));
     expect(posted.at(-1)).toEqual({ type: 'pickFiles', payload: {} });
     expect(screen.queryByTestId('composer-attach-menu')).toBeNull();
 
-    // 重新打开菜单并选择上传图片 -> 通过 input 上传后展示缩略图
-    fireEvent.click(screen.getByTestId('composer-attach-btn'));
-    fireEvent.click(screen.getByRole('menuitem', { name: '上传图片' }));
-    const file = new File(['png-bytes'], 'demo.png', { type: 'image/png' });
+    // Host 通过 attachImages 传入选中的图片 -> 展示缩略图并随消息发出
+    host({
+      type: 'attachImages',
+      payload: {
+        images: [{ localId: 'picked-1', mediaType: 'image/png', data: 'aGVsbG8=', name: 'demo.png' }],
+      },
+    });
+    expect(screen.getByTestId('composer-images')).toBeTruthy();
+
+    // 直接通过隐藏 file input 也能添加图片
+    const file = new File(['png-bytes'], 'extra.png', { type: 'image/png' });
     const fileInput = screen.getByTestId('composer-image-input') as HTMLInputElement;
     await act(async () => {
       fireEvent.change(fileInput, { target: { files: [file] } });
       await new Promise((r) => setTimeout(r, 20));
     });
-    expect(screen.getByTestId('composer-images')).toBeTruthy();
+    expect(screen.getByTestId('composer-images').querySelectorAll('img').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('斜杠命令补全不额外添加 / 图标，且剥除命令自带的前导 /', () => {
+    render(createElement(Composer));
+    host({
+      type: 'snapshot',
+      payload: snapshot({
+        commands: [
+          { name: 'explain', description: '解释代码', source: 'plugin' },
+          { name: '/custom', description: '自定义命令', source: 'agent' },
+        ],
+      }),
+    });
+
+    const box = input();
+    fireEvent.change(box, { target: { value: '/', selectionStart: 1 } });
+    fireEvent.click(box);
+
+    const completion = screen.getByTestId('completion');
+    const labels = [...completion.querySelectorAll('.completion__label')].map((el) => el.textContent);
+    expect(labels).toEqual(['/explain', '/custom']);
+    expect(completion.querySelectorAll('.completion__icon')).toHaveLength(0);
+  });
+
+  it('权限列表从左侧对齐展开，且权限名称不压缩截断', () => {
+    render(createElement(Composer));
+    host({
+      type: 'snapshot',
+      payload: snapshot({
+        permissions: {
+          options: ['read-only', 'workspace-write', 'danger-full-access'],
+          current: 'workspace-write',
+        },
+      }),
+    });
+
+    fireEvent.click(screen.getByTestId('permission-picker'));
+    const menu = document.querySelector('.permission-menu') as HTMLElement;
+    expect(menu).toBeTruthy();
+    expect(menu.className).toContain('left-0');
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    expect(items).toHaveLength(3);
+    for (const item of items) {
+      expect(item.querySelector('.menu-item__label')?.className).toContain('shrink-0');
+      expect(item.querySelector('.menu-item__hint')?.className).toContain('min-w-0');
+    }
   });
 });
 

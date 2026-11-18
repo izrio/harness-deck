@@ -6,8 +6,11 @@
 
 面板背后的「底层」可以切换：
 
-- **DeepSeek**（内置，即 dsh）：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。功能最全，会话和 dsh Web UI、DeepSeek Desktop 共用。
-- **ACP 代理**：任何支持 [Agent Client Protocol](https://agentclientprotocol.com) 的代理。内置了 [oh-my-pi](https://github.com/can1357/oh-my-pi)（`omp acp`）、腾讯 [CodeBuddy](https://www.codebuddy.ai/cli)（`codebuddy --acp`）和 Anthropic 的 [Claude Code](https://github.com/agentclientprotocol/claude-agent-acp)（`claude-agent-acp`），也可以自己加（例如 Gemini CLI）。
+- **DeepSeek**（原生，即 dsh）：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。功能最全，会话和 dsh Web UI、DeepSeek Desktop 共用。
+- **Claude Code**（原生）：Anthropic [Claude Code](https://docs.anthropic.com/en/docs/claude-code)（以 `claude -p` 双向 `stream-json` 原生对接），与终端 Claude Code 共用登录与 `~/.claude/projects` 历史会话。
+- **Pi**（原生）：[Pi Coding Agent](https://pi.dev)（以 `pi --mode rpc` 原生对接），支持多家模型提供方、思考档位与运行中 `steer` 插队。
+- **ZCode**（原生）：智谱 [ZCode](https://zcode.z.ai/)（`zcode app-server --stdio` 原生对接），支持逐字流式、推理、工具行、审批、提问卡片与消息插队。
+- **ACP 代理**：任何支持 [Agent Client Protocol](https://agentclientprotocol.com) 的代理。内置了 [OpenCode](https://opencode.ai)（`opencode acp`）与腾讯 [CodeBuddy](https://www.codebuddy.ai/cli)（`codebuddy --acp`），也可以自己加（例如 Gemini CLI）。
 
 Agent 能力（读写文件、执行命令、审批、会话、模型）都由底层提供；插件负责启动和连接底层、显示界面，并补上 VS Code 的集成。这个插件以前叫 **DSH Copilot**。
 
@@ -24,11 +27,11 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
    插件在 `PATH` 里查找 `dsh`，也可以在设置 `harnessDeck.dsh.path` 中指定路径。
 2. 第一次打开对话时按提示配置 DeepSeek API Key（保存到 dsh 的凭据存储，不会写进工作区）。
 
-**用 oh-my-pi**
+**用 Pi**
 
-1. 安装 [Bun](https://bun.sh)（1.4.4 及以上），再执行 `bun install -g @oh-my-pi/pi-coding-agent`，确认终端里 `omp --version` 能运行。
-2. 按 oh-my-pi 的说明配置模型提供方（API Key、`~/.omp/agent/models.yml` 等）——模型和 Key 在 omp 自己的配置里，不经过这个插件。
-3. 在对话面板右上角「…」→「底层」里选 **oh-my-pi**（或命令「Harness Deck: 切换底层」）。
+1. 执行 `npm install -g @earendil-works/pi-coding-agent`（或在设置页一键安装），确认终端里 `pi --version` 能运行，也可在设置 `harnessDeck.pi.path` 中指定路径。
+2. 在终端运行 `pi` 输入 `/login` 配置模型提供方，或在插件「设置 → 服务商」里直接为 Pi 绑定服务商。
+3. 在对话面板「设置 → 智能体」或「切换智能体」命令里选 **Pi**（插件以 `pi --mode rpc` 原生运行它）。
 
 **用 CodeBuddy**
 
@@ -36,11 +39,23 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 2. 在对话面板「…」→「底层」里选 **CodeBuddy**。第一次使用时会让你选登录方式（iOA、Google/GitHub、微信、企业域名），在打开的浏览器页面里完成登录；登录信息由 CodeBuddy 自己保存。也可以先在终端运行一次 `codebuddy` 登录。
 3. 不想用浏览器登录（例如远程开发时浏览器打不开），可以用 API Key：在 `harnessDeck.backends` 里覆盖内置的 CodeBuddy，通过 `env` 传 `CODEBUDDY_API_KEY`；中国版还要加 `CODEBUDDY_INTERNET_ENVIRONMENT: "internal"`（见 CodeBuddy 文档）。
 
-**用 Claude**
+**用 Claude Code**
 
-1. 执行 `npm install -g @agentclientprotocol/claude-agent-acp`（需要 Node 22 及以上），确认终端里 `claude-agent-acp` 能找到。这是 Claude Code 的官方 ACP 适配器，自带 Claude Code。
-2. 登录：装了 Claude Code 的话在终端运行 `claude`，输入 `/login`（登录状态和 Claude Code 共用）；或者用 API Key：在 `harnessDeck.backends` 里用 `id: "claude"` 覆盖内置项，通过 `env` 传 `ANTHROPIC_API_KEY`。没登录时发消息，对话里会提示怎么登录。
-3. 在对话面板「…」→「底层」里选 **Claude**。默认是 Auto 模式（由 Claude 判断要不要问你），想每次都确认可以在输入框的权限选择里切到 Manual。
+1. 执行 `npm install -g @anthropic-ai/claude-code`（或在设置页一键安装），确认终端里 `claude --version` 能运行，也可在设置 `harnessDeck.claude.path` 中指定路径。
+2. 在终端运行 `claude` 输入 `/login` 登录（与终端共用会话与凭证），或在插件「设置 → 服务商」里直接为 Claude Code 绑定服务商。
+3. 在对话面板「设置 → 智能体」或「切换智能体」命令里选 **Claude Code**（插件以 `claude -p` 流式 JSON 模式原生运行它）。
+
+**用 OpenCode**
+
+1. 执行 `npm install -g opencode-ai`（或在设置页一键安装），确认终端里 `opencode --version` 能运行。
+2. 在终端运行 `opencode auth login`（或在 `opencode` 中输入 `/connect`）配置模型提供方与 API Key。
+3. 在对话面板的设置页或「切换智能体」命令里选 **OpenCode**。支持 Build / Plan 模式与模型切换。
+
+**用 ZCode**
+
+1. 安装 [ZCode 桌面端](https://zcode.z.ai/)（自动识别内置 `zcode.cjs`），或执行 `npm install -g zcode-app-cli` 安装命令行，也可在设置 `harnessDeck.zcode.path` 中指定路径。
+2. 在 ZCode 桌面端或终端运行 `zcode` 登录智谱 BigModel / Z.ai Coding Plan 账号（凭证保存在 `~/.zcode`）。
+3. 在对话面板的设置页或「切换智能体」命令里选 **ZCode**。
 
 **其他 ACP 代理**：在设置 `harnessDeck.backends` 里加一项，写上名称和以 ACP 模式启动它的命令。`id` 和内置项相同（`oh-my-pi`、`codebuddy`）时替换内置项，例如写上完整路径或环境变量：
 
@@ -64,8 +79,8 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 - **图片**：在输入框里粘贴截图或图片（底层支持时）。
 - **改动**：修改文件的那一行显示增删行数，点击在 Diff 编辑器里查看。
 - **审批**：底层要执行需要确认的操作时，对话末尾出现审批卡片。
-- **模型、模式**：输入框工具条切换模型（有多个思考等级时先选模型再选等级）和权限 / 模式。ACP 底层的模型是按会话设置的：新对话沿用你上次选的模型和思考等级，已有会话保持自己的。
-- **字体、字号和配色**：「…」→「字体与字号」，默认是护眼配色（正文不刺眼），可以关掉改用主题原色。
+- **模型、模式**：输入框工具条切换模型（上方选择模型、下方滑动调整思考等级）和权限 / 模式。ACP 底层的模型是按会话设置的：新对话沿用你上次选的模型和思考等级，已有会话保持自己的。
+- **外观、字体和排版**：设置 → 外观中可切换浅色 / 深色 / 跟随系统主题、5 套整套界面配色，以及阅读与聊天排版参数。
 - **滚动到底部**：往上翻看历史时右下角出现「↓」按钮，有新内容时带提示点，点一下回到底部并继续跟随。
 
 ### 不同底层的差别
@@ -96,7 +111,8 @@ CodeBuddy 的一个进程只给一个会话推送回复。回到别的会话发�
 | `harnessDeck.ui.language` | `auto` | 界面语言：跟随 VS Code，或固定 `zh` / `en` |
 | `harnessDeck.ui.fontSize` | `0` | 对话面板字号（px）；`0` 表示比 VS Code 工作台字号大 1px |
 | `harnessDeck.ui.fontFamily` | 空 | 对话面板字体 |
-| `harnessDeck.ui.palette` | `soft` | 文字配色：`soft` 护眼（正文颜色柔和一些），`theme` 直接用主题颜色；「…」→「字体与字号」里也能切换 |
+| `harnessDeck.ui.theme` | `system` | 界面主题：`system`（跟随系统 / VS Code）、`light`（浅色）、`dark`（深色） |
+| `harnessDeck.ui.colorScheme` | `slate` | 整套界面配色方案：`slate` / `warm` / `forest` / `violet` / `rose`，自动适配浅色与深色 |
 | `harnessDeck.ui.codeFontFamily` | 空 | 代码、文件路径和命令输出的字体 |
 | `harnessDeck.ui.showTurnChanges` | `false` | 每轮回复结束时在对话里显示改动文件卡片（dsh） |
 

@@ -7,11 +7,13 @@
 import type {
   AppearanceState,
   BackendsState,
+  ExtensionsState,
   HostSnapshot,
   HostToWebview,
   ModelState,
   PreferencesState,
   ProjectsState,
+  ProvidersState,
   RuntimeStatus,
   WebviewToHost,
   WorkbenchState,
@@ -42,6 +44,8 @@ export interface ChatBackendController {
   handle(message: WebviewToHost): Promise<void>;
   /** Webview 加载（或切换底层）后的完整快照。 */
   snapshot(): HostSnapshot;
+  /** 读取当前控制器状态快照但不重置增量发布器基线，也不递归拉取工作台状态（供 WorkbenchHub 只读聚合使用）。 */
+  peekSnapshot?(): HostSnapshot;
   modelState(): ModelState;
   askAboutSelection(template: TemplateName): Promise<void>;
   pinActiveEditor(): void;
@@ -51,8 +55,12 @@ export interface ChatBackendController {
   preferencesChanged(): void;
   /** 底层列表或当前底层变化（推送给 Webview）。 */
   backendsChanged(): void;
+  /** 服务商配置变化（推送给 Webview）。 */
+  providersChanged?(): void;
   /** 项目与 Worktree 配置变化（推送给 Webview）。 */
   projectsChanged(): void;
+  /** 扩展（Agent Skills 与 MCP 服务器）配置变化（推送给 Webview）。 */
+  extensionsChanged?(): void;
   setWorkspace(path: string): void;
   renameSession(): Promise<void>;
   configureApiKey(): Promise<void>;
@@ -106,8 +114,12 @@ export interface ControllerHostOptions {
   readonly openSettings?: () => void;
   /** 可选的底层和当前底层（随快照下发，设置页里切换）。 */
   readonly backends?: () => BackendsState;
+  /** 第三方服务商配置与智能体绑定状态（随快照下发）。 */
+  readonly providers?: () => ProvidersState;
   /** 项目与 Worktree 配置（随快照下发，设置页里管理）。 */
   readonly projects?: () => ProjectsState;
+  /** 扩展模块状态（已安装 Agent Skills 与统一 MCP 服务器配置）。 */
+  readonly extensions?: () => ExtensionsState;
   /** 写入外观与排版设置（harnessDeck.ui.*）；值为 null 时恢复默认。 */
   readonly setAppearance?: (
     patch: Extract<WebviewToHost, { type: 'setAppearance' }>['payload'],
@@ -120,6 +132,7 @@ export interface ControllerHostOptions {
     readonly schedulePermission?: PreferencesState['schedulePermission'];
     readonly notifications?: Partial<NonNullable<PreferencesState['notifications']>>;
     readonly advanced?: Partial<NonNullable<PreferencesState['advanced']>>;
+    readonly chatCommands?: PreferencesState['chatCommands'];
   }) => Promise<void>;
   /** 输入框 `+` 菜单选择磁盘文件加入上下文。 */
   readonly pickFiles?: () => Promise<readonly string[]>;
@@ -139,6 +152,27 @@ export function renderDelay(options: Pick<ControllerHostOptions, 'renderDelayMs'
 /** 设置里配置的一个底层。 */
 export type BackendProfile =
   | { readonly id: 'dsh'; readonly kind: 'dsh'; readonly name: string }
+  | {
+      readonly id: 'zcode';
+      readonly kind: 'zcode';
+      readonly name: string;
+      readonly installHint?: string;
+      readonly signInHint?: string;
+    }
+  | {
+      readonly id: 'claude';
+      readonly kind: 'claude';
+      readonly name: string;
+      readonly installHint?: string;
+      readonly signInHint?: string;
+    }
+  | {
+      readonly id: 'pi';
+      readonly kind: 'pi';
+      readonly name: string;
+      readonly installHint?: string;
+      readonly signInHint?: string;
+    }
   | {
       readonly id: string;
       readonly kind: 'acp';

@@ -111,4 +111,45 @@ describe.skipIf(process.platform === 'win32')('RuntimeManager', () => {
     // 中止不算失败：不显示「启动失败」
     expect(statuses.some((s) => s.kind === 'failed')).toBe(false);
   });
+
+  it('命中缓存的可执行文件与版本元数据时直接跳过 locating，缓存失效时自动回退查找', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fake-dsh-cached-'));
+    dirs.push(dir);
+    const command = join(dir, 'dsh');
+    await writeFile(command, FAKE_DSH);
+    await chmod(command, 0o755);
+
+    const { verifyExecutableFile } = await import('../src/runtime/locate.ts');
+    const statMeta = await verifyExecutableFile(command, process.platform);
+    const statuses: RuntimeStatus[] = [];
+    let resolvedCache: unknown;
+
+    const manager = new RuntimeManager({
+      getConfig: () => ({
+        configuredPath: command,
+        profile: 'web',
+        cwd: dir,
+        env: { ...process.env, FAKE_DSH_MODE: 'ok' },
+        readyTimeoutMs: 5_000,
+        cachedExecutable: {
+          command,
+          version: '0.2.1-rc.5',
+          mtimeMs: statMeta?.mtimeMs,
+          size: statMeta?.size,
+        },
+        onResolvedExecutable: (info) => {
+          resolvedCache = info;
+        },
+      }),
+      log: () => undefined,
+    });
+    manager.onStatus((s) => statuses.push(s));
+    managers.push(manager);
+
+    const endpoint = await manager.start();
+    expect(endpoint?.version).toBe('0.2.1-rc.5');
+    // 命中缓存时不经过 locating
+    expect(statuses.map((s) => s.kind)).toEqual(['starting', 'connected']);
+    expect(resolvedCache).toMatchObject({ command, version: '0.2.1-rc.5' });
+  });
 });

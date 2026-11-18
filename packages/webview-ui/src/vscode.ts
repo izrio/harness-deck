@@ -1,4 +1,4 @@
-import type { WebviewToHost, WorkbenchModule } from '@harness-deck/shared';
+import type { BackendView, WebviewToHost, WorkbenchModule } from '@harness-deck/shared';
 
 /** Webview 本地保存的状态（输入框草稿等），刷新和隐藏后仍在。 */
 export interface PersistedState {
@@ -17,6 +17,8 @@ export interface PersistedState {
   readonly activeModule?: WorkbenchModule;
   /** 会话模块左侧按项目分组面板是否展开。 */
   readonly sessionsSidebarOpen?: boolean;
+  /** 上次选中的智能体，用于在冷启动收到 Host 快照前立即显示正确的智能体名称而不回退到 DeepSeek。 */
+  readonly activeBackend?: { readonly id: string; readonly name: string; readonly kind?: BackendView['kind'] };
 }
 
 /** 第一次用到时才取（acquireVsCodeApi 每个页面只能调一次；测试里没有它）。 */

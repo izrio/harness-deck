@@ -29,6 +29,7 @@ const ALIASES: Readonly<Record<string, string>> = {
   multi_edit: 'multi_edit',
   multiedit: 'multi_edit',
   apply_patch: 'apply_patch',
+  patch: 'apply_patch',
   str_replace: 'edit',
   str_replace_editor: 'edit',
   str_replace_based_edit_tool: 'edit',
@@ -50,6 +51,7 @@ const ALIASES: Readonly<Record<string, string>> = {
   cat: 'read',
   read_image: 'read_image',
   glob: 'glob',
+  find: 'glob',
   find_files: 'glob',
   file_search: 'glob',
   grep: 'grep',
@@ -75,6 +77,7 @@ const ALIASES: Readonly<Record<string, string>> = {
   // 其他有专门界面的工具
   todo_write: 'todo_write',
   todowrite: 'todo_write',
+  todoread: 'todo_write',
   // CodeBuddy 的待办工具（完成时带上整张待办表）
   taskcreate: 'todo_write',
   taskupdate: 'todo_write',

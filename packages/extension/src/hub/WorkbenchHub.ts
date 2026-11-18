@@ -20,6 +20,7 @@ import type {
   OverviewWaitingItem,
   ProjectsState,
   ProjectSessionGroup,
+  ProviderConfig,
   TaskBoardState,
   WebviewToHost,
   WorkbenchModule,
@@ -207,6 +208,93 @@ export class WorkbenchHub {
     }
     if (this.abort.signal.aborted) return;
     this.host.post({ type: 'workbench', payload: this.state() });
+  }
+
+  /** 同步某个第三方服务商绑定的工作台智能体预设：勾选的预设自动切换为该服务商的默认模型。 */
+  async syncProviderAgentBindings(provider: ProviderConfig): Promise<void> {
+    const boundSet = new Set(provider.boundAgentIds ?? []);
+    const chosenModel = provider.defaultModel ?? provider.models[0]?.id;
+    const locale = this.host.locale();
+    const resolved = resolveAgentProfiles(this.agentData, locale);
+    let nextData = this.agentData;
+    let changed = false;
+
+    for (const agent of resolved) {
+      if (boundSet.has(agent.id)) {
+        const nextBackend =
+          provider.boundBackendIds.length > 0 && !provider.boundBackendIds.includes(agent.backendId)
+            ? provider.boundBackendIds[0]!
+            : agent.backendId;
+        if (agent.provider !== provider.id || agent.model !== chosenModel || agent.backendId !== nextBackend) {
+          nextData = upsertStoredAgent(
+            nextData,
+            {
+              id: agent.id,
+              name: agent.name,
+              specialty: agent.specialty,
+              instructions: agent.instructions,
+              backendId: nextBackend,
+              ...(chosenModel ? { provider: provider.id, model: chosenModel } : {}),
+              ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
+              tools: agent.tools,
+            },
+            this.now(),
+            locale,
+          ).stored;
+          changed = true;
+        }
+      } else if (agent.provider === provider.id) {
+        nextData = upsertStoredAgent(
+          nextData,
+          {
+            id: agent.id,
+            name: agent.name,
+            specialty: agent.specialty,
+            instructions: agent.instructions,
+            backendId: agent.backendId,
+            tools: agent.tools,
+          },
+          this.now(),
+          locale,
+        ).stored;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.agentData = nextData;
+      await this.host.globalState.update(AGENTS_STORAGE_KEY, nextData);
+      this.pushNow();
+    }
+  }
+
+  async clearProviderAgentBindings(providerId: string): Promise<void> {
+    const locale = this.host.locale();
+    const resolved = resolveAgentProfiles(this.agentData, locale);
+    let nextData = this.agentData;
+    let changed = false;
+    for (const agent of resolved) {
+      if (agent.provider !== providerId) continue;
+      nextData = upsertStoredAgent(
+        nextData,
+        {
+          id: agent.id,
+          name: agent.name,
+          specialty: agent.specialty,
+          instructions: agent.instructions,
+          backendId: agent.backendId,
+          tools: agent.tools,
+        },
+        this.now(),
+        locale,
+      ).stored;
+      changed = true;
+    }
+    if (changed) {
+      this.agentData = nextData;
+      await this.host.globalState.update(AGENTS_STORAGE_KEY, nextData);
+      this.pushNow();
+    }
   }
 
   /** 监听前台控制器的会话状态变化：驱动顺序任务流转与未读会话标记。 */

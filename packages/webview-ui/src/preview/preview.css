@@ -1,0 +1,13 @@
+:root {
+  --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --vscode-font-size: 13px;
+  --vscode-editor-font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --vscode-editor-font-size: 12px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}

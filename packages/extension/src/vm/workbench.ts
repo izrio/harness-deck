@@ -48,7 +48,7 @@ export interface Workbench {
   /** 模态确认框。 */
   confirm(message: string, detail: string, action: string): Promise<boolean>;
   /** 原生输入框（密码输入时内容不经过 Webview）。取消时返回 undefined。 */
-  input(options: { readonly title: string; readonly prompt?: string; readonly value?: string; readonly placeHolder?: string; readonly password?: boolean }): Promise<string | undefined>;
+  input(options: { readonly title: string; readonly prompt?: string; readonly value?: string; readonly placeHolder?: string; readonly password?: boolean; readonly allowEmpty?: boolean }): Promise<string | undefined>;
 }
 
 /** 测试和没有编辑器时用的空实现。 */

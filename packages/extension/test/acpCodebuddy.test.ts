@@ -101,20 +101,30 @@ describe('Edit 片段的整文件 Diff', () => {
 describe('内置底层', () => {
   const builtins = builtinProfiles((id) => `install ${id}`);
 
-  it('dsh 和内置的 ACP 代理总在列表里，设置里的项追加在后面', () => {
-    expect(parseProfiles([{ name: 'Gemini CLI', command: 'gemini' }], undefined, builtins).map((p) => p.id)).toEqual(['dsh', 'oh-my-pi', 'codebuddy', 'claude', 'gemini-cli']);
+  it('dsh、原生智能体和内置 ACP 代理总在列表里，设置里的项追加在后面', () => {
+    expect(parseProfiles([{ name: 'Gemini CLI', command: 'gemini' }], undefined, builtins).map((p) => p.id)).toEqual([
+      'dsh',
+      'pi',
+      'codebuddy',
+      'claude',
+      'opencode',
+      'zcode',
+      'gemini-cli',
+    ]);
     expect(builtins.find((p) => p.id === 'codebuddy')).toMatchObject({ command: 'codebuddy', args: ['--acp'], installHint: 'install codebuddy' });
   });
 
-  it('设置里 id 相同的项替换内置项，位置不变；没写安装提示时沿用内置的', () => {
+  it('设置里 id 相同的项替换内置 ACP 项，位置不变；没写安装提示时沿用内置的', () => {
     const profiles = parseProfiles([{ id: 'codebuddy', name: 'CodeBuddy', command: '/opt/cb/bin/codebuddy', args: ['--acp'], env: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' } }], undefined, builtins);
-    expect(profiles.map((p) => p.id)).toEqual(['dsh', 'oh-my-pi', 'codebuddy', 'claude']);
+    expect(profiles.map((p) => p.id)).toEqual(['dsh', 'pi', 'codebuddy', 'claude', 'opencode', 'zcode']);
     expect(profiles[2]).toMatchObject({ command: '/opt/cb/bin/codebuddy', env: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' }, installHint: 'install codebuddy' });
   });
 
   it('CodeBuddy 是单会话代理；覆盖命令路径时保留，明确写 false 时关闭', () => {
-    expect(builtins.find((p) => p.id === 'codebuddy')?.singleSession).toBe(true);
-    expect(builtins.find((p) => p.id === 'oh-my-pi')?.singleSession).toBeUndefined();
+    const cb = builtins.find((p) => p.id === 'codebuddy');
+    const oc = builtins.find((p) => p.id === 'opencode');
+    expect(cb?.kind === 'acp' ? cb.singleSession : undefined).toBe(true);
+    expect(oc?.kind === 'acp' ? oc.singleSession : undefined).toBeUndefined();
     const kept = parseProfiles([{ id: 'codebuddy', name: 'CodeBuddy', command: 'cb' }], undefined, builtins)[2];
     expect(kept).toMatchObject({ command: 'cb', singleSession: true });
     const off = parseProfiles([{ id: 'codebuddy', name: 'CodeBuddy', command: 'cb', singleSession: false }], undefined, builtins)[2];

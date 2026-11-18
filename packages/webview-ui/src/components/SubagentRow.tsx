@@ -6,9 +6,8 @@ import type { Item } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { Button } from './ui/Button.tsx';
-import { Shimmer } from './ui/Shimmer.tsx';
-import { ValuePill } from './ui/ValuePill.tsx';
+import { Button } from '@/components/ui/button';
+import { Shimmer, ValuePill } from './beautifului/index.ts';
 import { Markdown } from './Markdown.tsx';
 import { formatDuration } from './RunStatus.tsx';
 import { AgentIcon, CheckIcon, ErrorIcon } from './icons.tsx';
@@ -151,7 +150,8 @@ export function SubagentRow({ item }: { item: Activity }) {
                 </section>
                 {sub.childId ? (
                   <Button
-                    variant="secondary"
+                    type="button"
+                    variant="outline"
                     size="xs"
                     className="subagent__open self-start"
                     onClick={() => postToHost({ type: 'switchSession', payload: { sessionId: sub.childId!, label: item.label, ...(parentId ? { parentId } : {}) } })}

@@ -16,11 +16,15 @@ import type {
   DiffRef,
   HostSnapshot,
   ImageView,
+  InstalledSkillView,
   Item,
+  McpServerConfig,
+  ModelOption,
   ModelState,
   PendingInteraction,
   PermissionState,
   PromptImage,
+  ProviderConfig,
   RuntimeStatus,
   SessionHeader,
   SessionListItem,
@@ -52,11 +56,22 @@ import {
 import { reverseToolDiffs } from '../vm/diffs.ts';
 import { displayPath } from '../vm/paths.ts';
 import { EditorContext, type GatherOptions } from '../vm/EditorContext.ts';
+import { attachPickedPaths } from '../vm/pickedFiles.ts';
 import { TabsModel } from '../vm/TabsModel.ts';
 import { ViewPublisher, type ControllerView } from '../vm/ViewPublisher.ts';
 import { noWorkbench, type Workbench } from '../vm/workbench.ts';
 import { AcpError } from './connection.ts';
-import { AcpSessionProjection, type AcpCommand, type AcpConfigOption, type AcpDiff, type AcpToolCall } from './projection.ts';
+import { toAcpMcpServers, type AcpSkillInjectionMode } from '../extensions/mcpService.ts';
+import { formatSkillsPromptCatalog } from '../extensions/skillService.ts';
+import {
+  AcpSessionProjection,
+  inputFilePath,
+  type AcpCommand,
+  type AcpConfigOption,
+  type AcpDiff,
+  type AcpSessionMeta,
+  type AcpToolCall,
+} from './projection.ts';
 
 /** 和代理通话的接口（测试里用假的）。 */
 export interface AcpLink {
@@ -72,7 +87,8 @@ export interface AcpInitialize {
   readonly agentCapabilities?: {
     readonly loadSession?: boolean;
     readonly promptCapabilities?: { readonly image?: boolean; readonly embeddedContext?: boolean };
-    readonly sessionCapabilities?: { readonly list?: unknown };
+    readonly mcpCapabilities?: { readonly http?: boolean; readonly sse?: boolean };
+    readonly sessionCapabilities?: { readonly list?: unknown; readonly additionalDirectories?: unknown };
   };
 }
 
@@ -111,6 +127,18 @@ export interface AcpControllerOptions extends ControllerHostOptions {
   readonly singleSession?: boolean;
   /** 代理要求登录、又没有提供登录方式时显示的说明（例如 Claude：在终端登录 Claude Code）。 */
   readonly signInHint?: string;
+  /** 当前智能体启动会话时应注入的 MCP 服务器列表。 */
+  readonly mcpServers?: () => readonly McpServerConfig[];
+  /** 当前智能体启动时携带的已安装 Agent Skills 上下文。 */
+  readonly skillsContext?: () => {
+    readonly skills: readonly InstalledSkillView[];
+    readonly bundleDir?: string;
+    readonly mode: AcpSkillInjectionMode;
+  };
+  /** 当前绑定到该 ACP 智能体的第三方服务商配置（若有）。 */
+  readonly boundProvider?: () => ProviderConfig | undefined;
+  /** 用户在模型选择器中切换绑定服务商的模型时通知本机代理同步映射。 */
+  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
 }
 
 export interface PreferredModel {
@@ -168,6 +196,8 @@ export class AcpController implements ChatBackendController {
   /** 同一进程里最近收到的选项和命令：切换/新建标签等待 session/new 或 session/load 返回期间沿用，避免反复显示「正在读取模型…」。 */
   private cachedConfigOptions: readonly AcpConfigOption[] = [];
   private cachedCommands: readonly AcpCommand[] = [];
+  /** 通用 ACP 代理下已注入过 `<available_skills>` 目录索引的会话 id。 */
+  private readonly skillCatalogInjected = new Set<string>();
   private workspacePath: string;
   private renderTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly publisher: ViewPublisher;
@@ -215,6 +245,7 @@ export class AcpController implements ChatBackendController {
     this.bound = undefined;
     this.cachedConfigOptions = [];
     this.cachedCommands = [];
+    this.skillCatalogInjected.clear();
     this.cancelPermissions();
     if (link) {
       void this.refreshList();
@@ -264,9 +295,7 @@ export class AcpController implements ChatBackendController {
     }
   }
 
-  snapshot(): HostSnapshot {
-    const view = this.compute();
-    this.publisher.reset(view);
+  private buildSnapshot(view: ControllerView, includeWorkbench: boolean): HostSnapshot {
     return {
       runtime: this.runtime,
       connection: this.connection,
@@ -284,9 +313,21 @@ export class AcpController implements ChatBackendController {
       appearance: this.options.appearance?.() ?? {},
       ...(this.options.preferences ? { preferences: this.options.preferences() } : {}),
       backends: this.backends(),
+      ...(this.options.providers ? { providers: this.options.providers() } : {}),
       ...(this.options.projects ? { projects: this.options.projects() } : {}),
-      ...(this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
+      ...(this.options.extensions ? { extensions: this.options.extensions() } : {}),
+      ...(includeWorkbench && this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
     };
+  }
+
+  snapshot(): HostSnapshot {
+    const view = this.compute();
+    this.publisher.reset(view);
+    return this.buildSnapshot(view, true);
+  }
+
+  peekSnapshot(): HostSnapshot {
+    return this.buildSnapshot(this.compute(), false);
   }
 
   modelState(): ModelState {
@@ -390,10 +431,24 @@ export class AcpController implements ChatBackendController {
     this.options.post({ type: 'backends', payload: this.backends() });
   }
 
+  providersChanged(): void {
+    if (this.options.providers) {
+      this.options.post({ type: 'providers', payload: this.options.providers() });
+    }
+    this.scheduleRender();
+  }
+
   projectsChanged(): void {
     if (this.options.projects) {
       this.options.post({ type: 'projects', payload: this.options.projects() });
     }
+  }
+
+  extensionsChanged(): void {
+    if (this.options.extensions) {
+      this.options.post({ type: 'extensions', payload: this.options.extensions() });
+    }
+    this.scheduleRender();
   }
 
   setWorkspace(path: string): void {
@@ -595,13 +650,29 @@ export class AcpController implements ChatBackendController {
       case 'runTaskNow':
       case 'startProjectSession':
       case 'openProjectSession':
+      case 'scanGitSkills':
+      case 'installGitSkills':
+      case 'updateSkill':
+      case 'syncSkill':
+      case 'deleteSkill':
+      case 'upsertMcpServer':
+      case 'toggleMcpServer':
+      case 'deleteMcpServer':
+      case 'scanAgentMcpConfigs':
+      case 'pickMcpConfigFile':
+      case 'importMcpServers':
+      case 'upsertProvider':
+      case 'deleteProvider':
+      case 'bindProviderAgents':
+      case 'fetchProviderModels':
         return;
       case 'pickFiles': {
         const picked = await this.options.pickFiles?.();
-        if (picked && picked.length > 0 && this.editorContext.pinFiles(picked) > 0) {
-          this.scheduleRender();
-          this.options.post({ type: 'focusComposer', payload: {} });
-        }
+        attachPickedPaths(picked, this.editorContext, {
+          post: (msg) => this.options.post(msg),
+          toast: (level, text) => this.toast(level, text),
+          scheduleRender: () => this.scheduleRender(),
+        });
         return;
       }
     }
@@ -632,6 +703,31 @@ export class AcpController implements ChatBackendController {
     this.scheduleRender();
   }
 
+  /** 构造传给 ACP `session/new` 与 `session/load` 的公共参数（包含 MCP 服务器与技能挂载目录）。 */
+  private sessionLaunchParams(stdioOnly = false): { readonly params: Record<string, unknown>; readonly hasRemoteMcp: boolean } {
+    const rawServers = this.options.mcpServers?.() ?? [];
+    const hasRemoteMcp = rawServers.some((s) => s.enabled && s.transport !== 'stdio');
+    const mcpServers = toAcpMcpServers(
+      stdioOnly ? rawServers.filter((s) => s.transport === 'stdio') : rawServers,
+      this.init?.agentCapabilities?.mcpCapabilities,
+    );
+    const skillCtx = this.options.skillsContext?.();
+    const bundleDir = skillCtx?.bundleDir;
+    const extra: Record<string, unknown> = {};
+    if (bundleDir) {
+      if (this.init?.agentCapabilities?.sessionCapabilities?.additionalDirectories) {
+        extra.additionalDirectories = [bundleDir];
+      }
+      if (skillCtx?.mode === 'claude-meta') {
+        extra._meta = { claudeCode: { options: { additionalDirectories: [bundleDir] } } };
+      }
+    }
+    return {
+      params: { cwd: this.workspacePath, mcpServers, ...extra },
+      hasRemoteMcp,
+    };
+  }
+
   /** 打开会话：同一个进程里已经加载过的直接显示，否则用 session/load 回放历史。 */
   private async load(sessionId: string): Promise<void> {
     const link = this.link;
@@ -645,8 +741,22 @@ export class AcpController implements ChatBackendController {
     projection.reset();
     this.scheduleRender();
     try {
-      const result = await link.request<{ configOptions?: AcpConfigOption[] } | null>('session/load', { sessionId, cwd: this.workspacePath, mcpServers: [] });
-      projection.setConfigOptions(result?.configOptions);
+      const { params, hasRemoteMcp } = this.sessionLaunchParams();
+      let result: AcpSessionMeta | null;
+      try {
+        result = await link.request<AcpSessionMeta | null>('session/load', { sessionId, ...params });
+      } catch (err) {
+        if (hasRemoteMcp && err instanceof AcpError && err.code === -32602) {
+          this.options.log(`${this.agentName()} 拒绝了远程 MCP 参数，回退为仅挂载 stdio MCP 服务器`);
+          result = await link.request<AcpSessionMeta | null>('session/load', {
+            sessionId,
+            ...this.sessionLaunchParams(true).params,
+          });
+        } else {
+          throw err;
+        }
+      }
+      projection.setSessionMeta(result);
       this.cacheProjectionDefaults(projection);
       // 新进程里第一个加载的会话收到实时更新
       if (this.options.singleSession && this.link === link && this.bound === undefined) this.bound = sessionId;
@@ -697,17 +807,28 @@ export class AcpController implements ChatBackendController {
    * 只有一种方式时直接用（omp：用已有的本地凭据）；有多种时由宿主让用户选（CodeBuddy：浏览器登录，可能要几分钟）。
    */
   private async newSession(link: AcpLink): Promise<string> {
-    const params = { cwd: this.workspacePath, mcpServers: [] };
-    let result: { sessionId: string; configOptions?: AcpConfigOption[] };
+    const { params, hasRemoteMcp } = this.sessionLaunchParams();
+    const requestNew = async (): Promise<{ sessionId: string } & AcpSessionMeta> => {
+      try {
+        return await link.request('session/new', params);
+      } catch (err) {
+        if (hasRemoteMcp && err instanceof AcpError && err.code === -32602) {
+          this.options.log(`${this.agentName()} 拒绝了远程 MCP 参数，回退为仅挂载 stdio MCP 服务器`);
+          return await link.request('session/new', this.sessionLaunchParams(true).params);
+        }
+        throw err;
+      }
+    };
+    let result: ({ sessionId: string } & AcpSessionMeta);
     try {
-      result = await link.request('session/new', params);
+      result = await requestNew();
     } catch (error) {
       if (!isAuthRequired(error)) throw error;
       if (!(await this.signIn(link))) throw new Error(this.authRequiredText(error));
-      result = await link.request('session/new', params);
+      result = await requestNew();
     }
     const projection = this.projectionFor(result.sessionId);
-    projection.setConfigOptions(result.configOptions);
+    projection.setSessionMeta(result);
     this.cacheProjectionDefaults(projection);
     if (this.options.singleSession && this.link === link) this.bound = result.sessionId;
     return result.sessionId;
@@ -903,8 +1024,9 @@ export class AcpController implements ChatBackendController {
     );
     projection.startTurn(Date.now());
     this.scheduleRender();
+    const wireText = this.enrichPromptWithSkills(sessionId, text);
     const content = [
-      ...(text.trim() ? [{ type: 'text', text }] : []),
+      ...(wireText.trim() ? [{ type: 'text', text: wireText }] : []),
       ...sent.map((image) => ({ type: 'image', mimeType: image.mediaType, data: image.data })),
     ];
     const send = () => link.request<{ stopReason?: string } | null>('session/prompt', { sessionId, prompt: content });
@@ -997,10 +1119,46 @@ export class AcpController implements ChatBackendController {
   }
 
   private modelsOf(projection: AcpSessionProjection | undefined): ModelState {
+    const bound = this.options.boundProvider?.();
     const model = this.modelOption(projection);
-    if (!model?.options?.length) return { options: [] };
     const effort = this.effortOption(projection);
-    const efforts = (effort?.options ?? []).map((o) => ({ id: o.value, name: o.name ?? o.value }));
+    const acpEfforts = (effort?.options ?? []).map((o) => ({ id: o.value, name: o.name ?? o.value }));
+
+    if (bound && bound.models.length > 0) {
+      const saved = this.options.loadPreferredModel?.();
+      const boundOptions: ModelOption[] = bound.models.map((m) => {
+        const itemEfforts =
+          m.efforts && m.efforts.length > 0 ? m.efforts.map((e) => ({ id: e, name: e })) : acpEfforts;
+        return {
+          provider: bound.id,
+          model: m.id,
+          name: m.name || m.id,
+          group: bound.name,
+          efforts: itemEfforts,
+          ...(itemEfforts[0] ? { defaultEffort: itemEfforts[0].id } : {}),
+        };
+      });
+      const chosenModel =
+        (saved?.model && bound.models.some((m) => m.id === saved.model) ? saved.model : undefined) ??
+        (bound.defaultModel && bound.models.some((m) => m.id === bound.defaultModel) ? bound.defaultModel : undefined) ??
+        bound.models[0]!.id;
+      const chosenOption = boundOptions.find((o) => o.model === chosenModel) ?? boundOptions[0]!;
+      const chosenEffort =
+        (saved?.effort && chosenOption.efforts.some((e) => e.id === saved.effort) ? saved.effort : undefined) ??
+        effort?.currentValue ??
+        chosenOption.defaultEffort;
+      return {
+        options: boundOptions,
+        current: {
+          provider: bound.id,
+          model: chosenModel,
+          ...(chosenEffort ? { reasoningEffort: chosenEffort } : {}),
+        },
+      };
+    }
+
+    if (!model?.options?.length) return { options: [] };
+    const efforts = acpEfforts;
     const usingFallback = !projection?.configOptions.length;
     const preferred = usingFallback && !this.activeId ? this.options.loadPreferredModel?.() : undefined;
     const activeModel =
@@ -1018,28 +1176,45 @@ export class AcpController implements ChatBackendController {
         name: o.name ?? o.value,
         group: o.value.includes('/') ? o.value.slice(0, o.value.indexOf('/')) : this.agentName(),
         ...(o.description && o.description !== o.value ? { description: o.description } : {}),
-        // 思考等级是会话级的设置：挂在当前模型下
-        efforts: o.value === activeModel ? efforts : [],
-        ...(o.value === activeModel && activeEffort ? { defaultEffort: activeEffort } : {}),
+        // 思考等级是会话级的设置：挂在每个模型选项上，便于上方选模型、下方直接调思考等级
+        efforts,
+        ...(activeEffort ? { defaultEffort: activeEffort } : {}),
       })),
       ...(activeModel ? { current: { provider: 'acp', model: activeModel, ...(activeEffort ? { reasoningEffort: activeEffort } : {}) } } : {}),
     };
   }
 
   private async selectModel(model: string, effort?: string): Promise<void> {
+    const bound = this.options.boundProvider?.();
+    if (bound) {
+      this.options.onProviderModelSelected?.(bound.id, model);
+    }
     this.options.savePreferredModel?.({ model, ...(effort ? { effort } : {}) });
     this.scheduleRender();
     const sessionId = this.currentId() ?? (await this.ensureDraft());
     const option = this.modelOption(this.currentProjection());
     if (!sessionId || !option) return;
     try {
-      if (model !== option.currentValue) await this.setOption(sessionId, option.id, model);
+      const prefixed = bound ? `${bound.id}/${model}` : undefined;
+      const acpModelValue =
+        option.options?.some((o) => o.value === model)
+          ? model
+          : prefixed && option.options?.some((o) => o.value === prefixed)
+            ? prefixed
+            : bound
+              ? undefined
+              : model;
+      if (acpModelValue && acpModelValue !== option.currentValue) {
+        await this.setOption(sessionId, option.id, acpModelValue);
+      }
       const effortOption = this.effortOption(this.currentProjection());
-      if (effort && effortOption && effort !== effortOption.currentValue) await this.setOption(sessionId, effortOption.id, effort);
+      if (effort && effortOption && effort !== effortOption.currentValue && (!bound || effortOption.options?.some((o) => o.value === effort))) {
+        await this.setOption(sessionId, effortOption.id, effort);
+      }
       // 已经建好、还没用过的草稿会话也换过来
       if (this.draftId && this.draftId !== sessionId) await this.applyPreferredModel(this.draftId);
     } catch (error) {
-      this.toast('error', t('model.failed', describe(error)));
+      if (!bound) this.toast('error', t('model.failed', describe(error)));
     }
   }
 
@@ -1081,9 +1256,21 @@ export class AcpController implements ChatBackendController {
   }
 
   private async setOption(sessionId: string, configId: string, value: string): Promise<void> {
-    const result = await this.link?.request<{ configOptions?: AcpConfigOption[] } | null>('session/set_config_option', { sessionId, configId, value });
     const projection = this.projectionFor(sessionId);
-    projection.setConfigOptions(result?.configOptions);
+    const currentOpt = this.effectiveOptions(projection).find((o) => o.id === configId || o.category === configId);
+    if (currentOpt?.legacyMethod === 'session/set_model') {
+      const result = await this.link?.request<AcpSessionMeta | null>('session/set_model', { sessionId, modelId: value });
+      projection.updateOptionValue('model', value);
+      projection.setSessionMeta(result);
+    } else if (currentOpt?.legacyMethod === 'session/set_mode') {
+      const result = await this.link?.request<AcpSessionMeta | null>('session/set_mode', { sessionId, modeId: value });
+      projection.updateOptionValue('mode', value);
+      projection.setSessionMeta(result);
+    } else {
+      const result = await this.link?.request<AcpSessionMeta | null>('session/set_config_option', { sessionId, configId, value });
+      projection.updateOptionValue(configId, value);
+      projection.setSessionMeta(result);
+    }
     this.cacheProjectionDefaults(projection);
     this.scheduleRender();
   }
@@ -1125,8 +1312,7 @@ export class AcpController implements ChatBackendController {
   private editTarget(pending: PendingPermission): string | undefined {
     const call = pending.toolCall;
     if (call.kind !== 'edit' && call.kind !== 'delete' && call.kind !== 'move' && !(call.content ?? []).some((c) => c.type === 'diff')) return undefined;
-    const args = (call.rawInput ?? {}) as { file_path?: unknown; path?: unknown };
-    const path = call.locations?.[0]?.path ?? (typeof args.file_path === 'string' ? args.file_path : typeof args.path === 'string' ? args.path : undefined);
+    const path = call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
     return path ? this.absolute(path) : undefined;
   }
 
@@ -1138,8 +1324,8 @@ export class AcpController implements ChatBackendController {
 
   private interactionOf(pending: PendingPermission): PendingInteraction {
     const call = pending.toolCall;
-    const args = (call.rawInput ?? {}) as { command?: unknown; file_path?: unknown; path?: unknown };
-    const path = call.locations?.[0]?.path ?? (typeof args.file_path === 'string' ? args.file_path : typeof args.path === 'string' ? args.path : undefined);
+    const args = (call.rawInput ?? {}) as { command?: unknown };
+    const path = call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
     const subject =
       typeof args.command === 'string' && args.command.trim()
         ? { subject: args.command.trim(), subjectKind: 'command' as const }
@@ -1335,7 +1521,7 @@ export class AcpController implements ChatBackendController {
       labels: Object.fromEntries((mode?.options ?? []).map((o) => [o.value, { name: o.name ?? o.value, ...(o.description ? { description: o.description } : {}) }])),
     };
     const agentCommands = projection?.commands.length ? projection.commands : this.cachedCommands;
-    const commands: CommandView[] = [
+    const baseCommands: CommandView[] = [
       ...pluginCommands().map((c) => ({ ...c, source: 'plugin' as const })),
       ...agentCommands.map((c) => ({
         name: c.name,
@@ -1344,6 +1530,11 @@ export class AcpController implements ChatBackendController {
         source: c._meta?.type === 'skill' ? ('skill' as const) : ('agent' as const),
       })),
     ];
+    const takenNames = new Set(baseCommands.map((c) => c.name));
+    const extraSkills: CommandView[] = (this.options.skillsContext?.().skills ?? [])
+      .filter((s) => !takenNames.has(s.name))
+      .map((s) => ({ name: s.name, description: s.description, source: 'skill' as const }));
+    const commands: CommandView[] = [...baseCommands, ...extraSkills];
     return {
       sessionKey: this.activeId ?? '',
       sessions,
@@ -1357,6 +1548,32 @@ export class AcpController implements ChatBackendController {
       context: this.editorContext.state(),
       commands,
     };
+  }
+
+  private enrichPromptWithSkills(sessionId: string, text: string): string {
+    const skillCtx = this.options.skillsContext?.();
+    if (!skillCtx || skillCtx.skills.length === 0 || skillCtx.mode !== 'prompt') return text;
+
+    const projection = this.projections.get(sessionId);
+    const agentCommandNames = new Set(
+      (projection?.commands.length ? projection.commands : this.cachedCommands).map((c) => c.name),
+    );
+    const slash = parseSlash(text);
+    let body = text;
+    if (slash && !agentCommandNames.has(slash.name)) {
+      const matched = skillCtx.skills.find((s) => s.name === slash.name || s.id === slash.name);
+      if (matched) {
+        const taskPart = slash.args.trim() ? `\n\nTask: ${slash.args.trim()}` : '';
+        body = `Use the Agent Skill "${matched.name}" by reading its instructions at "${matched.skillMdPath}".${taskPart}`;
+      }
+    }
+
+    if (!this.skillCatalogInjected.has(sessionId)) {
+      this.skillCatalogInjected.add(sessionId);
+      const catalog = formatSkillsPromptCatalog(skillCtx.skills);
+      if (catalog) return `${catalog}\n\n${body}`;
+    }
+    return body;
   }
 
   private absolute(path: string): string {

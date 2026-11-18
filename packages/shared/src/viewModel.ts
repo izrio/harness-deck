@@ -98,14 +98,26 @@ export interface ContextState {
   readonly pinned: readonly (AttachmentView & { readonly id: string })[];
 }
 
-/** 斜杠命令：插件自带的模板，或 dsh 原生命令。 */
+/** 斜杠命令：插件自带的模板、底层命令、或用户自定义的聊天命令。 */
 export interface CommandView {
   readonly name: string;
   readonly description: string;
   /** 参数提示，例如 `<text>`。 */
   readonly hint?: string;
-  /** plugin：插件自带的模板；agent：底层（dsh 或 ACP 代理）的斜杠命令；skill：底层的 skill（也用 `/name` 调用）。 */
-  readonly source: 'plugin' | 'agent' | 'skill';
+  /** plugin：插件自带的模板；agent：底层（dsh 或 ACP 代理）的斜杠命令；skill：底层的 skill（也用 `/name` 调用）；custom：用户保存的聊天命令。 */
+  readonly source: 'plugin' | 'agent' | 'skill' | 'custom';
+  /** 用户保存的聊天命令提示词全文；选用时填入输入框，可改再发。 */
+  readonly prompt?: string;
+}
+
+/**
+ * 用户在「设置 -> 会话 -> 聊天命令」中保存的常用提示词模板。
+ * 在输入框输入 `/` 即可检索选用，填入输入框后可继续修改再发送；所有 Agent 通用。
+ */
+export interface ChatCommand {
+  readonly name: string;
+  readonly prompt: string;
+  readonly description?: string;
 }
 
 /** `@` 补全的候选。 */
@@ -346,13 +358,14 @@ export interface TabsState {
 }
 
 /**
- * 底层：dsh（插件内置）或通过 ACP（Agent Client Protocol）接入的编程代理，例如 oh-my-pi。
+ * 底层：内置原生接入的 DeepSeek (dsh)、Claude Code (`claude -p`)、Pi (`pi --mode rpc`)、ZCode (`zcode app-server --stdio`)，
+ * 或通过 ACP（Agent Client Protocol）接入的编程代理（如 CodeBuddy、OpenCode）。
  * 设置里可以配多个，界面上随时切换。
  */
 export interface BackendView {
   readonly id: string;
   readonly name: string;
-  readonly kind: 'dsh' | 'acp';
+  readonly kind: 'dsh' | 'zcode' | 'claude' | 'pi' | 'acp';
   /** ACP 代理的启动命令（完整命令行，用于展示）。 */
   readonly command?: string;
   /** ACP 代理的可执行文件名/路径（用于表单编辑）。 */
@@ -426,6 +439,9 @@ export interface NotificationPreferences {
 export interface AdvancedPreferences {
   readonly dshPath: string;
   readonly dshProfile: string;
+  readonly zcodePath?: string;
+  readonly claudePath?: string;
+  readonly piPath?: string;
   readonly backendTrace: boolean;
 }
 
@@ -438,6 +454,8 @@ export interface PreferencesState {
   readonly schedulePermission?: 'danger-full-access' | 'workspace-write' | 'read-only';
   readonly notifications?: NotificationPreferences;
   readonly advanced?: AdvancedPreferences;
+  /** 用户保存的聊天命令（存好的提示词，所有 Agent 通用）。 */
+  readonly chatCommands?: readonly ChatCommand[];
 }
 
 /** 单个项目新建 worktree 时的配置。 */
@@ -460,6 +478,114 @@ export interface ProjectsState {
   readonly currentPath?: string;
   readonly recent: readonly RecentProject[];
   readonly configs: Readonly<Record<string, WorktreeProjectConfig>>;
+}
+
+// ────────────────────────────────────────────────────────────
+// 设置 -> 扩展（技能 Skills + MCP 服务器统一管理）
+// ────────────────────────────────────────────────────────────
+
+/** 从 Git 仓库安装的 Agent Skill（SKILL.md）。 */
+export interface InstalledSkillView {
+  /** 唯一标识（规范化目录名）。 */
+  readonly id: string;
+  /** SKILL.md 中的名称。 */
+  readonly name: string;
+  /** SKILL.md 中的描述。 */
+  readonly description: string;
+  /** 来源 Git 仓库地址。 */
+  readonly repoUrl: string;
+  /** 分支、Tag 或 Commit 引用（可选）。 */
+  readonly ref?: string;
+  /** 仓库内的相对子目录路径（根目录为空或 undefined）。 */
+  readonly subpath?: string;
+  /** 安装或最近同步时的 Git commit 短哈希。 */
+  readonly commit?: string;
+  /** 本地已安装的 SKILL.md 绝对路径（支持面板内 Markdown 预览）。 */
+  readonly skillMdPath: string;
+  /** 是否启用（启用时在目标 Agent 启动时自动带上）。 */
+  readonly enabled: boolean;
+  /** 限定的目标 Agent id 列表；undefined 或空数组表示对所有 Agent 生效。 */
+  readonly agents?: readonly string[];
+  readonly installedAt: number;
+  readonly updatedAt: number;
+  /** 正在同步更新或移除。 */
+  readonly busy?: 'updating' | 'removing';
+}
+
+/** 扫描 Git 仓库发现的候选 Skill。 */
+export interface DiscoveredGitSkill {
+  readonly name: string;
+  readonly description: string;
+  /** 仓库内的相对子目录路径（根目录为空字符串）。 */
+  readonly subpath: string;
+}
+
+export interface SkillsState {
+  readonly items: readonly InstalledSkillView[];
+  readonly installing?: boolean;
+  readonly scanning?: boolean;
+  readonly scanned?: {
+    readonly repoUrl: string;
+    readonly ref?: string;
+    readonly skills: readonly DiscoveredGitSkill[];
+  };
+  readonly error?: string;
+}
+
+export type McpTransport = 'stdio' | 'http' | 'sse';
+
+/** 统一管理的一台 MCP 服务器配置。 */
+export interface McpServerConfig {
+  /** 唯一标识。 */
+  readonly id: string;
+  /** 传给 Agent 的 MCP 服务器名称（如 github、context7）。 */
+  readonly name: string;
+  readonly transport: McpTransport;
+  /** stdio 模式可执行命令。 */
+  readonly command?: string;
+  /** stdio 模式命令参数。 */
+  readonly args?: readonly string[];
+  /** stdio 模式额外环境变量。 */
+  readonly env?: Readonly<Record<string, string>>;
+  /** http / sse 模式端点地址。 */
+  readonly url?: string;
+  /** http / sse 模式请求头。 */
+  readonly headers?: Readonly<Record<string, string>>;
+  /** 是否启用。 */
+  readonly enabled: boolean;
+  /** 启动时交给哪些 Agent（Backend id 列表）。 */
+  readonly agents: readonly string[];
+  /** 导入来源标记（如 Claude Code、Pi、DeepSeek 等）。 */
+  readonly importedFrom?: string;
+}
+
+/** 从各 Agent 配置文件扫描出的可导入 MCP 服务器候选。 */
+export interface McpImportCandidate {
+  readonly key: string;
+  readonly name: string;
+  readonly transport: McpTransport;
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly url?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly sourceAgentId: string;
+  readonly sourceAgentName: string;
+  readonly sourcePath: string;
+  /** 当前统一列表中是否已存在同名服务器。 */
+  readonly conflict?: boolean;
+}
+
+export interface McpState {
+  readonly servers: readonly McpServerConfig[];
+  readonly scanningImport?: boolean;
+  readonly importCandidates?: readonly McpImportCandidate[];
+  readonly scannedSources?: readonly string[];
+}
+
+export interface ExtensionsState {
+  readonly skills: SkillsState;
+  readonly mcp: McpState;
 }
 
 export interface WorkspaceState {
@@ -669,4 +795,55 @@ export interface WorkbenchState {
   readonly agents: readonly AgentProfile[];
   readonly tasks: TaskBoardState;
   readonly sessionGroups: readonly ProjectSessionGroup[];
+}
+
+// ────────────────────────────────────────────────────────────
+// 设置 -> Agent -> 服务商（第三方编程套餐与自定义模型接口）
+// ────────────────────────────────────────────────────────────
+
+export type ProviderProtocol = 'anthropic' | 'openai-chat' | 'openai-responses';
+
+export interface ProviderModelItem {
+  readonly id: string;
+  readonly name?: string;
+  /** 上下文上限（如 "200k"、"1M" 或数字字符串）。 */
+  readonly contextWindow?: string;
+  /** 最大输出上限（如 "64k"、"128k" 或数字字符串）。 */
+  readonly maxOutputTokens?: string;
+  /** 思考档位列表（如 ["low", "medium", "high"]）。 */
+  readonly efforts?: readonly string[];
+  /** 是否支持图片输入。 */
+  readonly vision?: boolean;
+}
+
+/** 写入设置 `harnessDeck.providers` 的服务商非敏感配置（API Key 仅保存在本机 SecretStorage）。 */
+export interface ProviderConfig {
+  readonly id: string;
+  readonly name: string;
+  readonly presetId?: string;
+  readonly anthropicUrl?: string;
+  readonly openaiChatUrl?: string;
+  readonly openaiResponsesUrl?: string;
+  /** 是否将该服务商的 OpenAI Chat Completions 接口通过本地网关转换为 Claude (Anthropic) 协议。 */
+  readonly convertOpenaiToAnthropic?: boolean;
+  readonly models: readonly ProviderModelItem[];
+  readonly defaultModel?: string;
+  readonly smallModel?: string;
+  /** 绑定的底层智能体 id 列表（如 ['dsh', 'claude', 'oh-my-pi', 'codebuddy']）。 */
+  readonly boundBackendIds: readonly string[];
+  /** 绑定的工作台智能体预设 id 列表（如 ['builtin-builder']）。 */
+  readonly boundAgentIds?: readonly string[];
+}
+
+export interface ProviderView extends ProviderConfig {
+  /** 本机安全凭据存储中是否已保存 API Key（明文绝不下发到 Webview）。 */
+  readonly hasApiKey: boolean;
+}
+
+export interface ProvidersState {
+  readonly items: readonly ProviderView[];
+  /** 是否启用本地协议转换网关（OpenAI 兼容 -> Claude Anthropic，默认 false）。 */
+  readonly protocolGatewayEnabled?: boolean;
+  /** 本地网关当前监听地址（已启动时存在，如 http://127.0.0.1:xxxxx）。 */
+  readonly protocolGatewayOrigin?: string;
 }

@@ -55,3 +55,53 @@ export function GlideMenu({
     </div>
   );
 }
+
+/** Beautiful UI GlideMenu 菜单项（配合 GlideMenu 滑动高亮）。 */
+export function MenuItem({
+  onSelect,
+  children,
+  active,
+  hint,
+  icon,
+  truncateHint,
+  className,
+  'data-testid': testId,
+}: {
+  onSelect: () => void;
+  children: ReactNode;
+  active?: boolean;
+  hint?: ReactNode;
+  icon?: ReactNode;
+  truncateHint?: boolean;
+  className?: string;
+  'data-testid'?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      data-menu-row
+      data-testid={testId}
+      className={cn(
+        'menu-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-[13px] transition-colors duration-100',
+        active ? 'menu-item--active bg-field font-medium text-ink group-hover/glide-menu:bg-transparent' : 'text-ink',
+        className,
+      )}
+      onClick={onSelect}
+    >
+      {icon ? <span className={cn('inline-flex shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}>{icon}</span> : null}
+      <span className={cn('menu-item__label', truncateHint && hint ? 'shrink-0 font-medium' : 'min-w-0 flex-1 truncate')}>{children}</span>
+      {hint ? (
+        <span
+          className={cn(
+            'menu-item__hint text-[11.5px] tabular-nums',
+            truncateHint ? 'min-w-0 flex-1 truncate text-right' : 'shrink-0',
+            active ? 'text-accent-ink' : 'text-ink-3',
+          )}
+        >
+          {hint}
+        </span>
+      ) : null}
+    </button>
+  );
+}

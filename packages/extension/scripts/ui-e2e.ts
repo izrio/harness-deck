@@ -466,7 +466,7 @@ try {
     () => check('打开子代理的对话：提示只读，输入框不可用', false),
   );
   check('子代理对话里输入框禁用', await composer.isDisabled());
-  check('子代理对话的标题用任务描述', (await page.locator('.header__title-text').innerText()) === '子代理 · 核对配置', await page.locator('.header__title-text').innerText());
+  check('子代理对话的标题用任务描述', (await page.getByTestId('tabs').locator('.tab--active').innerText()).includes('子代理 · 核对配置'));
   await page.locator('.assistant', { hasText: '配置没问题' }).first().waitFor({ timeout: 10_000 }).then(
     () => check('子代理的对话内容可以查看', true),
     () => check('子代理的对话内容可以查看', false),
@@ -532,17 +532,14 @@ try {
   await page.locator('.assistant', { hasText: '按你的选择来' }).waitFor({ timeout: 30_000 });
   check('提交后卡片消失，dsh 收到选择', (await question.count()) === 0);
 
-  // 2e2. 模型选择：当前项带勾；有多个思考等级的模型是级联菜单
+  // 2e2. 模型选择：上方选模型，下方直接展示思考等级滑块
   await page.getByTestId('model-picker').click();
   await page.locator('.model-menu').waitFor({ timeout: 5_000 });
-  check('模型菜单里当前模型带勾和强调色', (await page.locator('.model-menu .menu-item--active .model-item__check svg').count()) === 1);
-  const cascade = page.locator('.model-menu .model-item:has(.model-item__arrow)').first();
-  if ((await cascade.count()) > 0) {
-    await cascade.click();
-    await page.getByTestId('effort-menu').waitFor({ timeout: 5_000 });
-    check('点有多个思考等级的模型进入第二级选思考等级', (await page.locator('[data-testid="effort-menu"] .model-item').count()) > 1);
+  check('模型菜单里当前模型带勾和强调色', (await page.locator('.model-menu .model-item.menu-item--active .model-item__check svg').count()) === 1);
+  const effortMenu = page.getByTestId('effort-menu');
+  if ((await effortMenu.count()) > 0) {
+    check('模型菜单下方直接展示思考等级选择', (await effortMenu.locator('.model-effort-option').count()) > 1);
     await shot('15b-model-efforts');
-    await page.locator('.model-menu__back').click();
   }
   await shot('15c-model-menu');
   await page.keyboard.press('Escape');
@@ -759,10 +756,12 @@ try {
   await page.getByTestId('settings-tab-interface').click();
   await page.getByRole('button', { name: '重命名会话' }).click();
   await page.getByTestId('settings-back').click();
-  await page.locator('.header__title', { hasText: 'E2E 重命名的会话' }).waitFor({ timeout: 10_000 }).then(
+  await page.getByTestId('history-button').click();
+  await page.locator('[data-testid="session-history-page"] .history-session-item', { hasText: 'E2E 重命名的会话' }).waitFor({ timeout: 10_000 }).then(
     () => check('重命名会话', true),
     () => check('重命名会话', false),
   );
+  await page.getByTestId('history-back').click();
 
   // 3. 停止生成
   await send('E2E_SLOW 慢慢分析');
@@ -806,11 +805,11 @@ try {
     async () => check('悬停用户消息可以"编辑后重发"（放回输入框）', false, await composer.inputValue()),
   );
   await composer.fill('');
-  await page.locator('.header__title').click();
-  await page.locator('.sessions-menu .menu-item').nth(1).waitFor({ timeout: 10_000 });
-  check('会话列表里有两个会话', (await page.locator('.sessions-menu .menu-item').count()) === 2);
+  await page.getByTestId('history-button').click();
+  await page.locator('[data-testid="session-history-page"] .history-session-item').nth(1).waitFor({ timeout: 10_000 });
+  check('会话列表里有两个会话', (await page.locator('[data-testid="session-history-page"] .history-session-item').count()) === 2);
   await shot('09-sessions');
-  await page.locator('.sessions-menu .menu-item', { hasNotText: '你好' }).first().click();
+  await page.locator('[data-testid="session-history-page"] .history-session-item', { hasNotText: '你好' }).first().click();
   await page.locator('.assistant', { hasText: '需要我继续展开' }).waitFor({ timeout: 20_000 });
   check('切换回第一个会话，历史完整恢复', activeSessionId === firstSession && (await page.locator('.changes').count()) === 1 && (await page.locator('.activity').count()) === firstSessionActivities, (await page.locator('.activity').allInnerTexts()).join(' | '));
 

@@ -3,13 +3,13 @@
  *
  * Diff 的左侧（修改前）或右侧（将要写入）不是磁盘上的文件，由 `dsh-diff:` 只读文档提供。
  * 能还原出完整的修改前内容时用 VS Code 的 Diff 编辑器，右侧是磁盘上的真实文件，可以直接继续编辑；
- * 还原不了（文件之后又被改过）时退回只读的统一 diff 文本。还原算法见 vm/diffs.ts。
+ * 还原不了（文件之后又被改过）时退回只读的统一 diff 文本。还原算法见 vm/diffSpec.ts 与 vm/diffs.ts。
  */
 import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import type { FileCandidate } from '@harness-deck/shared';
 import { SELECTION_LIMIT } from '../vm/context.ts';
-import { proposedContent, reverseHunks, reverseToolDiffs, unifiedFromHunks, unifiedFromToolDiffs } from '../vm/diffs.ts';
+import { resolveDiffSpec, type DiffSideSpec } from '../vm/diffSpec.ts';
 import type { DiffRequest, EditorSnapshot, Workbench } from '../vm/workbench.ts';
 import { t } from '../i18n.ts';
 
@@ -104,7 +104,7 @@ export class VscodeWorkbench implements Workbench, vscode.TextDocumentContentPro
     await vscode.workspace.saveAll(false);
   }
 
-  input(options: { readonly title: string; readonly prompt?: string; readonly value?: string; readonly placeHolder?: string; readonly password?: boolean }): Promise<string | undefined> {
+  input(options: { readonly title: string; readonly prompt?: string; readonly value?: string; readonly placeHolder?: string; readonly password?: boolean; readonly allowEmpty?: boolean }): Promise<string | undefined> {
     return Promise.resolve(
       vscode.window.showInputBox({
         title: options.title,
@@ -113,7 +113,7 @@ export class VscodeWorkbench implements Workbench, vscode.TextDocumentContentPro
         ...(options.placeHolder ? { placeHolder: options.placeHolder } : {}),
         password: options.password ?? false,
         ignoreFocusOut: true,
-        validateInput: (value) => (value.trim() ? undefined : t('input.required')),
+        ...(options.allowEmpty ? {} : { validateInput: (value) => (value.trim() ? undefined : t('input.required')) }),
       }),
     );
   }
@@ -137,47 +137,22 @@ export class VscodeWorkbench implements Workbench, vscode.TextDocumentContentPro
   }
 
   async openDiff(request: DiffRequest): Promise<void> {
-    const file = vscode.Uri.file(request.path);
-    const name = basename(request.path);
-    switch (request.kind) {
-      case 'tool': {
-        if (request.created) return this.diff(this.virtual(request.path, 'empty', ''), file, t('diff.created', name));
-        const current = await this.read(file);
-        const before = current === undefined ? undefined : reverseToolDiffs(current, request.diffs);
-        if (before !== undefined) return this.diff(this.virtual(request.path, 'before', before), file, t('diff.toolTitle', name));
-        return this.showUnified(request.path, unifiedFromToolDiffs(name, request.diffs));
-      }
-      case 'turn': {
-        if (!request.after) {
-          const before = reverseHunks('', request.hunks) ?? '';
-          return this.diff(this.virtual(request.path, 'before', before), this.virtual(request.path, 'deleted', ''), t('diff.deleted', name));
-        }
-        if (!request.before) return this.diff(this.virtual(request.path, 'empty', ''), file, t('diff.created', name));
-        const current = await this.read(file);
-        const before = current === undefined ? undefined : reverseHunks(current, request.hunks);
-        if (before !== undefined) return this.diff(this.virtual(request.path, 'before', before), file, t('diff.turnTitle', name));
-        return this.showUnified(request.path, unifiedFromHunks(name, request.hunks));
-      }
-      case 'contents': {
-        const right = request.after === undefined ? file : this.virtual(request.path, 'after', request.after);
-        const title = request.created ? t('diff.created', name) : t(request.scope === 'session' ? 'diff.sessionTitle' : request.after === undefined ? 'diff.turnTitle' : 'diff.turnOnlyTitle', name);
-        return this.diff(this.virtual(request.path, request.created ? 'empty' : 'before', request.before), right, title);
-      }
-      case 'proposed': {
-        const current = await this.read(file);
-        const proposed = proposedContent(request.tool, request.args, current);
-        if (proposed === undefined) {
-          void vscode.window.showInformationMessage(t('diff.cannotPreview', name));
-          return;
-        }
-        const left = current === undefined ? this.virtual(request.path, 'empty', '') : file;
-        return this.diff(left, this.virtual(request.path, 'proposed', proposed), t('diff.proposedTitle', name));
-      }
+    const spec = await resolveDiffSpec(request, (p) => this.readFile(p));
+    if (spec.kind === 'cannotPreview') {
+      void vscode.window.showInformationMessage(spec.message);
+      return;
     }
+    if (spec.kind === 'unified') {
+      await this.showUnified(spec.path, spec.patchText);
+      return;
+    }
+    const leftUri = this.sideUri(spec.left);
+    const rightUri = this.sideUri(spec.right);
+    await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, spec.title, { preview: true });
   }
 
-  private async diff(left: vscode.Uri, right: vscode.Uri, title: string): Promise<void> {
-    await vscode.commands.executeCommand('vscode.diff', left, right, title, { preview: true });
+  private sideUri(side: DiffSideSpec): vscode.Uri {
+    return side.kind === 'disk' ? vscode.Uri.file(side.path) : this.virtual(side.path, side.label, side.content);
   }
 
   /** 文件之后又被改过、还原不出修改前内容时，显示这次修改的片段。 */

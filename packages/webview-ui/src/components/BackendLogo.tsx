@@ -7,12 +7,17 @@ import claude from '../assets/backends/claude.svg?inline';
 import codebuddy from '../assets/backends/codebuddy.png?inline';
 import deepseek from '../assets/backends/deepseek.svg?inline';
 import ohMyPi from '../assets/backends/oh-my-pi.png?inline';
+import opencode from '../assets/backends/opencode.svg?inline';
+import zcode from '../assets/backends/zcode.svg?inline';
 
 const LOGOS: Readonly<Record<string, { readonly src: string; readonly tile?: boolean }>> = {
   dsh: { src: deepseek, tile: true },
+  pi: { src: ohMyPi },
   'oh-my-pi': { src: ohMyPi },
   codebuddy: { src: codebuddy },
   claude: { src: claude, tile: true },
+  opencode: { src: opencode },
+  zcode: { src: zcode },
 };
 
 export function BackendLogo({ backend, size = 'md' }: { readonly backend: Pick<BackendView, 'id' | 'name'>; readonly size?: 'sm' | 'md' }) {

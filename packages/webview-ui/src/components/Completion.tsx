@@ -1,8 +1,8 @@
 /** 输入框上方的补全列表（Beautiful UI PromptBar @ / / 浮层风格）。 */
 import { useEffect, useRef } from 'react';
 import { cn } from '../lib/utils.ts';
-import { ValuePill } from './ui/ValuePill.tsx';
-import { FileIcon, FolderIcon, SlashIcon, SpinnerIcon } from './icons.tsx';
+import { ValuePill } from './beautifului/index.ts';
+import { FileIcon, FolderIcon, SpinnerIcon } from './icons.tsx';
 
 export interface CompletionItem {
   readonly key: string;
@@ -32,7 +32,7 @@ export function Completion({
 }) {
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
   }, [selected]);
   return (
     <div
@@ -67,9 +67,11 @@ export function Completion({
           }}
           onMouseMove={() => onHover(index)}
         >
-          <span className={cn('completion__icon inline-flex shrink-0', index === selected ? 'text-ink' : 'text-ink-3')}>
-            {item.icon === 'command' ? <SlashIcon className="size-3.5" /> : item.icon === 'directory' ? <FolderIcon className="size-3.5" /> : <FileIcon className="size-3.5" />}
-          </span>
+          {item.icon !== 'command' ? (
+            <span className={cn('completion__icon inline-flex shrink-0', index === selected ? 'text-ink' : 'text-ink-3')}>
+              {item.icon === 'directory' ? <FolderIcon className="size-3.5" /> : <FileIcon className="size-3.5" />}
+            </span>
+          ) : null}
           <span className="completion__label max-w-[60%] shrink-0 truncate font-medium">{item.label}</span>
           {item.tag ? <ValuePill tone="neutral" className="completion__tag text-[10.5px]">{item.tag}</ValuePill> : null}
           {item.hint ? <span className="completion__hint shrink-0 font-mono text-[11px] text-ink-3">{item.hint}</span> : null}

@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import type { ImageView } from '@harness-deck/shared';
 import { imageKey, requestImage, useView } from '../store.ts';
 import { cn } from '../lib/utils.ts';
-import { Button } from './ui/Button.tsx';
+import { Button } from '@/components/ui/button';
 import { CloseIcon, ErrorIcon, ImageIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
@@ -95,8 +95,9 @@ function Lightbox({ src, label, onClose }: { src: string; label: string; onClose
         className="sr-only"
       />
       <Button
+        type="button"
         variant="secondary"
-        size="icon"
+        size="icon-sm"
         className="absolute top-3 right-3"
         aria-label={t('common.close')}
         onClick={onClose}

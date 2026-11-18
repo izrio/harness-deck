@@ -4,7 +4,7 @@
 
 <p align="center">
   编程代理的 VS Code 对话面板：一个界面，换着用不同的底层。<br>
-  DeepSeek · Claude · oh-my-pi · CodeBuddy · 任何支持 ACP 的代理
+  DeepSeek · Claude Code · Pi · ZCode · OpenCode · CodeBuddy · 任何支持 ACP 的代理
 </p>
 
 <p align="center">
@@ -41,22 +41,24 @@
 
 ## 特性
 
-- **底层可以换**：同一个面板背后可以是 DeepSeek（dsh）、Claude、oh-my-pi、CodeBuddy，或任何支持 [ACP（Agent Client Protocol）](https://agentclientprotocol.com)的代理；每个底层的会话分开保存。
+- **底层可以换**：同一个面板背后可以是 DeepSeek（dsh）、ZCode、OpenCode、Claude、oh-my-pi、CodeBuddy，或任何支持 [ACP（Agent Client Protocol）](https://agentclientprotocol.com)的代理；每个底层的会话分开保存。
 - **侧边栏对话**：逐字流式回复和推理，紧凑的工具活动行（读文件和搜索合并成「浏览」、命令带输出、修改带增删行数），运行状态和用时，停止生成，回复中继续发的消息自动排队。
 - **审批与模式**：需要确认的操作弹出审批卡片；在输入框里切换权限 / 模式（含计划模式），模型和思考等级级联选择。
 - **VS Code 集成**：在 Diff 编辑器里查看每次改动；当前编辑器和选区作为上下文；`@` 引用文件、`/` 命令；编辑器右键「解释 / 修复 / 写测试」；粘贴图片。
 - **多开标签和改动栏**：每个会话一个标签，后台会话继续回复；输入框上方的改动栏列出本会话改过的文件，点开看累计 Diff。所有底层都支持。
 - **DeepSeek（dsh）独有**：每轮改动汇总（含命令造成的改动）、子代理卡片、提问卡片、消息插队、`/goal`、在浏览器中打开 dsh 网页。
-- **细节**：中英文界面，跟随 VS Code 主题，默认护眼配色（正文颜色柔和），对话字号和字体可调；翻看历史时一键滚动到底部。
+- **细节**：中英文界面，支持浅色 / 深色 / 跟随系统与多套配色方案，对话字体、字号和排版参数可调；翻看历史时一键滚动到底部。
 
 ## 支持的底层
 
 | 底层 | 接入方式 | 安装 | 登录 / 模型 |
 | --- | --- | --- | --- |
-| <img src="packages/webview-ui/src/assets/backends/deepseek.svg" width="16"> **DeepSeek**（dsh，[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)） | 内置：HTTP + WebSocket | [DeepSeek Desktop](https://www.deepseek.com/en/download/) 菜单「管理 dsh 命令…」，或 `npm install -g @deepseek-ai/dsh` | 第一次使用时引导配置 DeepSeek API Key |
-| <img src="packages/webview-ui/src/assets/backends/oh-my-pi.png" width="16"> **oh-my-pi** | ACP：`omp acp` | `bun install -g @oh-my-pi/pi-coding-agent` | omp 自己的模型提供方配置 |
+| <img src="packages/webview-ui/src/assets/backends/deepseek.svg" width="16"> **DeepSeek**（dsh，[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)） | 原生：HTTP + WebSocket | [DeepSeek Desktop](https://www.deepseek.com/en/download/) 菜单「管理 dsh 命令…」，或 `npm install -g @deepseek-ai/dsh` | 第一次使用时引导配置 DeepSeek API Key |
+| <img src="packages/webview-ui/src/assets/backends/oh-my-pi.png" width="16"> **Pi**（[Pi Coding Agent](https://pi.dev)） | 原生：`pi --mode rpc` | `npm install -g @earendil-works/pi-coding-agent` | `pi` → `/login`，或绑定服务商 |
 | <img src="packages/webview-ui/src/assets/backends/codebuddy.png" width="16"> **CodeBuddy** | ACP：`codebuddy --acp` | `npm install -g @tencent-ai/codebuddy-code` | 浏览器登录，或 `CODEBUDDY_API_KEY` |
-| <img src="packages/webview-ui/src/assets/backends/claude.svg" width="16"> **Claude** | ACP：`claude-agent-acp` | `npm install -g @agentclientprotocol/claude-agent-acp` | `claude` → `/login`，或 `ANTHROPIC_API_KEY` |
+| <img src="packages/webview-ui/src/assets/backends/claude.svg" width="16"> **Claude Code** | 原生：`claude -p`（`stream-json`） | `npm install -g @anthropic-ai/claude-code` | `claude` → `/login`，或绑定服务商 / `ANTHROPIC_API_KEY` |
+| <img src="packages/webview-ui/src/assets/backends/opencode.svg" width="16"> **OpenCode** | ACP：`opencode acp` | `npm install -g opencode-ai` | `opencode auth login`（或 `/connect`） |
+| <img src="packages/webview-ui/src/assets/backends/zcode.svg" width="16"> **ZCode** | 原生：`zcode app-server --stdio` | [ZCode 桌面端](https://zcode.z.ai/)，或 `npm install -g zcode-app-cli` | 智谱 BigModel / Z.ai Coding Plan 登录或 API Key |
 | 其他 ACP 代理 | 设置 `harnessDeck.backends` | 按代理的说明 | 按代理的说明 |
 
 各底层的功能差别、设置项和常见问题见[使用说明](./packages/extension/README.md)。
