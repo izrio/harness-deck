@@ -27,6 +27,7 @@ import type {
   WebviewToHost,
 } from '@harness-deck/shared';
 import { isUnrestrictedMode, wholeFile, type StoredSession } from '../acp/AcpController.ts';
+import { isPathInsideProject } from '../projects/ProjectService.ts';
 import {
   renderDelay,
   type ChatBackendController,
@@ -275,7 +276,7 @@ export class ZcodeController implements ChatBackendController {
       byId.set(s.id, {
         id: s.id,
         title: this.titleOf(s.id),
-        cwd: s.cwd ?? this.workspacePath,
+        cwd: s.cwd ?? '',
         updatedAt: s.updatedAt,
         running: this.projections.get(s.id)?.running ?? false,
         ...(waiting.has(s.id) ? { needsAttention: true } : {}),
@@ -286,7 +287,7 @@ export class ZcodeController implements ChatBackendController {
         byId.set(s.id, {
           id: s.id,
           title: s.title,
-          cwd: this.workspacePath,
+          cwd: '',
           updatedAt: s.updatedAt,
           running: this.projections.get(s.id)?.running ?? false,
           ...(waiting.has(s.id) ? { needsAttention: true } : {}),
@@ -1129,13 +1130,16 @@ export class ZcodeController implements ChatBackendController {
     const waiting = this.interactions.sessionsWaiting();
     const state = (id: string) => ({ running: this.projections.get(id)?.running ?? false, ...(waiting.has(id) ? { needsAttention: true } : {}) });
     const known = new Map<string, SessionListItem>();
+    const otherWorkspaceIds = new Set<string>();
     for (const s of this.listed) {
-      if (!s.cwd || s.cwd === this.workspacePath) {
+      if (!s.cwd || isPathInsideProject(this.workspacePath, s.cwd)) {
         known.set(s.id, { id: s.id, title: this.titleOf(s.id), updatedAt: s.updatedAt, ...state(s.id) });
+      } else {
+        otherWorkspaceIds.add(s.id);
       }
     }
     for (const s of this.stored) {
-      if (!known.has(s.id)) {
+      if (!known.has(s.id) && !otherWorkspaceIds.has(s.id)) {
         known.set(s.id, { id: s.id, title: s.title, updatedAt: s.updatedAt, ...state(s.id) });
       }
     }

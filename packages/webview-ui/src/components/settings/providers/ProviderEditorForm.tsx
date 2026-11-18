@@ -1,0 +1,371 @@
+import { PROVIDER_PRESETS, isProviderReadyForBackend, type AgentProfile, type BackendView, type ProviderPreset, type ProviderView } from '@harness-deck/shared';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { cn } from '../../../lib/utils.ts';
+import { ChevronDownIcon, ChevronRightIcon, CloseIcon } from '../../icons.tsx';
+import { ProviderModelTable } from './ProviderModelTable.tsx';
+import type { Dispatch, SetStateAction } from 'react';
+import type { EditableModelRow, ProviderEditorState } from './providerEditor.ts';
+import { useT } from '../../../i18n.ts';
+
+export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, backends, workbenchAgents, editor, setEditor, detailsOpen, setDetailsOpen, batchOpen, setBatchOpen, batchText, setBatchText, formError, pendingFetchId, fetchError, boundOwnerByBackend, boundOwnerByWbAgent, closeEditor, selectPreset, updateModelRow, addModelRow, removeModelRow, applyBatchPaste, triggerFetchModels, toggleBackendBind, toggleWbAgentBind, saveProvider, validModelOptions, compatibilitySummary, hasAnyUrl }: { locale: 'zh' | 'en'; providers: readonly ProviderView[]; protocolGatewayEnabled: boolean; backends: readonly BackendView[]; workbenchAgents: readonly AgentProfile[]; editor: ProviderEditorState; setEditor: Dispatch<SetStateAction<ProviderEditorState | undefined>>; detailsOpen: boolean; setDetailsOpen: Dispatch<SetStateAction<boolean>>; batchOpen: boolean; setBatchOpen: Dispatch<SetStateAction<boolean>>; batchText: string; setBatchText: (text: string) => void; formError: string | undefined; pendingFetchId: number | undefined; fetchError: string | undefined; boundOwnerByBackend: ReadonlyMap<string, ProviderView>; boundOwnerByWbAgent: ReadonlyMap<string, ProviderView>; closeEditor: () => void; selectPreset: (preset: ProviderPreset) => void; updateModelRow: (rowKey: number, patch: Partial<EditableModelRow>) => void; addModelRow: () => void; removeModelRow: (rowKey: number) => void; applyBatchPaste: () => void; triggerFetchModels: () => void; toggleBackendBind: (backendId: string, checked: boolean) => void; toggleWbAgentBind: (agentId: string, checked: boolean) => void; saveProvider: () => void; validModelOptions: readonly { readonly id: string; readonly label: string }[]; compatibilitySummary: { readonly missingHints: readonly string[]; readonly accountOnlyNames: readonly string[] }; hasAnyUrl: boolean }) {
+  const t = useT();
+  return (
+    <section
+      className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card"
+      data-testid="provider-editor"
+    >
+      <div className="primitive-card-bar flex items-center justify-between gap-2 border-b border-line bg-inset/50">
+        <h3 className="m-0 text-[13px] font-semibold text-ink">
+          {editor.editingId
+            ? t('settings.providers.editTitle', editor.name || editor.editingId)
+            : t('settings.providers.addTitle')}
+        </h3>
+        {providers.length > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('common.close')}
+            data-testid="provider-editor-close"
+            onClick={closeEditor}
+          >
+            <CloseIcon className="size-3.5 text-ink-3" />
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="primitive-card-pad flex flex-col gap-3.5">
+        {/* 预设卡片网格 */}
+        <div className="flex flex-col gap-1.5">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="provider-presets">
+            {PROVIDER_PRESETS.map((preset) => {
+              const selected = editor.presetId === preset.id;
+              const title = locale === 'zh' ? preset.nameZh : preset.nameEn;
+              const desc = locale === 'zh' ? preset.descZh : preset.descEn;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  data-testid={`provider-preset-${preset.id}`}
+                  onClick={() => selectPreset(preset)}
+                  className={cn(
+                    'flex flex-col items-start gap-1 rounded-card border px-3 py-2.5 text-left transition-colors duration-150',
+                    selected
+                      ? 'border-primary bg-surface ring-1 ring-primary'
+                      : 'border-line bg-field/60 hover:bg-hover',
+                  )}
+                >
+                  <div className="flex w-full items-center gap-2">
+                    <span className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-surface text-[11px] font-semibold text-ink-2 shadow-hairline">
+                      {preset.badge}
+                    </span>
+                    <span className="truncate text-[12.5px] font-semibold text-ink">{title}</span>
+                    {!preset.verified ? (
+                      <span className="ml-auto shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] text-ink-3 shadow-hairline">
+                        {t('settings.providers.presetUnverifiedBadge')}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className="line-clamp-1 text-[11.5px] text-ink-3">{desc}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.presetUnverifiedNote')}</p>
+        </div>
+
+        {/* 名称 */}
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.providers.name')}</span>
+          <Input
+            data-testid="provider-form-name"
+            value={editor.name}
+            placeholder={t('settings.providers.namePlaceholder')}
+            onChange={(e) => setEditor({ ...editor, name: e.target.value })}
+          />
+        </label>
+
+        {/* API Key */}
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[12px] font-medium text-ink-2">{t('settings.providers.apiKey')}</span>
+            {editor.hasSavedApiKey ? (
+              editor.clearApiKey ? (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="xs"
+                  className="h-auto p-0 text-[11.5px]"
+                  data-testid="provider-restore-apikey"
+                  onClick={() => setEditor({ ...editor, clearApiKey: false })}
+                >
+                  {t('settings.providers.apiKeyRestore')}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="xs"
+                  className="h-auto p-0 text-[11.5px] text-destructive"
+                  data-testid="provider-clear-apikey"
+                  onClick={() => setEditor({ ...editor, clearApiKey: true, apiKey: '' })}
+                >
+                  {t('settings.providers.apiKeyClear')}
+                </Button>
+              )
+            ) : null}
+          </div>
+          <Input
+            type="password"
+            autoComplete="off"
+            data-testid="provider-form-apikey"
+            value={editor.apiKey}
+            placeholder={
+              editor.clearApiKey
+                ? t('settings.providers.apiKeyWillClear')
+                : editor.hasSavedApiKey
+                  ? t('settings.providers.apiKeySavedPlaceholder')
+                  : t('settings.providers.apiKeyPlaceholder')
+            }
+            onChange={(e) => setEditor({ ...editor, apiKey: e.target.value, clearApiKey: false })}
+          />
+          <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.apiKeyHint')}</p>
+        </div>
+
+        {/* 折叠区：配置模型与连接地址 */}
+        <div className="border-t border-line pt-3">
+          <button
+            type="button"
+            data-testid="provider-config-toggle"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink hover:text-accent-ink"
+          >
+            {detailsOpen ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+            <span>{t('settings.providers.sectionToggle')}</span>
+          </button>
+
+          {detailsOpen ? (
+            <div className="mt-3 flex flex-col gap-3.5" data-testid="provider-config-section">
+              {/* 协议地址 */}
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlAnthropic')}</span>
+                  <Input
+                    data-testid="provider-url-anthropic"
+                    className="h-8 font-mono text-[12px]"
+                    placeholder="https://api.anthropic.com"
+                    value={editor.anthropicUrl}
+                    onChange={(e) => setEditor({ ...editor, anthropicUrl: e.target.value })}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlOpenaiChat')}</span>
+                  <Input
+                    data-testid="provider-url-openai-chat"
+                    className="h-8 font-mono text-[12px]"
+                    placeholder="https://api.openai.com/v1"
+                    value={editor.openaiChatUrl}
+                    onChange={(e) => setEditor({ ...editor, openaiChatUrl: e.target.value })}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11.5px] font-medium text-ink-2">
+                    {t('settings.providers.urlOpenaiResponses')}
+                  </span>
+                  <Input
+                    data-testid="provider-url-openai-responses"
+                    className="h-8 font-mono text-[12px]"
+                    placeholder="https://api.openai.com/v1"
+                    value={editor.openaiResponsesUrl}
+                    onChange={(e) => setEditor({ ...editor, openaiResponsesUrl: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              {editor.openaiChatUrl.trim() || editor.openaiResponsesUrl.trim() ? (
+                <div className="flex flex-col gap-1 rounded-control bg-field/60 px-2.5 py-2">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] font-medium text-ink">
+                    <Checkbox
+                      data-testid="provider-convert-openai"
+                      checked={editor.convertOpenaiToAnthropic}
+                      onCheckedChange={(val) => setEditor({ ...editor, convertOpenaiToAnthropic: val === true })}
+                    />
+                    <span>{t('settings.providers.convertOpenaiLabel')}</span>
+                  </label>
+                  <p className="m-0 pl-6 text-[11px] leading-relaxed text-ink-3">
+                    {t('settings.providers.convertOpenaiHint')}
+                  </p>
+                </div>
+              ) : null}
+
+              <ProviderModelTable editor={editor} batchOpen={batchOpen} setBatchOpen={setBatchOpen} batchText={batchText} setBatchText={setBatchText} pendingFetchId={pendingFetchId} fetchError={fetchError} updateModelRow={updateModelRow} addModelRow={addModelRow} removeModelRow={removeModelRow} applyBatchPaste={applyBatchPaste} triggerFetchModels={triggerFetchModels} hasAnyUrl={hasAnyUrl} />
+              {/* 默认模型 & 小模型 */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">
+                    {t('settings.providers.defaultModel')}
+                  </span>
+                  <NativeSelect
+                    size="sm"
+                    className="w-full"
+                    data-testid="provider-default-model"
+                    value={editor.defaultModel}
+                    onChange={(e) => setEditor({ ...editor, defaultModel: e.target.value })}
+                  >
+                    <NativeSelectOption value="">{t('settings.providers.modelUnset')}</NativeSelectOption>
+                    {validModelOptions.map((opt) => (
+                      <NativeSelectOption key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">
+                    {t('settings.providers.smallModel')}
+                  </span>
+                  <NativeSelect
+                    size="sm"
+                    className="w-full"
+                    data-testid="provider-small-model"
+                    value={editor.smallModel}
+                    onChange={(e) => setEditor({ ...editor, smallModel: e.target.value })}
+                  >
+                    <NativeSelectOption value="">{t('settings.providers.modelUnset')}</NativeSelectOption>
+                    {validModelOptions.map((opt) => (
+                      <NativeSelectOption key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                  <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.smallModelHint')}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* 给哪些 Agent 用 */}
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
+          <span className="text-[12px] font-semibold text-ink">{t('settings.providers.bindTitle')}</span>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="provider-bind-backends">
+            {backends.map((backend) => {
+              const urls = {
+                anthropicUrl: editor.anthropicUrl,
+                openaiChatUrl: editor.openaiChatUrl,
+                openaiResponsesUrl: editor.openaiResponsesUrl,
+                convertOpenaiToAnthropic: editor.convertOpenaiToAnthropic,
+              };
+              const ready = isProviderReadyForBackend(urls, backend, {
+                protocolGatewayEnabled: protocolGatewayEnabled || editor.convertOpenaiToAnthropic,
+              });
+              const checked = ready && editor.boundBackendIds.includes(backend.id);
+              const currentOwner = boundOwnerByBackend.get(backend.id);
+              const ownedByOther = currentOwner && currentOwner.id !== editor.editingId;
+              return (
+                <label
+                  key={backend.id}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 text-[12.5px]',
+                    ready ? 'cursor-pointer text-ink' : 'cursor-not-allowed text-ink-3 opacity-60',
+                  )}
+                >
+                  <Checkbox
+                    data-testid={`provider-bind-backend-${backend.id}`}
+                    disabled={!ready}
+                    checked={checked}
+                    onCheckedChange={(val) => toggleBackendBind(backend.id, val === true)}
+                  />
+                  <span>{backend.name}</span>
+                  {ownedByOther ? (
+                    <span className="text-[11px] text-ink-3">
+                      ({t('settings.providers.boundElsewhere', currentOwner.name)})
+                    </span>
+                  ) : null}
+                </label>
+              );
+            })}
+          </div>
+
+          {(compatibilitySummary.missingHints.length > 0 || compatibilitySummary.accountOnlyNames.length > 0) ? (
+            <p
+              className="m-0 text-[11.5px] leading-relaxed text-ink-3"
+              data-testid="provider-compatibility-hint"
+            >
+              {compatibilitySummary.missingHints.length > 0
+                ? t('settings.providers.bindMissingUrls', compatibilitySummary.missingHints.join('、'))
+                : ''}
+              {compatibilitySummary.missingHints.length > 0 && compatibilitySummary.accountOnlyNames.length > 0
+                ? ' '
+                : ''}
+              {compatibilitySummary.accountOnlyNames.length > 0
+                ? t('settings.providers.bindAccountOnly', compatibilitySummary.accountOnlyNames.join('、'))
+                : ''}
+            </p>
+          ) : null}
+
+          {/* 可选：同时绑定到工作台智能体预设 */}
+          {workbenchAgents.length > 0 ? (
+            <div className="mt-1.5 flex flex-col gap-1.5 rounded-card bg-field/60 p-2.5">
+              <span className="text-[11.5px] font-medium text-ink-2">
+                {t('settings.providers.bindWorkbenchAgents')}
+              </span>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5" data-testid="provider-bind-wb-agents">
+                {workbenchAgents.map((agent) => {
+                  const checked = editor.boundAgentIds.includes(agent.id);
+                  const owner = boundOwnerByWbAgent.get(agent.id);
+                  const ownedByOther = owner && owner.id !== editor.editingId;
+                  return (
+                    <label key={agent.id} className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-ink">
+                      <Checkbox
+                        data-testid={`provider-bind-wb-agent-${agent.id}`}
+                        checked={checked}
+                        onCheckedChange={(val) => toggleWbAgentBind(agent.id, val === true)}
+                      />
+                      <span>{agent.name}</span>
+                      {ownedByOther ? (
+                        <span className="text-[11px] text-ink-3">
+                          ({t('settings.providers.boundElsewhere', owner.name)})
+                        </span>
+                      ) : null}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="m-0 text-[11px] text-ink-3">{t('settings.providers.bindWorkbenchAgentsHint')}</p>
+            </div>
+          ) : null}
+        </div>
+
+        {formError ? (
+          <div className="text-[12px] text-destructive" role="alert" data-testid="provider-form-error">
+            {formError}
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
+          {providers.length > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="provider-cancel-btn"
+              onClick={closeEditor}
+            >
+              {t('common.cancel')}
+            </Button>
+          ) : null}
+          <Button type="button" size="sm" data-testid="provider-save-btn" onClick={saveProvider}>
+            {t('settings.providers.save')}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}

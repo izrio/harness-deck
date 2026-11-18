@@ -6,6 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ScheduleFrequency, ScheduleRule, ScheduleRunRecord } from '@harness-deck/shared';
+import { normalizeProjectPath } from '../projects/ProjectService.ts';
 
 export const MAX_RUNS_PER_RULE = 30;
 export const MAX_HIDDEN_SESSIONS = 1_000;
@@ -114,13 +115,14 @@ export function parseStoredScheduleData(raw: unknown, nowMs: number, interrupted
           : computeNextRunAt(r.frequency, nowMs)
         : undefined;
 
+      const projectPath = normalizeProjectPath(r.projectPath) || r.projectPath;
       rules.push({
         id: r.id,
         name: r.name,
         prompt: r.prompt,
         frequency: r.frequency,
         backendId: r.backendId,
-        projectPath: r.projectPath,
+        projectPath,
         enabled: enabled && (r.frequency.kind !== 'once' || nextRunAt !== undefined),
         createdAt: typeof r.createdAt === 'number' ? r.createdAt : nowMs,
         ...(nextRunAt !== undefined ? { nextRunAt } : {}),
@@ -142,6 +144,7 @@ export function upsertScheduleRule(
   const enabled = input.enabled ?? existing?.enabled ?? true;
   const nextRunAt = enabled ? computeNextRunAt(input.frequency, nowMs) : undefined;
   const effectiveEnabled = enabled && (input.frequency.kind !== 'once' || nextRunAt !== undefined);
+  const projectPath = normalizeProjectPath(input.projectPath) || input.projectPath;
 
   const rule: ScheduleRule = {
     id: existing?.id ?? input.id ?? `sched-${randomUUID().slice(0, 8)}`,
@@ -149,7 +152,7 @@ export function upsertScheduleRule(
     prompt: input.prompt.trim(),
     frequency: input.frequency,
     backendId: input.backendId,
-    projectPath: input.projectPath,
+    projectPath,
     enabled: effectiveEnabled,
     createdAt: existing?.createdAt ?? nowMs,
     ...(effectiveEnabled && nextRunAt !== undefined ? { nextRunAt } : {}),

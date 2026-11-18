@@ -4,7 +4,7 @@
  * Agent 启动时自动带上并支持在输入框通过 / 调用。
  */
 import { useEffect, useState } from 'react';
-import type { BackendView, InstalledSkillView } from '@harness-deck/shared';
+import type { InstalledSkillView } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
 import { requestMarkdownPreview, setExtensionsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
@@ -21,7 +21,9 @@ import {
   TrashIcon,
 } from '../icons.tsx';
 import { ValuePill } from '../beautifului/index.ts';
+import { FALLBACK_BACKENDS } from '@/lib/workbenchOptions';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -32,15 +34,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-
-const FALLBACK_BACKENDS: readonly Pick<BackendView, 'id' | 'name'>[] = [
-  { id: 'dsh', name: 'DeepSeek' },
-  { id: 'zcode', name: 'ZCode' },
-  { id: 'pi', name: 'Pi' },
-  { id: 'codebuddy', name: 'CodeBuddy' },
-  { id: 'claude', name: 'Claude Code' },
-  { id: 'opencode', name: 'OpenCode' },
-];
 
 function shortRepoLabel(repoUrl: string): string {
   return repoUrl
@@ -327,11 +320,10 @@ export function SkillSettings() {
                               className="flex cursor-pointer items-start gap-2 rounded-control bg-surface px-2.5 py-2 shadow-hairline"
                               data-testid={`discovered-skill-${item.name}`}
                             >
-                              <input
-                                type="checkbox"
-                                className="mt-0.5 accent-[var(--accent)]"
+                              <Checkbox
+                                className="mt-0.5"
                                 checked={checked}
-                                onChange={() => toggleDiscoveredSubpath(item.subpath)}
+                                onCheckedChange={() => toggleDiscoveredSubpath(item.subpath)}
                               />
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-1.5">
@@ -370,7 +362,7 @@ export function SkillSettings() {
                         onClick={() => setAllAgentsMode(true)}
                         className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
                           allAgentsMode
-                            ? 'border-accent bg-accent-tint font-medium text-accent-ink'
+                            ? 'border-brand bg-accent-tint font-medium text-accent-ink'
                             : 'border-line bg-field text-ink-2 hover:bg-hover'
                         }`}
                       >
@@ -387,7 +379,7 @@ export function SkillSettings() {
                             onClick={() => toggleDialogAgent(agent.id)}
                             className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
                               active
-                                ? 'border-accent bg-accent-tint font-medium text-accent-ink'
+                                ? 'border-brand bg-accent-tint font-medium text-accent-ink'
                                 : 'border-line bg-field text-ink-2 hover:bg-hover'
                             }`}
                           >
@@ -544,7 +536,7 @@ export function SkillSettings() {
                         onClick={() => updateSkillLocalAndHost(skill, { agents: null })}
                         className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2 py-0.5 text-[11px] transition-colors ${
                           isUniversal
-                            ? 'border-accent bg-accent-tint font-medium text-accent-ink'
+                            ? 'border-brand bg-accent-tint font-medium text-accent-ink'
                             : 'border-line bg-surface text-ink-3 hover:bg-hover'
                         }`}
                       >
@@ -561,7 +553,7 @@ export function SkillSettings() {
                             onClick={() => toggleSkillAgent(skill, agent.id)}
                             className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2 py-0.5 text-[11px] transition-colors ${
                               selected
-                                ? 'border-accent bg-accent-tint font-medium text-accent-ink'
+                                ? 'border-brand bg-accent-tint font-medium text-accent-ink'
                                 : 'border-line bg-surface text-ink-3 hover:bg-hover'
                             }`}
                           >

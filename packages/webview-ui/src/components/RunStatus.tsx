@@ -1,12 +1,12 @@
 /**
  * 运行状态（Beautiful UI LoadingState 像素波纹 + Shimmer + 等宽计时器）。
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Item } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { cn } from '../lib/utils.ts';
 import { LoaderGrid, Shimmer } from './beautifului/index.ts';
-import { CheckIcon } from './icons.tsx';
+import { CheckIcon, CopyIcon } from './icons.tsx';
 import { useT, type Translate } from '../i18n.ts';
 
 /** 「12 秒」「1 分 23 秒」「1 小时 2 分」。 */
@@ -82,12 +82,60 @@ export function RunStatus() {
   );
 }
 
-/** 一轮结束时的用时（可合并上一条助手消息的操作栏到同一行）。 */
-export function TurnDone({ item, actions }: { item: Extract<Item, { kind: 'turnDone' }>; actions?: ReactNode }) {
-  const t = useT();
+export function IconAction({ label, title, onClick, children }: { label: string; title?: string; onClick: () => void; children: ReactNode }) {
   return (
-    <div className={cn('turn-done flex items-center gap-2 text-[12px] text-ink-3', actions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
-      {actions}
+    <button
+      type="button"
+      className="msg-action flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-hover-2 hover:text-ink-2"
+      aria-label={label}
+      title={title ?? label}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** 对齐 Beautiful UI StreamingText 底部操作图标行。 */
+export function AssistantActions({ text, inline = false }: { text: string; inline?: boolean }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+  return (
+    <div className={cn('flex items-center gap-0.5', !inline && 'mt-1.5')}>
+      <IconAction
+        label={copied ? t('assistant.copied') : t('assistant.copy')}
+        onClick={() =>
+          void navigator.clipboard
+            .writeText(text)
+            .then(() => {
+              setCopied(true);
+              clearTimeout(timerRef.current);
+              timerRef.current = setTimeout(() => setCopied(false), 1_200);
+            })
+            .catch(() => undefined)
+        }
+      >
+        {copied ? <CheckIcon className="size-3.5 text-green" /> : <CopyIcon className="size-3.5" />}
+      </IconAction>
+    </div>
+  );
+}
+
+/** 一轮结束时的用时（可合并上一条助手消息的操作栏到同一行）。 */
+export const TurnDone = memo(function TurnDone({
+  item,
+  copyText,
+}: {
+  item: Extract<Item, { kind: 'turnDone' }>;
+  copyText?: string;
+}) {
+  const t = useT();
+  const hasActions = copyText !== undefined;
+  return (
+    <div className={cn('turn-done flex items-center gap-2 text-[12px] text-ink-3', hasActions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
+      {hasActions ? <AssistantActions text={copyText} inline /> : null}
       <span className="flex items-center gap-1.5">
         {item.completed ? (
           <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-green-tint text-green">
@@ -98,4 +146,4 @@ export function TurnDone({ item, actions }: { item: Extract<Item, { kind: 'turnD
       </span>
     </div>
   );
-}
+});

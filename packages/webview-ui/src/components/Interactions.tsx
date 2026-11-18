@@ -8,6 +8,7 @@ import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { GlideMenu, ValuePill } from './beautifului/index.ts';
 import { Markdown } from './Markdown.tsx';
 import {
@@ -103,8 +104,25 @@ function RollingDigits({ value }: { value: string }) {
   );
 }
 
+const REPLY_RECOVERY_MS = 4_000;
+
+/** Track a pending reply and auto-recover if Host leaves the interaction mounted. */
+function usePendingReply<T extends string>(resetKey?: string) {
+  const [sent, setSent] = useState<T | undefined>();
+  useEffect(() => {
+    setSent(undefined);
+  }, [resetKey]);
+  useEffect(() => {
+    if (sent === undefined) return;
+    const timer = setTimeout(() => setSent(undefined), REPLY_RECOVERY_MS);
+    return () => clearTimeout(timer);
+  }, [sent]);
+  return [sent, setSent] as const;
+}
+
 function ApprovalCard({ item }: { item: Of<'approval'> }) {
-  const [sent, setSent] = useState<'allow' | 'allowAlways' | 'reject' | undefined>();
+  const dirtyKey = item.dirtyFiles.join('\0');
+  const [sent, setSent] = usePendingReply<'allow' | 'allowAlways' | 'reject'>(`${item.id}\0${dirtyKey}`);
   const t = useT();
   const blocked = item.dirtyFiles.length > 0;
   const isDsh = useView((s) => (s.backends.items.find((b) => b.id === s.backends.active)?.kind ?? 'dsh') === 'dsh');
@@ -172,7 +190,7 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
             {item.allowAlways}
           </Button>
         ) : null}
-        <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
+        <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
           {sent === 'allow' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
           {t('approval.allow')}
         </Button>
@@ -184,7 +202,7 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
 function PlanReviewCard({ id, question }: { id: string; question: QuestionView }) {
   const t = useT();
   const [feedback, setFeedback] = useState<string | undefined>();
-  const [sent, setSent] = useState<'approve' | 'keep' | 'reply' | undefined>();
+  const [sent, setSent] = usePendingReply<'approve' | 'keep' | 'reply'>(id);
   const intent = question.intent!;
   const answer = (selected: string, custom?: string) => {
     setSent(selected === intent.approve ? 'approve' : 'keep');
@@ -245,7 +263,7 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
               <PencilIcon className="size-3.5" />
               {t('plan.keep')}
             </Button>
-            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={sent !== undefined} onClick={() => answer(intent.approve)}>
+            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined} onClick={() => answer(intent.approve)}>
               {sent === 'approve' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
               {t('plan.approve')}
             </Button>
@@ -256,7 +274,7 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
               <ReplyIcon className="size-3.5" />
               {t('plan.back')}
             </Button>
-            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={sent !== undefined} onClick={() => answer(keep, feedback.trim() || undefined)}>
+            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined} onClick={() => answer(keep, feedback.trim() || undefined)}>
               {sent === 'keep' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
               {t('plan.sendFeedback')}
             </Button>
@@ -279,12 +297,13 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
   const t = useT();
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [step, setStep] = useState(0);
-  const [sent, setSent] = useState<'submit' | 'skip' | undefined>();
+  const [sent, setSent] = usePendingReply<'submit' | 'skip'>(item.id);
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(advanceTimer.current), []);
 
   const questions = item.questions;
   const total = questions.length;
+  if (total === 0) return null;
   const index = Math.min(step, total - 1);
   const q = questions[index]!;
   const last = index === total - 1;
@@ -432,8 +451,8 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
             </GlideMenu>
           ) : null}
           <label className="relative z-10 flex items-center rounded-control px-1.5 py-1 transition-colors duration-100 hover:bg-hover">
-            <input
-              className="question__custom min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+            <Input
+              className="question__custom h-auto min-w-0 flex-1 border-0 bg-transparent px-0 py-0 text-[13px] text-ink shadow-none focus-visible:ring-0 placeholder:text-ink-3 dark:bg-transparent"
               value={draft.custom}
               placeholder={q.options.length > 0 ? t('question.other') : t('question.answer')}
               aria-label={t('question.answerLabel', q.question)}
@@ -459,12 +478,12 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
             </Button>
           ) : null}
           {last ? (
-            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={!complete || sent !== undefined} onClick={submit}>
+            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={!complete || sent !== undefined} onClick={submit}>
               {sent === 'submit' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
               {t('question.submit')}
             </Button>
           ) : (
-            <Button type="button" size="sm" className="bg-accent text-white hover:bg-accent-ink" disabled={!answered(q) || sent !== undefined} onClick={next}>
+            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={!answered(q) || sent !== undefined} onClick={next}>
               {t('question.next')}
               <ArrowRightIcon className="size-3.5" />
             </Button>

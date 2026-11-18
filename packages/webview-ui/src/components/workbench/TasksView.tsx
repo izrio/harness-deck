@@ -13,32 +13,16 @@ import { cn } from '../../lib/utils.ts';
 import { useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  ChatIcon,
-  CheckIcon,
-  KanbanIcon,
   PlayIcon,
   PlusIcon,
-  ReplyIcon,
-  SpinnerIcon,
-  TerminalIcon,
   TrashIcon,
 } from '../icons.tsx';
 import { ValuePill } from '../beautifului/index.ts';
+import { getMergedModels, getProjectOptions } from '@/lib/workbenchOptions';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
+import { TaskCard } from './tasks/TaskCard.tsx';
+import { TaskCreateDialog } from './tasks/TaskCreateDialog.tsx';
 
 export function TasksView() {
   const t = useT();
@@ -78,44 +62,9 @@ export function TasksView() {
     setCreateOpen(false);
   };
 
-  const projectOptions = (() => {
-    const map = new Map<string, string>();
-    if (projects.currentPath) {
-      const curName =
-        projects.recent.find((r) => r.path === projects.currentPath)?.name ??
-        projects.currentPath.split(/[\\/]/u).pop() ??
-        projects.currentPath;
-      map.set(projects.currentPath, curName);
-    }
-    for (const r of projects.recent) {
-      if (!map.has(r.path)) map.set(r.path, r.name);
-    }
-    return [...map.entries()];
-  })();
+  const projectOptions = getProjectOptions(projects);
 
-  const mergedModels = (() => {
-    const seen = new Set<string>();
-    const list: { key: string; label: string }[] = [];
-    const orderedProviders = [
-      ...providers.filter((p) => p.boundBackendIds.includes(backendId)),
-      ...providers.filter((p) => !p.boundBackendIds.includes(backendId)),
-    ];
-    for (const p of orderedProviders) {
-      for (const m of p.models) {
-        const key = `${p.id}::${m.id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        list.push({ key, label: `${m.name || m.id} (${p.name})` });
-      }
-    }
-    for (const m of models.options) {
-      const key = `${m.provider}::${m.model}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      list.push({ key, label: `${m.name} (${m.group})` });
-    }
-    return list;
-  })();
+  const mergedModels = getMergedModels(backendId, providers, models);
 
   const parseSelectedModel = () => {
     if (!modelKey) return {};
@@ -211,157 +160,7 @@ export function TasksView() {
       </div>
 
       {/* 新增任务模态弹窗（标题位于表单第一项） */}
-      <Dialog open={createOpen} onOpenChange={(open) => !open && closeCreateModal()}>
-        <DialogContent data-testid="kanban-task-creator" aria-modal="true" className="sm:max-w-[540px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-[14px]">
-              <KanbanIcon className="size-4 text-accent-ink" />
-              <span>{t('wb.tasks.new')}</span>
-            </DialogTitle>
-            <DialogDescription className="sr-only">{t('wb.tasks.subtitle')}</DialogDescription>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.fieldTitle')}</span>
-              <Input
-                data-testid="task-input-title"
-                value={title}
-                placeholder={t('wb.tasks.newTitlePlaceholder')}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.fieldPrompt')}</span>
-              <Textarea
-                data-testid="task-input-prompt"
-                rows={4}
-                value={prompt}
-                placeholder={t('wb.tasks.newPlaceholder')}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    handleCreateTask(false);
-                  }
-                }}
-              />
-            </label>
-
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 [&_[data-slot=native-select-wrapper]]:w-full">
-              {projectOptions.length > 0 ? (
-                <label className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectProject')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="task-select-project"
-                    aria-label={t('wb.tasks.selectProject')}
-                    value={projectPath}
-                    onChange={(e) => setProjectPath(e.target.value)}
-                  >
-                    {projectOptions.map(([path, label]) => (
-                      <NativeSelectOption key={path} value={path}>
-                        {label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
-              ) : null}
-
-              <label className="flex flex-col gap-1">
-                <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectHarness')}</span>
-                <NativeSelect
-                  size="sm"
-                  data-testid="task-select-harness"
-                  aria-label={t('wb.tasks.selectHarness')}
-                  value={backendId}
-                  onChange={(e) => setBackendId(e.target.value)}
-                >
-                  {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
-                    <NativeSelectOption key={b.id} value={b.id}>
-                      {b.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectModel')}</span>
-                <NativeSelect
-                  size="sm"
-                  data-testid="task-select-model"
-                  aria-label={t('wb.tasks.selectModel')}
-                  value={modelKey}
-                  onChange={(e) => setModelKey(e.target.value)}
-                >
-                  <NativeSelectOption value="">{t('wb.tasks.modelAuto')}</NativeSelectOption>
-                  {mergedModels.map((m) => (
-                    <NativeSelectOption key={m.key} value={m.key}>
-                      {m.label}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </label>
-
-              {agents.length > 0 ? (
-                <label className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectAgent')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="task-select-agent"
-                    aria-label={t('wb.tasks.selectAgent')}
-                    value={agentId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setAgentId(nextId);
-                      const chosen = agents.find((a) => a.id === nextId);
-                      if (chosen) {
-                        setBackendId(chosen.backendId);
-                        if (chosen.model) setModelKey(`${chosen.provider ?? ''}::${chosen.model}`);
-                      }
-                    }}
-                  >
-                    <NativeSelectOption value="">{t('wb.tasks.agentNone')}</NativeSelectOption>
-                    {agents.map((a) => (
-                      <NativeSelectOption key={a.id} value={a.id}>
-                        {a.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
-              ) : null}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" size="sm" data-testid="task-cancel-btn" onClick={closeCreateModal}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="task-create-run-btn"
-              disabled={!prompt.trim()}
-              onClick={() => handleCreateTask(true)}
-            >
-              <PlayIcon className="size-3" />
-              <span>{t('wb.tasks.runNow')}</span>
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              data-testid="task-create-btn"
-              disabled={!prompt.trim()}
-              onClick={() => handleCreateTask(false)}
-            >
-              <PlusIcon className="size-3" />
-              <span>{t('wb.tasks.add')}</span>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TaskCreateDialog agents={agents} backends={backends} prompt={prompt} setPrompt={setPrompt} title={title} setTitle={setTitle} projectPath={projectPath} setProjectPath={setProjectPath} backendId={backendId} setBackendId={setBackendId} modelKey={modelKey} setModelKey={setModelKey} agentId={agentId} setAgentId={setAgentId} createOpen={createOpen} closeCreateModal={closeCreateModal} projectOptions={projectOptions} mergedModels={mergedModels} handleCreateTask={handleCreateTask} />
 
       {/* 四列响应式看板：宽屏四列并排，窄侧边栏纵向堆叠可滚动 */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto min-[900px]:grid-cols-4 min-[900px]:overflow-x-auto">
@@ -381,10 +180,10 @@ export function TasksView() {
                       col === 'todo'
                         ? 'bg-ink-3'
                         : col === 'in_progress'
-                          ? 'bg-accent'
+                          ? 'bg-brand'
                           : col === 'review'
                             ? 'bg-orange'
-                            : 'bg-emerald-500',
+                            : 'bg-green',
                     )}
                   />
                   <h3 className="m-0 text-[12.5px] font-semibold text-ink">
@@ -413,249 +212,19 @@ export function TasksView() {
                 {items.length === 0 ? (
                   <div className="py-4 text-center text-[12px] text-ink-3">{t('wb.tasks.emptyCol')}</div>
                 ) : (
-                  items.map((task, idx) => {
-                    const backendName = backends.items.find((b) => b.id === task.backendId)?.name ?? task.backendId;
-                    const assignedAgent = task.agentId ? agents.find((a) => a.id === task.agentId) : undefined;
-                    const hasVerify = (projects.configs[task.projectPath]?.verifyCommands.length ?? 0) > 0;
-
-                    return (
-                      <article
-                        key={task.id}
-                        className="flex flex-col gap-2 rounded-control border border-line bg-field/45 p-2.5 shadow-hairline"
-                        data-testid={`task-card-${task.id}`}
-                      >
-                        <div className="flex items-start justify-between gap-1.5">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
-                              {col === 'todo' ? (
-                                <span className="shrink-0 font-mono text-[10.5px] text-ink-3">#{idx + 1}</span>
-                              ) : col === 'in_progress' ? (
-                                <SpinnerIcon className="size-3 shrink-0 text-accent-ink" />
-                              ) : null}
-                              <span className="truncate text-[12.5px] font-semibold text-ink">{task.title}</span>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            aria-label={t('common.delete')}
-                            className="rounded p-0.5 text-ink-3 hover:bg-hover hover:text-ink"
-                            onClick={() => postToHost({ type: 'deleteTask', payload: { id: task.id } })}
-                          >
-                            <TrashIcon className="size-3" />
-                          </button>
-                        </div>
-
-                        <p className="m-0 line-clamp-2 text-[11.5px] leading-relaxed text-ink-2">{task.prompt}</p>
-
-                        {task.summary && (col === 'review' || col === 'done') ? (
-                          <div className="rounded bg-surface px-2 py-1 text-[11px] text-ink-2 shadow-hairline">
-                            <span className="line-clamp-2">{task.summary}</span>
-                          </div>
-                        ) : null}
-
-                        {task.error ? (
-                          <div className="rounded bg-orange/10 px-2 py-1 text-[11px] text-orange">{task.error}</div>
-                        ) : null}
-
-                        <div className="flex flex-wrap gap-1 text-[10.5px] text-ink-3">
-                          <span className="rounded-chip bg-surface px-1.5 py-0.5 shadow-hairline">{task.projectName}</span>
-                          <span className="rounded-chip bg-surface px-1.5 py-0.5 shadow-hairline">{backendName}</span>
-                          {task.model ? (
-                            <span className="rounded-chip bg-surface px-1.5 py-0.5 font-mono shadow-hairline">
-                              {task.model}
-                            </span>
-                          ) : null}
-                          {assignedAgent ? (
-                            <span className="rounded-chip bg-surface px-1.5 py-0.5 shadow-hairline">
-                              {assignedAgent.name}
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {/* 状态流转与操作栏 */}
-                        <div className="flex flex-wrap items-center justify-between gap-1 border-t border-line pt-1.5">
-                          {col === 'todo' ? (
-                            <>
-                              <div className="flex items-center gap-0.5">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-xs"
-                                  disabled={idx === 0}
-                                  title={t('wb.tasks.moveUp')}
-                                  aria-label={t('wb.tasks.moveUp')}
-                                  onClick={() =>
-                                    postToHost({ type: 'reorderTask', payload: { id: task.id, direction: 'up' } })
-                                  }
-                                >
-                                  <ArrowUpIcon className="size-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-xs"
-                                  disabled={idx === items.length - 1}
-                                  title={t('wb.tasks.moveDown')}
-                                  aria-label={t('wb.tasks.moveDown')}
-                                  onClick={() =>
-                                    postToHost({ type: 'reorderTask', payload: { id: task.id, direction: 'down' } })
-                                  }
-                                >
-                                  <ArrowDownIcon className="size-3" />
-                                </Button>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="xs"
-                                disabled={hasRunning}
-                                data-testid={`task-run-${task.id}`}
-                                onClick={() => postToHost({ type: 'runTaskNow', payload: { id: task.id } })}
-                              >
-                                <PlayIcon className="size-3" />
-                                <span>{t('wb.tasks.runNow')}</span>
-                              </Button>
-                            </>
-                          ) : null}
-
-                          {col === 'in_progress' ? (
-                            <div className="flex w-full items-center justify-between gap-1">
-                              {task.sessionId ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="xs"
-                                  onClick={() =>
-                                    postToHost({
-                                      type: 'openProjectSession',
-                                      payload: {
-                                        projectPath: task.projectPath,
-                                        sessionId: task.sessionId!,
-                                        backendId: task.backendId,
-                                      },
-                                    })
-                                  }
-                                >
-                                  <ChatIcon className="size-3" />
-                                  <span>{t('wb.tasks.openSession')}</span>
-                                </Button>
-                              ) : <span />}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="xs"
-                                onClick={() =>
-                                  postToHost({ type: 'updateTaskStatus', payload: { id: task.id, status: 'review' } })
-                                }
-                              >
-                                {t('wb.tasks.col.review')}
-                              </Button>
-                            </div>
-                          ) : null}
-
-                          {col === 'review' ? (
-                            <div className="flex w-full flex-wrap items-center justify-between gap-1">
-                              <div className="flex items-center gap-1">
-                                {task.sessionId ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="xs"
-                                    onClick={() =>
-                                      postToHost({
-                                        type: 'openProjectSession',
-                                        payload: {
-                                          projectPath: task.projectPath,
-                                          sessionId: task.sessionId!,
-                                          backendId: task.backendId,
-                                        },
-                                      })
-                                    }
-                                  >
-                                    <ChatIcon className="size-3" />
-                                    <span>{t('wb.tasks.openSession')}</span>
-                                  </Button>
-                                ) : null}
-                                {hasVerify ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="xs"
-                                    onClick={() =>
-                                      postToHost({ type: 'runProjectVerify', payload: { path: task.projectPath } })
-                                    }
-                                  >
-                                    <TerminalIcon className="size-3" />
-                                    <span>{t('wb.tasks.runVerify')}</span>
-                                  </Button>
-                                ) : null}
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-xs"
-                                  title={t('wb.tasks.sendBack')}
-                                  aria-label={t('wb.tasks.sendBack')}
-                                  onClick={() =>
-                                    postToHost({ type: 'updateTaskStatus', payload: { id: task.id, status: 'todo' } })
-                                  }
-                                >
-                                  <ReplyIcon className="size-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="xs"
-                                  data-testid={`task-approve-${task.id}`}
-                                  onClick={() =>
-                                    postToHost({ type: 'updateTaskStatus', payload: { id: task.id, status: 'done' } })
-                                  }
-                                >
-                                  <CheckIcon className="size-3" />
-                                  <span>{t('wb.tasks.approveDone')}</span>
-                                </Button>
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {col === 'done' ? (
-                            <div className="flex w-full items-center justify-between gap-1">
-                              {task.sessionId ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="xs"
-                                  onClick={() =>
-                                    postToHost({
-                                      type: 'openProjectSession',
-                                      payload: {
-                                        projectPath: task.projectPath,
-                                        sessionId: task.sessionId!,
-                                        backendId: task.backendId,
-                                      },
-                                    })
-                                  }
-                                >
-                                  <ChatIcon className="size-3" />
-                                  <span>{t('wb.tasks.openSession')}</span>
-                                </Button>
-                              ) : <span />}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={() =>
-                                  postToHost({ type: 'updateTaskStatus', payload: { id: task.id, status: 'todo' } })
-                                }
-                              >
-                                <ReplyIcon className="size-3" />
-                              </Button>
-                            </div>
-                          ) : null}
-                        </div>
-                      </article>
-                    );
-                  })
+                  items.map((task, idx) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      idx={idx}
+                      isLast={idx === items.length - 1}
+                      col={col}
+                      hasRunning={hasRunning}
+                      backends={backends}
+                      agents={agents}
+                      projects={projects}
+                    />
+                  ))
                 )}
               </div>
             </section>

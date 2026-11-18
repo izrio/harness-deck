@@ -257,6 +257,10 @@ export class ClaudeSessionProjection {
           }
         } else if (evType === 'message_delta') {
           if (event.usage) this.applyUsageObject(event.usage);
+        } else if (evType === 'error') {
+          const errText = extractClaudeErrorText(event.error ?? event) ?? t('notice.errorUnknown');
+          if (!isReplay) this.endTurn(now, 'failed', errText);
+          return;
         }
         this.changed();
         return;
@@ -348,17 +352,34 @@ export class ClaudeSessionProjection {
         return;
       }
 
+      case 'error': {
+        const errText = extractClaudeErrorText(raw.error ?? raw) ?? t('notice.errorUnknown');
+        if (!isReplay) {
+          if (this.running) {
+            this.endTurn(now, 'failed', errText);
+          } else {
+            this.items.push({ kind: 'notice', id: `n:${++this.counter}`, level: 'error', text: t('notice.error', errText) });
+            this.changed();
+          }
+        }
+        return;
+      }
+
       case 'result': {
         this.applyModelUsageWindow(raw.modelUsage);
         if (raw.usage) this.applyUsageObject(raw.usage);
+        const rawErrorText = extractClaudeErrorText(raw.error);
         const isError =
-          raw.is_error === true || (typeof raw.subtype === 'string' && raw.subtype.startsWith('error'));
+          raw.is_error === true ||
+          Boolean(rawErrorText) ||
+          (typeof raw.subtype === 'string' && raw.subtype.startsWith('error'));
         if (isError) {
           const errors = Array.isArray(raw.errors)
             ? raw.errors.filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
             : [];
           const errText =
             (typeof raw.result === 'string' && raw.result.trim() ? raw.result.trim() : '') ||
+            rawErrorText ||
             errors.join('\n') ||
             t('notice.errorUnknown');
           if (!isReplay) this.endTurn(now, 'failed', errText);
@@ -709,6 +730,20 @@ function extractGoalFromTool(call: ClaudeToolState): SessionHeader['goal'] | und
     maxRounds: typeof obj.maxRounds === 'number' ? obj.maxRounds : 10,
     ...(typeof obj.blockedReason === 'string' && obj.blockedReason ? { blockedReason: obj.blockedReason } : {}),
   };
+}
+
+function extractClaudeErrorText(raw: unknown): string | undefined {
+  if (!raw) return undefined;
+  if (typeof raw === 'string') return raw.trim() || undefined;
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message.trim();
+    if (obj.error && typeof obj.error === 'object' && !Array.isArray(obj.error)) {
+      const inner = obj.error as Record<string, unknown>;
+      if (typeof inner.message === 'string' && inner.message.trim()) return inner.message.trim();
+    }
+  }
+  return undefined;
 }
 
 function truncateOutput(raw: string): string {

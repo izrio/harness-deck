@@ -281,6 +281,7 @@ export function Composer() {
   const includeActive = active ? context.includeActiveByDefault !== (toggledKey === active.key) : true;
 
   const addImages = async (files: readonly File[]) => {
+    const targetTab = draftOwner.current;
     let room = MAX_IMAGES - images.length;
     const added: PromptImage[] = [];
     for (const file of files) {
@@ -307,7 +308,12 @@ export function Composer() {
         showToast('error', t('image.failed'));
       }
     }
-    if (added.length) setImages((current) => [...current, ...added].slice(0, MAX_IMAGES));
+    if (!added.length) return;
+    if (targetTab && draftOwner.current !== targetTab) {
+      imageStash.current.set(targetTab, [...(imageStash.current.get(targetTab) ?? []), ...added].slice(0, MAX_IMAGES));
+      return;
+    }
+    setImages((current) => [...current, ...added].slice(0, MAX_IMAGES));
   };
 
   const imageFiles = (list: DataTransferItemList | FileList | null | undefined): File[] => {

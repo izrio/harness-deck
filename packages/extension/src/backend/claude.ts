@@ -132,11 +132,16 @@ export function createClaudeBackend(
             proxyToken: proxy.token,
             baseEnv: launchEnv,
             protocolGatewayEnabled: host.isProtocolGatewayEnabled?.() ?? false,
+            ...(spawnParams.model ? { selectedModel: spawnParams.model } : {}),
           });
           if (adapted) {
             launchEnv = adapted.env;
             const chosen = spawnParams.model ?? boundProvider.defaultModel ?? boundProvider.models[0]?.id;
             if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen);
+          } else {
+            host.log(
+              `服务商 ${boundProvider.name} 未满足 Claude Code 协议要求（需配置 Anthropic 地址，或开启「本地协议转换网关」并配置 OpenAI 地址），本次将使用本机默认 Claude 环境启动。`,
+            );
           }
         } catch (error) {
           host.log(`准备服务商 ${boundProvider.name} 的 Claude Code 配置失败：${error instanceof Error ? error.message : String(error)}`);

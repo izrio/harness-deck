@@ -29,6 +29,7 @@ export function resolvePiAgentDir(env?: Readonly<Record<string, string | undefin
 export async function scanPiSessions(
   workspacePath: string,
   piAgentDir = resolvePiAgentDir(),
+  extraProjectPaths: readonly string[] = [],
 ): Promise<PiDiskSession[]> {
   const defaultAgentDir = join(homedir(), '.pi', 'agent');
   const roots = [
@@ -37,17 +38,41 @@ export async function scanPiSessions(
   ];
 
   const byId = new Map<string, PiDiskSession>();
-  const normWs = resolve(workspacePath);
-  const encodedHint = normWs.replace(/^[/\\]+/u, '').replace(/[^a-zA-Z0-9._-]+/gu, '-');
+  const encodeHint = (p: string) => resolve(p).replace(/^[/\\]+/u, '').replace(/[^a-zA-Z0-9._-]+/gu, '-');
+  const currentHint = encodeHint(workspacePath);
+  const allHints = new Set<string>([currentHint]);
+  for (const extra of extraProjectPaths) {
+    const trimmed = extra.trim();
+    if (trimmed) allHints.add(encodeHint(trimmed));
+  }
+  const matchesAnyHint = (dirName: string): boolean => {
+    for (const h of allHints) {
+      if (h && dirName.includes(h)) return true;
+    }
+    return false;
+  };
 
   for (const sessionsRoot of roots) {
     const dirEntries = await readdir(sessionsRoot, { withFileTypes: true }).catch(() => []);
     const subdirs = dirEntries.filter((d) => d.isDirectory());
 
+    const currentMatches = subdirs.filter((d) => currentHint && d.name.includes(currentHint));
+    const extraMatches = subdirs.filter((d) => !(currentHint && d.name.includes(currentHint)) && matchesAnyHint(d.name));
+    const prioritySet = new Set([...currentMatches, ...extraMatches].map((d) => d.name));
+    const remaining = subdirs.filter((d) => !prioritySet.has(d.name));
+    const remainingWithStats = await Promise.all(
+      remaining.map(async (d) => {
+        const st = await stat(join(sessionsRoot, d.name)).catch(() => undefined);
+        return { entry: d, mtimeMs: st?.mtimeMs ?? 0 };
+      }),
+    );
+    remainingWithStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    const priorityDirs = [...currentMatches, ...extraMatches];
     const prioritized = [
-      ...subdirs.filter((d) => d.name.includes(encodedHint)),
-      ...subdirs.filter((d) => !d.name.includes(encodedHint)),
-    ].slice(0, MAX_SCAN_DIRS);
+      ...priorityDirs,
+      ...remainingWithStats.map((x) => x.entry),
+    ].slice(0, Math.max(MAX_SCAN_DIRS, priorityDirs.length));
 
     for (const sub of prioritized) {
       const absDir = join(sessionsRoot, sub.name);

@@ -36,6 +36,28 @@ function proxyUrl(proxyOrigin: string, providerId: string, protocol: ProviderPro
   return `${proxyOrigin.replace(/\/+$/u, '')}/p/${encodeURIComponent(providerId)}/${protocol}`;
 }
 
+function mergeLoopbackNoProxy(raw: string | undefined): string {
+  const parts = (raw ?? '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  for (const host of ['127.0.0.1', 'localhost']) {
+    if (!parts.some((p) => p.toLowerCase() === host)) {
+      parts.push(host);
+    }
+  }
+  return parts.join(',');
+}
+
+function withLoopbackNoProxy(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  const merged = mergeLoopbackNoProxy(env.NO_PROXY ?? env.no_proxy);
+  return {
+    ...env,
+    NO_PROXY: merged,
+    no_proxy: merged,
+  };
+}
+
 /** 生成 dsh 的 Cordis `--patch` YAML 内容（挂载到 `@deepseek-ai/dsh-llm-pi-ai`）。 */
 export function buildDshPatchYaml(
   provider: ProviderConfig,
@@ -172,8 +194,9 @@ export function prepareClaudeProviderRuntime(params: {
   readonly proxyToken: string;
   readonly baseEnv: Record<string, string | undefined>;
   readonly protocolGatewayEnabled?: boolean;
+  readonly selectedModel?: string;
 }): { readonly env: Record<string, string | undefined> } | undefined {
-  const { provider, proxyOrigin, proxyToken, baseEnv, protocolGatewayEnabled } = params;
+  const { provider, proxyOrigin, proxyToken, baseEnv, protocolGatewayEnabled, selectedModel } = params;
   if (
     !isProviderReadyForBackend(
       provider,
@@ -184,7 +207,12 @@ export function prepareClaudeProviderRuntime(params: {
     return undefined;
   }
   const models = effectiveModels(provider);
+  const validSelected =
+    selectedModel && (provider.models.length === 0 || provider.models.some((m) => m.id === selectedModel))
+      ? selectedModel
+      : undefined;
   const defaultModel =
+    validSelected ??
     (provider.defaultModel && models.some((m) => m.id === provider.defaultModel) ? provider.defaultModel : undefined) ??
     models[0]?.id;
   const smallModel =
@@ -208,7 +236,7 @@ export function prepareClaudeProviderRuntime(params: {
     cleanedEnv.ANTHROPIC_SMALL_FAST_MODEL = smallModel;
     cleanedEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = smallModel;
   }
-  return { env: cleanedEnv };
+  return { env: withLoopbackNoProxy(cleanedEnv) };
 }
 
 /** 为原生 Pi (`pi --mode rpc`) 准备隔离的 `PI_CODING_AGENT_DIR` 与 `models.json` 配置。 */
@@ -385,7 +413,7 @@ export async function prepareAcpProviderRuntime(params: {
       cleanedEnv.ANTHROPIC_SMALL_FAST_MODEL = smallModel;
       cleanedEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = smallModel;
     }
-    return { args: [...profile.args], env: cleanedEnv };
+    return { args: [...profile.args], env: withLoopbackNoProxy(cleanedEnv) };
   }
 
   // 2. Pi (oh-my-pi / omp acp)
@@ -408,10 +436,10 @@ export async function prepareAcpProviderRuntime(params: {
         : [...profile.args];
     return {
       args: nextArgs,
-      env: {
+      env: withLoopbackNoProxy({
         ...baseEnv,
         PI_CODING_AGENT_DIR: ompDir,
-      },
+      }),
     };
   }
 
@@ -423,11 +451,11 @@ export async function prepareAcpProviderRuntime(params: {
         : [...profile.args];
     return {
       args: nextArgs,
-      env: {
+      env: withLoopbackNoProxy({
         ...baseEnv,
         CODEBUDDY_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'openai-chat'),
         CODEBUDDY_API_KEY: proxyToken,
-      },
+      }),
     };
   }
 
@@ -481,10 +509,10 @@ export async function prepareAcpProviderRuntime(params: {
     };
     return {
       args: [...profile.args],
-      env: {
+      env: withLoopbackNoProxy({
         ...baseEnv,
         OPENCODE_CONFIG_CONTENT: JSON.stringify(inlineConfig),
-      },
+      }),
     };
   }
 
@@ -511,6 +539,6 @@ export async function prepareAcpProviderRuntime(params: {
 
   return {
     args: [...profile.args],
-    env: nextEnv,
+    env: withLoopbackNoProxy(nextEnv),
   };
 }

@@ -47,6 +47,7 @@ export type {
   ProjectSessionGroup,
   ProjectsState,
   ProviderConfig,
+  ProviderGatewayLogEntry,
   ProviderModelItem,
   ProviderProtocol,
   ProvidersState,

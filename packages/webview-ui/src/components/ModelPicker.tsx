@@ -212,7 +212,7 @@ function EffortSlider({
       >
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-accent transition-[width] duration-150 ease-out"
+          className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-brand transition-[width] duration-150 ease-out"
           style={{ width: fillWidth }}
         />
         {efforts.map((e, i) => {
@@ -230,9 +230,9 @@ function EffortSlider({
               className="absolute top-1/2 z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
             >
               {active ? (
-                <span className="size-5 rounded-full bg-white shadow-md ring-1 ring-black/10 transition-transform duration-150" />
+                <span className="size-5 rounded-full bg-surface shadow-raised ring-1 ring-line-strong transition-transform duration-150" />
               ) : (
-                <span className={cn('size-1.5 rounded-full transition-colors duration-150', filled ? 'bg-white/70' : 'bg-ink-3/50')} />
+                <span className={cn('size-1.5 rounded-full transition-colors duration-150', filled ? 'bg-surface/80' : 'bg-ink-3/50')} />
               )}
             </button>
           );

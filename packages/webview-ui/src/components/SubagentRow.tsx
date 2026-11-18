@@ -7,7 +7,7 @@ import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import { Button } from '@/components/ui/button';
-import { Shimmer, ValuePill } from './beautifului/index.ts';
+import { CollapsibleDrawer, Shimmer, ValuePill } from './beautifului/index.ts';
 import { Markdown } from './Markdown.tsx';
 import { formatDuration } from './RunStatus.tsx';
 import { AgentIcon, CheckIcon, ErrorIcon } from './icons.tsx';
@@ -78,11 +78,11 @@ export function SubagentRow({ item }: { item: Activity }) {
           {running ? (
             <TaskRing />
           ) : sub.state === 'failed' ? (
-            <span className="flex size-5.5 items-center justify-center rounded-full bg-red text-white">
+            <span className="flex size-5.5 items-center justify-center rounded-full bg-red text-brand-foreground">
               <ErrorIcon className="size-3" strokeWidth={2.5} />
             </span>
           ) : (
-            <span className="flex size-5.5 items-center justify-center rounded-full bg-green text-white">
+            <span className="flex size-5.5 items-center justify-center rounded-full bg-green text-brand-foreground">
               <CheckIcon className="size-3" strokeWidth={2.8} />
             </span>
           )}
@@ -117,15 +117,7 @@ export function SubagentRow({ item }: { item: Activity }) {
         </span>
       </button>
 
-      <div
-        className="grid transition-[grid-template-rows,opacity] duration-300"
-        style={{
-          gridTemplateRows: open ? '1fr' : '0fr',
-          opacity: open ? 1 : 0,
-          transitionTimingFunction: 'cubic-bezier(0.23, 1, 0.32, 1)',
-        }}
-      >
-        <div className="overflow-hidden">
+      <CollapsibleDrawer open={open}>
           {open ? (
             <div className="subagent__body mb-2.5 grid grid-cols-[24px_1fr] gap-2.5 px-2.5">
               <span aria-hidden className="mx-auto h-full w-px bg-line" />
@@ -162,8 +154,7 @@ export function SubagentRow({ item }: { item: Activity }) {
               </div>
             </div>
           ) : null}
-        </div>
-      </div>
+      </CollapsibleDrawer>
     </div>
   );
 }

@@ -62,7 +62,7 @@ export function TabBar() {
             {tab.needsAttention ? (
               <span className="dot dot--attention inline-block size-1.5 shrink-0 rounded-full bg-orange" aria-label={t('tabs.attention')} />
             ) : tab.running ? (
-              <span className="dot dot--running inline-block size-1.5 shrink-0 rounded-full bg-accent" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} aria-label={t('header.running')} />
+              <span className="dot dot--running inline-block size-1.5 shrink-0 rounded-full bg-brand" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} aria-label={t('header.running')} />
             ) : null}
             <span className="tab__title min-w-0 flex-1 truncate">{tab.title}</span>
             <button

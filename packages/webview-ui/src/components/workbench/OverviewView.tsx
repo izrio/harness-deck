@@ -151,7 +151,7 @@ export function OverviewView() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         <span
-                          className="size-2 shrink-0 rounded-full bg-accent"
+                          className="size-2 shrink-0 rounded-full bg-brand"
                           style={{ animation: 'pulse 1.4s ease-in-out infinite' }}
                         />
                         <span className="truncate text-[12.5px] font-medium text-ink">{item.title}</span>
@@ -215,7 +215,7 @@ export function OverviewView() {
                     }}
                   >
                     <span
-                      className={`mt-1 size-2 shrink-0 rounded-full ${todo.status === 'in_progress' ? 'bg-accent' : 'border border-ink-3'}`}
+                      className={`mt-1 size-2 shrink-0 rounded-full ${todo.status === 'in_progress' ? 'bg-brand' : 'border border-ink-3'}`}
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[12.5px] text-ink">{todo.content}</span>
@@ -319,7 +319,7 @@ export function OverviewView() {
                       }}
                     >
                       <div className="flex items-center gap-1.5">
-                        <span className="size-2 shrink-0 rounded-full bg-accent" />
+                        <span className="size-2 shrink-0 rounded-full bg-brand" />
                         <span className="truncate text-[12.5px] font-medium text-ink">{item.title}</span>
                       </div>
                       <div className="mt-0.5 truncate text-[11.5px] text-ink-2">{item.summary}</div>

@@ -96,6 +96,7 @@ import {
   buildProjectsState,
   createProjectWorktree,
   EMPTY_WORKTREE_CONFIG,
+  normalizeProjectPath,
   parseProjectConfigs,
   parseRecentProjects,
   recordRecentProject,
@@ -168,7 +169,14 @@ export interface HarnessHostRuntime {
   dispose(): Promise<void>;
 }
 
-export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRuntime {
+export interface HarnessHostRuntimeOptions {
+  readonly createBackend?: (profile: BackendProfile, host: BackendHost) => RunningBackend;
+}
+
+export function createHarnessHostRuntime(
+  platform: HostPlatform,
+  runtimeOptions: HarnessHostRuntimeOptions = {},
+): HarnessHostRuntime {
   const disposers: (() => void)[] = [];
 
   const applyLocale = (): void =>
@@ -195,19 +203,33 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
 
   // 多根工作区与按项目分组会话：优先恢复上次选择的目录（包括最近项目），默认第一个工作区文件夹
   const folders = () => platform.workspaceFolders();
-  const defaultWorkspacePath = (): string => folders()[0]?.path ?? homedir();
-  const savedFolder =
+  const defaultWorkspacePath = (): string => normalizeProjectPath(folders()[0]?.path ?? homedir()) || homedir();
+  const rawSavedFolder =
     platform.workspaceState.get<string>(FOLDER_KEY) ?? platform.workspaceState.get<string>(LEGACY_FOLDER_KEY);
+  const savedFolder = rawSavedFolder ? normalizeProjectPath(rawSavedFolder) : undefined;
   const savedInRecent = savedFolder
     ? parseRecentProjects(platform.globalState.get<unknown>(RECENT_PROJECTS_KEY)).some((r) => r.path === savedFolder)
     : false;
+  const matchedFolder = savedFolder ? folders().find((f) => normalizeProjectPath(f.path) === savedFolder)?.path : undefined;
   let workspacePath =
-    folders().find((f) => f.path === savedFolder)?.path ??
+    (matchedFolder ? normalizeProjectPath(matchedFolder) : undefined) ??
     (savedFolder && savedInRecent ? savedFolder : undefined) ??
     defaultWorkspacePath();
 
-  let active: RunningBackend | undefined;
-  let modelLabel: string | undefined;
+  interface ManagedBackend {
+    readonly backend: RunningBackend;
+    profileSignature: string;
+    boundProviderSignature: string;
+    extensionsSignature: string;
+    modelLabel?: string;
+    lastObservedSessionId?: string;
+    workspacePath: string;
+  }
+
+  const managedBackends = new Map<string, ManagedBackend>();
+  const notifiers = new Map<string, NotificationDispatcher>();
+  const lastBackendRunning = new Map<string, boolean>();
+  let active: ManagedBackend | undefined;
 
   const openExternalVoid = (url: string): void => {
     void platform.openExternal(url);
@@ -266,7 +288,14 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     return raw;
   };
 
-  const persistSelectedBackend = async (id: string): Promise<void> => {
+  const resolveBackendId = (rawId: string | undefined): string => {
+    const trimmed = rawId?.trim();
+    if (!trimmed) return DSH_PROFILE.id;
+    const mapped = trimmed === 'oh-my-pi' && !profiles().some((p) => p.id === 'oh-my-pi') ? 'pi' : trimmed;
+    return profiles().some((p) => p.id === mapped) ? mapped : DSH_PROFILE.id;
+  };
+
+  const persistBackendKeys = async (id: string): Promise<void> => {
     await Promise.all([
       platform.globalState.update(BACKEND_KEY, id),
       platform.workspaceState.update(BACKEND_KEY, id),
@@ -277,7 +306,18 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
   if (initialSavedBackend && platform.globalState.get<string>(BACKEND_KEY) === undefined) {
     void platform.globalState.update(BACKEND_KEY, initialSavedBackend);
   }
-  let targetBackendId = initialSavedBackend ?? DSH_PROFILE.id;
+  const initialConfiguredDefault = platform.settings.get<string>('defaultBackend', '').trim();
+  let defaultBackendId = resolveBackendId(initialConfiguredDefault || initialSavedBackend || DSH_PROFILE.id);
+  let targetBackendId = defaultBackendId;
+
+  const persistDefaultBackend = async (id: string): Promise<void> => {
+    const resolved = resolveBackendId(id);
+    defaultBackendId = resolved;
+    await Promise.all([
+      persistBackendKeys(resolved),
+      platform.settings.update('defaultBackend', resolved),
+    ]);
+  };
 
   const backendsState = (): BackendsState => {
     const builtinList = builtins();
@@ -290,20 +330,34 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
         .filter((id) => id !== DSH_PROFILE.id && id !== 'zcode' && id !== 'claude' && id !== 'pi' && builtinIds.has(id)),
     );
     return {
-      items: profiles().map((p) =>
-        profileView(p, {
-          ...(availability.has(p.id) ? { available: availability.get(p.id) } : {}),
-          ...(installedVersions.has(p.id) ? { version: installedVersions.get(p.id) } : {}),
-          ...(availableVersions.has(p.id) ? { versions: availableVersions.get(p.id) } : {}),
-          ...(versionsLoading.has(p.id) ? { versionsLoading: true } : {}),
-          ...(versionsError.has(p.id) ? { versionsError: versionsError.get(p.id) } : {}),
-          ...(backendBusy.has(p.id) ? { busy: backendBusy.get(p.id) } : {}),
-          builtinIds,
-          overriddenIds,
-        }),
-      ),
-      active: active?.profile.id ?? targetBackendId,
-      workspace: folders().find((f) => f.path === workspacePath)?.name ?? basename(workspacePath),
+      items: profiles().map((p) => {
+        const managed = managedBackends.get(p.id);
+        const status = managed?.backend.currentStatus();
+        const alive =
+          status !== undefined &&
+          status.kind !== 'idle' &&
+          status.kind !== 'notInstalled' &&
+          status.kind !== 'untrusted' &&
+          status.kind !== 'failed';
+        const running = lastBackendRunning.get(p.id) === true;
+        return {
+          ...profileView(p, {
+            ...(availability.has(p.id) ? { available: availability.get(p.id) } : {}),
+            ...(installedVersions.has(p.id) ? { version: installedVersions.get(p.id) } : {}),
+            ...(availableVersions.has(p.id) ? { versions: availableVersions.get(p.id) } : {}),
+            ...(versionsLoading.has(p.id) ? { versionsLoading: true } : {}),
+            ...(versionsError.has(p.id) ? { versionsError: versionsError.get(p.id) } : {}),
+            ...(backendBusy.has(p.id) ? { busy: backendBusy.get(p.id) } : {}),
+            builtinIds,
+            overriddenIds,
+          }),
+          ...(alive ? { alive: true } : {}),
+          ...(running ? { running: true } : {}),
+        };
+      }),
+      active: active?.backend.profile.id ?? targetBackendId,
+      defaultBackend: defaultBackendId,
+      workspace: folders().find((f) => (normalizeProjectPath(f.path) || f.path) === workspacePath)?.name ?? basename(workspacePath),
       nodeEnv,
     };
   };
@@ -327,7 +381,6 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
   let hub: WorkbenchHub | undefined;
   let buildingWorkbenchState = false;
   let pendingModule: WorkbenchModule | undefined;
-  let lastObservedSessionId: string | undefined;
 
   const focusView = () => platform.focusChatView();
   const focusModule = async (mod: WorkbenchModule): Promise<void> => {
@@ -434,23 +487,6 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     };
   };
 
-  const notifications = new NotificationDispatcher({
-    isWindowFocused: () => platform.isWindowFocused(),
-    getPreferences: readNotificationPreferences,
-    actionLabel: () => t('notify.openSession'),
-    showNotification: async (level, message, actionLabel) => {
-      const choice = await platform.showMessage(level, message, [actionLabel]);
-      return choice === actionLabel;
-    },
-    openSession: async (sessionId) => {
-      await focusView();
-      post({ type: 'navigateToSession', payload: sessionId ? { sessionId } : {} });
-      if (sessionId) {
-        await active?.controller.handle({ type: 'switchSession', payload: { sessionId } });
-      }
-    },
-  });
-
   const pushBackends = (): void => {
     post({ type: 'backends', payload: backendsState() });
     hub?.schedulePush();
@@ -458,6 +494,38 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
   const pushProjects = (): void => {
     post({ type: 'projects', payload: projectsState() });
     hub?.schedulePush();
+  };
+
+  let switchBackendFn: (id: string, forceReload?: boolean) => Promise<void> = async () => undefined;
+
+  const notifierFor = (backendId: string): NotificationDispatcher => {
+    let dispatcher = notifiers.get(backendId);
+    if (!dispatcher) {
+      dispatcher = new NotificationDispatcher({
+        isWindowFocused: () => platform.isWindowFocused(),
+        getPreferences: readNotificationPreferences,
+        actionLabel: () => t('notify.openSession'),
+        showNotification: async (level, message, actionLabel) => {
+          const choice = await platform.showMessage(level, message, [actionLabel]);
+          return choice === actionLabel;
+        },
+        openSession: async (sessionId) => {
+          await focusView();
+          if (active?.backend.profile.id !== backendId) {
+            await switchBackendFn(backendId);
+          }
+          post({ type: 'navigateToSession', payload: sessionId ? { sessionId } : {} });
+          if (sessionId) {
+            await managedBackends.get(backendId)?.backend.controller.handle({
+              type: 'switchSession',
+              payload: { sessionId },
+            });
+          }
+        },
+      });
+      notifiers.set(backendId, dispatcher);
+    }
+    return dispatcher;
   };
 
   // ---- 第三方服务商（Coding Plan 与自定义网关）与本机回环代理 ----
@@ -472,7 +540,9 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       provider: providerForBackend(readProviders(), backendId) ?? null,
       gateway: readProtocolGatewayEnabled(),
     });
-  let activeBoundProviderSignature = '';
+
+  let gatewayLogTimer: ReturnType<typeof setTimeout> | undefined;
+  let scheduleGatewayLogPush = (): void => undefined;
 
   const providerProxy = new ProviderProxy({
     getProvider: (id) => readProviders().find((p) => p.id === id),
@@ -489,21 +559,37 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     getSelectedModel: (id) => selectedProviderModels.get(id),
     isProtocolGatewayEnabled: readProtocolGatewayEnabled,
     log,
+    onLogChange: () => scheduleGatewayLogPush(),
   });
 
   const providersState = (): ProvidersState =>
     buildProvidersState(readProviders(), providerHasKey, {
       protocolGatewayEnabled: readProtocolGatewayEnabled(),
       ...(providerProxy.origin ? { protocolGatewayOrigin: providerProxy.origin } : {}),
+      gatewayLogs: providerProxy.getLogs(),
     });
 
   const pushProviders = (): void => {
-    if (active?.controller.providersChanged) {
-      active.controller.providersChanged();
+    if (active?.backend.controller.providersChanged) {
+      active.backend.controller.providersChanged();
     } else {
       post({ type: 'providers', payload: providersState() });
     }
+    for (const entry of managedBackends.values()) {
+      if (entry !== active) {
+        entry.backend.controller.providersChanged?.();
+      }
+    }
     hub?.schedulePush();
+  };
+
+  scheduleGatewayLogPush = (): void => {
+    if (gatewayLogTimer) return;
+    gatewayLogTimer = setTimeout(() => {
+      gatewayLogTimer = undefined;
+      pushProviders();
+    }, 30);
+    gatewayLogTimer.unref?.();
   };
 
   if (readProtocolGatewayEnabled()) {
@@ -565,7 +651,6 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
   let mcpScanningImport = false;
   let mcpImportCandidates: readonly McpImportCandidate[] | undefined;
   let mcpScannedSources: readonly string[] | undefined;
-  let activeExtensionsSignature = '';
 
   const extensionsState = (): ExtensionsState => ({
     skills: {
@@ -587,10 +672,15 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
   });
 
   const pushExtensions = (): void => {
-    if (active?.controller.extensionsChanged) {
-      active.controller.extensionsChanged();
+    if (active?.backend.controller.extensionsChanged) {
+      active.backend.controller.extensionsChanged();
     } else {
       post({ type: 'extensions', payload: extensionsState() });
+    }
+    for (const entry of managedBackends.values()) {
+      if (entry !== active) {
+        entry.backend.controller.extensionsChanged?.();
+      }
     }
   };
 
@@ -704,10 +794,10 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
         pushBackends();
         if (
           platform.isWebviewVisible() &&
-          active?.currentStatus().kind === 'notInstalled' &&
-          availability.get(active.profile.id) === true
+          active?.backend.currentStatus().kind === 'notInstalled' &&
+          availability.get(active.backend.profile.id) === true
         ) {
-          active.start();
+          active.backend.start();
         }
       }
     })()
@@ -719,12 +809,12 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
 
   const updateStatusBar = (): void => {
     const fallbackName = profiles().find((p) => p.id === targetBackendId)?.name ?? DSH_PROFILE.name;
-    const backendName = active?.profile.name ?? fallbackName;
-    const status: RuntimeStatus = active?.currentStatus() ?? { kind: 'idle' };
+    const backendName = active?.backend.profile.name ?? fallbackName;
+    const status: RuntimeStatus = active?.backend.currentStatus() ?? { kind: 'idle' };
     platform.onStatusUpdate({
       backendName,
       status,
-      ...(modelLabel ? { modelLabel } : {}),
+      ...(active?.modelLabel ? { modelLabel: active.modelLabel } : {}),
     });
   };
 
@@ -834,21 +924,35 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       return;
     }
     const picked = await platform.pickQuickItem(
-      list.map((f) => ({ id: f.path, label: f.name, description: f.path, picked: f.path === workspacePath })),
+      list.map((f) => {
+        const norm = normalizeProjectPath(f.path) || f.path;
+        return { id: norm, label: f.name, description: f.path, picked: norm === workspacePath };
+      }),
       { placeHolder: t('ext.selectFolder') },
     );
-    if (!picked || picked.id === workspacePath) return;
-    workspacePath = picked.id;
-    lastObservedSessionId = undefined;
-    notifications.reset();
+    if (!picked) return;
+    const nextPath = normalizeProjectPath(picked.id) || picked.id;
+    if (nextPath === workspacePath) return;
+    workspacePath = nextPath;
     await platform.workspaceState.update(FOLDER_KEY, workspacePath);
     await saveRecentProjectPath(workspacePath);
-    active?.controller.setWorkspace(workspacePath);
-    active?.controller.backendsChanged();
+    if (active) {
+      active.workspacePath = workspacePath;
+      active.lastObservedSessionId = undefined;
+      notifierFor(active.backend.profile.id).reset();
+      active.backend.controller.setWorkspace(workspacePath);
+      active.backend.controller.backendsChanged();
+    }
     pushProjects();
   };
 
-  const host: BackendHost = {
+  const postForBackend = (backendId: string, message: HostToWebview): void => {
+    if (active?.backend.profile.id === backendId || message.type === 'toast') {
+      post(message);
+    }
+  };
+
+  const hostFor = (profile: BackendProfile): BackendHost => ({
     globalState: platform.globalState,
     workspaceState: platform.workspaceState,
     storageRoot,
@@ -864,37 +968,48 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     withCancellableProgress: (title, task) => platform.withCancellableProgress(title, task),
     log,
     runtimeLog,
-    workspacePath: () => workspacePath,
-    stateKey: (name) =>
-      folders().length > 1 || workspacePath !== defaultWorkspacePath() ? `${name}:${workspacePath}` : name,
+    workspacePath: () => managedBackends.get(profile.id)?.workspacePath ?? workspacePath,
+    stateKey: (name) => {
+      const targetWs = managedBackends.get(profile.id)?.workspacePath ?? workspacePath;
+      return folders().length > 1 || targetWs !== defaultWorkspacePath() ? `${name}:${targetWs}` : name;
+    },
     onStatus: (nextStatus) => {
-      updateStatusBar();
-      const agentName = active?.profile.name ?? 'Agent';
+      if (active?.backend.profile.id === profile.id) {
+        updateStatusBar();
+      }
+      const entry = managedBackends.get(profile.id);
+      const sessionId = entry?.lastObservedSessionId;
+      const agentName = profile.name;
+      const notifier = notifierFor(profile.id);
       if (nextStatus.kind === 'failed') {
-        notifications.observeRuntimeExit({
+        notifier.observeRuntimeExit({
           kind: nextStatus.kind,
           message: nextStatus.message,
-          ...(lastObservedSessionId ? { sessionId: lastObservedSessionId } : {}),
+          ...(sessionId ? { sessionId } : {}),
           text: t('notify.unexpectedExit', agentName, nextStatus.message),
         });
       } else if (nextStatus.kind === 'reconnecting') {
-        notifications.observeRuntimeExit({
+        notifier.observeRuntimeExit({
           kind: nextStatus.kind,
           message: 'reconnecting',
-          ...(lastObservedSessionId ? { sessionId: lastObservedSessionId } : {}),
+          ...(sessionId ? { sessionId } : {}),
           text: t('notify.unexpectedExit', agentName, t('status.reconnecting', agentName)),
         });
       } else if (nextStatus.kind === 'connected') {
-        notifications.observeRuntimeExit({ kind: nextStatus.kind, text: '' });
+        notifier.observeRuntimeExit({ kind: nextStatus.kind, text: '' });
       }
+      pushBackends();
     },
     controllerOptions: () => ({
       workbench: platform.workbench,
       includeActiveEditor: () => platform.settings.get<boolean>('context.includeActiveEditor', true),
-      post,
-      isVisible: () => platform.isWebviewVisible(),
+      post: (message) => postForBackend(profile.id, message),
+      isVisible: () => platform.isWebviewVisible() && active?.backend.profile.id === profile.id,
       log,
-      folderLabel: () => (folders().length > 1 ? folders().find((f) => f.path === workspacePath)?.name : undefined),
+      folderLabel: () => {
+        const targetWs = managedBackends.get(profile.id)?.workspacePath ?? workspacePath;
+        return folders().length > 1 ? folders().find((f) => (normalizeProjectPath(f.path) || f.path) === targetWs)?.name : undefined;
+      },
       selectFolder: () => void selectFolderCommand(),
       openExternal: openExternalVoid,
       showLogs: () => platform.showLogs(),
@@ -913,21 +1028,27 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
           canSelectMany: true,
           canSelectFiles: true,
           canSelectFolders: true,
-          defaultPath: workspacePath,
+          defaultPath: managedBackends.get(profile.id)?.workspacePath ?? workspacePath,
           title: t('files.pickTitle'),
         }),
       onSessionObserve: (obs) => {
-        if (obs.sessionId) lastObservedSessionId = obs.sessionId;
-        notifications.observeSession({
+        const entry = managedBackends.get(profile.id);
+        if (entry && obs.sessionId) entry.lastObservedSessionId = obs.sessionId;
+        notifierFor(profile.id).observeSession({
           ...obs,
-          agentName: active?.profile.name ?? 'Agent',
+          agentName: profile.name,
           format: {
             attention: (agent, title) => t('notify.attention', agent, title),
             turnComplete: (agent, title) => t('notify.turnComplete', agent, title),
             scheduledComplete: (title) => t('notify.scheduledComplete', title),
           },
         });
-        hub?.observeSession(obs);
+        const prevRunning = lastBackendRunning.get(profile.id) ?? false;
+        if (prevRunning !== obs.running) {
+          lastBackendRunning.set(profile.id, obs.running);
+          pushBackends();
+        }
+        hub?.observeSession(obs, profile.id);
       },
       isHiddenSession: (sessionId) => hub?.isHiddenSession(sessionId) ?? false,
       workbenchState: () => {
@@ -940,8 +1061,11 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
         }
       },
       onModelChange: (label) => {
-        modelLabel = label;
-        updateStatusBar();
+        const entry = managedBackends.get(profile.id);
+        if (entry) entry.modelLabel = label;
+        if (active?.backend.profile.id === profile.id) {
+          updateStatusBar();
+        }
       },
     }),
     getCachedExecutable: (profileId, commandSpec) => {
@@ -997,51 +1121,89 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     onProviderModelSelected: (providerId, model) => {
       selectedProviderModels.set(providerId, model);
     },
-    prepareBackendLaunch: (profile) =>
+    prepareBackendLaunch: (targetProfile) =>
       prepareBackendLaunch({
         storageRoot,
-        profile,
+        profile: targetProfile,
         skills: installedSkills,
         mcpServers: readMcpServers(),
       }),
-  };
+  });
 
   const create = (profile: BackendProfile): RunningBackend => {
-    if (profile.kind === 'dsh') return createDshBackend(profile, host);
-    if (profile.kind === 'zcode') return createZcodeBackend(profile, host);
-    if (profile.kind === 'claude') return createClaudeBackend(profile, host);
-    if (profile.kind === 'pi') return createPiBackend(profile, host);
-    return createAcpBackend(profile, host);
+    const profileHost = hostFor(profile);
+    if (runtimeOptions.createBackend) {
+      return runtimeOptions.createBackend(profile, profileHost);
+    }
+    if (profile.kind === 'dsh') return createDshBackend(profile, profileHost);
+    if (profile.kind === 'zcode') return createZcodeBackend(profile, profileHost);
+    if (profile.kind === 'claude') return createClaudeBackend(profile, profileHost);
+    if (profile.kind === 'pi') return createPiBackend(profile, profileHost);
+    return createAcpBackend(profile, profileHost);
   };
 
   const startIfNeeded = (): void => {
     if (!active) return;
-    const kind = active.currentStatus().kind;
-    if (kind === 'idle' || kind === 'notInstalled' || kind === 'untrusted') active.start();
+    const kind = active.backend.currentStatus().kind;
+    if (kind === 'idle' || kind === 'notInstalled' || kind === 'untrusted') active.backend.start();
   };
 
-  let activeProfileSignature = '';
+  const isBackendRunningTurn = (entry: ManagedBackend): boolean =>
+    entry.backend.controller.peekSnapshot?.()?.session.running === true;
 
-  const activateBackend = (id: string): void => {
+  const stopAndDeleteManagedBackend = async (id: string): Promise<void> => {
+    const existing = managedBackends.get(id);
+    if (!existing) return;
+    managedBackends.delete(id);
+    lastBackendRunning.delete(id);
+    if (active === existing) {
+      active = undefined;
+    }
+    await existing.backend.stop().catch((error: unknown) => log(`停止底层失败：${String(error)}`));
+  };
+
+  const createManagedEntry = (profile: BackendProfile): ManagedBackend => {
+    const backend = create(profile);
+    const entry: ManagedBackend = {
+      backend,
+      profileSignature: JSON.stringify(profile),
+      boundProviderSignature: boundProviderSignatureFor(profile.id),
+      extensionsSignature: backendExtensionsSignature(profile.id, installedSkills, readMcpServers()),
+      workspacePath,
+    };
+    managedBackends.set(profile.id, entry);
+    return entry;
+  };
+
+  const activateBackend = async (id: string, forceReload = false): Promise<void> => {
     targetBackendId = id;
     const profile = profiles().find((p) => p.id === id) ?? DSH_PROFILE;
-    try {
-      active = create(profile);
-      activeProfileSignature = JSON.stringify(profile);
-      activeBoundProviderSignature = boundProviderSignatureFor(profile.id);
-      activeExtensionsSignature = backendExtensionsSignature(profile.id, installedSkills, readMcpServers());
-    } catch (error) {
-      log(`启动底层 ${profile.name} 失败：${error instanceof Error ? error.message : String(error)}`);
-      active = create(DSH_PROFILE);
-      activeProfileSignature = JSON.stringify(DSH_PROFILE);
-      activeBoundProviderSignature = boundProviderSignatureFor(DSH_PROFILE.id);
-      activeExtensionsSignature = backendExtensionsSignature(DSH_PROFILE.id, installedSkills, readMcpServers());
+    if (forceReload) {
+      await stopAndDeleteManagedBackend(profile.id);
     }
-    modelLabel = undefined;
+    let entry = managedBackends.get(profile.id);
+    if (!entry) {
+      try {
+        entry = createManagedEntry(profile);
+      } catch (error) {
+        log(`启动底层 ${profile.name} 失败：${error instanceof Error ? error.message : String(error)}`);
+        if (forceReload) {
+          await stopAndDeleteManagedBackend(DSH_PROFILE.id);
+        }
+        entry = managedBackends.get(DSH_PROFILE.id) ?? createManagedEntry(DSH_PROFILE);
+      }
+    } else if (entry.workspacePath !== workspacePath) {
+      entry.workspacePath = workspacePath;
+      entry.backend.controller.setWorkspace(workspacePath);
+    }
+    active = entry;
+    targetBackendId = entry.backend.profile.id;
     updateStatusBar();
     if (platform.isWebviewVisible()) {
-      active.start();
-      post({ type: 'snapshot', payload: active.controller.snapshot() });
+      startIfNeeded();
+      post({ type: 'snapshot', payload: entry.backend.controller.snapshot() });
+    } else {
+      pushBackends();
     }
   };
 
@@ -1053,40 +1215,36 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
 
   const switchBackend = (id: string, forceReload = false): Promise<void> =>
     enqueueBackendTransition(async () => {
-      await persistSelectedBackend(id);
-      if (!forceReload && active?.profile.id === id) return;
+      if (!forceReload && active?.backend.profile.id === id) {
+        if (platform.isWebviewVisible()) startIfNeeded();
+        return;
+      }
       targetBackendId = id;
-      const previous = active;
-      active = undefined;
-      lastObservedSessionId = undefined;
-      notifications.reset();
-      await previous?.stop().catch((error: unknown) => log(`停止底层失败：${String(error)}`));
-      activateBackend(id);
-      log(`已切换到底层 ${(active as RunningBackend | undefined)?.profile.name ?? id}`);
+      await activateBackend(id, forceReload);
+      log(`已切换到底层 ${active?.backend.profile.name ?? id}`);
     });
+  switchBackendFn = switchBackend;
 
   const reloadActiveIfExtensionsChanged = (): void => {
-    if (!active) return;
-    const nextSig = backendExtensionsSignature(active.profile.id, installedSkills, readMcpServers());
-    if (nextSig === activeExtensionsSignature) return;
-    activeExtensionsSignature = nextSig;
-    if (!active.controller.snapshot().session.running) {
-      void switchBackend(active.profile.id, true);
+    for (const [id, entry] of [...managedBackends.entries()]) {
+      const nextSig = backendExtensionsSignature(id, installedSkills, readMcpServers());
+      if (nextSig === entry.extensionsSignature) continue;
+      entry.extensionsSignature = nextSig;
+      if (isBackendRunningTurn(entry)) continue;
+      if (id === active?.backend.profile.id) {
+        void switchBackend(id, true);
+      } else {
+        void enqueueBackendTransition(async () => {
+          await stopAndDeleteManagedBackend(id);
+          pushBackends();
+        });
+      }
     }
   };
 
   void loadInstalledSkills(storageRoot).then((loaded) => {
     installedSkills = loaded;
-    if (active) {
-      const nextSig = backendExtensionsSignature(active.profile.id, installedSkills, readMcpServers());
-      if (nextSig !== activeExtensionsSignature) {
-        activeExtensionsSignature = nextSig;
-        if (!active.controller.snapshot().session.running) {
-          void switchBackend(active.profile.id, true);
-          return;
-        }
-      }
-    }
+    reloadActiveIfExtensionsChanged();
     pushExtensions();
   });
 
@@ -1143,17 +1301,13 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
 
     try {
       await enqueueBackendTransition(async () => {
-        if (active?.profile.id === id) {
-          const previous = active;
-          active = undefined;
-          await previous.stop().catch((error: unknown) => log(`停止底层失败：${String(error)}`));
-        }
+        await stopAndDeleteManagedBackend(id);
       });
-      const res = await installNpmPackage(npmCommand, pkg, version, processEnv(), process.platform, host.runtimeLog);
+      const res = await installNpmPackage(npmCommand, pkg, version, processEnv(), process.platform, runtimeLog);
       await checkAvailability();
       await enqueueBackendTransition(async () => {
         if (!active && targetBackendId === id) {
-          activateBackend(id);
+          await activateBackend(id);
         }
       });
       if (res.ok) {
@@ -1196,17 +1350,13 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
 
     try {
       await enqueueBackendTransition(async () => {
-        if (active?.profile.id === id) {
-          const previous = active;
-          active = undefined;
-          await previous.stop().catch((error: unknown) => log(`停止底层失败：${String(error)}`));
-        }
+        await stopAndDeleteManagedBackend(id);
       });
-      const res = await uninstallNpmPackage(npmCommand, pkg, processEnv(), process.platform, host.runtimeLog);
+      const res = await uninstallNpmPackage(npmCommand, pkg, processEnv(), process.platform, runtimeLog);
       await checkAvailability();
       await enqueueBackendTransition(async () => {
         if (!active && targetBackendId === id) {
-          activateBackend(id);
+          await activateBackend(id);
         }
       });
       if (res.ok) {
@@ -1223,11 +1373,11 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     }
   };
 
-  activateBackend(savedBackend() ?? DSH_PROFILE.id);
-  const current = (): RunningBackend | undefined => active;
+  void activateBackend(defaultBackendId);
+  const current = (): RunningBackend | undefined => active?.backend;
 
   const unattendedRunner = new UnattendedRunner({
-    getActiveDshClient: () => active?.dshClient?.(),
+    getActiveDshClient: () => managedBackends.get(DSH_PROFILE.id)?.backend.dshClient?.(),
     getDshConfig: () => ({
       configuredPath: platform.settings.get<string>('dsh.path', ''),
       profile: safeProfile(platform.settings.get<string>('dsh.profile', 'web') || 'web'),
@@ -1246,10 +1396,25 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       env: processEnv(),
     }),
     getEnvForProfile: (profileEnv) => processEnv(profileEnv),
-    prepareBackendLaunch: host.prepareBackendLaunch,
+    prepareBackendLaunch: (targetProfile) =>
+      prepareBackendLaunch({
+        storageRoot,
+        profile: targetProfile,
+        skills: installedSkills,
+        mcpServers: readMcpServers(),
+      }),
     extensionVersion: platform.extensionVersion,
     log,
-    runtimeLog: host.runtimeLog,
+    runtimeLog,
+  });
+
+  const contextForManaged = (entry: ManagedBackend) => ({
+    backendId: entry.backend.profile.id,
+    backendName: entry.backend.profile.name,
+    workspacePath: entry.workspacePath,
+    snapshot: entry.backend.controller.peekSnapshot?.() ?? entry.backend.controller.snapshot(),
+    crossProjectSessions: entry.backend.controller.allWorkspaceSessions?.() ?? [],
+    latestAssistantText: (sid: string) => entry.backend.controller.latestAssistantText?.(sid),
   });
 
   hub = new WorkbenchHub({
@@ -1262,33 +1427,33 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     projects: projectsState,
     profiles,
     schedulePermission: readSchedulePermission,
-    activeContext: () => {
-      const cur = current();
-      if (!cur) return undefined;
-      return {
-        backendId: cur.profile.id,
-        backendName: cur.profile.name,
-        workspacePath,
-        snapshot: cur.controller.peekSnapshot?.() ?? cur.controller.snapshot(),
-        crossProjectSessions: cur.controller.allWorkspaceSessions?.() ?? [],
-        latestAssistantText: (sid) => cur.controller.latestAssistantText?.(sid),
-      };
+    activeContext: () => (active ? contextForManaged(active) : undefined),
+    liveContexts: () => [...managedBackends.values()].map(contextForManaged),
+    backendContext: (backendId) => {
+      const entry = managedBackends.get(backendId);
+      return entry ? contextForManaged(entry) : undefined;
     },
     switchProjectAndBackend: async (projectPath, backendId) => {
-      await saveRecentProjectPath(projectPath);
-      if (projectPath !== workspacePath) {
-        workspacePath = projectPath;
-        lastObservedSessionId = undefined;
-        notifications.reset();
+      const nextPath = normalizeProjectPath(projectPath) || projectPath;
+      await saveRecentProjectPath(nextPath);
+      const targetId = backendId ?? active?.backend.profile.id;
+      const switchingBackend = Boolean(targetId && targetId !== active?.backend.profile.id);
+      if (nextPath !== workspacePath) {
+        workspacePath = nextPath;
         await platform.workspaceState.update(FOLDER_KEY, workspacePath);
-        current()?.controller.setWorkspace(workspacePath);
-        current()?.controller.backendsChanged();
+        if (!switchingBackend && active) {
+          active.workspacePath = workspacePath;
+          active.lastObservedSessionId = undefined;
+          notifierFor(active.backend.profile.id).reset();
+          active.backend.controller.setWorkspace(workspacePath);
+          active.backend.controller.backendsChanged();
+        }
         pushProjects();
       } else {
         pushProjects();
       }
-      if (backendId && backendId !== active?.profile.id) {
-        await switchBackend(backendId);
+      if (switchingBackend && targetId) {
+        await switchBackend(targetId);
       }
       startIfNeeded();
     },
@@ -1309,7 +1474,7 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     openPanel: () => platform.openWorkbenchPanel(t('workbench.title')),
     notifyScheduledComplete: (ruleName, runStatus) => {
       if (runStatus === 'succeeded') {
-        void notifications.notify({
+        void notifierFor(active?.backend.profile.id ?? defaultBackendId).notify({
           kind: 'scheduledComplete',
           message: t('notify.scheduledComplete', ruleName),
         });
@@ -1354,15 +1519,56 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
         log('Pi 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
         pushPreferences();
       }
-      if (affects('backends')) {
-        const updated = profiles().find((p) => p.id === targetBackendId);
-        if (!updated) {
-          void switchBackend(DSH_PROFILE.id);
-        } else if (active && active.profile.id === updated.id && JSON.stringify(updated) !== activeProfileSignature) {
-          void switchBackend(updated.id, true);
-        } else {
-          pushBackends();
+      if (affects('defaultBackend')) {
+        const configured = platform.settings.get<string>('defaultBackend', '').trim();
+        if (configured) {
+          const resolved = resolveBackendId(configured);
+          if (resolved !== defaultBackendId) {
+            defaultBackendId = resolved;
+            void persistBackendKeys(resolved);
+            if (resolved !== active?.backend.profile.id) {
+              void switchBackend(resolved);
+            } else {
+              pushBackends();
+            }
+          }
         }
+      }
+      if (affects('backends')) {
+        const currentProfiles = profiles();
+        const byId = new Map(currentProfiles.map((p) => [p.id, p]));
+        if (!byId.has(defaultBackendId)) {
+          defaultBackendId = DSH_PROFILE.id;
+          void persistDefaultBackend(DSH_PROFILE.id);
+        }
+        for (const [id, entry] of [...managedBackends.entries()]) {
+          const updated = byId.get(id);
+          if (!updated) {
+            if (id === active?.backend.profile.id) {
+              void enqueueBackendTransition(async () => {
+                await stopAndDeleteManagedBackend(id);
+                await activateBackend(defaultBackendId);
+              });
+            } else {
+              void enqueueBackendTransition(async () => {
+                await stopAndDeleteManagedBackend(id);
+                pushBackends();
+              });
+            }
+            continue;
+          }
+          if (JSON.stringify(updated) !== entry.profileSignature) {
+            if (id === active?.backend.profile.id) {
+              void switchBackend(updated.id, true);
+            } else if (!isBackendRunningTurn(entry)) {
+              void enqueueBackendTransition(async () => {
+                await stopAndDeleteManagedBackend(id);
+                pushBackends();
+              });
+            }
+          }
+        }
+        pushBackends();
         void checkAvailability();
       }
       if (affects('dsh.path') || affects('zcode.path') || affects('claude.path') || affects('pi.path')) {
@@ -1408,15 +1614,28 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       }
       if (affects('providers') || affects('protocolGateway')) {
         void (async () => {
+          const anyUsesProvider = [...managedBackends.values()].some((entry) =>
+            Boolean(providerForBackend(readProviders(), entry.backend.profile.id)),
+          );
           if (readProtocolGatewayEnabled()) {
             await providerProxy.ensureStarted().catch((err: unknown) => log(`启动本地协议转换网关失败：${String(err)}`));
-          } else if (!active || !providerForBackend(readProviders(), active.profile.id)) {
+          } else if (!anyUsesProvider) {
             await providerProxy.dispose();
           }
           await refreshProviderSecretFlags();
           pushProviders();
-          if (active && boundProviderSignatureFor(active.profile.id) !== activeBoundProviderSignature) {
-            void switchBackend(active.profile.id, true);
+          for (const [id, entry] of [...managedBackends.entries()]) {
+            const nextSig = boundProviderSignatureFor(id);
+            if (nextSig === entry.boundProviderSignature) continue;
+            entry.boundProviderSignature = nextSig;
+            if (id === active?.backend.profile.id) {
+              void switchBackend(id, true);
+            } else if (!isBackendRunningTurn(entry)) {
+              void enqueueBackendTransition(async () => {
+                await stopAndDeleteManagedBackend(id);
+                pushBackends();
+              });
+            }
           }
         })();
       }
@@ -1438,9 +1657,9 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
     }
     if (message.type === 'selectBackend') {
       void (async () => {
-        const id = message.payload.id;
-        await persistSelectedBackend(id);
-        if (id !== active?.profile.id) await switchBackend(id);
+        const id = resolveBackendId(message.payload.id);
+        await persistDefaultBackend(id);
+        if (id !== active?.backend.profile.id) await switchBackend(id);
         else pushBackends();
       })();
       return;
@@ -1490,8 +1709,22 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
             providerHasKey.delete(saved.id);
           }
         }
+        const hasOpenAiUrl = Boolean(saved.openaiChatUrl?.trim() || saved.openaiResponsesUrl?.trim());
+        const needsGateway =
+          hasOpenAiUrl &&
+          (saved.convertOpenaiToAnthropic === true ||
+            (!saved.anthropicUrl?.trim() && saved.boundBackendIds.includes('claude')));
+        if (needsGateway && !readProtocolGatewayEnabled()) {
+          await writeSetting(undefined, 'protocolGateway', true);
+        }
+        if (needsGateway || readProtocolGatewayEnabled()) {
+          await providerProxy.ensureStarted().catch((err: unknown) => log(`启动本地协议转换网关失败：${String(err)}`));
+        }
         await writeSetting(undefined, 'providers', nextProviders.length > 0 ? nextProviders : undefined);
         await hub?.syncProviderAgentBindings(saved);
+        if (saved.defaultModel) {
+          selectedProviderModels.set(saved.id, saved.defaultModel);
+        }
         pushProviders();
       })();
       return;
@@ -1514,16 +1747,38 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       void (async () => {
         const enabled = message.payload.enabled;
         await writeSetting(undefined, 'protocolGateway', enabled ? true : undefined);
+        const anyUsesProvider = [...managedBackends.values()].some((entry) =>
+          Boolean(providerForBackend(readProviders(), entry.backend.profile.id)),
+        );
         if (enabled) {
           await providerProxy.ensureStarted().catch((err: unknown) => log(`启动本地协议转换网关失败：${String(err)}`));
-        } else if (!active || !providerForBackend(readProviders(), active.profile.id)) {
+        } else if (!anyUsesProvider) {
           await providerProxy.dispose();
         }
         pushProviders();
-        if (active && boundProviderSignatureFor(active.profile.id) !== activeBoundProviderSignature) {
-          void switchBackend(active.profile.id, true);
+        for (const [id, entry] of [...managedBackends.entries()]) {
+          const nextSig = boundProviderSignatureFor(id);
+          if (nextSig === entry.boundProviderSignature) continue;
+          entry.boundProviderSignature = nextSig;
+          if (id === active?.backend.profile.id) {
+            void switchBackend(id, true);
+          } else if (!isBackendRunningTurn(entry)) {
+            void enqueueBackendTransition(async () => {
+              await stopAndDeleteManagedBackend(id);
+              pushBackends();
+            });
+          }
         }
       })();
+      return;
+    }
+    if (message.type === 'clearProtocolGatewayLogs') {
+      if (gatewayLogTimer) {
+        clearTimeout(gatewayLogTimer);
+        gatewayLogTimer = undefined;
+      }
+      providerProxy.clearLogs();
+      pushProviders();
       return;
     }
     if (message.type === 'bindProviderAgents') {
@@ -1565,7 +1820,10 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       return;
     }
     if (message.type === 'testNotification') {
-      void notifications.sendTest(t('notify.test'), lastObservedSessionId);
+      void notifierFor(active?.backend.profile.id ?? defaultBackendId).sendTest(
+        t('notify.test'),
+        active?.lastObservedSessionId,
+      );
       return;
     }
     if (message.type === 'scanGitSkills') {
@@ -1833,25 +2091,30 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       void (async () => {
         const next = removeRecentProjectFromList(readRecentProjects(), message.payload.path);
         await platform.globalState.update(RECENT_PROJECTS_KEY, next);
+        hub?.removeProjectSessions(message.payload.path);
         pushProjects();
       })();
       return;
     }
     if (message.type === 'openProject') {
       void (async () => {
-        await saveRecentProjectPath(message.payload.path);
+        const targetPath = normalizeProjectPath(message.payload.path) || message.payload.path;
+        await saveRecentProjectPath(targetPath);
         pushProjects();
-        const matching = folders().find((f) => f.path === message.payload.path);
+        const matching = folders().find((f) => (normalizeProjectPath(f.path) || f.path) === targetPath);
         if (matching) {
-          workspacePath = matching.path;
-          lastObservedSessionId = undefined;
-          notifications.reset();
+          workspacePath = normalizeProjectPath(matching.path) || matching.path;
           await platform.workspaceState.update(FOLDER_KEY, workspacePath);
-          current()?.controller.setWorkspace(workspacePath);
-          current()?.controller.backendsChanged();
+          if (active) {
+            active.workspacePath = workspacePath;
+            active.lastObservedSessionId = undefined;
+            notifierFor(active.backend.profile.id).reset();
+            active.backend.controller.setWorkspace(workspacePath);
+            active.backend.controller.backendsChanged();
+          }
           pushProjects();
         } else {
-          await platform.openProjectWindow(message.payload.path);
+          await platform.openProjectWindow(targetPath);
         }
       })();
       return;
@@ -1862,8 +2125,9 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
           post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
           return;
         }
+        const targetPath = normalizeProjectPath(message.payload.path) || message.payload.path;
         const configs = parseProjectConfigs(platform.settings.get<unknown>('projects', {}));
-        const config = configs[message.payload.path] ?? EMPTY_WORKTREE_CONFIG;
+        const config = configs[targetPath] ?? EMPTY_WORKTREE_CONFIG;
         const branch =
           message.payload.branch ??
           (await platform.workbench.input({
@@ -1896,8 +2160,9 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
           post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
           return;
         }
+        const targetPath = normalizeProjectPath(message.payload.path) || message.payload.path;
         const configs = parseProjectConfigs(platform.settings.get<unknown>('projects', {}));
-        const config = configs[message.payload.path] ?? EMPTY_WORKTREE_CONFIG;
+        const config = configs[targetPath] ?? EMPTY_WORKTREE_CONFIG;
         if (config.verifyCommands.length === 0) {
           post({ type: 'toast', payload: { level: 'info', text: t('project.noVerifyCommands') } });
           return;
@@ -1996,7 +2261,7 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
         }
         return;
       }
-      void active.controller.handle(message).then(() => {
+      void active.backend.controller.handle(message).then(() => {
         if (pendingModule) {
           post({ type: 'switchWorkbenchModule', payload: { module: pendingModule } });
           pendingModule = undefined;
@@ -2004,7 +2269,7 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
       });
       return;
     }
-    void active?.controller.handle(message);
+    void active?.backend.controller.handle(message);
   };
 
   const executeCommand = async (cmd: HostCommandId): Promise<void> => {
@@ -2040,13 +2305,14 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
                     : p.kind === 'zcode'
                       ? 'zcode app-server'
                       : `ACP · ${p.command}`,
-            picked: p.id === active?.profile.id,
+            picked: p.id === active?.backend.profile.id,
           })),
           { placeHolder: t('ext.selectBackend') },
         );
         if (!picked) return;
-        await persistSelectedBackend(picked.id);
-        if (picked.id !== active?.profile.id) await switchBackend(picked.id);
+        const resolved = resolveBackendId(picked.id);
+        await persistDefaultBackend(resolved);
+        if (resolved !== active?.backend.profile.id) await switchBackend(resolved);
         else pushBackends();
         return;
       }
@@ -2131,15 +2397,24 @@ export function createHarnessHostRuntime(platform: HostPlatform): HarnessHostRun
   return {
     handleWebviewMessage,
     onViewVisible: startIfNeeded,
-    onWorkspaceChanged: () => active?.controller.workspaceChanged(),
+    onWorkspaceChanged: () => active?.backend.controller.workspaceChanged(),
     executeCommand,
     dispose: async () => {
+      if (gatewayLogTimer) {
+        clearTimeout(gatewayLogTimer);
+        gatewayLogTimer = undefined;
+      }
       for (const dispose of disposers.splice(0)) dispose();
       hub?.dispose();
       hub = undefined;
-      const stopping = active?.stop();
+      const stops = [...managedBackends.values()].map((entry) =>
+        entry.backend.stop().catch((error: unknown) => log(`停止底层失败：${String(error)}`)),
+      );
+      managedBackends.clear();
+      lastBackendRunning.clear();
+      notifiers.clear();
       active = undefined;
-      await Promise.all([stopping, providerProxy.dispose()]);
+      await Promise.all([...stops, providerProxy.dispose()]);
     },
   };
 }

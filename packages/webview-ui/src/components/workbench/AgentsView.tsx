@@ -18,6 +18,7 @@ import {
   TrashIcon,
 } from '../icons.tsx';
 import { ValuePill } from '../beautifului/index.ts';
+import { getMergedModels, getProjectOptions } from '@/lib/workbenchOptions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -63,41 +64,9 @@ export function AgentsView() {
   const [modelKey, setModelKey] = useState('');
   const [tools, setTools] = useState<AgentToolConfig>(DEFAULT_TOOLS);
 
-  const projectOptions = (() => {
-    const map = new Map<string, string>();
-    if (projects.currentPath) {
-      const curName = projects.recent.find((r) => r.path === projects.currentPath)?.name ?? projects.currentPath.split(/[\\/]/u).pop() ?? projects.currentPath;
-      map.set(projects.currentPath, curName);
-    }
-    for (const r of projects.recent) {
-      if (!map.has(r.path)) map.set(r.path, r.name);
-    }
-    return [...map.entries()];
-  })();
+  const projectOptions = getProjectOptions(projects);
 
-  const mergedModels = (() => {
-    const seen = new Set<string>();
-    const list: { key: string; label: string }[] = [];
-    const orderedProviders = [
-      ...providers.filter((p) => p.boundBackendIds.includes(backendId)),
-      ...providers.filter((p) => !p.boundBackendIds.includes(backendId)),
-    ];
-    for (const p of orderedProviders) {
-      for (const m of p.models) {
-        const key = `${p.id}::${m.id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        list.push({ key, label: `${m.name || m.id} (${p.name})` });
-      }
-    }
-    for (const m of models.options) {
-      const key = `${m.provider}::${m.model}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      list.push({ key, label: `${m.name} (${m.group})` });
-    }
-    return list;
-  })();
+  const mergedModels = getMergedModels(backendId, providers, models);
 
   const openCreate = () => {
     setEditingId(undefined);

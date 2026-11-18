@@ -12,6 +12,7 @@ import { ChatViewProvider } from './webview/ChatViewProvider.ts';
 import { VscodeWorkbench } from './workbench/VscodeWorkbench.ts';
 
 const GLOBAL_ONLY_SETTINGS = new Set([
+  'defaultBackend',
   'backends',
   'providers',
   'protocolGateway',
@@ -25,6 +26,7 @@ const GLOBAL_ONLY_SETTINGS = new Set([
 ]);
 
 const WATCHED_SETTING_KEYS = [
+  'defaultBackend',
   'dsh',
   'dsh.path',
   'dsh.profile',

@@ -42,6 +42,7 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
   const controller = new AcpController({
     ...common,
     workspacePath: host.workspacePath(),
+    backendName: profile.name,
     restartRuntime: () => void restart(),
     loadActiveSessionId: () => state.get<string>(key('activeSessionId')),
     saveActiveSessionId: (sessionId) => void state.update(key('activeSessionId'), sessionId),

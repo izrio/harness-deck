@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useView } from '../store.ts';
 import { loadState, postToHost, saveState } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { GlideMenu, Shimmer, TaskRows, ValuePill } from './beautifului/index.ts';
+import { CollapsibleDrawer, GlideMenu, Shimmer, TaskRows, ValuePill } from './beautifului/index.ts';
 import { ChangedFileButton, Stats } from './Items.tsx';
 import { ChecklistIcon, ChevronRightIcon, CloseIcon, DiffIcon, SaveIcon, TargetIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
@@ -66,15 +66,7 @@ export function StatusDock() {
         </div>
       ) : null}
 
-      <div
-        className="grid transition-[grid-template-rows,opacity] duration-300"
-        style={{
-          gridTemplateRows: panel === 'todos' && todos ? '1fr' : '0fr',
-          opacity: panel === 'todos' && todos ? 1 : 0,
-          transitionTimingFunction: 'var(--ease-out-strong)',
-        }}
-      >
-        <div className="min-h-0 overflow-hidden">
+      <CollapsibleDrawer open={panel === 'todos' && todos !== undefined}>
           {panel === 'todos' && todos ? (
             <TaskRows
               id="dock-panel"
@@ -88,8 +80,7 @@ export function StatusDock() {
               className="dock__panel max-h-[min(40vh,260px)] overflow-y-auto border-b border-line p-1.5"
             />
           ) : null}
-        </div>
-      </div>
+      </CollapsibleDrawer>
 
       {panel === 'changes' && shownChanges ? (
         <div className="dock__panel max-h-[min(40vh,260px)] overflow-y-auto border-b border-line p-1" id="dock-panel">

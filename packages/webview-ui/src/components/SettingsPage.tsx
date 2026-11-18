@@ -12,7 +12,7 @@
  * - 项目 -> 项目（projects）：最近项目切换、Worktree 复制文件、准备与验收命令
  * - 其他 -> 运行时与诊断（other）：定时任务默认权限、dsh 路径与 Profile、ACP 日志与 VS Code 原生设置
  */
-import { useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Sidebar,
@@ -64,6 +64,16 @@ export function SettingsPage() {
   const t = useT();
   const activeTab = useView((s) => s.settingsTab);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (document.querySelector('[data-slot="dialog-content"]')) return;
+      closeSettingsPage();
+    };
+    document.addEventListener('keydown', onDocumentKeyDown);
+    return () => document.removeEventListener('keydown', onDocumentKeyDown);
+  }, []);
 
   const groups: readonly SettingsNavGroup[] = [
     {
@@ -161,7 +171,7 @@ export function SettingsPage() {
       </div>
 
       {/* 主体：左侧 shadcn/ui Sidebar + 右侧内容区 */}
-      <SidebarProvider className="min-h-0 flex-1 overflow-hidden">
+      <SidebarProvider keyboardShortcut={false} persistCookie={false} className="min-h-0 flex-1 overflow-hidden">
         <Sidebar
           collapsible="none"
           aria-label={t('settings.title')}

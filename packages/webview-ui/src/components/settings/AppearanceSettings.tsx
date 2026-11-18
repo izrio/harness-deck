@@ -26,7 +26,7 @@ import {
 } from '../icons.tsx';
 import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
-import { ButtonGroup, ButtonGroupText } from '@/components/ui/button-group';
+import { NumberStepper } from '../NumberStepper.tsx';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
@@ -185,7 +185,7 @@ export function AppearanceSettings() {
                       <span className="truncate text-[12.5px] font-medium text-ink">{t(titleKey)}</span>
                     </div>
                     {active ? (
-                      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-accent text-white">
+                      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
                         <CheckIcon className="size-2.5" />
                       </span>
                     ) : null}
@@ -232,7 +232,7 @@ export function AppearanceSettings() {
                     <div className="flex items-center justify-between gap-1">
                       <span className="truncate text-[12px] font-medium text-ink">{label}</span>
                       {active ? (
-                        <span className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full bg-accent text-white">
+                        <span className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
                           <CheckIcon className="size-2.5" />
                         </span>
                       ) : null}
@@ -295,31 +295,17 @@ export function AppearanceSettings() {
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalSize')}</span>
             <div className="flex items-center gap-2">
               {appearance.terminalFontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-              <ButtonGroup>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-xs"
-                  aria-label={t('settings.appearance.terminalSizeSmaller')}
-                  disabled={termSize <= MIN_TERM_SIZE}
-                  onClick={() => updateTerminal({ terminalFontSize: Math.max(MIN_TERM_SIZE, termSize - 1) })}
-                >
-                  −
-                </Button>
-                <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="terminal-font-size">
-                  {termSize}px
-                </ButtonGroupText>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-xs"
-                  aria-label={t('settings.appearance.terminalSizeLarger')}
-                  disabled={termSize >= MAX_TERM_SIZE}
-                  onClick={() => updateTerminal({ terminalFontSize: Math.min(MAX_TERM_SIZE, termSize + 1) })}
-                >
-                  +
-                </Button>
-              </ButtonGroup>
+              <NumberStepper
+ decLabel={t('settings.appearance.terminalSizeSmaller')}
+ incLabel={t('settings.appearance.terminalSizeLarger')}
+ decDisabled={termSize <= MIN_TERM_SIZE}
+ incDisabled={termSize >= MAX_TERM_SIZE}
+ onDec={() => updateTerminal({ terminalFontSize: Math.max(MIN_TERM_SIZE, termSize - 1) })}
+ onInc={() => updateTerminal({ terminalFontSize: Math.min(MAX_TERM_SIZE, termSize + 1) })}
+ valueTestId="terminal-font-size"
+>
+ {termSize}px
+</NumberStepper>
             </div>
           </div>
 
@@ -327,31 +313,17 @@ export function AppearanceSettings() {
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalLineHeight')}</span>
             <div className="flex items-center gap-2">
               {appearance.terminalLineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-              <ButtonGroup>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-xs"
-                  aria-label={t('settings.appearance.terminalLineHeightSmaller')}
-                  disabled={termLineHeight <= MIN_TERM_LH + 0.01}
-                  onClick={() => updateTerminal({ terminalLineHeight: Number((termLineHeight - 0.1).toFixed(1)) })}
-                >
-                  −
-                </Button>
-                <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="terminal-line-height">
-                  {termLineHeight.toFixed(1)}
-                </ButtonGroupText>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-xs"
-                  aria-label={t('settings.appearance.terminalLineHeightLarger')}
-                  disabled={termLineHeight >= MAX_TERM_LH - 0.01}
-                  onClick={() => updateTerminal({ terminalLineHeight: Number((termLineHeight + 0.1).toFixed(1)) })}
-                >
-                  +
-                </Button>
-              </ButtonGroup>
+              <NumberStepper
+ decLabel={t('settings.appearance.terminalLineHeightSmaller')}
+ incLabel={t('settings.appearance.terminalLineHeightLarger')}
+ decDisabled={termLineHeight <= MIN_TERM_LH + 0.01}
+ incDisabled={termLineHeight >= MAX_TERM_LH - 0.01}
+ onDec={() => updateTerminal({ terminalLineHeight: Number((termLineHeight - 0.1).toFixed(1)) })}
+ onInc={() => updateTerminal({ terminalLineHeight: Number((termLineHeight + 0.1).toFixed(1)) })}
+ valueTestId="terminal-line-height"
+>
+ {termLineHeight.toFixed(1)}
+</NumberStepper>
             </div>
           </div>
 

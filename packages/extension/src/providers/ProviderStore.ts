@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   ModelOption,
   ProviderConfig,
+  ProviderGatewayLogEntry,
   ProviderModelItem,
   ProvidersState,
   ProviderView,
@@ -282,7 +283,11 @@ export function providerForBackend(
 export function buildProvidersState(
   providers: readonly ProviderConfig[],
   hasKeyIds: ReadonlySet<string>,
-  options?: { readonly protocolGatewayEnabled?: boolean; readonly protocolGatewayOrigin?: string },
+  options?: {
+    readonly protocolGatewayEnabled?: boolean;
+    readonly protocolGatewayOrigin?: string;
+    readonly gatewayLogs?: readonly ProviderGatewayLogEntry[];
+  },
 ): ProvidersState {
   const items: ProviderView[] = providers.map((p) => ({
     ...p,
@@ -292,6 +297,7 @@ export function buildProvidersState(
     items,
     protocolGatewayEnabled: options?.protocolGatewayEnabled === true,
     ...(options?.protocolGatewayOrigin ? { protocolGatewayOrigin: options.protocolGatewayOrigin } : {}),
+    ...(options?.gatewayLogs ? { gatewayLogs: options.gatewayLogs } : {}),
   };
 }
 

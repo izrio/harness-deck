@@ -400,6 +400,10 @@ export interface BackendView {
   readonly installCommand?: string;
   /** 找不到时的安装提示（设置里写的 installHint）。 */
   readonly installHint?: string;
+  /** 该智能体在当前窗口进程中是否已启动保活。 */
+  readonly alive?: boolean;
+  /** 该智能体在当前窗口进程中是否有会话正在执行回复。 */
+  readonly running?: boolean;
 }
 
 /** 本机 Node.js 与 npm 的探测结果（底层通过 npm 安装和管理）。 */
@@ -414,6 +418,8 @@ export interface NodeEnvState {
 export interface BackendsState {
   readonly items: readonly BackendView[];
   readonly active: string;
+  /** 启动时默认启动的智能体 id（在设置中选中当前智能体时同步设为默认）。 */
+  readonly defaultBackend?: string;
   /** 底层工作的文件夹名（首页显示）。 */
   readonly workspace?: string;
   /** 系统 Node.js 与 npm 状态。 */
@@ -840,10 +846,31 @@ export interface ProviderView extends ProviderConfig {
   readonly hasApiKey: boolean;
 }
 
+export interface ProviderGatewayLogEntry {
+  readonly id: string;
+  readonly timestamp: number;
+  readonly level: 'info' | 'warn' | 'error';
+  readonly providerId: string;
+  readonly providerName?: string;
+  readonly protocol: ProviderProtocol;
+  readonly converted?: boolean;
+  readonly method: string;
+  readonly path: string;
+  readonly targetUrl?: string;
+  readonly requestModel?: string;
+  readonly mappedModel?: string;
+  readonly status?: number;
+  readonly durationMs?: number;
+  readonly message: string;
+  readonly detail?: string;
+}
+
 export interface ProvidersState {
   readonly items: readonly ProviderView[];
   /** 是否启用本地协议转换网关（OpenAI 兼容 -> Claude Anthropic，默认 false）。 */
   readonly protocolGatewayEnabled?: boolean;
   /** 本地网关当前监听地址（已启动时存在，如 http://127.0.0.1:xxxxx）。 */
   readonly protocolGatewayOrigin?: string;
+  /** 本地网关最近的请求与协议转换日志。 */
+  readonly gatewayLogs?: readonly ProviderGatewayLogEntry[];
 }

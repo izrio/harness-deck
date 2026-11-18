@@ -9,4 +9,8 @@ coverage/
 .e2e-screenshots/
 .gradle/
 .intellijPlatform/
+.kotlin/
+.idea/
+*.iml
 packages/jetbrains/build/
+harness-deck-jetbrains-*.zip

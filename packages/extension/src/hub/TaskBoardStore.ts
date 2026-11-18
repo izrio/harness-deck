@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { TASK_COLUMNS, type KanbanTask, type TaskBoardState, type TaskColumn } from '@harness-deck/shared';
+import { normalizeProjectPath } from '../projects/ProjectService.ts';
 
 export const MAX_KANBAN_TASKS = 300;
 
@@ -53,13 +54,14 @@ export function parseTaskBoardState(raw: unknown): TaskBoardState {
       const rawStatus = isTaskColumn(t.status) ? t.status : 'todo';
       // 宿主重启后原进程已不在跑，若之前停在 in_progress 则回到 todo 等待重新调度
       const status: TaskColumn = rawStatus === 'in_progress' ? 'todo' : rawStatus;
+      const projectPath = normalizeProjectPath(t.projectPath) || t.projectPath;
       items.push({
         id: t.id,
         title: typeof t.title === 'string' && t.title.trim() ? t.title : deriveTaskTitle(t.prompt),
         prompt: t.prompt,
         status,
-        projectPath: t.projectPath,
-        projectName: typeof t.projectName === 'string' && t.projectName ? t.projectName : basename(t.projectPath) || t.projectPath,
+        projectPath,
+        projectName: typeof t.projectName === 'string' && t.projectName ? t.projectName : basename(projectPath) || projectPath,
         backendId: t.backendId,
         ...(typeof t.provider === 'string' && t.provider ? { provider: t.provider } : {}),
         ...(typeof t.model === 'string' && t.model ? { model: t.model } : {}),
@@ -84,13 +86,14 @@ export function createKanbanTask(
   nowMs: number,
 ): { readonly board: TaskBoardState; readonly task: KanbanTask } {
   const prompt = input.prompt.trim();
+  const projectPath = normalizeProjectPath(input.projectPath) || input.projectPath;
   const task: KanbanTask = {
     id: `task-${randomUUID().slice(0, 8)}`,
     title: deriveTaskTitle(prompt, input.title),
     prompt,
     status: 'todo',
-    projectPath: input.projectPath,
-    projectName: basename(input.projectPath) || input.projectPath,
+    projectPath,
+    projectName: basename(projectPath) || projectPath,
     backendId: input.backendId,
     ...(input.provider?.trim() ? { provider: input.provider.trim() } : {}),
     ...(input.model?.trim() ? { model: input.model.trim() } : {}),

@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Harness Deck",
   "description": "%extension.description%",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -135,6 +135,12 @@
     "configuration": {
       "title": "%config.title%",
       "properties": {
+        "harnessDeck.defaultBackend": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "%config.defaultBackend%"
+        },
         "harnessDeck.dsh.path": {
           "type": "string",
           "default": "",

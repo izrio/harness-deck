@@ -29,6 +29,13 @@ import type {
 } from '@harness-deck/shared';
 import type { BackendProfile, CrossProjectSession, ProgrammaticSessionRequest, SessionObservation } from '../backend/types.ts';
 import {
+  disambiguateProjectNames,
+  isPathInsideProject,
+  normalizeProjectPath,
+  projectBaseName,
+  resolveEnclosingProjectPath,
+} from '../projects/ProjectService.ts';
+import {
   composeAgentPrompt,
   deleteStoredAgent,
   parseStoredAgentData,
@@ -106,6 +113,8 @@ export interface WorkbenchHubHost {
   readonly profiles: () => readonly BackendProfile[];
   readonly schedulePermission: () => SchedulePermissionPreset;
   readonly activeContext: () => ActiveControllerContext | undefined;
+  readonly liveContexts?: () => readonly ActiveControllerContext[];
+  readonly backendContext?: (backendId: string) => ActiveControllerContext | undefined;
   readonly switchProjectAndBackend: (projectPath: string, backendId?: string) => Promise<void>;
   readonly startProgrammaticSession: (req: ProgrammaticSessionRequest) => Promise<string | undefined>;
   readonly switchSessionInActive: (sessionId: string) => Promise<void>;
@@ -173,15 +182,67 @@ export class WorkbenchHub {
     return this.hiddenSet.has(sessionId);
   };
 
+  /** 移除指定项目在会话注册表中的缓存记录（用于「设置 -> 项目」删除最近项目后同步清理残留分组）。 */
+  removeProjectSessions(projectPath: string): void {
+    const target = normalizeProjectPath(projectPath);
+    if (!target) return;
+    const knownPaths = this.knownProjectPaths().filter((p) => p !== target);
+    let changed = false;
+    for (const [key, rec] of this.registry) {
+      if (!isPathInsideProject(target, rec.projectPath)) continue;
+      const otherKnown = resolveEnclosingProjectPath(rec.projectPath, knownPaths);
+      if (!otherKnown) {
+        this.registry.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.persistRegistry();
+      this.schedulePush();
+    }
+  }
+
+  private knownProjectPaths(): string[] {
+    const projects = this.host.projects();
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (raw?: string) => {
+      if (!raw) return;
+      const norm = normalizeProjectPath(raw);
+      if (!norm || seen.has(norm)) return;
+      seen.add(norm);
+      out.push(norm);
+    };
+    add(this.host.workspacePath());
+    add(projects.currentPath);
+    for (const p of projects.recent) add(p.path);
+    for (const cfgPath of Object.keys(projects.configs)) add(cfgPath);
+    for (const t of this.taskBoard.items) add(t.projectPath);
+    for (const r of this.scheduleData.rules) add(r.projectPath);
+    return out;
+  }
+
+  private allContexts(activeCtx?: ActiveControllerContext): readonly ActiveControllerContext[] {
+    if (this.host.liveContexts) return this.host.liveContexts();
+    return activeCtx ? [activeCtx] : [];
+  }
+
+  private contextFor(backendId: string, activeCtx?: ActiveControllerContext): ActiveControllerContext | undefined {
+    if (this.host.backendContext) return this.host.backendContext(backendId);
+    const active = activeCtx ?? this.host.activeContext();
+    return active?.backendId === backendId ? active : undefined;
+  }
+
   /** 当前完整工作台视图状态。 */
   state(): WorkbenchState {
-    const ctx = this.host.activeContext();
-    if (ctx) {
+    const activeCtx = this.host.activeContext();
+    const contexts = this.allContexts(activeCtx);
+    for (const ctx of contexts) {
       this.syncRegistryFromContext(ctx);
     }
     const agents = resolveAgentProfiles(this.agentData, this.host.locale());
-    const sessionGroups = this.buildSessionGroups(ctx);
-    const overview = this.buildOverview(ctx, sessionGroups);
+    const sessionGroups = this.buildSessionGroups(contexts);
+    const overview = this.buildOverview(activeCtx, contexts, sessionGroups);
     return {
       overview,
       schedules: this.scheduleData.rules,
@@ -297,19 +358,24 @@ export class WorkbenchHub {
     }
   }
 
-  /** 监听前台控制器的会话状态变化：驱动顺序任务流转与未读会话标记。 */
-  observeSession(obs: SessionObservation): void {
-    const ctx = this.host.activeContext();
+  /** 监听前台或后台控制器的会话状态变化：驱动顺序任务流转与未读会话标记。 */
+  observeSession(obs: SessionObservation, backendId?: string): void {
+    const activeCtx = this.host.activeContext();
+    const resolvedBackendId = backendId ?? activeCtx?.backendId ?? 'dsh';
+    const sourceCtx = this.contextFor(resolvedBackendId, activeCtx);
     if (obs.sessionId && !this.isHiddenSession(obs.sessionId)) {
-      const regKey = `${ctx?.backendId ?? 'dsh'}:${obs.sessionId}`;
+      const regKey = `${resolvedBackendId}:${obs.sessionId}`;
       const prevRunning = this.sessionPrevRunning.get(regKey) ?? false;
       this.sessionPrevRunning.set(regKey, obs.running);
 
       const existing = this.registry.get(regKey);
-      const isActivelyViewed = this.host.isWebviewVisible() && ctx?.snapshot.session.id === obs.sessionId;
+      const isActivelyViewed =
+        this.host.isWebviewVisible() &&
+        activeCtx?.backendId === resolvedBackendId &&
+        activeCtx?.snapshot.session.id === obs.sessionId;
 
       if (prevRunning && !obs.running && !obs.turnAborted && !isActivelyViewed) {
-        const summary = ctx?.latestAssistantText(obs.sessionId) ?? '';
+        const summary = sourceCtx?.latestAssistantText(obs.sessionId) ?? '';
         if (existing) {
           this.registry.set(regKey, {
             ...existing,
@@ -333,7 +399,7 @@ export class WorkbenchHub {
           tracker.sawRunning = true;
         } else if (tracker.sawRunning || obs.hasTurnOutput || obs.turnAborted) {
           this.activeTaskTracker = undefined;
-          void this.settleRunningTask(tracker.taskId, obs.sessionId, Boolean(obs.turnAborted));
+          void this.settleRunningTask(tracker.taskId, obs.sessionId, Boolean(obs.turnAborted), resolvedBackendId);
         }
       }
     }
@@ -725,8 +791,13 @@ export class WorkbenchHub {
     }
   }
 
-  private async settleRunningTask(taskId: string, sessionId: string, aborted: boolean): Promise<void> {
-    const ctx = this.host.activeContext();
+  private async settleRunningTask(
+    taskId: string,
+    sessionId: string,
+    aborted: boolean,
+    backendId?: string,
+  ): Promise<void> {
+    const ctx = backendId ? this.contextFor(backendId) : this.host.activeContext();
     const summary = ctx?.latestAssistantText(sessionId)?.slice(0, 500);
     if (aborted) {
       const abortedNote = this.host.locale() === 'zh' ? '执行已中止，顺序队列已暂停' : 'Execution stopped; sequential queue paused';
@@ -804,12 +875,15 @@ export class WorkbenchHub {
   }
 
   private recordAgentOnSession(backendId: string, sessionId: string, projectPath: string, title: string, agentName: string): void {
+    const resolvedPath =
+      resolveEnclosingProjectPath(projectPath, this.knownProjectPaths()) ??
+      (normalizeProjectPath(projectPath) || projectPath);
     const key = `${backendId}:${sessionId}`;
     const existing = this.registry.get(key);
     this.registry.set(key, {
       id: sessionId,
       title: existing?.title || title,
-      projectPath,
+      projectPath: resolvedPath,
       backendId,
       updatedAt: this.now(),
       ...(existing?.unread ? { unread: true } : {}),
@@ -820,9 +894,11 @@ export class WorkbenchHub {
   }
 
   private syncRegistryFromContext(ctx: ActiveControllerContext): void {
+    const knownPaths = this.knownProjectPaths();
+    const currentProject = resolveEnclosingProjectPath(ctx.workspacePath, knownPaths);
     let dirty = false;
     const upsert = (id: string, title: string, projectPath: string, backendId: string, updatedAt: number) => {
-      if (this.isHiddenSession(id)) return;
+      if (this.isHiddenSession(id) || !projectPath) return;
       const key = `${backendId}:${id}`;
       const prev = this.registry.get(key);
       if (!prev || prev.title !== title || prev.projectPath !== projectPath || Math.abs(prev.updatedAt - updatedAt) > 1_000) {
@@ -840,11 +916,28 @@ export class WorkbenchHub {
       }
     };
 
-    for (const s of ctx.snapshot.sessions) {
-      upsert(s.id, s.title, ctx.workspacePath, ctx.backendId, s.updatedAt);
-    }
+    const explicitCwdIds = new Set<string>();
     for (const s of ctx.crossProjectSessions) {
-      upsert(s.id, s.title, s.cwd || ctx.workspacePath, ctx.backendId, s.updatedAt);
+      const explicitCwd = s.cwd.trim();
+      if (explicitCwd) {
+        explicitCwdIds.add(s.id);
+        const targetProject = resolveEnclosingProjectPath(explicitCwd, knownPaths);
+        if (!targetProject) continue;
+        upsert(s.id, s.title, targetProject, ctx.backendId, s.updatedAt);
+      } else {
+        const prev = this.registry.get(`${ctx.backendId}:${s.id}`);
+        const prevResolved = prev ? resolveEnclosingProjectPath(prev.projectPath, knownPaths) : undefined;
+        const targetProject = prevResolved ?? currentProject;
+        if (targetProject) upsert(s.id, s.title, targetProject, ctx.backendId, s.updatedAt);
+      }
+    }
+
+    for (const s of ctx.snapshot.sessions) {
+      if (explicitCwdIds.has(s.id)) continue;
+      const prev = this.registry.get(`${ctx.backendId}:${s.id}`);
+      const prevResolved = prev ? resolveEnclosingProjectPath(prev.projectPath, knownPaths) : undefined;
+      const targetProject = prevResolved ?? currentProject;
+      if (targetProject) upsert(s.id, s.title, targetProject, ctx.backendId, s.updatedAt);
     }
 
     if (this.registry.size > MAX_REGISTRY_SESSIONS) {
@@ -855,14 +948,14 @@ export class WorkbenchHub {
     if (dirty) this.persistRegistry();
   }
 
-  private buildSessionGroups(ctx: ActiveControllerContext | undefined): ProjectSessionGroup[] {
-    const currentPath = this.host.workspacePath();
+  private buildSessionGroups(contexts: readonly ActiveControllerContext[]): ProjectSessionGroup[] {
+    const currentPath = normalizeProjectPath(this.host.workspacePath()) || this.host.workspacePath();
     const projects = this.host.projects();
     const profiles = this.host.profiles();
     const backendNameOf = (id: string) => profiles.find((p) => p.id === id)?.name ?? id;
 
     const liveMap = new Map<string, { running: boolean; needsAttention?: boolean; title?: string; updatedAt?: number }>();
-    if (ctx) {
+    for (const ctx of contexts) {
       for (const s of ctx.snapshot.sessions) {
         liveMap.set(`${ctx.backendId}:${s.id}`, {
           running: s.running,
@@ -884,25 +977,21 @@ export class WorkbenchHub {
       }
     }
 
+    const knownPaths = this.knownProjectPaths();
     const grouped = new Map<string, GroupedSessionItem[]>();
-    const ensureGroup = (path: string) => {
-      if (!path) return;
-      if (!grouped.has(path)) grouped.set(path, []);
-    };
-
-    ensureGroup(currentPath);
-    for (const p of projects.recent) ensureGroup(p.path);
-    for (const cfgPath of Object.keys(projects.configs)) ensureGroup(cfgPath);
-    for (const t of this.taskBoard.items) ensureGroup(t.projectPath);
+    for (const path of knownPaths) {
+      if (path && !grouped.has(path)) grouped.set(path, []);
+    }
 
     for (const [key, rec] of this.registry) {
       if (this.isHiddenSession(rec.id)) continue;
-      ensureGroup(rec.projectPath);
+      const targetProject = resolveEnclosingProjectPath(rec.projectPath, knownPaths);
+      if (!targetProject) continue;
       const live = liveMap.get(key);
-      grouped.get(rec.projectPath)!.push({
+      grouped.get(targetProject)!.push({
         id: rec.id,
         title: live?.title || rec.title,
-        projectPath: rec.projectPath,
+        projectPath: targetProject,
         backendId: rec.backendId,
         backendName: backendNameOf(rec.backendId),
         updatedAt: live?.updatedAt ?? rec.updatedAt,
@@ -913,13 +1002,29 @@ export class WorkbenchHub {
       });
     }
 
+    const recentMap = new Map<string, { readonly name: string; readonly lastOpenedAt: number }>();
+    for (const p of projects.recent) {
+      const norm = normalizeProjectPath(p.path);
+      if (!norm) continue;
+      const existing = recentMap.get(norm);
+      if (!existing || p.lastOpenedAt > existing.lastOpenedAt) {
+        recentMap.set(norm, { name: p.name, lastOpenedAt: p.lastOpenedAt });
+      }
+    }
+
+    const baseEntries: { readonly projectPath: string; readonly baseName: string }[] = [];
+    for (const projectPath of grouped.keys()) {
+      const baseName = recentMap.get(projectPath)?.name ?? (projectBaseName(projectPath) || projectPath);
+      baseEntries.push({ projectPath, baseName });
+    }
+    const disambiguatedNames = disambiguateProjectNames(baseEntries);
+
     const result: ProjectSessionGroup[] = [];
     for (const [projectPath, sessions] of grouped) {
       sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-      const knownProject = projects.recent.find((p) => p.path === projectPath);
       result.push({
         projectPath,
-        projectName: knownProject?.name ?? (basename(projectPath) || projectPath),
+        projectName: disambiguatedNames.get(projectPath) ?? (projectBaseName(projectPath) || projectPath),
         isCurrent: projectPath === currentPath,
         sessions,
       });
@@ -927,32 +1032,43 @@ export class WorkbenchHub {
 
     result.sort((a, b) => {
       if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
-      const aLatest = a.sessions[0]?.updatedAt ?? 0;
-      const bLatest = b.sessions[0]?.updatedAt ?? 0;
-      return bLatest - aLatest;
+      const aActivity = Math.max(a.sessions[0]?.updatedAt ?? 0, recentMap.get(a.projectPath)?.lastOpenedAt ?? 0);
+      const bActivity = Math.max(b.sessions[0]?.updatedAt ?? 0, recentMap.get(b.projectPath)?.lastOpenedAt ?? 0);
+      if (aActivity !== bActivity) return bActivity - aActivity;
+      const byName = a.projectName.localeCompare(b.projectName);
+      if (byName !== 0) return byName;
+      return a.projectPath.localeCompare(b.projectPath);
     });
     return result;
   }
 
   private buildOverview(
-    ctx: ActiveControllerContext | undefined,
+    activeCtx: ActiveControllerContext | undefined,
+    contexts: readonly ActiveControllerContext[],
     sessionGroups: readonly ProjectSessionGroup[],
   ): WorkbenchOverview {
     const zh = this.host.locale() === 'zh';
     const profiles = this.host.profiles();
     const backendNameOf = (id: string) => profiles.find((p) => p.id === id)?.name ?? id;
 
-    // 1. 等我（waiting）：当前审批/提问/计划确认 + 其他会话里的待处理请求 + 看板「待验收」任务
+    // 1. 等我（waiting）：所有保活底层当前会话的审批/提问/计划确认 + 其他会话里的待处理请求 + 看板「待验收」任务
     const waiting: OverviewWaitingItem[] = [];
     const seenAttentionSessions = new Set<string>();
-    if (ctx) {
+    const seenInteractionIds = new Set<string>();
+    const orderedContexts = activeCtx
+      ? [activeCtx, ...contexts.filter((c) => c.backendId !== activeCtx.backendId)]
+      : contexts;
+    for (const ctx of orderedContexts) {
       const currentSessionId = ctx.snapshot.session.id;
       const projectName = basename(ctx.workspacePath) || ctx.workspacePath;
       for (const inter of ctx.snapshot.interactions) {
+        const dedupeKey = `${ctx.backendId}:${inter.id}`;
+        if (seenInteractionIds.has(dedupeKey)) continue;
+        seenInteractionIds.add(dedupeKey);
         if (currentSessionId) seenAttentionSessions.add(`${ctx.backendId}:${currentSessionId}`);
         if (inter.kind === 'approval') {
           waiting.push({
-            id: `inter:${inter.id}`,
+            id: `inter:${ctx.backendId}:${inter.id}`,
             kind: 'interaction',
             title: `${inter.toolName}${inter.subject ? ` · ${inter.subject}` : ''}`,
             subtitle: inter.reason,
@@ -966,7 +1082,7 @@ export class WorkbenchHub {
           const firstQ = inter.questions[0];
           const isPlan = firstQ?.intent?.kind === 'plan-review';
           waiting.push({
-            id: `inter:${inter.id}`,
+            id: `inter:${ctx.backendId}:${inter.id}`,
             kind: 'interaction',
             title: isPlan ? (zh ? '计划待审阅确认' : 'Plan ready for review') : (firstQ?.header || (zh ? '智能体提问' : 'Agent question')),
             subtitle: firstQ?.question ?? '',
@@ -1015,13 +1131,14 @@ export class WorkbenchHub {
       }
     }
 
-    // 2. 待办（todos）：当前会话 todo_write 未完成项 + 看板「待执行」任务
+    // 2. 待办（todos）：当前/后台保活会话 todo_write 未完成项 + 看板「待执行」任务
     const todos: OverviewTodoItem[] = [];
-    if (ctx?.snapshot.session.todos) {
+    for (const ctx of orderedContexts) {
+      if (!ctx.snapshot.session.todos) continue;
       ctx.snapshot.session.todos.forEach((todo, idx) => {
         if (todo.status === 'pending' || todo.status === 'in_progress') {
           todos.push({
-            id: `agent-todo:${idx}`,
+            id: `agent-todo:${ctx.backendId}:${ctx.snapshot.session.id ?? 'draft'}:${idx}`,
             kind: 'agent-todo',
             content: todo.content,
             status: todo.status,
@@ -1086,18 +1203,24 @@ export class WorkbenchHub {
       }
     }
 
+    const runningSinceMap = new Map<string, number>();
+    for (const ctx of orderedContexts) {
+      if (ctx.snapshot.session.id && ctx.snapshot.session.runningSince) {
+        runningSinceMap.set(`${ctx.backendId}:${ctx.snapshot.session.id}`, ctx.snapshot.session.runningSince);
+      }
+    }
+
     for (const group of sessionGroups) {
       for (const s of group.sessions) {
         if (s.running && !runningTaskSessionIds.has(`${s.backendId}:${s.id}`)) {
+          const startedAt = runningSinceMap.get(`${s.backendId}:${s.id}`);
           running.push({
             id: `run-sess:${s.backendId}:${s.id}`,
             kind: 'session',
             title: s.title,
             backendName: s.backendName,
             projectName: group.projectName,
-            ...(ctx && ctx.snapshot.session.id === s.id && ctx.snapshot.session.runningSince
-              ? { startedAt: ctx.snapshot.session.runningSince }
-              : {}),
+            ...(startedAt !== undefined ? { startedAt } : {}),
             sessionId: s.id,
             projectPath: s.projectPath,
             backendId: s.backendId,
@@ -1174,8 +1297,11 @@ export class WorkbenchHub {
       });
     }
 
+    const knownPaths = this.knownProjectPaths();
     for (const [key, rec] of this.registry) {
       if (!rec.unread || this.isHiddenSession(rec.id)) continue;
+      const targetProject = resolveEnclosingProjectPath(rec.projectPath, knownPaths);
+      if (!targetProject) continue;
       unread.push({
         id: `session:${key}`,
         kind: 'session',
@@ -1183,7 +1309,7 @@ export class WorkbenchHub {
         summary: firstLineText(rec.unreadSummary || (zh ? '会话回复已完成' : 'Session reply finished')),
         timestamp: rec.updatedAt,
         sessionId: rec.id,
-        projectPath: rec.projectPath,
+        projectPath: targetProject,
         backendId: rec.backendId,
       });
     }
@@ -1201,10 +1327,11 @@ export class WorkbenchHub {
         continue;
       }
       if (this.hiddenSet.has(r.id)) continue;
+      const projectPath = normalizeProjectPath(r.projectPath) || r.projectPath;
       this.registry.set(`${r.backendId}:${r.id}`, {
         id: r.id,
         title: r.title,
-        projectPath: r.projectPath,
+        projectPath,
         backendId: r.backendId,
         updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : 0,
         ...(r.unread ? { unread: true } : {}),

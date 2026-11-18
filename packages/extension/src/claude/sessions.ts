@@ -34,22 +34,46 @@ export function resolveClaudeConfigDir(env?: Readonly<Record<string, string | un
 export async function scanClaudeSessions(
   workspacePath: string,
   claudeConfigDir = resolveClaudeConfigDir(),
+  extraProjectPaths: readonly string[] = [],
 ): Promise<ClaudeDiskSession[]> {
   const projectsRoot = join(claudeConfigDir, 'projects');
   const encodedCurrent = encodeClaudeProjectDir(workspacePath);
+  const priorityFallback = new Map<string, string>([[encodedCurrent, resolve(workspacePath)]]);
+  for (const extra of extraProjectPaths) {
+    const trimmed = extra.trim();
+    if (!trimmed) continue;
+    const encoded = encodeClaudeProjectDir(trimmed);
+    if (!priorityFallback.has(encoded)) {
+      priorityFallback.set(encoded, resolve(trimmed));
+    }
+  }
+
   const dirEntries = await readdir(projectsRoot, { withFileTypes: true }).catch(() => []);
   const subdirs = dirEntries.filter((d) => d.isDirectory());
 
-  // 当前工作区目录优先，其余最近修改的项目目录最多扫 MAX_SCAN_DIRS 个（供跨项目会话面板展示）
-  const orderedDirs: string[] = [];
+  // 当前工作区及已知最近项目优先，其余项目目录按最近修改时间排序后再截取（供跨项目会话面板展示）
+  const priorityDirs: string[] = [];
   if (subdirs.some((d) => d.name === encodedCurrent)) {
-    orderedDirs.push(encodedCurrent);
+    priorityDirs.push(encodedCurrent);
   }
   for (const d of subdirs) {
-    if (d.name !== encodedCurrent && orderedDirs.length < MAX_SCAN_DIRS) {
-      orderedDirs.push(d.name);
+    if (d.name !== encodedCurrent && priorityFallback.has(d.name)) {
+      priorityDirs.push(d.name);
     }
   }
+  const remaining = subdirs.filter((d) => !priorityFallback.has(d.name));
+  const remainingWithStats = await Promise.all(
+    remaining.map(async (d) => {
+      const st = await stat(join(projectsRoot, d.name)).catch(() => undefined);
+      return { name: d.name, mtimeMs: st?.mtimeMs ?? 0 };
+    }),
+  );
+  remainingWithStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  const orderedDirs = [
+    ...priorityDirs,
+    ...remainingWithStats.map((d) => d.name),
+  ].slice(0, Math.max(MAX_SCAN_DIRS, priorityDirs.length));
 
   const results: ClaudeDiskSession[] = [];
   for (const dirName of orderedDirs) {
@@ -70,9 +94,10 @@ export async function scanClaudeSessions(
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
       .slice(0, MAX_SESSIONS_PER_DIR);
 
+    const fallbackCwd = priorityFallback.get(dirName);
     for (const entry of sorted) {
       const id = basename(entry.name, '.jsonl');
-      const meta = await readSessionSummary(entry.filePath, dirName === encodedCurrent ? resolve(workspacePath) : undefined);
+      const meta = await readSessionSummary(entry.filePath, fallbackCwd);
       if (!meta) continue;
       results.push({
         id,

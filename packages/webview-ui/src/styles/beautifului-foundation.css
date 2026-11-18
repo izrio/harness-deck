@@ -36,6 +36,7 @@
   --ink: oklch(0.242 0.012 258);
   --ink-2: oklch(0.502 0.014 260);
   --ink-3: oklch(0.685 0.012 260);
+  --ink-4: oklch(0.755 0.01 260);
 
   --line: oklch(0.932 0.006 255);
   --line-strong: oklch(0.892 0.009 255);
@@ -75,7 +76,10 @@
   --secondary-foreground: var(--ink);
   --muted: var(--inset);
   --muted-foreground: var(--ink-2);
-  --accent-foreground: #ffffff;
+  --shadcn-accent: var(--hover);
+  --accent-foreground: var(--ink);
+  --brand: var(--accent);
+  --brand-foreground: var(--surface);
   --destructive: var(--red);
   --destructive-foreground: #ffffff;
   --border: var(--line);
@@ -104,6 +108,7 @@
   --ink: oklch(0.255 0.022 58);
   --ink-2: oklch(0.505 0.024 60);
   --ink-3: oklch(0.675 0.02 65);
+  --ink-4: oklch(0.75 0.016 65);
 
   --line: oklch(0.916 0.016 78);
   --line-strong: oklch(0.872 0.022 75);
@@ -127,6 +132,7 @@
   --ink: oklch(0.248 0.024 162);
   --ink-2: oklch(0.495 0.026 162);
   --ink-3: oklch(0.67 0.02 162);
+  --ink-4: oklch(0.745 0.016 162);
 
   --line: oklch(0.918 0.016 158);
   --line-strong: oklch(0.875 0.022 158);
@@ -150,6 +156,7 @@
   --ink: oklch(0.248 0.026 292);
   --ink-2: oklch(0.5 0.026 292);
   --ink-3: oklch(0.675 0.02 292);
+  --ink-4: oklch(0.75 0.016 292);
 
   --line: oklch(0.918 0.018 295);
   --line-strong: oklch(0.875 0.025 295);
@@ -173,6 +180,7 @@
   --ink: oklch(0.252 0.024 10);
   --ink-2: oklch(0.502 0.024 10);
   --ink-3: oklch(0.675 0.018 10);
+  --ink-4: oklch(0.75 0.014 10);
 
   --line: oklch(0.918 0.016 12);
   --line-strong: oklch(0.875 0.022 12);
@@ -200,6 +208,7 @@
   --ink: oklch(0.96 0.004 252);
   --ink-2: oklch(0.735 0.01 260);
   --ink-3: oklch(0.545 0.012 262);
+  --ink-4: oklch(0.455 0.012 262);
 
   --line: oklch(0.312 0.01 262);
   --line-strong: oklch(0.362 0.012 264);
@@ -226,6 +235,12 @@
   --shadow-overlay:
     0 0 0 1px var(--line-strong), 0 8px 28px oklch(0 0 0 / 0.38);
   --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.4);
+
+  /* shadcn/ui semantic hover & brand overrides */
+  --shadcn-accent: var(--hover);
+  --accent-foreground: var(--ink);
+  --brand: var(--accent);
+  --brand-foreground: var(--page);
 }
 
 /* 2. Warm Paper (暖砂琥珀) — Dark */
@@ -241,6 +256,7 @@
   --ink: oklch(0.952 0.012 80);
   --ink-2: oklch(0.745 0.018 72);
   --ink-3: oklch(0.555 0.018 68);
+  --ink-4: oklch(0.465 0.016 68);
 
   --line: oklch(0.318 0.016 58);
   --line-strong: oklch(0.368 0.02 58);
@@ -264,6 +280,7 @@
   --ink: oklch(0.954 0.01 160);
   --ink-2: oklch(0.745 0.018 160);
   --ink-3: oklch(0.555 0.018 160);
+  --ink-4: oklch(0.465 0.016 160);
 
   --line: oklch(0.316 0.018 162);
   --line-strong: oklch(0.366 0.022 162);
@@ -287,6 +304,7 @@
   --ink: oklch(0.954 0.012 295);
   --ink-2: oklch(0.745 0.02 294);
   --ink-3: oklch(0.555 0.02 294);
+  --ink-4: oklch(0.465 0.018 294);
 
   --line: oklch(0.318 0.022 292);
   --line-strong: oklch(0.368 0.026 292);
@@ -310,6 +328,7 @@
   --ink: oklch(0.954 0.01 12);
   --ink-2: oklch(0.745 0.018 12);
   --ink-3: oklch(0.555 0.018 12);
+  --ink-4: oklch(0.465 0.016 12);
 
   --line: oklch(0.318 0.02 10);
   --line-strong: oklch(0.368 0.024 10);
@@ -329,15 +348,18 @@
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
   --color-hover: var(--hover);
   --color-hover-2: var(--hover-2);
   --color-field: var(--field);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-line-soft: var(--line-soft);
-  --color-accent: var(--accent);
+  --color-accent: var(--shadcn-accent);
   --color-accent-ink: var(--accent-ink);
   --color-accent-tint: var(--accent-tint);
+  --color-brand: var(--accent);
+  --color-brand-foreground: var(--brand-foreground);
   --color-green: var(--green);
   --color-green-tint: var(--green-tint);
   --color-orange: var(--orange);

@@ -1,7 +1,7 @@
-# 发布：打包 vsix，创建 GitHub Release 并附上安装包。
-# - 推送 v* 标签时自动运行（例如 git tag v0.1.0 && git push origin v0.1.0）；
+# 发布：分别打包 VS Code 插件（vsix）与 JetBrains / IDEA 插件（zip），创建 GitHub Release 并附上安装包。
+# - 推送 v* 标签时自动运行（例如 git tag v0.5.0 && git push origin v0.5.0）；
 # - 也可以在 Actions 页面手动运行，填写标签（标签不存在时在当前提交上创建）。
-# 标签必须与 packages/extension/package.json 的版本一致；发布说明取 CHANGELOG.md 里对应版本的一节。
+# 标签必须与 packages/extension/package.json 及 packages/jetbrains/build.gradle.kts 的版本一致；发布说明取 CHANGELOG.md 里对应版本的一节。
 name: Release
 
 on:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要发布的标签，例如 v0.1.0（必须与 package.json 的版本一致）'
+        description: '要发布的标签，例如 v0.5.0（必须与插件版本一致）'
         required: true
       prerelease:
         description: '标记为预发布'
@@ -24,12 +24,15 @@ concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
-  release:
+  vscode:
+    name: Build VS Code plugin
     runs-on: ubuntu-latest
-    env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -39,30 +42,112 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Check tag matches package version
+      - name: Check tag matches VS Code package version
+        id: version
         run: |
           VERSION="$(node -p "require('./packages/extension/package.json').version")"
           if [ "$TAG" != "v$VERSION" ]; then
-            echo "::error::标签 $TAG 与 package.json 的版本 $VERSION 不一致"
+            echo "::error::标签 $TAG 与 packages/extension/package.json 的版本 $VERSION 不一致"
             exit 1
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm package
 
-      - name: Prepare assets and notes
+      - name: Prepare VS Code asset
         run: |
           VSIX="packages/extension/harness-deck-${VERSION}.vsix"
           test -f "$VSIX"
-          mkdir -p release
-          cp "$VSIX" release/
-          (cd release && sha256sum "harness-deck-${VERSION}.vsix" > "harness-deck-${VERSION}.vsix.sha256")
+          mkdir -p release-vscode
+          cp "$VSIX" release-vscode/
+          (cd release-vscode && sha256sum "harness-deck-${VERSION}.vsix" > "harness-deck-${VERSION}.vsix.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-vscode
+          path: release-vscode/*
+
+  jetbrains:
+    name: Build IDEA plugin
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check tag matches JetBrains plugin version
+        id: version
+        run: |
+          JB_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' packages/jetbrains/build.gradle.kts | head -n 1)"
+          if [ "$TAG" != "v$JB_VERSION" ]; then
+            echo "::error::标签 $TAG 与 packages/jetbrains/build.gradle.kts 的版本 $JB_VERSION 不一致"
+            exit 1
+          fi
+          echo "version=$JB_VERSION" >> "$GITHUB_OUTPUT"
+          echo "JB_VERSION=$JB_VERSION" >> "$GITHUB_ENV"
+
+      - run: pnpm build
+
+      - name: Test and build JetBrains plugin
+        working-directory: packages/jetbrains
+        run: gradle test buildPlugin
+
+      - name: Prepare JetBrains asset
+        run: |
+          ZIP="packages/jetbrains/build/distributions/harness-deck-jetbrains-${JB_VERSION}.zip"
+          test -f "$ZIP"
+          mkdir -p release-jetbrains
+          cp "$ZIP" release-jetbrains/
+          (cd release-jetbrains && sha256sum "harness-deck-jetbrains-${JB_VERSION}.zip" > "harness-deck-jetbrains-${JB_VERSION}.zip.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-jetbrains
+          path: release-jetbrains/*
+
+  release:
+    name: Publish GitHub Release
+    needs: [vscode, jetbrains]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.vscode.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-vscode
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-jetbrains
+          path: release
+
+      - name: Prepare release notes
+        run: |
           # CHANGELOG 里 "## <版本>" 到下一个 "## " 之间的内容
           awk -v v="## ${VERSION}" '$0 == v {found=1; next} found && /^## / {exit} found {print}' packages/extension/CHANGELOG.md > release/changes.md
           {
             echo "## 安装 / Install"
+            echo
+            echo "### VS Code"
             echo
             echo "1. 下载下面的 \`harness-deck-${VERSION}.vsix\`。"
             echo "   Download \`harness-deck-${VERSION}.vsix\` below."
@@ -73,10 +158,22 @@ jobs:
             echo "   code --install-extension harness-deck-${VERSION}.vsix"
             echo '   ```'
             echo
-            echo "3. 至少装好一个底层：dsh（0.2.1-rc.5 及以上，DeepSeek Desktop 菜单「管理 dsh 命令…」或 \`npm install -g @deepseek-ai/dsh\`）、oh-my-pi（\`bun install -g @oh-my-pi/pi-coding-agent\`）、CodeBuddy（\`npm install -g @tencent-ai/codebuddy-code\`）或 Claude（\`npm install -g @agentclientprotocol/claude-agent-acp\`）。第一次打开面板时会让你选底层。使用说明见 [README](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/packages/extension/README.md)。"
-            echo "   Install at least one backend: dsh 0.2.1-rc.5+ (DeepSeek Desktop → \"Manage dsh command…\", or \`npm install -g @deepseek-ai/dsh\`), oh-my-pi (\`bun install -g @oh-my-pi/pi-coding-agent\`), CodeBuddy (\`npm install -g @tencent-ai/codebuddy-code\`) or Claude (\`npm install -g @agentclientprotocol/claude-agent-acp\`). The panel asks which one to use on first open."
+            echo "### JetBrains IDE (IntelliJ IDEA / WebStorm / PyCharm / GoLand / Rider)"
             echo
-            echo "SHA-256：\`$(cut -d' ' -f1 "release/harness-deck-${VERSION}.vsix.sha256")\`"
+            echo "1. 下载下面的 \`harness-deck-jetbrains-${VERSION}.zip\`（需要本地已安装 Node.js >= 20）。"
+            echo "   Download \`harness-deck-jetbrains-${VERSION}.zip\` below (requires Node.js >= 20)."
+            echo "2. 在 IDE 设置「Plugins → ⚙ → Install Plugin from Disk…」选择该压缩包安装。"
+            echo "   In IDE Settings → Plugins → ⚙ → Install Plugin from Disk…, select the zip archive."
+            echo
+            echo "### 底层 / Backends"
+            echo
+            echo "至少装好一个底层：dsh（0.2.1-rc.5 及以上，DeepSeek Desktop 菜单「管理 dsh 命令…」或 \`npm install -g @deepseek-ai/dsh\`）、Claude Code（\`npm install -g @anthropic-ai/claude-code\`）、Pi（\`npm install -g @earendil-works/pi-coding-agent\`）、ZCode（\`npm install -g zcode-app-cli\`）、OpenCode（\`npm install -g opencode-ai\`）或 CodeBuddy（\`npm install -g @tencent-ai/codebuddy-code\`）。"
+            echo "Install at least one backend: dsh 0.2.1-rc.5+ (DeepSeek Desktop → \"Manage dsh command…\", or \`npm install -g @deepseek-ai/dsh\`), Claude Code (\`npm install -g @anthropic-ai/claude-code\`), Pi (\`npm install -g @earendil-works/pi-coding-agent\`), ZCode (\`npm install -g zcode-app-cli\`), OpenCode (\`npm install -g opencode-ai\`), or CodeBuddy (\`npm install -g @tencent-ai/codebuddy-code\`)."
+            echo
+            echo "### SHA-256"
+            echo
+            echo "- \`harness-deck-${VERSION}.vsix\`: \`$(cut -d' ' -f1 "release/harness-deck-${VERSION}.vsix.sha256")\`"
+            echo "- \`harness-deck-jetbrains-${VERSION}.zip\`: \`$(cut -d' ' -f1 "release/harness-deck-jetbrains-${VERSION}.zip.sha256")\`"
             echo
             echo "## 更新内容 / Changes"
             cat release/changes.md
@@ -90,9 +187,9 @@ jobs:
           if gh release view "$TAG" > /dev/null 2>&1; then
             # 重新运行时更新已有的 Release，替换安装包
             gh release edit "$TAG" --title "Harness Deck ${TAG}" --notes-file release/notes.md "${FLAGS[@]}"
-            gh release upload "$TAG" release/*.vsix release/*.sha256 --clobber
+            gh release upload "$TAG" release/*.vsix release/*.zip release/*.sha256 --clobber
           else
-            gh release create "$TAG" release/*.vsix release/*.sha256 \
+            gh release create "$TAG" release/*.vsix release/*.zip release/*.sha256 \
               --title "Harness Deck ${TAG}" \
               --notes-file release/notes.md \
               --target "$GITHUB_SHA" \

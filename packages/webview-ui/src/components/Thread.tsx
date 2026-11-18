@@ -149,7 +149,7 @@ export function Thread() {
           onClick={toBottom}
         >
           <ArrowDownIcon className="size-4" />
-          {unseen ? <span className="to-bottom__dot absolute top-0.5 right-0.5 size-2 rounded-full border-2 border-surface bg-accent" aria-label={t('thread.newContent')} /> : null}
+          {unseen ? <span className="to-bottom__dot absolute top-0.5 right-0.5 size-2 rounded-full border-2 border-surface bg-brand" aria-label={t('thread.newContent')} /> : null}
         </Button>
       ) : null}
     </div>

@@ -1,3 +1,4 @@
+export { CollapsibleDrawer } from './CollapsibleDrawer.tsx';
 export { GlideMenu, MenuItem } from './GlideMenu.tsx';
 export { LoaderGrid } from './LoaderGrid.tsx';
 export { Shimmer } from './Shimmer.tsx';

@@ -5,7 +5,7 @@ import { composeAgentPrompt, deleteStoredAgent, parseStoredAgentData, resolveAge
 import { computeNextRunAt, parseStoredScheduleData, upsertScheduleRule } from '../src/hub/ScheduleEngine.ts';
 import { createKanbanTask, parseTaskBoardState, reorderKanbanTask } from '../src/hub/TaskBoardStore.ts';
 import type { UnattendedRunner, UnattendedRunRequest } from '../src/hub/UnattendedRunner.ts';
-import { WorkbenchHub, type StateStore } from '../src/hub/WorkbenchHub.ts';
+import { WorkbenchHub, type ActiveControllerContext, type StateStore } from '../src/hub/WorkbenchHub.ts';
 
 class MemoryStore implements StateStore {
   private readonly map = new Map<string, unknown>();
@@ -342,6 +342,261 @@ describe('WorkbenchHub 五大模块协同与顺序调度', () => {
     expect(startedSessions).toHaveLength(2);
     expect(startedSessions[1]?.projectPath).toBe('/repo/beta');
     expect(startedSessions[1]?.backendId).toBe('claude');
+
+    hub.dispose();
+  });
+
+  it('多智能体并发保活时通过 liveContexts 与 backendContext 正确聚合与结算后台任务', async () => {
+    const store = new MemoryStore();
+    const posted: HostToWebview[] = [];
+    let currentTime = 1_700_000_000_000;
+    let activeBackend = 'dsh';
+    let sessionSeq = 0;
+
+    const profiles: BackendProfile[] = [
+      { id: 'dsh', kind: 'dsh', name: 'DeepSeek' },
+      { id: 'claude', kind: 'acp', name: 'Claude Code', command: 'claude-agent-acp', args: [], env: {} },
+    ];
+    const projects: ProjectsState = {
+      currentPath: '/repo/alpha',
+      recent: [{ path: '/repo/alpha', name: 'alpha', lastOpenedAt: 200, isCurrent: true }],
+      configs: {},
+    };
+
+    let dshSnapshot = makeBaseSnapshot({
+      session: { id: 'dsh-live', title: 'DSH 执行中', running: true, hasOlder: false, loadingOlder: false, sync: 'live' },
+      sessions: [{ id: 'dsh-live', title: 'DSH 执行中', updatedAt: currentTime, running: true }],
+    });
+    let claudeSnapshot = makeBaseSnapshot({
+      backends: { items: profiles.map((p) => ({ id: p.id, name: p.name, kind: p.kind })), active: 'claude' },
+      session: { id: 'claude-bg', title: 'Claude 后台待审批', running: true, hasOlder: false, loadingOlder: false, sync: 'live' },
+      sessions: [{ id: 'claude-bg', title: 'Claude 后台待审批', updatedAt: currentTime, running: true }],
+      interactions: [
+        {
+          kind: 'approval',
+          id: 'claude-app-1',
+          toolName: 'bash',
+          reason: '需要执行构建',
+          subject: 'pnpm build',
+          subjectKind: 'command',
+          previewable: false,
+          dirtyFiles: [],
+        },
+      ],
+    });
+
+    const contexts = (): readonly ActiveControllerContext[] => [
+      {
+        backendId: 'dsh',
+        backendName: 'DeepSeek',
+        workspacePath: '/repo/alpha',
+        snapshot: dshSnapshot,
+        crossProjectSessions: [],
+        latestAssistantText: () => 'DSH 完成结果',
+      },
+      {
+        backendId: 'claude',
+        backendName: 'Claude Code',
+        workspacePath: '/repo/alpha',
+        snapshot: claudeSnapshot,
+        crossProjectSessions: [],
+        latestAssistantText: (id) => (id === 'task-sess-1' ? 'Claude 后台任务已交付' : undefined),
+      },
+    ];
+
+    const hub = new WorkbenchHub({
+      globalState: store,
+      runner: {
+        run: async () => ({ status: 'succeeded', sessionId: 'unused', output: '' }),
+      } as unknown as UnattendedRunner,
+      locale: () => 'zh',
+      isWorkspaceTrusted: () => true,
+      isWebviewVisible: () => true,
+      workspacePath: () => '/repo/alpha',
+      projects: () => projects,
+      profiles: () => profiles,
+      schedulePermission: () => 'workspace-write',
+      activeContext: () => contexts().find((c) => c.backendId === activeBackend),
+      liveContexts: contexts,
+      backendContext: (id) => contexts().find((c) => c.backendId === id),
+      switchProjectAndBackend: async (_path, backendId) => {
+        if (backendId) activeBackend = backendId;
+      },
+      startProgrammaticSession: async () => `task-sess-${++sessionSeq}`,
+      switchSessionInActive: async () => undefined,
+      openNewSessionInActive: async () => undefined,
+      post: (msg) => {
+        posted.push(msg);
+      },
+      focusView: async () => undefined,
+      openPanel: () => undefined,
+      log: () => undefined,
+      now: () => currentTime,
+      enableTimer: false,
+    });
+
+    // 当前聚焦在 dsh，但后台 claude 也在运行且有待审批请求：总览同时聚合两个保活后端的 waiting / running
+    const st0 = hub.state();
+    expect(st0.overview.waiting.some((w) => w.backendId === 'claude' && w.id === 'inter:claude:claude-app-1')).toBe(true);
+    expect(st0.overview.running.some((r) => r.backendId === 'dsh' && r.id === 'run-sess:dsh:dsh-live')).toBe(true);
+    expect(st0.overview.running.some((r) => r.backendId === 'claude' && r.id === 'run-sess:claude:claude-bg')).toBe(true);
+
+    // 看板派发一个使用 claude 的任务，随后切回前台聚焦 dsh
+    await hub.handleMessage({
+      type: 'createTask',
+      payload: {
+        title: '后台 Claude 任务',
+        prompt: '生成测试报告',
+        projectPath: '/repo/alpha',
+        backendId: 'claude',
+        autoStart: true,
+      },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    activeBackend = 'dsh';
+    dshSnapshot = makeBaseSnapshot({
+      session: { id: 'dsh-live', title: 'DSH 闲置', running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
+    });
+
+    // 后台 claude 会话结束并携带 backendId='claude' 上报，即使此时 activeContext 是 dsh 也能准确结算该任务
+    currentTime += 3_000;
+    claudeSnapshot = makeBaseSnapshot({
+      session: { id: 'task-sess-1', title: '后台 Claude 任务', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+    });
+    hub.observeSession(
+      {
+        sessionId: 'task-sess-1',
+        title: '后台 Claude 任务',
+        running: false,
+        sync: 'live',
+        interactionIds: [],
+        hasTurnOutput: true,
+      },
+      'claude',
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    const settledTask = hub.state().tasks.items[0];
+    expect(settledTask?.status).toBe('review');
+    expect(settledTask?.summary).toContain('Claude 后台任务已交付');
+
+    hub.dispose();
+  });
+
+  it('收敛已知项目分组：过滤未知目录、归并子目录会话、防止无 cwd 会话串组、按活跃度排序并支持移除清理与同名消歧', () => {
+    const store = new MemoryStore();
+    const now = 1_700_000_000_000;
+    let currentWorkspace = '/work/team-a/app';
+
+    const profiles: BackendProfile[] = [
+      { id: 'dsh', kind: 'dsh', name: 'DeepSeek' },
+      { id: 'claude', kind: 'claude', name: 'Claude Code' },
+    ];
+
+    let projects: ProjectsState = {
+      currentPath: '/work/team-a/app',
+      recent: [
+        { path: '/work/team-a/app/', name: 'app', lastOpenedAt: now - 10_000, isCurrent: true },
+        { path: '/work/team-b/app', name: 'app', lastOpenedAt: now - 20_000 },
+        { path: '/repo/beta', name: 'beta', lastOpenedAt: now - 30_000 },
+        // 新添加但尚无任何会话的空项目（最近打开时间最新）
+        { path: '/repo/fresh-empty', name: 'fresh-empty', lastOpenedAt: now },
+      ],
+      configs: {},
+    };
+
+    let snapshot = makeBaseSnapshot({
+      sessions: [
+        { id: 'alpha-1', title: '主仓库会话', updatedAt: now - 5_000, running: false },
+        { id: 'alpha-no-cwd', title: '无 cwd 历史会话', updatedAt: now - 8_000, running: false },
+      ],
+    });
+    let crossProjectSessions = [
+      // 子目录会话应自动归并到父项目 /work/team-a/app
+      { id: 'alpha-sub', title: '子目录构建', cwd: '/work/team-a/app/packages/ext', updatedAt: now - 4_000, running: false },
+      // 不属于任何已知项目的野生临时目录必须被忽略
+      { id: 'wild-tmp', title: '临时测试目录会话', cwd: '/tmp/random-dir', updatedAt: now, running: false },
+      { id: 'beta-1', title: 'Beta 会话', cwd: '/repo/beta', updatedAt: now - 6_000, running: false },
+    ];
+
+    const hub = new WorkbenchHub({
+      globalState: store,
+      runner: {
+        run: async () => ({ status: 'succeeded', sessionId: 'unused', output: '' }),
+      } as unknown as UnattendedRunner,
+      locale: () => 'zh',
+      isWorkspaceTrusted: () => true,
+      isWebviewVisible: () => true,
+      workspacePath: () => currentWorkspace,
+      projects: () => projects,
+      profiles: () => profiles,
+      schedulePermission: () => 'workspace-write',
+      activeContext: () => ({
+        backendId: 'dsh',
+        backendName: 'DeepSeek',
+        workspacePath: currentWorkspace,
+        snapshot,
+        crossProjectSessions,
+        latestAssistantText: () => undefined,
+      }),
+      switchProjectAndBackend: async () => undefined,
+      startProgrammaticSession: async () => undefined,
+      switchSessionInActive: async () => undefined,
+      openNewSessionInActive: async () => undefined,
+      post: () => undefined,
+      focusView: async () => undefined,
+      openPanel: () => undefined,
+      log: () => undefined,
+      now: () => now,
+      enableTimer: false,
+    });
+
+    const st1 = hub.state();
+    // 1. 野生临时目录不建组、不入表
+    expect(st1.sessionGroups.some((g) => g.projectPath === '/tmp/random-dir')).toBe(false);
+    expect(st1.sessionGroups.flatMap((g) => g.sessions.map((s) => s.id))).not.toContain('wild-tmp');
+
+    // 2. 重名项目自动附加父目录消歧，且子目录会话已归并到父项目
+    const teamAGroup = st1.sessionGroups.find((g) => g.projectPath === '/work/team-a/app');
+    const teamBGroup = st1.sessionGroups.find((g) => g.projectPath === '/work/team-b/app');
+    expect(teamAGroup?.projectName).toBe('team-a/app');
+    expect(teamBGroup?.projectName).toBe('team-b/app');
+    expect(teamAGroup?.isCurrent).toBe(true);
+    expect(teamAGroup?.sessions.map((s) => s.id)).toEqual(['alpha-sub', 'alpha-1', 'alpha-no-cwd']);
+
+    // 3. 新添加的空项目按 lastOpenedAt 排在当前项目之后、旧项目之前，不会沉底
+    expect(st1.sessionGroups.map((g) => g.projectPath)).toEqual([
+      '/work/team-a/app',
+      '/repo/fresh-empty',
+      '/repo/beta',
+      '/work/team-b/app',
+    ]);
+
+    // 4. 切换到 /repo/beta 后，无明确 cwd（cwd: ''）的历史会话保留在 /work/team-a/app 下，不串组到 /repo/beta
+    currentWorkspace = '/repo/beta';
+    snapshot = makeBaseSnapshot({
+      sessions: [{ id: 'beta-1', title: 'Beta 会话', updatedAt: now - 6_000, running: false }],
+    });
+    crossProjectSessions = [
+      { id: 'alpha-no-cwd', title: '无 cwd 历史会话', cwd: '', updatedAt: now - 8_000, running: false },
+      { id: 'beta-1', title: 'Beta 会话', cwd: '/repo/beta', updatedAt: now - 6_000, running: false },
+    ];
+    const st2 = hub.state();
+    expect(st2.sessionGroups.find((g) => g.projectPath === '/work/team-a/app')?.sessions.map((s) => s.id)).toContain('alpha-no-cwd');
+    expect(st2.sessionGroups.find((g) => g.projectPath === '/repo/beta')?.sessions.map((s) => s.id)).not.toContain('alpha-no-cwd');
+
+    // 5. 移除最近项目 /work/team-b/app 后同步清理注册表残留会话并消失分组
+    projects = {
+      ...projects,
+      recent: projects.recent.filter((p) => p.path !== '/repo/beta' && p.path !== '/work/team-b/app'),
+    };
+    currentWorkspace = '/work/team-a/app';
+    snapshot = makeBaseSnapshot({ sessions: [] });
+    crossProjectSessions = [];
+    hub.removeProjectSessions('/repo/beta');
+    const st3 = hub.state();
+    expect(st3.sessionGroups.some((g) => g.projectPath === '/repo/beta')).toBe(false);
+    expect(st3.sessionGroups.some((g) => g.projectPath === '/work/team-b/app')).toBe(false);
 
     hub.dispose();
   });

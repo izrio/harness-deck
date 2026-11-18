@@ -42,6 +42,7 @@ import {
   type ProgrammaticSessionRequest,
 } from '../backend/types.ts';
 import { getLocale, t } from '../i18n.ts';
+import { isPathInsideProject } from '../projects/ProjectService.ts';
 import {
   CONTEXT_OPEN,
   isTemplate,
@@ -101,6 +102,7 @@ export interface StoredSession {
 
 export interface AcpControllerOptions extends ControllerHostOptions {
   readonly workspacePath: string;
+  readonly backendName?: string;
   readonly restartRuntime: () => void;
   readonly loadActiveSessionId: () => string | undefined;
   readonly saveActiveSessionId: (sessionId: string | undefined) => void;
@@ -179,7 +181,7 @@ export class AcpController implements ChatBackendController {
   private creatingDraft: Promise<string | undefined> | undefined;
   private readonly projections = new Map<string, AcpSessionProjection>();
   private readonly loading = new Set<string>();
-  private listed: { id: string; updatedAt: number; title?: string }[] = [];
+  private listed: { id: string; cwd?: string; updatedAt: number; title?: string }[] = [];
   private stored: StoredSession[];
   private readonly queues = new Map<string, QueuedPrompt[]>();
   private readonly permissions = new Map<string, PendingPermission>();
@@ -336,14 +338,17 @@ export class AcpController implements ChatBackendController {
 
   allWorkspaceSessions(): readonly CrossProjectSession[] {
     const waiting = new Set([...this.permissions.values()].map((p) => p.sessionId));
-    return this.compute().sessions.map((s) => ({
-      id: s.id,
-      title: s.title,
-      cwd: this.workspacePath,
-      updatedAt: s.updatedAt,
-      running: s.running,
-      ...(waiting.has(s.id) ? { needsAttention: true } : {}),
-    }));
+    return this.compute().sessions.map((s) => {
+      const listedItem = this.listed.find((l) => l.id === s.id);
+      return {
+        id: s.id,
+        title: s.title,
+        cwd: listedItem?.cwd ?? '',
+        updatedAt: s.updatedAt,
+        running: s.running,
+        ...(waiting.has(s.id) ? { needsAttention: true } : {}),
+      };
+    });
   }
 
   async startProgrammaticSession(req: ProgrammaticSessionRequest): Promise<string | undefined> {
@@ -861,8 +866,13 @@ export class AcpController implements ChatBackendController {
     try {
       const result = await link.request<{ sessions?: { sessionId: string; cwd?: string; updatedAt?: string; title?: string | null }[] }>('session/list', { cwd: this.workspacePath });
       this.listed = (result?.sessions ?? [])
-        .filter((s) => !s.cwd || s.cwd === this.workspacePath)
-        .map((s) => ({ id: s.sessionId, updatedAt: s.updatedAt ? Date.parse(s.updatedAt) || 0 : 0, ...(s.title ? { title: s.title } : {}) }));
+        .filter((s) => !s.cwd || isPathInsideProject(this.workspacePath, s.cwd))
+        .map((s) => ({
+          id: s.sessionId,
+          ...(s.cwd ? { cwd: s.cwd } : {}),
+          updatedAt: s.updatedAt ? Date.parse(s.updatedAt) || 0 : 0,
+          ...(s.title ? { title: s.title } : {}),
+        }));
       this.scheduleRender();
     } catch (error) {
       this.options.log(`读取会话列表失败：${describe(error)}`);
@@ -1585,6 +1595,7 @@ export class AcpController implements ChatBackendController {
   }
 
   private agentName(): string {
+    if (this.options.backendName) return this.options.backendName;
     const state = this.backends();
     return state.items.find((b) => b.id === state.active)?.name ?? this.init?.agentInfo?.title ?? this.init?.agentInfo?.name ?? 'ACP';
   }

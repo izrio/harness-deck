@@ -29,7 +29,7 @@ function TaskStatusRing({ active }: { active: boolean }) {
         className="inline-flex size-4 items-center justify-center rounded-full bg-surface shadow-[inset_0_0_0_1.5px_var(--accent)]"
         aria-hidden
       >
-        <span className="size-1.5 rounded-full bg-accent" />
+        <span className="size-1.5 rounded-full bg-brand" />
       </span>
     );
   }
@@ -49,7 +49,7 @@ function TaskStatusRing({ active }: { active: boolean }) {
           strokeDasharray={`${c * 0.3} ${c * 0.7}`}
         />
       </svg>
-      <span className="size-1.5 rounded-full bg-accent" />
+      <span className="size-1.5 rounded-full bg-brand" />
     </span>
   );
 }
@@ -97,7 +97,7 @@ export function TaskRows({
               className={cn(
                 'todo__mark mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full',
                 completed
-                  ? 'bg-green text-white'
+                  ? 'bg-green text-brand-foreground'
                   : inProgress
                     ? 'text-accent-ink'
                     : 'bg-surface/60 text-ink-3 shadow-[inset_0_0_0_1.5px_var(--line-strong)]',

@@ -29,6 +29,7 @@ import type {
   WebviewToHost,
 } from '@harness-deck/shared';
 import { wholeFile, type StoredSession } from '../acp/AcpController.ts';
+import { isPathInsideProject } from '../projects/ProjectService.ts';
 import {
   renderDelay,
   type ChatBackendController,
@@ -296,7 +297,7 @@ export class PiController implements ChatBackendController {
         byId.set(s.id, {
           id: s.id,
           title: s.title,
-          cwd: this.workspacePath,
+          cwd: '',
           updatedAt: s.updatedAt,
           running: this.projections.get(s.id)?.running ?? false,
           ...(waiting.has(s.id) ? { needsAttention: true } : {}),
@@ -669,7 +670,8 @@ export class PiController implements ChatBackendController {
 
   private async refreshDiskSessions(): Promise<void> {
     try {
-      this.diskSessions = await scanPiSessions(this.workspacePath, this.options.piAgentDir?.());
+      const extraProjects = this.options.projects?.().recent.map((p) => p.path) ?? [];
+      this.diskSessions = await scanPiSessions(this.workspacePath, this.options.piAgentDir?.(), extraProjects);
       for (const s of this.diskSessions) {
         if (!this.sessionPaths.has(s.id)) {
           this.sessionPaths.set(s.id, s.sessionPath);
@@ -1166,15 +1168,17 @@ export class PiController implements ChatBackendController {
       running: this.projections.get(id)?.running ?? false,
       ...(waiting.has(id) ? { needsAttention: true } : {}),
     });
-    const normWs = resolve(this.workspacePath);
     const known = new Map<string, SessionListItem>();
+    const otherWorkspaceIds = new Set<string>();
     for (const s of this.diskSessions) {
-      if (resolve(s.cwd) === normWs) {
+      if (isPathInsideProject(this.workspacePath, s.cwd)) {
         known.set(s.id, { id: s.id, title: this.titleOf(s.id), updatedAt: s.updatedAt, ...state(s.id) });
+      } else {
+        otherWorkspaceIds.add(s.id);
       }
     }
     for (const s of this.stored) {
-      if (!known.has(s.id)) {
+      if (!known.has(s.id) && !otherWorkspaceIds.has(s.id)) {
         known.set(s.id, { id: s.id, title: s.title, updatedAt: s.updatedAt, ...state(s.id) });
       }
     }

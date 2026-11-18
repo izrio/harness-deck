@@ -7,10 +7,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildProjectsState,
   createProjectWorktree,
+  disambiguateProjectNames,
+  isPathInsideProject,
+  normalizeProjectPath,
   parseProjectConfigs,
   parseRecentProjects,
   recordRecentProject,
   removeRecentProjectFromList,
+  resolveEnclosingProjectPath,
   updateProjectConfigsMap,
 } from '../src/projects/ProjectService.ts';
 
@@ -99,5 +103,35 @@ describe('ProjectService', () => {
         config: { copyFiles: [], setupCommands: [], verifyCommands: [] },
       }),
     ).rejects.toThrow(/Invalid branch name/u);
+  });
+
+  it('归一化路径、判断子目录归属并按最长前缀归并到已知父项目', () => {
+    expect(normalizeProjectPath('  /repo/alpha/  ')).toBe('/repo/alpha');
+    expect(normalizeProjectPath('/repo/alpha/./sub/../')).toBe('/repo/alpha');
+    expect(normalizeProjectPath('///')).toBe('/');
+    expect(normalizeProjectPath('c:/work/demo/')).toBe('C:\\work\\demo');
+    expect(normalizeProjectPath('c:\\')).toBe('C:\\');
+
+    expect(isPathInsideProject('/repo/alpha/', '/repo/alpha')).toBe(true);
+    expect(isPathInsideProject('/repo/alpha', '/repo/alpha/packages/ext')).toBe(true);
+    // 兄弟目录 / worktree 不能被误判为子目录
+    expect(isPathInsideProject('/repo/alpha', '/repo/alpha-wt')).toBe(false);
+    expect(isPathInsideProject('C:\\Work\\App', 'c:/work/app/src')).toBe(true);
+
+    const known = ['/repo/alpha', '/repo/alpha/packages/ui', '/repo/beta'];
+    expect(resolveEnclosingProjectPath('/repo/alpha/packages/ui/src', known)).toBe('/repo/alpha/packages/ui');
+    expect(resolveEnclosingProjectPath('/repo/alpha/packages/core', known)).toBe('/repo/alpha');
+    expect(resolveEnclosingProjectPath('/tmp/random-dir', known)).toBeUndefined();
+  });
+
+  it('对重名项目自动补充父级目录消歧，非重名项目保持原名', () => {
+    const names = disambiguateProjectNames([
+      { projectPath: '/work/client-a/app', baseName: 'app' },
+      { projectPath: '/work/client-b/app', baseName: 'app' },
+      { projectPath: '/work/solo', baseName: 'solo' },
+    ]);
+    expect(names.get('/work/client-a/app')).toBe('client-a/app');
+    expect(names.get('/work/client-b/app')).toBe('client-b/app');
+    expect(names.get('/work/solo')).toBe('solo');
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { HostToWebview } from '@harness-deck/shared';
 import { applyHostMessage, openSettingsPage, requestPrefill, useView } from './store.ts';
+import { cn } from './lib/utils.ts';
 import { applyColorScheme, applyThemeMode } from './theme.ts';
 import { postToHost } from './vscode.ts';
 import { Button } from '@/components/ui/button';
@@ -90,10 +91,16 @@ export function App() {
           </div>
         ) : null}
         {opening ? <SessionLoading /> : empty ? <EmptyState /> : <Thread />}
-        {!hideChat ? <Toasts /> : null}
         <Composer />
       </SessionsView>
-      {hideChat ? <Toasts /> : null}
+      <div
+        className={cn(
+          'pointer-events-none fixed inset-x-0 z-40 [&_.toast]:pointer-events-auto',
+          hideChat ? 'bottom-3' : 'bottom-32',
+        )}
+      >
+        <Toasts />
+      </div>
     </div>
   );
 }

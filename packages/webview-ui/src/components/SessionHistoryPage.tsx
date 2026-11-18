@@ -231,7 +231,7 @@ export function SessionHistoryPage() {
                                       title={t('approval.label')}
                                     />
                                   ) : sess.unread ? (
-                                    <span className="inline-block size-2 rounded-full bg-accent" />
+                                    <span className="inline-block size-2 rounded-full bg-brand" />
                                   ) : null}
                                   <span className="rounded-chip bg-field px-1.5 py-0.5 text-[10.5px] text-ink-3 shadow-hairline">
                                     {sess.backendName}

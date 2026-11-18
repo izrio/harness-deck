@@ -607,4 +607,197 @@ describe('本地协议转换网关（OpenAI 兼容 -> Claude Anthropic）', () =
       await proxy.dispose();
     }
   });
+
+  it('切换到新增的 OpenAI 模型时正确注入 NO_PROXY、映射选中模型并在双协议服务商下走协议转换', async () => {
+    const mixedProvider: ProviderConfig = {
+      id: 'mixed',
+      name: 'Mixed Provider',
+      anthropicUrl: 'https://anthropic.example.com',
+      openaiChatUrl: 'https://openai.example.com/v1',
+      models: [
+        { id: 'glm-5', name: 'GLM-5' },
+        { id: 'gpt-4o', name: 'GPT-4o' },
+        { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+      ],
+      defaultModel: 'glm-5',
+      smallModel: 'glm-5',
+      boundBackendIds: ['claude'],
+    };
+
+    const runtime = prepareClaudeProviderRuntime({
+      provider: mixedProvider,
+      proxyOrigin: 'http://127.0.0.1:43123',
+      proxyToken: 'tok-local',
+      baseEnv: { HTTP_PROXY: 'http://127.0.0.1:7890' },
+      protocolGatewayEnabled: true,
+      selectedModel: 'gpt-4o',
+    });
+    expect(runtime?.env.ANTHROPIC_MODEL).toBe('gpt-4o');
+    expect(runtime?.env.NO_PROXY).toContain('127.0.0.1');
+    expect(runtime?.env.NO_PROXY).toContain('localhost');
+    expect(runtime?.env.no_proxy).toContain('127.0.0.1');
+
+    let selectedModel = 'gpt-4o';
+    const capturedModels: string[] = [];
+    const capturedUrls: string[] = [];
+    const proxy = new ProviderProxy({
+      getProvider: (id) => (id === 'mixed' ? mixedProvider : undefined),
+      getApiKey: async () => 'real-key',
+      getSelectedModel: () => selectedModel,
+      isProtocolGatewayEnabled: () => true,
+      fetchImpl: async (input, init) => {
+        capturedUrls.push(String(input));
+        const body = JSON.parse(Buffer.from(init?.body as Uint8Array).toString('utf8')) as { model: string };
+        capturedModels.push(body.model);
+        return new Response(
+          JSON.stringify({
+            id: 'chatcmpl-m1',
+            model: body.model,
+            choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }],
+            usage: { prompt_tokens: 5, completion_tokens: 2 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+
+    try {
+      await proxy.ensureStarted();
+      const base = proxy.endpointFor('mixed', 'anthropic');
+
+      // 即使客户端发来旧默认模型 glm-5，也应映射到当前选中的 gpt-4o，并路由到 OpenAI Chat 接口
+      const res1 = await fetch(`${base}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'glm-5', max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      expect(res1.status).toBe(200);
+      expect(capturedUrls[0]).toBe('https://openai.example.com/v1/chat/completions');
+      expect(capturedModels[0]).toBe('gpt-4o');
+
+      // 选中名字里含 mini 的模型 gpt-4o-mini 时，不应被误判为小模型任务而覆盖
+      selectedModel = 'gpt-4o-mini';
+      const res2 = await fetch(`${base}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'gpt-4o-mini', max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      expect(res2.status).toBe(200);
+      expect(capturedModels[1]).toBe('gpt-4o-mini');
+
+      // 验证网关结构化日志已记录模型映射且可清空
+      const logs = proxy.getLogs();
+      expect(logs.length).toBe(2);
+      expect(logs[1]).toMatchObject({
+        providerId: 'mixed',
+        converted: true,
+        requestModel: 'glm-5',
+        mappedModel: 'gpt-4o',
+        status: 200,
+        level: 'info',
+      });
+      proxy.clearLogs();
+      expect(proxy.getLogs()).toHaveLength(0);
+    } finally {
+      await proxy.dispose();
+    }
+  });
+
+  it('上游返回 max_tokens / stream_options 400 错误时自动降级重试，并兼容流式请求返回非流式 JSON 与记录错误日志', async () => {
+    const providerNoCap: ProviderConfig = {
+      id: 'openai-nocap',
+      name: 'OpenAI No Cap',
+      openaiChatUrl: 'https://api.openai-compat.example/v1',
+      models: [{ id: 'gpt-4o' }],
+      defaultModel: 'gpt-4o',
+      boundBackendIds: ['claude'],
+    };
+
+    let attempt = 0;
+    const sentBodies: Record<string, unknown>[] = [];
+    const proxy = new ProviderProxy({
+      getProvider: (id) => (id === 'openai-nocap' ? providerNoCap : undefined),
+      getApiKey: async () => 'sk-real-secret-1234567890abcdef',
+      isProtocolGatewayEnabled: () => true,
+      fetchImpl: async (_input, init) => {
+        attempt++;
+        const parsed = JSON.parse(Buffer.from(init?.body as Uint8Array).toString('utf8')) as Record<string, unknown>;
+        sentBodies.push(parsed);
+        if (attempt === 1) {
+          return new Response(
+            JSON.stringify({
+              error: { message: 'Invalid max_tokens: must be in range of [1, 8192]; stream_options unsupported' },
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (attempt === 2) {
+          // 即使 stream=true，部分上游仍返回非流式 JSON，网关应自动包装为 Anthropic SSE
+          return new Response(
+            JSON.stringify({
+              id: 'chatcmpl-wrap',
+              model: 'gpt-4o',
+              choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '兼容包装成功' } }],
+              usage: { prompt_tokens: 12, completion_tokens: 4 },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        // 第三次模拟上游在 HTTP 200 包体内返回 error 字段
+        return new Response(
+          JSON.stringify({ error: { message: 'Upstream quota exceeded' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+
+    try {
+      await proxy.ensureStarted();
+      const base = proxy.endpointFor('openai-nocap', 'anthropic');
+
+      const res = await fetch(`${base}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          stream: true,
+          max_tokens: 32_000,
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      const sseText = await res.text();
+      expect(sseText).toContain('event: message_start');
+      expect(sseText).toContain('"text":"兼容包装成功"');
+      expect(sseText).toContain('event: message_stop');
+
+      expect(sentBodies[0]?.max_tokens).toBe(16_384);
+      expect(sentBodies[0]?.stream_options).toEqual({ include_usage: true });
+      expect(sentBodies[1]?.max_tokens).toBe(8_192);
+      expect(sentBodies[1]?.stream_options).toBeUndefined();
+
+      // 验证上游返回 200 { error } 时不会静默输出空字符串，而是报错并记录 error 日志
+      const errRes = await fetch(`${base}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          stream: false,
+          max_tokens: 1024,
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      });
+      expect(errRes.status).toBe(502);
+      const errBody = (await errRes.json()) as { error: { message: string } };
+      expect(errBody.error.message).toContain('Upstream quota exceeded');
+
+      const logs = proxy.getLogs();
+      expect(logs.some((l) => l.level === 'warn' && l.message.includes('retrying'))).toBe(true);
+      expect(logs.some((l) => l.level === 'error' && l.message.includes('Upstream quota exceeded'))).toBe(true);
+      expect(JSON.stringify(logs)).not.toContain('sk-real-secret');
+    } finally {
+      await proxy.dispose();
+    }
+  });
 });

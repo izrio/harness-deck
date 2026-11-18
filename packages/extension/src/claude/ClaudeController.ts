@@ -31,6 +31,7 @@ import type {
   WebviewToHost,
 } from '@harness-deck/shared';
 import { isUnrestrictedMode, wholeFile, type StoredSession } from '../acp/AcpController.ts';
+import { isPathInsideProject } from '../projects/ProjectService.ts';
 import {
   renderDelay,
   type ChatBackendController,
@@ -174,12 +175,14 @@ export class ClaudeController implements ChatBackendController {
   private readonly interactions: ClaudeInteractionManager;
   private readonly publisher: ViewPublisher;
   private renderTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastBoundProviderSig: string;
 
   constructor(private readonly options: ClaudeControllerOptions) {
     this.workspacePath = options.workspacePath;
     this.activeId = options.loadActiveSessionId();
     this.stored = [...(options.loadSessions() ?? [])].filter((s) => !s.id.startsWith('pending:'));
     this.selectedModel = options.loadPreferredModel?.();
+    this.lastBoundProviderSig = this.boundProviderSig();
     this.publisher = new ViewPublisher(options.post, options.onModelChange);
     this.editorContext = new EditorContext(
       () => this.workbench,
@@ -301,7 +304,7 @@ export class ClaudeController implements ChatBackendController {
         byId.set(s.id, {
           id: s.id,
           title: s.title,
-          cwd: this.workspacePath,
+          cwd: '',
           updatedAt: s.updatedAt,
           running: this.projections.get(s.id)?.running ?? false,
           ...(waiting.has(s.id) ? { needsAttention: true } : {}),
@@ -374,9 +377,22 @@ export class ClaudeController implements ChatBackendController {
     this.options.post({ type: 'backends', payload: this.backends() });
   }
 
+  private boundProviderSig(): string {
+    return JSON.stringify(this.options.boundProvider?.() ?? null);
+  }
+
   providersChanged(): void {
     if (this.options.providers) {
       this.options.post({ type: 'providers', payload: this.options.providers() });
+    }
+    const nextSig = this.boundProviderSig();
+    if (nextSig !== this.lastBoundProviderSig) {
+      this.lastBoundProviderSig = nextSig;
+      for (const [sessionKey] of this.links) {
+        if (!(this.projections.get(sessionKey)?.running ?? false)) {
+          void this.closeSessionLink(sessionKey);
+        }
+      }
     }
     this.scheduleRender();
   }
@@ -656,7 +672,8 @@ export class ClaudeController implements ChatBackendController {
 
   private async refreshDiskSessions(): Promise<void> {
     try {
-      this.diskSessions = await scanClaudeSessions(this.workspacePath, this.options.claudeConfigDir?.());
+      const extraProjects = this.options.projects?.().recent.map((p) => p.path) ?? [];
+      this.diskSessions = await scanClaudeSessions(this.workspacePath, this.options.claudeConfigDir?.(), extraProjects);
       this.scheduleRender();
     } catch (error) {
       this.options.log(`扫描 Claude Code 历史会话跳过：${describe(error)}`);
@@ -978,9 +995,16 @@ export class ClaudeController implements ChatBackendController {
       ...(options[0]!.defaultEffort ? { effort: options[0]!.defaultEffort } : {}),
     };
     const current: ClaudePreferredModel =
-      this.selectedModel && (bound ? this.selectedModel.provider === bound.id : true)
+      this.selectedModel &&
+      (bound
+        ? this.selectedModel.provider === bound.id &&
+          (bound.models.length === 0 || bound.models.some((m) => m.id === this.selectedModel!.model))
+        : true)
         ? this.selectedModel
         : (defaultFromBound ?? fallbackFirst);
+    if (bound && current.provider === bound.id) {
+      this.options.onProviderModelSelected?.(bound.id, current.model);
+    }
 
     const exists = options.some((o) => o.provider === current.provider && o.model === current.model);
     const mergedOptions = exists
@@ -1010,6 +1034,8 @@ export class ClaudeController implements ChatBackendController {
     if (bound && provider === bound.id) {
       this.options.onProviderModelSelected?.(bound.id, model);
     }
+    const prevModel = this.selectedModel?.model;
+    const prevProvider = this.selectedModel?.provider;
     const prevEffort = this.selectedModel?.effort;
     this.selectedModel = { provider, model, ...(effort ? { effort } : {}) };
     this.options.savePreferredModel?.(this.selectedModel);
@@ -1017,8 +1043,10 @@ export class ClaudeController implements ChatBackendController {
     if (this.activeId) {
       const link = this.links.get(this.activeId);
       if (link?.running) {
-        if (effort !== prevEffort && !(this.projections.get(this.activeId)?.running ?? false)) {
-          // 思考档位通过进程环境变量生效：会话空闲时关闭旧进程，下一条消息以新 effort 重建（--resume）
+        const modelChanged = model !== prevModel || provider !== prevProvider;
+        const effortChanged = effort !== prevEffort;
+        if ((modelChanged || effortChanged) && !(this.projections.get(this.activeId)?.running ?? false)) {
+          // 思考档位与绑定的环境变量在启动时注入：会话空闲时关闭旧进程，下一条消息以新模型与配置重启（--resume）
           await this.closeSessionLink(this.activeId);
         } else {
           await link.sendControlRequest({ subtype: 'set_model', model }, 8_000).catch(() => undefined);
@@ -1237,15 +1265,17 @@ export class ClaudeController implements ChatBackendController {
       running: this.projections.get(id)?.running ?? false,
       ...(waiting.has(id) ? { needsAttention: true } : {}),
     });
-    const normWs = resolve(this.workspacePath);
     const known = new Map<string, SessionListItem>();
+    const otherWorkspaceIds = new Set<string>();
     for (const s of this.diskSessions) {
-      if (resolve(s.cwd) === normWs) {
+      if (isPathInsideProject(this.workspacePath, s.cwd)) {
         known.set(s.id, { id: s.id, title: this.titleOf(s.id), updatedAt: s.updatedAt, ...state(s.id) });
+      } else {
+        otherWorkspaceIds.add(s.id);
       }
     }
     for (const s of this.stored) {
-      if (!known.has(s.id) && !s.id.startsWith('pending:')) {
+      if (!known.has(s.id) && !otherWorkspaceIds.has(s.id) && !s.id.startsWith('pending:')) {
         known.set(s.id, { id: s.id, title: s.title, updatedAt: s.updatedAt, ...state(s.id) });
       }
     }

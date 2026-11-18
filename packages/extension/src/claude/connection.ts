@@ -151,6 +151,12 @@ export class ClaudeConnection implements ClaudeLink {
       });
 
       child.once('exit', (code, signal) => {
+        const leftover = stderrBuffer.trim();
+        if (leftover) {
+          stderrBuffer = '';
+          this.stderrTail = [...this.stderrTail, leftover].slice(-STDERR_TAIL);
+          this.options.onStderr?.(leftover);
+        }
         this.closeAll(new ClaudeClosedError(`Claude Code 进程已退出（${signal ?? code}）`));
         if (!this.disposed) this.options.onExit(code, signal, this.stderrTail.join('\n'));
       });

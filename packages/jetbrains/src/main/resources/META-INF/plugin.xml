@@ -4,6 +4,7 @@
     <vendor>izrio</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="harness-deck-jcef.xml">com.intellij.modules.jcef</depends>
     <depends optional="true" config-file="harness-deck-terminal.xml">org.jetbrains.plugins.terminal</depends>
 
     <extensions defaultExtensionNs="com.intellij">

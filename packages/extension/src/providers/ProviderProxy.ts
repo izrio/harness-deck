@@ -6,17 +6,26 @@
  * - 真实 API Key 只保存在 VS Code 的 SecretStorage 里，由本代理在转发给上游服务商时注入请求头，
  *   绝不写入智能体的配置文件、命令行参数或日志。
  */
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { formatTokenLimit, type ProviderConfig, type ProviderModelItem, type ProviderProtocol } from '@harness-deck/shared';
+import {
+  formatTokenLimit,
+  type ProviderConfig,
+  type ProviderGatewayLogEntry,
+  type ProviderModelItem,
+  type ProviderProtocol,
+} from '@harness-deck/shared';
+import { redactSecrets } from '../util/redact.ts';
 import {
   convertAnthropicToOpenAiRequest,
   convertOpenAiToAnthropicResponse,
   estimateAnthropicTokens,
+  extractOpenAiErrorMessage,
   pipeOpenAiStreamToAnthropicSse,
   resolveMappedProviderModel,
   shouldConvertOpenaiToAnthropic,
+  writeAnthropicResponseAsSse,
 } from './OpenaiToAnthropicConverter.ts';
 
 export type FetchImpl = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -36,11 +45,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   'x-api-key',
 ]);
 
-const ANTHROPIC_STRIPPED_HEADERS = new Set([
-  'anthropic-version',
-  'anthropic-beta',
-  'anthropic-dangerous-direct-browser-access',
-]);
+const MAX_GATEWAY_LOGS = 100;
 
 export interface ProviderProxyOptions {
   readonly getProvider: (id: string) => ProviderConfig | undefined;
@@ -50,6 +55,8 @@ export interface ProviderProxyOptions {
   /** 是否启用本地协议转换网关（将 OpenAI 兼容接口转换为 Claude Anthropic 协议，默认 false）。 */
   readonly isProtocolGatewayEnabled?: () => boolean;
   readonly log?: (line: string) => void;
+  /** 网关请求日志更新时触发。 */
+  readonly onLogChange?: () => void;
   readonly fetchImpl?: FetchImpl;
 }
 
@@ -79,32 +86,71 @@ export function rewriteModelInPayload(
   provider: ProviderConfig,
   selectedModel?: string,
 ): Buffer {
-  if (rawBody.length === 0 || provider.models.length === 0) return rawBody;
+  return rewriteModelDetailsInPayload(rawBody, provider, selectedModel).body;
+}
+
+function rewriteModelDetailsInPayload(
+  rawBody: Buffer,
+  provider: ProviderConfig,
+  selectedModel?: string,
+): { readonly body: Buffer; readonly requestModel?: string; readonly mappedModel?: string } {
+  if (rawBody.length === 0) return { body: rawBody };
   let parsed: Record<string, unknown>;
   try {
     const val = JSON.parse(rawBody.toString('utf8')) as unknown;
-    if (!val || typeof val !== 'object' || Array.isArray(val)) return rawBody;
+    if (!val || typeof val !== 'object' || Array.isArray(val)) return { body: rawBody };
     parsed = val as Record<string, unknown>;
   } catch {
-    return rawBody;
+    return { body: rawBody };
   }
 
   const reqModel = typeof parsed.model === 'string' ? parsed.model.trim() : '';
+  if (provider.models.length === 0) {
+    return {
+      body: rawBody,
+      ...(reqModel ? { requestModel: reqModel, mappedModel: reqModel } : {}),
+    };
+  }
   const fallbackModel = resolveMappedProviderModel(reqModel, provider, selectedModel);
-  if (!fallbackModel) return rawBody;
+  if (!fallbackModel) {
+    return {
+      body: rawBody,
+      ...(reqModel ? { requestModel: reqModel, mappedModel: reqModel } : {}),
+    };
+  }
   parsed.model = fallbackModel;
-  return Buffer.from(JSON.stringify(parsed), 'utf8');
+  return {
+    body: Buffer.from(JSON.stringify(parsed), 'utf8'),
+    ...(reqModel ? { requestModel: reqModel } : {}),
+    mappedModel: fallbackModel,
+  };
 }
 
-function extractClientToken(req: IncomingMessage): string | undefined {
+function extractModelFromBody(rawBody: Buffer): string | undefined {
+  if (rawBody.length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(rawBody.toString('utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const model = (parsed as Record<string, unknown>).model;
+    return typeof model === 'string' && model.trim() ? model.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isClientAuthorized(req: IncomingMessage, expectedToken: string): boolean {
   const xApiKey = req.headers['x-api-key'];
-  if (typeof xApiKey === 'string' && xApiKey.trim()) return xApiKey.trim();
+  if (typeof xApiKey === 'string' && safeTokenEquals(expectedToken, xApiKey.trim())) {
+    return true;
+  }
   const auth = req.headers.authorization;
   if (typeof auth === 'string') {
     const match = /^Bearer\s+(.+)$/iu.exec(auth.trim());
-    if (match?.[1]) return match[1].trim();
+    if (match?.[1] && safeTokenEquals(expectedToken, match[1].trim())) {
+      return true;
+    }
   }
-  return undefined;
+  return false;
 }
 
 function safeTokenEquals(expected: string, actual: string | undefined): boolean {
@@ -148,20 +194,152 @@ async function readRequestBody(req: IncomingMessage): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-function buildForwardHeaders(
-  rawHeaders: IncomingMessage['headers'],
-  extraExcluded?: ReadonlySet<string>,
-): Record<string, string> {
+function buildForwardHeaders(rawHeaders: IncomingMessage['headers']): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(rawHeaders)) {
     const lower = key.toLowerCase();
     if (HOP_BY_HOP_HEADERS.has(lower) || value === undefined) continue;
     // 跳过压缩编码头，让 fetch 自动解码并以干净字节流回传客户端
     if (lower === 'accept-encoding') continue;
-    if (extraExcluded?.has(lower)) continue;
     headers[key] = Array.isArray(value) ? value.join(', ') : value;
   }
   return headers;
+}
+
+function buildOpenAiForwardHeaders(rawHeaders: IncomingMessage['headers']): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(rawHeaders)) {
+    const lower = key.toLowerCase();
+    if (
+      HOP_BY_HOP_HEADERS.has(lower) ||
+      lower === 'accept-encoding' ||
+      lower.startsWith('anthropic-') ||
+      lower.startsWith('x-stainless-') ||
+      lower.startsWith('x-claude-') ||
+      lower === 'x-app' ||
+      lower === 'user-agent' ||
+      value === undefined
+    ) {
+      continue;
+    }
+    headers[key] = Array.isArray(value) ? value.join(', ') : value;
+  }
+  headers['content-type'] = 'application/json';
+  return headers;
+}
+
+function buildRetryOpenAiPayload(
+  payloadBuf: Buffer,
+  status: number,
+  errText: string,
+): { readonly body: Buffer; readonly reason: string } | undefined {
+  if (status !== 400 && status !== 422) return undefined;
+  let parsed: Record<string, unknown>;
+  try {
+    const val = JSON.parse(payloadBuf.toString('utf8')) as unknown;
+    if (!val || typeof val !== 'object' || Array.isArray(val)) return undefined;
+    parsed = val as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+
+  let changed = false;
+  const reasons: string[] = [];
+
+  if (/max_completion_tokens/iu.test(errText) && 'max_tokens' in parsed) {
+    parsed.max_completion_tokens = parsed.max_tokens;
+    delete parsed.max_tokens;
+    changed = true;
+    reasons.push('max_tokens -> max_completion_tokens');
+  } else if (
+    /max_tokens|max_output_tokens|max_completion_tokens|context_length|range of \[1,\s*\d+\]|less than or equal to \d+/iu.test(
+      errText,
+    )
+  ) {
+    const curKey =
+      typeof parsed.max_tokens === 'number'
+        ? 'max_tokens'
+        : typeof parsed.max_completion_tokens === 'number'
+          ? 'max_completion_tokens'
+          : undefined;
+    if (curKey) {
+      const curLimit = parsed[curKey] as number;
+      const capMatch =
+        /(?:<=|less than or equal to|max(?:imum)?(?: allowed)?(?: is|:)?|range of \[1,\s*|up to )\s*(\d{3,6})/iu.exec(
+          errText,
+        ) ?? /\[1,\s*(\d{3,6})\]/iu.exec(errText);
+      const parsedCap = capMatch?.[1] ? Number(capMatch[1]) : undefined;
+      let nextLimit: number | undefined;
+      if (parsedCap && Number.isFinite(parsedCap) && parsedCap > 0 && parsedCap < curLimit) {
+        nextLimit = parsedCap;
+      } else if (curLimit > 8_192) {
+        nextLimit = 8_192;
+      } else if (curLimit > 4_096) {
+        nextLimit = 4_096;
+      }
+      if (nextLimit !== undefined && nextLimit < curLimit) {
+        parsed[curKey] = nextLimit;
+        changed = true;
+        reasons.push(`${curKey} -> ${nextLimit}`);
+      }
+    }
+  }
+
+  if (/stream_options/iu.test(errText) && 'stream_options' in parsed) {
+    delete parsed.stream_options;
+    changed = true;
+    reasons.push('strip stream_options');
+  }
+
+  if (/reasoning_content/iu.test(errText) && Array.isArray(parsed.messages)) {
+    let stripped = false;
+    for (const msg of parsed.messages) {
+      if (msg && typeof msg === 'object' && !Array.isArray(msg) && 'reasoning_content' in msg) {
+        delete (msg as Record<string, unknown>).reasoning_content;
+        stripped = true;
+      }
+    }
+    if (stripped) {
+      changed = true;
+      reasons.push('strip reasoning_content');
+    }
+  }
+
+  if (/temperature/iu.test(errText) && 'temperature' in parsed) {
+    delete parsed.temperature;
+    changed = true;
+    reasons.push('strip temperature');
+  }
+
+  if (/top_p/iu.test(errText) && 'top_p' in parsed) {
+    delete parsed.top_p;
+    changed = true;
+    reasons.push('strip top_p');
+  }
+
+  if (!changed) return undefined;
+  return {
+    body: Buffer.from(JSON.stringify(parsed), 'utf8'),
+    reason: reasons.join(', '),
+  };
+}
+
+function parseUpstreamErrorText(errText: string, status: number): string {
+  let message = errText || `Upstream HTTP ${status}`;
+  if (errText) {
+    try {
+      const errJson = JSON.parse(errText) as { error?: unknown; message?: unknown };
+      const extracted = extractOpenAiErrorMessage(errJson.error ?? errJson);
+      if (extracted) {
+        message = extracted;
+      } else if (typeof errJson.message === 'string' && errJson.message) {
+        message = errJson.message;
+      }
+    } catch {
+      // 保留原始文本错误
+    }
+  }
+  return message;
 }
 
 function writeJson(res: ServerResponse, status: number, payload: unknown): void {
@@ -176,6 +354,7 @@ export class ProviderProxy {
   private boundOrigin: string | undefined;
   private readonly openResponses = new Set<ServerResponse>();
   private readonly fetchImpl: FetchImpl;
+  private logs: ProviderGatewayLogEntry[] = [];
 
   constructor(private readonly options: ProviderProxyOptions) {
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
@@ -183,6 +362,41 @@ export class ProviderProxy {
 
   get origin(): string | undefined {
     return this.boundOrigin;
+  }
+
+  getLogs(): readonly ProviderGatewayLogEntry[] {
+    return this.logs;
+  }
+
+  clearLogs(): void {
+    if (this.logs.length === 0) return;
+    this.logs = [];
+    this.options.onLogChange?.();
+  }
+
+  private appendGatewayLog(entry: Omit<ProviderGatewayLogEntry, 'id' | 'timestamp'>): void {
+    const full: ProviderGatewayLogEntry = {
+      id: randomUUID(),
+      timestamp: Date.now(),
+      ...entry,
+      ...(entry.targetUrl ? { targetUrl: redactSecrets(entry.targetUrl) } : {}),
+      message: redactSecrets(entry.message),
+      ...(entry.detail ? { detail: redactSecrets(entry.detail) } : {}),
+    };
+    this.logs = [full, ...this.logs].slice(0, MAX_GATEWAY_LOGS);
+    const tag = full.converted ? 'OpenAI转换' : full.protocol;
+    const modelInfo =
+      full.mappedModel && full.requestModel && full.mappedModel !== full.requestModel
+        ? ` [${full.requestModel} -> ${full.mappedModel}]`
+        : full.mappedModel || full.requestModel
+          ? ` [${full.mappedModel ?? full.requestModel}]`
+          : '';
+    const statusInfo = full.status !== undefined ? ` HTTP ${full.status}` : '';
+    const durInfo = full.durationMs !== undefined ? ` (${full.durationMs}ms)` : '';
+    this.options.log?.(
+      `[网关][${full.level.toUpperCase()}][${full.providerName ?? full.providerId}][${tag}] ${full.method} ${full.path}${modelInfo}${statusInfo}${durInfo} - ${full.message}${full.detail ? ` | ${full.detail}` : ''}`,
+    );
+    this.options.onLogChange?.();
   }
 
   endpointFor(providerId: string, protocol: ProviderProtocol): string {
@@ -242,8 +456,7 @@ export class ProviderProxy {
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const incomingToken = extractClientToken(req);
-    if (!safeTokenEquals(this.token, incomingToken)) {
+    if (!isClientAuthorized(req, this.token)) {
       res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: { message: 'Unauthorized local proxy token', type: 'authentication_error' } }));
       return;
@@ -263,18 +476,55 @@ export class ProviderProxy {
       return;
     }
 
-    if (
-      route.protocol === 'anthropic' &&
-      shouldConvertOpenaiToAnthropic(provider, this.options.isProtocolGatewayEnabled?.() ?? false)
-    ) {
-      await this.handleAnthropicViaOpenAi(req, res, provider, route.subPath, parsedUrl.search);
+    const method = req.method ?? 'POST';
+    // 拦截 Claude Code 等客户端发往 ANTHROPIC_BASE_URL 的非对话遥测接口，避免阻塞或误发给第三方网关
+    if (route.protocol === 'anthropic' && /^\/api\/event_logging\b/u.test(route.subPath)) {
+      await readRequestBody(req).catch(() => undefined);
+      writeJson(res, 200, {});
       return;
     }
 
+    let bodyBuf: Buffer = await readRequestBody(req);
+    const contentType = typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : '';
+    const reqModelHint =
+      method === 'POST' && contentType.includes('json') ? extractModelFromBody(bodyBuf) : undefined;
+    const selectedModel = this.options.getSelectedModel?.(provider.id);
+
+    if (
+      route.protocol === 'anthropic' &&
+      shouldConvertOpenaiToAnthropic(
+        provider,
+        this.options.isProtocolGatewayEnabled?.() ?? false,
+        reqModelHint,
+        selectedModel,
+      )
+    ) {
+      await this.handleAnthropicViaOpenAi(req, res, provider, route.subPath, parsedUrl.search, bodyBuf);
+      return;
+    }
+
+    const startedAt = Date.now();
     const upstreamBase = baseUrlForProtocol(provider, route.protocol);
     if (!upstreamBase) {
+      const msg =
+        route.protocol === 'anthropic' && (provider.openaiChatUrl?.trim() || provider.openaiResponsesUrl?.trim())
+          ? `Provider "${provider.name}" has no Anthropic URL configured (enable Local Protocol Gateway to convert OpenAI endpoint)`
+          : `Provider "${provider.name}" has no endpoint URL configured`;
+      this.appendGatewayLog({
+        level: 'error',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: route.protocol,
+        converted: false,
+        method,
+        path: route.subPath,
+        ...(reqModelHint ? { requestModel: reqModelHint } : {}),
+        status: 400,
+        durationMs: Date.now() - startedAt,
+        message: msg,
+      });
       writeJson(res, 400, {
-        error: { message: `Provider "${provider.name}" has no endpoint URL configured`, type: 'invalid_request_error' },
+        error: { message: msg, type: 'invalid_request_error' },
       });
       return;
     }
@@ -283,14 +533,13 @@ export class ProviderProxy {
     const targetParsed = new URL(targetUrl);
     const realApiKey = (await this.options.getApiKey(provider.id))?.trim();
 
-    let bodyBuf: Buffer = await readRequestBody(req);
-    const contentType = typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : '';
-    if (req.method === 'POST' && contentType.includes('json') && bodyBuf.length > 0) {
-      bodyBuf = rewriteModelInPayload(
-        bodyBuf,
-        provider,
-        this.options.getSelectedModel?.(provider.id),
-      );
+    let requestModel = reqModelHint;
+    let mappedModel = reqModelHint;
+    if (method === 'POST' && contentType.includes('json') && bodyBuf.length > 0) {
+      const rewritten = rewriteModelDetailsInPayload(bodyBuf, provider, selectedModel);
+      bodyBuf = rewritten.body;
+      requestModel = rewritten.requestModel ?? requestModel;
+      mappedModel = rewritten.mappedModel ?? mappedModel;
     }
 
     const headers = buildForwardHeaders(req.headers);
@@ -313,7 +562,6 @@ export class ProviderProxy {
     res.once('close', onClose);
 
     try {
-      const method = req.method ?? 'POST';
       const hasBody = method !== 'GET' && method !== 'HEAD' && bodyBuf.length > 0;
       const upstreamRes = await this.fetchImpl(targetUrl, {
         method,
@@ -329,9 +577,47 @@ export class ProviderProxy {
         outHeaders[key] = val;
       });
 
+      if (!upstreamRes.ok) {
+        const errText = await upstreamRes.text().catch(() => '');
+        this.appendGatewayLog({
+          level: 'error',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: route.protocol,
+          converted: false,
+          method,
+          path: route.subPath,
+          targetUrl,
+          ...(requestModel ? { requestModel } : {}),
+          ...(mappedModel ? { mappedModel } : {}),
+          status: upstreamRes.status,
+          durationMs: Date.now() - startedAt,
+          message: parseUpstreamErrorText(errText, upstreamRes.status),
+          ...(errText ? { detail: errText.slice(0, 500) } : {}),
+        });
+        res.writeHead(upstreamRes.status, outHeaders);
+        res.end(errText);
+        return;
+      }
+
       res.writeHead(upstreamRes.status, outHeaders);
       if (!upstreamRes.body) {
         res.end();
+        this.appendGatewayLog({
+          level: 'info',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: route.protocol,
+          converted: false,
+          method,
+          path: route.subPath,
+          targetUrl,
+          ...(requestModel ? { requestModel } : {}),
+          ...(mappedModel ? { mappedModel } : {}),
+          status: upstreamRes.status,
+          durationMs: Date.now() - startedAt,
+          message: 'Direct proxy response completed',
+        });
         return;
       }
 
@@ -348,6 +634,39 @@ export class ProviderProxy {
         reader.releaseLock();
       }
       if (!res.destroyed) res.end();
+      this.appendGatewayLog({
+        level: 'info',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: route.protocol,
+        converted: false,
+        method,
+        path: route.subPath,
+        targetUrl,
+        ...(requestModel ? { requestModel } : {}),
+        ...(mappedModel ? { mappedModel } : {}),
+        status: upstreamRes.status,
+        durationMs: Date.now() - startedAt,
+        message: 'Direct proxy response completed',
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.appendGatewayLog({
+        level: abort.signal.aborted ? 'warn' : 'error',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: route.protocol,
+        converted: false,
+        method,
+        path: route.subPath,
+        targetUrl,
+        ...(requestModel ? { requestModel } : {}),
+        ...(mappedModel ? { mappedModel } : {}),
+        status: 502,
+        durationMs: Date.now() - startedAt,
+        message: abort.signal.aborted ? 'Client closed connection' : errMsg,
+      });
+      throw err;
     } finally {
       res.removeListener('close', onClose);
     }
@@ -359,18 +678,60 @@ export class ProviderProxy {
     provider: ProviderConfig,
     subPath: string,
     search: string,
+    bodyBuf: Buffer,
   ): Promise<void> {
-    const bodyBuf = await readRequestBody(req);
+    const startedAt = Date.now();
+    const method = req.method ?? 'POST';
+
     if (/\/(?:messages\/)?count_tokens$/u.test(subPath)) {
-      writeJson(res, 200, estimateAnthropicTokens(bodyBuf));
+      const estimate = estimateAnthropicTokens(bodyBuf);
+      const reqModel = extractModelFromBody(bodyBuf);
+      this.appendGatewayLog({
+        level: 'info',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        ...(reqModel ? { requestModel: reqModel } : {}),
+        status: 200,
+        durationMs: Date.now() - startedAt,
+        message: `Local count_tokens estimate (${estimate.input_tokens} tokens)`,
+      });
+      writeJson(res, 200, estimate);
       return;
     }
 
-    const openaiBase = provider.openaiChatUrl?.trim();
+    if (method === 'GET' && /^\/(?:v1\/)?models$/u.test(subPath)) {
+      writeJson(res, 200, {
+        data: provider.models.map((m) => ({
+          id: m.id,
+          display_name: m.name || m.id,
+          type: 'model',
+        })),
+      });
+      return;
+    }
+
+    const openaiBase = provider.openaiChatUrl?.trim() || provider.openaiResponsesUrl?.trim();
     if (!openaiBase) {
+      const msg = `Provider "${provider.name}" has no OpenAI Chat URL configured`;
+      this.appendGatewayLog({
+        level: 'error',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        status: 400,
+        durationMs: Date.now() - startedAt,
+        message: msg,
+      });
       writeJson(res, 400, {
         type: 'error',
-        error: { message: `Provider "${provider.name}" has no OpenAI Chat URL configured`, type: 'invalid_request_error' },
+        error: { message: msg, type: 'invalid_request_error' },
       });
       return;
     }
@@ -383,19 +744,45 @@ export class ProviderProxy {
         this.options.getSelectedModel?.(provider.id),
       );
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.appendGatewayLog({
+        level: 'error',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        status: 400,
+        durationMs: Date.now() - startedAt,
+        message: `Request conversion failed: ${msg}`,
+      });
       writeJson(res, 400, {
         type: 'error',
-        error: { message: err instanceof Error ? err.message : String(err), type: 'invalid_request_error' },
+        error: { message: msg, type: 'invalid_request_error' },
       });
       return;
     }
 
     const targetUrl = joinUpstreamUrl(openaiBase, '/v1/chat/completions', search);
     const realApiKey = (await this.options.getApiKey(provider.id))?.trim();
-    const headers = buildForwardHeaders(req.headers, ANTHROPIC_STRIPPED_HEADERS);
-    headers['content-type'] = 'application/json';
+    const headers = buildOpenAiForwardHeaders(req.headers);
     if (realApiKey) {
       headers['authorization'] = `Bearer ${realApiKey}`;
+    } else {
+      this.appendGatewayLog({
+        level: 'warn',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        targetUrl,
+        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+        mappedModel: converted.model,
+        message: 'No API Key saved for this provider; forwarding without Authorization header',
+      });
     }
 
     const abort = new AbortController();
@@ -405,28 +792,88 @@ export class ProviderProxy {
     res.once('close', onClose);
 
     try {
-      const upstreamRes = await this.fetchImpl(targetUrl, {
+      let currentPayload = converted.body;
+      let retryDetail: string | undefined;
+      let upstreamRes = await this.fetchImpl(targetUrl, {
         method: 'POST',
         headers,
-        body: new Uint8Array(converted.body),
+        body: new Uint8Array(currentPayload),
         signal: abort.signal,
       });
 
+      if (!upstreamRes.ok && (upstreamRes.status === 400 || upstreamRes.status === 422)) {
+        const firstErrText = await upstreamRes.text().catch(() => '');
+        const retryPlan = buildRetryOpenAiPayload(currentPayload, upstreamRes.status, firstErrText);
+        if (retryPlan) {
+          retryDetail = retryPlan.reason;
+          this.appendGatewayLog({
+            level: 'warn',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: 'anthropic',
+            converted: true,
+            method,
+            path: subPath,
+            targetUrl,
+            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+            mappedModel: converted.model,
+            status: upstreamRes.status,
+            durationMs: Date.now() - startedAt,
+            message: `Upstream rejected parameters; retrying (${retryPlan.reason})`,
+            ...(firstErrText ? { detail: firstErrText.slice(0, 400) } : {}),
+          });
+          currentPayload = retryPlan.body;
+          upstreamRes = await this.fetchImpl(targetUrl, {
+            method: 'POST',
+            headers,
+            body: new Uint8Array(currentPayload),
+            signal: abort.signal,
+          });
+        } else {
+          const message = parseUpstreamErrorText(firstErrText, upstreamRes.status);
+          this.appendGatewayLog({
+            level: 'error',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: 'anthropic',
+            converted: true,
+            method,
+            path: subPath,
+            targetUrl,
+            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+            mappedModel: converted.model,
+            status: upstreamRes.status,
+            durationMs: Date.now() - startedAt,
+            message,
+            ...(firstErrText ? { detail: firstErrText.slice(0, 500) } : {}),
+          });
+          writeJson(res, upstreamRes.status, {
+            type: 'error',
+            error: { type: 'api_error', message },
+          });
+          return;
+        }
+      }
+
       if (!upstreamRes.ok) {
         const errText = await upstreamRes.text().catch(() => '');
-        let message = errText || `Upstream HTTP ${upstreamRes.status}`;
-        if (errText) {
-          try {
-            const errJson = JSON.parse(errText) as { error?: { message?: unknown }; message?: unknown };
-            if (typeof errJson.error?.message === 'string' && errJson.error.message) {
-              message = errJson.error.message;
-            } else if (typeof errJson.message === 'string' && errJson.message) {
-              message = errJson.message;
-            }
-          } catch {
-            // 保留原始文本错误
-          }
-        }
+        const message = parseUpstreamErrorText(errText, upstreamRes.status);
+        this.appendGatewayLog({
+          level: 'error',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: upstreamRes.status,
+          durationMs: Date.now() - startedAt,
+          message,
+          ...(errText ? { detail: errText.slice(0, 500) } : {}),
+        });
         writeJson(res, upstreamRes.status, {
           type: 'error',
           error: { type: 'api_error', message },
@@ -441,12 +888,75 @@ export class ProviderProxy {
           'cache-control': 'no-cache',
           connection: 'keep-alive',
         });
-        await pipeOpenAiStreamToAnthropicSse(upstreamRes.body, res, converted.model);
+        const summary = await pipeOpenAiStreamToAnthropicSse(upstreamRes.body, res, converted.model);
         if (!res.destroyed && !res.writableEnded) res.end();
+        const streamDetail = [
+          `chunks=${summary.chunkCount}`,
+          `finish=${summary.finishReason || 'stop'}`,
+          `in=${summary.inputTokens}`,
+          `out=${summary.outputTokens}`,
+          ...(retryDetail ? [`retry=${retryDetail}`] : []),
+        ].join(', ');
+        this.appendGatewayLog({
+          level: summary.streamError ? 'error' : summary.hasOutput ? 'info' : 'warn',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 200,
+          durationMs: Date.now() - startedAt,
+          message: summary.streamError
+            ? `Upstream stream error: ${summary.streamError}`
+            : summary.hasOutput
+              ? 'Streamed response converted (OpenAI SSE -> Anthropic SSE)'
+              : 'Upstream SSE stream completed with empty output',
+          detail: streamDetail,
+        });
         return;
       }
 
       const rawRespText = await upstreamRes.text();
+      if (converted.stream && rawRespText.trimStart().startsWith('data:')) {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        const encoded = new TextEncoder().encode(rawRespText);
+        const fallbackStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoded);
+            controller.close();
+          },
+        });
+        const summary = await pipeOpenAiStreamToAnthropicSse(fallbackStream, res, converted.model);
+        if (!res.destroyed && !res.writableEnded) res.end();
+        this.appendGatewayLog({
+          level: summary.streamError ? 'error' : summary.hasOutput ? 'info' : 'warn',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 200,
+          durationMs: Date.now() - startedAt,
+          message: summary.streamError
+            ? `Upstream stream error: ${summary.streamError}`
+            : 'Streamed response converted (OpenAI SSE payload -> Anthropic SSE)',
+          detail: `chunks=${summary.chunkCount}, finish=${summary.finishReason || 'stop'}`,
+        });
+        return;
+      }
+
       let openAiJson: Record<string, unknown>;
       try {
         const parsed = JSON.parse(rawRespText) as unknown;
@@ -455,15 +965,127 @@ export class ProviderProxy {
         }
         openAiJson = parsed as Record<string, unknown>;
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.appendGatewayLog({
+          level: 'error',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 502,
+          durationMs: Date.now() - startedAt,
+          message: msg,
+          ...(rawRespText ? { detail: rawRespText.slice(0, 400) } : {}),
+        });
         writeJson(res, 502, {
           type: 'error',
-          error: { message: err instanceof Error ? err.message : String(err), type: 'api_error' },
+          error: { message: msg, type: 'api_error' },
         });
         return;
       }
 
-      const anthropicResp = convertOpenAiToAnthropicResponse(openAiJson, converted.model);
+      let anthropicResp: Record<string, unknown>;
+      try {
+        anthropicResp = convertOpenAiToAnthropicResponse(openAiJson, converted.model);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.appendGatewayLog({
+          level: 'error',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 502,
+          durationMs: Date.now() - startedAt,
+          message: `Upstream error in response: ${msg}`,
+          ...(rawRespText ? { detail: rawRespText.slice(0, 400) } : {}),
+        });
+        writeJson(res, 502, {
+          type: 'error',
+          error: { message: msg, type: 'api_error' },
+        });
+        return;
+      }
+
+      if (converted.stream) {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        writeAnthropicResponseAsSse(res, anthropicResp);
+        if (!res.destroyed && !res.writableEnded) res.end();
+        this.appendGatewayLog({
+          level: 'info',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 200,
+          durationMs: Date.now() - startedAt,
+          message: 'Non-stream upstream JSON wrapped as Anthropic SSE',
+          ...(retryDetail ? { detail: `retry=${retryDetail}` } : {}),
+        });
+        return;
+      }
+
       writeJson(res, 200, anthropicResp);
+      this.appendGatewayLog({
+        level: 'info',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        targetUrl,
+        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+        mappedModel: converted.model,
+        status: 200,
+        durationMs: Date.now() - startedAt,
+        message: 'Non-stream response converted (OpenAI -> Anthropic)',
+        ...(retryDetail ? { detail: `retry=${retryDetail}` } : {}),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.appendGatewayLog({
+        level: abort.signal.aborted ? 'warn' : 'error',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        targetUrl,
+        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+        mappedModel: converted.model,
+        status: 502,
+        durationMs: Date.now() - startedAt,
+        message: abort.signal.aborted ? 'Client closed connection' : msg,
+      });
+      if (!res.headersSent) {
+        writeJson(res, 502, {
+          type: 'error',
+          error: { message: msg, type: 'api_error' },
+        });
+      } else if (!res.destroyed && !res.writableEnded) {
+        res.end();
+      }
     } finally {
       res.removeListener('close', onClose);
     }

@@ -472,6 +472,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('setProtocolGateway'),
     payload: z.object({ enabled: z.boolean() }),
   }),
+  z.object({ type: z.literal('clearProtocolGatewayLogs'), payload: empty }),
   z.object({
     type: z.literal('bindProviderAgents'),
     payload: z.object({

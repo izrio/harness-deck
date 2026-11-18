@@ -674,6 +674,50 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     expect(screen.getByTestId('provider-card-volcengine').textContent).toContain('代码审查官');
     expect(screen.getByTestId('provider-card-openai-gw').textContent).toContain('OpenAI → Claude');
 
+    // 点击「网关日志」入口按钮打开日志弹窗，查看空状态、日志渲染、清空日志与打开输出面板
+    fireEvent.click(screen.getByTestId('provider-gateway-logs-btn'));
+    expect(screen.getByTestId('provider-gateway-logs-dialog')).toBeTruthy();
+    expect(screen.getByTestId('provider-gateway-logs-empty')).toBeTruthy();
+
+    host({
+      type: 'providers',
+      payload: {
+        ...store.getState().providers,
+        gatewayLogs: [
+          {
+            id: 'log-1',
+            timestamp: Date.now(),
+            level: 'error',
+            providerId: 'openai-gw',
+            providerName: 'OpenAI Only Gateway',
+            protocol: 'anthropic',
+            converted: true,
+            method: 'POST',
+            path: '/v1/messages',
+            targetUrl: 'https://api.openai-compat.example/v1/chat/completions',
+            requestModel: 'claude-sonnet-4-5',
+            mappedModel: 'gpt-4.1',
+            status: 400,
+            durationMs: 120,
+            message: 'Model not supported',
+          },
+        ],
+      },
+    });
+    const logItem = screen.getByTestId('provider-gateway-log-log-1');
+    expect(logItem.textContent).toContain('HTTP 400');
+    expect(logItem.textContent).toContain('claude-sonnet-4-5 → gpt-4.1');
+    expect(logItem.textContent).toContain('Model not supported');
+
+    fireEvent.click(screen.getByTestId('provider-gateway-clear-logs-btn'));
+    expect(posted).toContainEqual({ type: 'clearProtocolGatewayLogs', payload: {} });
+
+    fireEvent.click(screen.getByTestId('provider-gateway-open-output-btn'));
+    expect(posted).toContainEqual({ type: 'showLogs', payload: {} });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('provider-gateway-logs-dialog')).toBeNull();
+
     fireEvent.click(screen.getByTestId('settings-tab-agents'));
     const boundBadge = screen.getByTestId('backend-bound-provider-claude');
     expect(boundBadge.textContent).toContain('服务商：火山方舟');
@@ -910,8 +954,8 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     });
 
     // 无冲突的 context7 默认自动勾选，已存在的 filesystem 默认不勾选避免误覆盖
-    expect((screen.getByTestId('mcp-candidate-check-context7') as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByTestId('mcp-candidate-check-filesystem') as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByTestId('mcp-candidate-check-context7').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByTestId('mcp-candidate-check-filesystem').getAttribute('aria-checked')).toBe('false');
 
     fireEvent.click(screen.getByTestId('mcp-import-submit'));
     expect(posted).toContainEqual({

@@ -106,6 +106,8 @@ export function SessionsView({
 
   return (
     <SidebarProvider
+      keyboardShortcut={false}
+      persistCookie={false}
       className={cn('min-h-0 flex-1 flex-col overflow-hidden min-[760px]:flex-row', hidden && 'hidden')}
       aria-hidden={hidden || undefined}
       data-testid="workbench-sessions"
@@ -362,7 +364,7 @@ function SessionListItemRow({
               title={t('approval.label')}
             />
           ) : session.unread ? (
-            <span className="size-2 shrink-0 rounded-full bg-accent ring-2 ring-accent-tint" />
+            <span className="size-2 shrink-0 rounded-full bg-brand ring-2 ring-accent-tint" />
           ) : null}
         </div>
 

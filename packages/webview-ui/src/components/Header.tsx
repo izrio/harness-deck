@@ -2,7 +2,7 @@
  * 工作台顶栏：
  * 五大核心模块导航（总览 / 定时 / 智能体 / 任务 / 会话）+ 新建会话 / 全宽工作台 / 历史会话 / 设置按钮
  */
-import type { KeyboardEvent } from 'react';
+import { useRef, type KeyboardEvent } from 'react';
 import { WORKBENCH_MODULES, type WorkbenchModule } from '@harness-deck/shared/limits';
 import { setActiveModule, toggleHistoryPage, toggleSettingsPage, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
@@ -30,21 +30,25 @@ export function Header() {
   const tasks = useView((s) => s.workbench.tasks.items);
   const schedules = useView((s) => s.workbench.schedules);
   const t = useT();
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const overviewBadge = overview.waiting.length + overview.unread.length;
   const tasksActiveCount = tasks.filter((item) => item.status === 'in_progress' || item.status === 'review').length;
   const schedulesRunning = schedules.some((r) => r.lastStatus === 'running');
 
   const onNavKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    e.preventDefault();
     const idx = WORKBENCH_MODULES.indexOf(activeModule);
-    const nextIdx =
-      e.key === 'ArrowRight'
-        ? (idx + 1) % WORKBENCH_MODULES.length
-        : (idx - 1 + WORKBENCH_MODULES.length) % WORKBENCH_MODULES.length;
+    if (idx < 0) return;
+    let nextIdx = -1;
+    if (e.key === 'ArrowRight') nextIdx = (idx + 1) % WORKBENCH_MODULES.length;
+    else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + WORKBENCH_MODULES.length) % WORKBENCH_MODULES.length;
+    else if (e.key === 'Home') nextIdx = 0;
+    else if (e.key === 'End') nextIdx = WORKBENCH_MODULES.length - 1;
+    if (nextIdx < 0) return;
+    e.preventDefault();
     const nextMod = WORKBENCH_MODULES[nextIdx]!;
     setActiveModule(nextMod);
+    tabRefs.current[nextIdx]?.focus();
   };
 
   const renderModuleIcon = (mod: WorkbenchModule) => {
@@ -73,16 +77,21 @@ export function Header() {
           onKeyDown={onNavKeyDown}
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
         >
-          {WORKBENCH_MODULES.map((mod) => {
+          {WORKBENCH_MODULES.map((mod, index) => {
             const active = !settingsOpen && !historyOpen && activeModule === mod;
             return (
               <button
+                ref={(el) => {
+                  tabRefs.current[index] = el;
+                }}
                 key={mod}
                 type="button"
                 role="tab"
+                id={`workbench-tab-${mod}`}
                 data-testid={`workbench-tab-${mod}`}
                 aria-selected={active}
-                tabIndex={active ? 0 : -1}
+                aria-controls={`workbench-panel-${mod}`}
+                tabIndex={activeModule === mod ? 0 : -1}
                 className={cn(
                   'inline-flex shrink-0 items-center gap-1 rounded-[6px] px-2 py-1 text-[12px] font-medium transition-colors duration-100',
                   active
@@ -96,23 +105,23 @@ export function Header() {
                 {mod === 'overview' && overviewBadge > 0 ? (
                   <span
                     className={cn(
-                      'ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-semibold text-white',
-                      overview.waiting.length > 0 ? 'bg-orange' : 'bg-accent',
+                      'ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-semibold text-brand-foreground',
+                      overview.waiting.length > 0 ? 'bg-orange' : 'bg-brand',
                     )}
                   >
                     {overviewBadge}
                   </span>
                 ) : null}
                 {mod === 'schedules' && schedulesRunning ? (
-                  <span className="size-1.5 rounded-full bg-accent" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} />
+                  <span className="size-1.5 rounded-full bg-brand" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} />
                 ) : null}
                 {mod === 'tasks' && tasksActiveCount > 0 ? (
-                  <span className="ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full bg-accent/15 px-1 text-[10px] leading-4 font-semibold text-accent-ink">
+                  <span className="ml-0.5 inline-flex min-w-4 items-center justify-center rounded-full bg-brand/15 px-1 text-[10px] leading-4 font-semibold text-accent-ink">
                     {tasksActiveCount}
                   </span>
                 ) : null}
                 {mod === 'sessions' && session.running ? (
-                  <span className="size-1.5 rounded-full bg-accent" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} />
+                  <span className="size-1.5 rounded-full bg-brand" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} />
                 ) : null}
               </button>
             );

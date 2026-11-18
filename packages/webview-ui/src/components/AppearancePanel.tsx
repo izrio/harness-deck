@@ -11,7 +11,7 @@ import { postToHost } from '../vscode.ts';
 import { Markdown } from './Markdown.tsx';
 import { ValuePill } from './beautifului/index.ts';
 import { Button } from '@/components/ui/button';
-import { ButtonGroup, ButtonGroupText } from '@/components/ui/button-group';
+import { NumberStepper } from './NumberStepper.tsx';
 import { Input } from '@/components/ui/input';
 
 const MIN_SIZE = 10;
@@ -165,31 +165,17 @@ export function AppearancePanel() {
         <span className="text-[12.5px] font-medium text-ink">{t('appearance.size')}</span>
         <div className="flex items-center gap-2">
           {appearance.fontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-          <ButtonGroup>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('appearance.smaller')}
-              disabled={size <= MIN_SIZE}
-              onClick={() => setSize(size - 1)}
-            >
-              −
-            </Button>
-            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="appearance-size">
-              {size}px
-            </ButtonGroupText>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('appearance.larger')}
-              disabled={size >= MAX_SIZE}
-              onClick={() => setSize(size + 1)}
-            >
-              +
-            </Button>
-          </ButtonGroup>
+          <NumberStepper
+ decLabel={t('appearance.smaller')}
+ incLabel={t('appearance.larger')}
+ decDisabled={size <= MIN_SIZE}
+ incDisabled={size >= MAX_SIZE}
+ onDec={() => setSize(size - 1)}
+ onInc={() => setSize(size + 1)}
+ valueTestId="appearance-size"
+>
+ {size}px
+</NumberStepper>
         </div>
       </div>
 
@@ -198,31 +184,17 @@ export function AppearancePanel() {
         <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.lineHeight')}</span>
         <div className="flex items-center gap-2">
           {appearance.lineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-          <ButtonGroup>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('settings.appearance.lineHeightSmaller')}
-              disabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
-              onClick={() => setLineHeight(lineHeight - 0.1)}
-            >
-              −
-            </Button>
-            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="prose-line-height">
-              {lineHeight.toFixed(1)}
-            </ButtonGroupText>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('settings.appearance.lineHeightLarger')}
-              disabled={lineHeight >= MAX_LINE_HEIGHT - 0.01}
-              onClick={() => setLineHeight(lineHeight + 0.1)}
-            >
-              +
-            </Button>
-          </ButtonGroup>
+          <NumberStepper
+ decLabel={t('settings.appearance.lineHeightSmaller')}
+ incLabel={t('settings.appearance.lineHeightLarger')}
+ decDisabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
+ incDisabled={lineHeight >= MAX_LINE_HEIGHT - 0.01}
+ onDec={() => setLineHeight(lineHeight - 0.1)}
+ onInc={() => setLineHeight(lineHeight + 0.1)}
+ valueTestId="prose-line-height"
+>
+ {lineHeight.toFixed(1)}
+</NumberStepper>
         </div>
       </div>
 
@@ -231,31 +203,17 @@ export function AppearancePanel() {
         <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.paragraphSpacing')}</span>
         <div className="flex items-center gap-2">
           {appearance.paragraphSpacing === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-          <ButtonGroup>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('settings.appearance.paragraphSpacingSmaller')}
-              disabled={paragraphSpacing <= MIN_SPACING}
-              onClick={() => setParagraphSpacing(paragraphSpacing - 2)}
-            >
-              −
-            </Button>
-            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="prose-paragraph-spacing">
-              {paragraphSpacing}px
-            </ButtonGroupText>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('settings.appearance.paragraphSpacingLarger')}
-              disabled={paragraphSpacing >= MAX_SPACING}
-              onClick={() => setParagraphSpacing(paragraphSpacing + 2)}
-            >
-              +
-            </Button>
-          </ButtonGroup>
+          <NumberStepper
+ decLabel={t('settings.appearance.paragraphSpacingSmaller')}
+ incLabel={t('settings.appearance.paragraphSpacingLarger')}
+ decDisabled={paragraphSpacing <= MIN_SPACING}
+ incDisabled={paragraphSpacing >= MAX_SPACING}
+ onDec={() => setParagraphSpacing(paragraphSpacing - 2)}
+ onInc={() => setParagraphSpacing(paragraphSpacing + 2)}
+ valueTestId="prose-paragraph-spacing"
+>
+ {paragraphSpacing}px
+</NumberStepper>
         </div>
       </div>
 
@@ -284,31 +242,17 @@ export function AppearancePanel() {
               );
             })}
           </div>
-          <ButtonGroup>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('settings.appearance.contentWidthSmaller')}
-              disabled={contentWidth <= MIN_WIDTH}
-              onClick={() => setContentWidth(contentWidth - 40)}
-            >
-              −
-            </Button>
-            <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid="prose-content-width">
-              {contentWidth}px
-            </ButtonGroupText>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              aria-label={t('settings.appearance.contentWidthLarger')}
-              disabled={contentWidth >= MAX_WIDTH}
-              onClick={() => setContentWidth(contentWidth + 40)}
-            >
-              +
-            </Button>
-          </ButtonGroup>
+          <NumberStepper
+ decLabel={t('settings.appearance.contentWidthSmaller')}
+ incLabel={t('settings.appearance.contentWidthLarger')}
+ decDisabled={contentWidth <= MIN_WIDTH}
+ incDisabled={contentWidth >= MAX_WIDTH}
+ onDec={() => setContentWidth(contentWidth - 40)}
+ onInc={() => setContentWidth(contentWidth + 40)}
+ valueTestId="prose-content-width"
+>
+ {contentWidth}px
+</NumberStepper>
         </div>
       </div>
 

@@ -7,6 +7,7 @@ on:
 
 jobs:
   check:
+    name: Build VS Code plugin
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +25,33 @@ jobs:
         with:
           name: vsix
           path: packages/extension/*.vsix
+
+  jetbrains:
+    name: Build IDEA plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Test and build JetBrains plugin
+        working-directory: packages/jetbrains
+        run: gradle test buildPlugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jetbrains-plugin
+          path: packages/jetbrains/build/distributions/*.zip
 
   # 插件里有按平台分支的代码（Windows 下 .cmd 的启动方式、PATHEXT、结束进程树；macOS 的路径）：单元测试在这两个平台上也跑一遍。
   platforms:

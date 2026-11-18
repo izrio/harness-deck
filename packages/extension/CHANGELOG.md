@@ -1,5 +1,20 @@
 # 更新记录 / Changelog
 
+## 0.5.0
+
+**JetBrains IDE 插件与独立 Sidecar、原生多底层扩展、工作台与界面重构**：新增 JetBrains IDE 插件（IntelliJ IDEA、WebStorm、PyCharm、GoLand、Rider 等）与独立 Node.js Sidecar；新增 Claude Code、Pi、ZCode 原生底层；上线工作台（总览、定时任务、智能体、看板任务、跨项目会话）、服务商代理与绑定、MCP / Skill 管理；前端组件体系重构为 `shadcn-ui` + `beautifului` 并补齐组件级测试与无障碍改进。
+
+**JetBrains IDE plugin & standalone Sidecar, native backends, Workbench, and UI overhaul**: Added the JetBrains IDE plugin (IntelliJ IDEA, WebStorm, PyCharm, GoLand, Rider, etc.) powered by a standalone Node.js sidecar; added native Claude Code, Pi, and ZCode backends; introduced the Workbench (Overview, Schedules, Agents, Kanban Tasks, Cross-project Sessions), Provider Proxy & bindings, and MCP / Skill management; refactored the frontend UI onto `shadcn-ui` + `beautifului` with component test coverage and accessibility fixes.
+
+- **JetBrains IDE 插件（`packages/jetbrains`）**：基于 `JBCefBrowser`（支持降级处理）、本地静态资源服务与 `JBCefJSQuery` 通信桥接，集成 `PasswordSafe` 密钥存储、编辑器上下文同步、终端与 Diff 视图；通过 `sidecar.cjs` 守护进程与 VS Code 扩展共享主机核心与 `~/.harness-deck/` 配置状态。
+  **JetBrains IDE plugin (`packages/jetbrains`)**: Built on `JBCefBrowser` (with fallback handling), an embedded static asset server and `JBCefJSQuery` bridge, `PasswordSafe` secret storage, editor context sync, terminal and diff integration; shares host runtime and `~/.harness-deck/` state with VS Code via `sidecar.cjs`.
+- **原生多底层扩展**：新增 Claude Code（`claude -p`）、Pi（`pi --mode rpc`）和 ZCode（`zcode app-server --stdio`）原生适配器，支持自动定位安装与默认底层配置（`harnessDeck.defaultBackend`）。
+  **New native backends**: Added native adapters for Claude Code (`claude -p`), Pi (`pi --mode rpc`), and ZCode (`zcode app-server --stdio`), with executable discovery and `harnessDeck.defaultBackend` configuration.
+- **工作台与生态管理**：新增工作台面板（总览、定时调度与无人值守执行、智能体配置、看板任务、跨项目会话），以及服务商管理（含 OpenAI 转 Anthropic 本地代理与模型预设）、MCP 导入与管理、Skill 管理。
+  **Workbench & ecosystem management**: Added the Workbench (Overview, Schedules & unattended runner, Agents, Kanban Tasks, Cross-project Sessions), Provider management (including local OpenAI-to-Anthropic proxy and presets), MCP importer/service, and Skill management.
+- **界面重构与稳定性**：基于 `shadcn-ui` 与 `beautifului` 规范重构设置页与工作台视图，拆分大模块并消除重复逻辑；修复定时任务手风琴状态、深色模式对比度、键盘导航与 `Esc` 处理、流式输出记忆化渲染和错误提示稳定性，新增 jsdom + Testing Library 测试基线。
+  **UI refactor & stability**: Refactored settings and workbench views onto `shadcn-ui` and `beautifului`, splitting oversized modules and deduplicating shared logic; fixed schedule accordion state, dark-mode contrast, keyboard navigation and `Esc` handling, streaming memoization, and toast stability, backed by a new jsdom + Testing Library test suite.
+
 ## 0.4.0
 
 **全面审查后的修复**：底层的启动和切换、ACP 底层的安全保护、发送失败不再丢输入；输入框上方的状态栏合并成一行；对比度、点击区域和读屏支持。

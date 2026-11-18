@@ -341,18 +341,19 @@ export interface ProtocolReadinessOptions {
   readonly protocolGatewayEnabled?: boolean;
 }
 
-/** 该服务商是否可通过本地协议转换网关将 OpenAI Chat Completions 接口转换为 Anthropic 协议。 */
+/** 该服务商是否可通过本地协议转换网关将 OpenAI 兼容接口转换为 Anthropic 协议。 */
 export function canProviderConvertOpenaiToAnthropic(
   provider: {
     readonly anthropicUrl?: string;
     readonly openaiChatUrl?: string;
+    readonly openaiResponsesUrl?: string;
     readonly convertOpenaiToAnthropic?: boolean;
   },
   options?: ProtocolReadinessOptions,
 ): boolean {
   if (options?.protocolGatewayEnabled === false) return false;
   const gatewayOn = options?.protocolGatewayEnabled === true || provider.convertOpenaiToAnthropic === true;
-  return gatewayOn && Boolean(provider.openaiChatUrl?.trim());
+  return gatewayOn && Boolean(provider.openaiChatUrl?.trim() || provider.openaiResponsesUrl?.trim());
 }
 
 /** 服务商是否已配置某个协议的连接地址（开启本地协议转换网关时，OpenAI Chat 接口也可满足 Anthropic 协议）。 */
