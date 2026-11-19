@@ -203,6 +203,7 @@ packages/
 | v0.5.1 | 对话虚拟列表、统一控件尺寸与离线 Iconify 图标规范、WSL 运行时发现、浏览器桥接与 OpenAI 转 Anthropic 代理增强 |
 | v0.5.2 | 对话思考轨迹折叠（`ThinkingTrace`）、首页智能体快捷下拉切换、设置页统一分区布局与控件尺寸对齐、状态栏与会话列表视觉打磨 |
 | v0.5.3 | Google Antigravity（`agy acp`）内置接入、思考轨迹与运行状态视觉精简、Claude 服务商 `--settings` 覆盖与代理/运行时增强 |
+| v0.5.4 | 跨智能体统一标签栏与标签图标、Beautiful UI `LoadingState`（Orbit 运行状态）、底层 SVG 图标与 dsh 网页地址入口 |
 
 里程碑细节见 [DESIGN.md 第 12 节](./docs/DESIGN.md#12-里程碑与任务拆解)，每个版本的改动见 [CHANGELOG](./packages/extension/CHANGELOG.md)。
 

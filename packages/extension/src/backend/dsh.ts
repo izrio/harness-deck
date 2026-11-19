@@ -70,6 +70,7 @@ export function createDshBackend(profile: Extract<BackendProfile, { kind: 'dsh' 
     profile,
     controller: chat,
     dshClient: () => dsh.client,
+    webUrl: () => manager.endpoint?.origin.replace(/\/+$/u, ''),
     start: () => {
       if (!host.isWorkspaceTrusted()) {
         host.log('工作区未受信任，不启动 dsh');

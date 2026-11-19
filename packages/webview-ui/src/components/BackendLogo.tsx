@@ -5,9 +5,9 @@ import type { BackendView } from '@harness-deck/shared';
 import { cn } from '../lib/utils.ts';
 import antigravity from '../assets/backends/antigravity.svg?inline';
 import claude from '../assets/backends/claude.svg?inline';
-import codebuddy from '../assets/backends/codebuddy.png?inline';
+import codebuddy from '../assets/backends/codebuddy.svg?inline';
 import deepseek from '../assets/backends/deepseek.svg?inline';
-import ohMyPi from '../assets/backends/oh-my-pi.png?inline';
+import ohMyPi from '../assets/backends/oh-my-pi.svg?inline';
 import opencode from '../assets/backends/opencode.svg?inline';
 import zcode from '../assets/backends/zcode.svg?inline';
 
@@ -18,7 +18,7 @@ const LOGOS: Readonly<Record<string, { readonly src: string; readonly tile?: boo
   codebuddy: { src: codebuddy },
   claude: { src: claude, tile: true },
   opencode: { src: opencode },
-  antigravity: { src: antigravity },
+  antigravity: { src: antigravity, tile: true },
   zcode: { src: zcode },
 };
 

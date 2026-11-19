@@ -480,4 +480,140 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
     expect(dsh?.stopCount).toBe(1);
     expect(claude?.stopCount).toBe(1);
   });
+
+  it('新建会话并切换智能体时不清空顶部标签，支持 DeepSeek 与 Claude 标签共存、图标元信息及跨标签切换', async () => {
+    const env = createFakePlatform({
+      initialSettings: { defaultBackend: 'dsh' },
+    });
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, { createBackend: factory.createBackend });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    const latestTabs = () => {
+      for (let i = env.posted.length - 1; i >= 0; i--) {
+        const msg = env.posted[i]!;
+        if (msg.type === 'tabs') return msg.payload;
+        if (msg.type === 'snapshot') return msg.payload.tabs;
+      }
+      return undefined;
+    };
+
+    const dsh = factory.byId.get('dsh')?.[0];
+    expect(dsh).toBeDefined();
+
+    // 1. DeepSeek 已有会话
+    dsh?.observe({ sessionId: 'dsh-s1', title: 'DSH 架构评审', running: false, hasTurnOutput: true });
+    await flushAsync();
+
+    // 2. 点击「新建对话」并切换到 Claude：顶部标签应保留第一个 DeepSeek 会话，第二个为 Claude 会话
+    runtime.handleWebviewMessage({ type: 'newSession', payload: {} });
+    await flushAsync();
+    runtime.handleWebviewMessage({ type: 'selectBackend', payload: { id: 'claude' } });
+    await flushAsync();
+
+    const afterSwitch = latestTabs();
+    expect(afterSwitch?.items).toHaveLength(2);
+    expect(afterSwitch?.items[0]).toMatchObject({
+      backendId: 'dsh',
+      backendName: 'DeepSeek',
+      sessionId: 'dsh-s1',
+      title: 'DSH 架构评审',
+    });
+    expect(afterSwitch?.items[1]).toMatchObject({
+      backendId: 'claude',
+      backendName: 'Claude Code',
+    });
+    expect(afterSwitch?.items[1]?.sessionId).toBeUndefined();
+    expect(afterSwitch?.active).toBe(afterSwitch?.items[1]?.key);
+
+    // 3. Claude 发出首条消息产生会话后，第二个标签绑定到该 Claude 会话
+    const claude = factory.byId.get('claude')?.[0];
+    expect(claude).toBeDefined();
+    claude?.observe({ sessionId: 'claude-c1', title: 'Claude 单元测试', running: true, hasTurnOutput: true });
+    await flushAsync();
+
+    const afterClaudeStart = latestTabs();
+    expect(afterClaudeStart?.items).toHaveLength(2);
+    expect(afterClaudeStart?.items[0]).toMatchObject({ backendId: 'dsh', sessionId: 'dsh-s1', title: 'DSH 架构评审' });
+    expect(afterClaudeStart?.items[1]).toMatchObject({
+      backendId: 'claude',
+      sessionId: 'claude-c1',
+      title: 'Claude 单元测试',
+      running: true,
+    });
+
+    // 4. 点击第一个 DeepSeek 标签：切回 dsh 而不覆盖默认智能体 claude，两个标签都保留
+    const dshTabKey = afterClaudeStart!.items[0]!.key;
+    const claudeTabKey = afterClaudeStart!.items[1]!.key;
+    runtime.handleWebviewMessage({ type: 'activateTab', payload: { key: dshTabKey } });
+    await flushAsync();
+
+    expect(dsh?.switchedSessions).toContain('dsh-s1');
+    expect(env.settings.get('defaultBackend', '')).toBe('claude');
+    const afterActivateDsh = latestTabs();
+    expect(afterActivateDsh?.active).toBe(dshTabKey);
+    expect(afterActivateDsh?.items).toHaveLength(2);
+
+    // 5. 后台的 Claude 会话结束运行：顶部第二个标签状态实时刷新为 running=false
+    claude?.observe({ sessionId: 'claude-c1', title: 'Claude 单元测试', running: false, hasTurnOutput: true });
+    await flushAsync();
+    const afterBgFinish = latestTabs();
+    expect(afterBgFinish?.items[1]).toMatchObject({ key: claudeTabKey, running: false });
+
+    // 6. 关闭第二个 Claude 标签：只剩第一个 DeepSeek 标签
+    runtime.handleWebviewMessage({ type: 'closeTab', payload: { key: claudeTabKey } });
+    await flushAsync();
+    const afterClose = latestTabs();
+    expect(afterClose?.items).toHaveLength(1);
+    expect(afterClose?.items[0]).toMatchObject({ key: dshTabKey, backendId: 'dsh', sessionId: 'dsh-s1' });
+  });
+
+  it('冷启动恢复跨智能体标签时不提前启动非激活智能体，点击对应标签后按需启动并加载会话', async () => {
+    const env = createFakePlatform({
+      initialSettings: { defaultBackend: 'claude' },
+      initialWorkspaceState: {
+        'harnessDeck.unifiedTabs': {
+          items: [
+            { backendId: 'dsh', sessionId: 'dsh-old', title: '历史 DSH 会话' },
+            { backendId: 'claude', sessionId: 'claude-old', title: '历史 Claude 会话' },
+          ],
+          active: { backendId: 'claude', sessionId: 'claude-old' },
+        },
+      },
+    });
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, { createBackend: factory.createBackend });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    // 启动时仅启动默认智能体 claude，不提前启动 dsh
+    expect(factory.created.map((b) => b.profile.id)).toEqual(['claude']);
+    const snapMsg = [...env.posted].reverse().find((m) => m.type === 'snapshot');
+    expect(snapMsg?.type).toBe('snapshot');
+    if (snapMsg?.type === 'snapshot') {
+      expect(snapMsg.payload.tabs.items).toHaveLength(2);
+      expect(snapMsg.payload.tabs.items[0]).toMatchObject({
+        backendId: 'dsh',
+        backendName: 'DeepSeek',
+        sessionId: 'dsh-old',
+        title: '历史 DSH 会话',
+      });
+      expect(snapMsg.payload.tabs.items[1]).toMatchObject({
+        backendId: 'claude',
+        backendName: 'Claude Code',
+        sessionId: 'claude-old',
+      });
+
+      // 点击第一个 DeepSeek 标签：按需启动 dsh 并切换到 dsh-old
+      runtime.handleWebviewMessage({
+        type: 'activateTab',
+        payload: { key: snapMsg.payload.tabs.items[0]!.key },
+      });
+      await flushAsync();
+    }
+
+    expect(factory.created.map((b) => b.profile.id)).toEqual(['claude', 'dsh']);
+    expect(factory.byId.get('dsh')?.[0]?.switchedSessions).toContain('dsh-old');
+  });
 });

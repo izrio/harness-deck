@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.5.4
+
+**跨智能体统一标签栏、共享加载态组件与智能体图标更新**：顶部标签栏不再按底层隔离，DeepSeek、Claude、Pi、ZCode、ACP 的会话可以并排打开并各自显示智能体图标；新增 Beautiful UI `LoadingState`（Drive / Dots / Orbit），运行状态改用 Orbit 轨道动效；底层图标改用 SVG，设置页直接展示 dsh 网页地址。
+
+**Unified cross-agent tab bar, shared loading state, and backend icon refresh**: The tab bar is no longer isolated per backend—DeepSeek, Claude, Pi, ZCode, and ACP sessions can stay open side by side with their own agent icons; added the Beautiful UI `LoadingState` (Drive / Dots / Orbit) with Orbit used for the run status; backend logos moved to SVG and the settings card now shows the dsh web address.
+
+- **跨智能体统一标签栏**：新增 `UnifiedTabs` 模型，标签归属到具体智能体并支持持久化与冷启动恢复，切换或新建会话切换智能体不再清空已有标签；冷启动恢复时按需启动非激活智能体，旧会话临时 key 换成真实 id 后标签同步更新且不丢失；标签栏与会话历史列表展示智能体图标，并补充 `unifiedTabs`、`tabBar` 与运行时集成测试。
+  **Unified cross-agent tabs**: Added the `UnifiedTabs` model so each tab belongs to a backend with persistence and cold-start restore; switching backends or creating sessions no longer clears existing tabs; inactive backends start on demand when restoring, pending session keys are rekeyed to real ids without losing tabs, and tabs plus session history show backend icons, covered by `unifiedTabs`, `tabBar`, and runtime integration tests.
+- **加载态与思考轨迹**：抽出共享 `LoadingState` 组件（Drive / Dots / Orbit 三种 3×3 网格动效），`RunStatus` 改用 Orbit 轨道动效并单独处理等待审批状态；思考轨迹在当前轮次运行期间保持展开，整轮操作结束后统一收起。
+  **Loading state & thinking trace**: Extracted a shared `LoadingState` component (Drive / Dots / Orbit 3×3 grid animations); `RunStatus` now uses the Orbit animation with a separate waiting-for-approval state, and thinking traces stay expanded while the current turn runs, collapsing only after the whole turn finishes.
+- **图标与 dsh 入口**：CodeBuddy、oh-my-pi 图标改用 SVG，Antigravity 图标补充底板并更新 OpenCode 图标；`BackendView.webUrl` 让设置页直接展示 dsh 网页地址作为打开入口。
+  **Icons & dsh entry**: Switched CodeBuddy and oh-my-pi logos to SVG, added a tile background to the Antigravity logo, refreshed the OpenCode icon, and exposed `BackendView.webUrl` so the settings card shows the dsh web address as a direct entry point.
+
 ## 0.5.3
 
 **Google Antigravity 原生支持、思考轨迹与状态栏精简、Claude 服务商运行时与代理增强**：新增 Google Antigravity（`agy acp`）内置智能体及协议适配；精简 `ThinkingTrace`、`RunStatus` 与活动行视觉状态，消除重复加载动效；增强 Claude 服务商 `--settings` 环境变量注入、`NO_PROXY` 处理与服务商代理稳定性。

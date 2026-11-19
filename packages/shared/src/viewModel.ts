@@ -346,6 +346,10 @@ export interface TabView {
   /** 标签的标识，切换、关闭时用；新对话的标签在第一条消息发送后仍沿用同一个 key。 */
   readonly key: string;
   readonly sessionId?: string;
+  /** 所属智能体（底层）id：用于在标签标题前展示智能体图标并支持跨智能体切换。 */
+  readonly backendId?: string;
+  /** 所属智能体显示名（用于图标回退与悬浮提示）。 */
+  readonly backendName?: string;
   readonly title: string;
   readonly running: boolean;
   /** 有等待处理的审批或提问。 */
@@ -400,6 +404,8 @@ export interface BackendView {
   readonly installCommand?: string;
   /** 找不到时的安装提示（设置里写的 installHint）。 */
   readonly installHint?: string;
+  /** dsh 网页的地址（本机 origin，不含启动令牌）；点击由宿主转发端口并在浏览器打开。 */
+  readonly webUrl?: string;
   /** 该智能体在当前窗口进程中是否已启动保活。 */
   readonly alive?: boolean;
   /** 该智能体在当前窗口进程中是否有会话正在执行回复。 */

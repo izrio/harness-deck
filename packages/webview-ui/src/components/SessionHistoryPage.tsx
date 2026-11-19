@@ -11,6 +11,7 @@ import { useT } from '../i18n.ts';
 import { relativeTime } from '../lib/time.ts';
 import { closeHistoryPage, setActiveModule, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
+import { BackendLogo } from './BackendLogo.tsx';
 import { GlideMenu, MenuItem, ValuePill } from './beautifului/index.ts';
 import {
   ArrowLeftIcon,
@@ -29,7 +30,9 @@ export function SessionHistoryPage() {
   const session = useView((s) => s.session);
   const sessions = useView((s) => s.sessions);
   const sessionGroups = useView((s) => s.workbench.sessionGroups);
-  const activeBackendId = useView((s) => s.backends.active);
+  const backends = useView((s) => s.backends);
+  const activeBackendId = backends.active;
+  const activeBackend = backends.items.find((b) => b.id === activeBackendId) ?? (activeBackendId ? { id: activeBackendId, name: activeBackendId } : undefined);
   const [query, setQuery] = useState('');
 
   useEffect(() => {
@@ -242,7 +245,10 @@ export function SessionHistoryPage() {
                               }
                               onSelect={() => openGroupedSession(sess)}
                             >
-                              {sess.title}
+                              <span className="inline-flex min-w-0 items-center gap-1.5">
+                                <BackendLogo backend={{ id: sess.backendId, name: sess.backendName }} size="sm" />
+                                <span className="min-w-0 truncate">{sess.title}</span>
+                              </span>
                             </MenuItem>
                           );
                         })}
@@ -282,7 +288,10 @@ export function SessionHistoryPage() {
                     }
                     onSelect={() => openFlatSession(s.id)}
                   >
-                    {s.title}
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      {activeBackend ? <BackendLogo backend={activeBackend} size="sm" /> : null}
+                      <span className="min-w-0 truncate">{s.title}</span>
+                    </span>
                   </MenuItem>
                 ))}
               </GlideMenu>

@@ -138,6 +138,8 @@ export interface ControllerHostOptions {
   readonly pickFiles?: () => Promise<readonly string[]>;
   /** 会话视图每次刷新后通知上层（用于系统通知检测与工作台同步）。 */
   readonly onSessionObserve?: (observation: SessionObservation) => void;
+  /** 会话临时 key 替换为真实会话 id 时通知上层（例如 Claude 首条消息 pending key -> session_id）。 */
+  readonly onSessionRekey?: (oldSessionId: string, newSessionId: string) => void;
   /** 判断某个会话 id 是否属于后台定时任务隐藏会话（不出现在左侧会话列表）。 */
   readonly isHiddenSession?: (sessionId: string) => boolean;
   /** 当前工作台五模块状态（随快照下发）。 */
@@ -198,6 +200,8 @@ export interface RunningBackend {
   readonly controller: ChatBackendController;
   /** dsh 底层当前已连接的客户端（定时任务可复用同一 Host 创建后台隔离会话）。 */
   readonly dshClient?: () => DshClient | undefined;
+  /** dsh 网页地址（本机 origin，不含令牌）；底层未启动时为空。 */
+  readonly webUrl?: () => string | undefined;
   /** 视图打开时启动（工作区受信任时）。 */
   start(): void;
   restart(): void;

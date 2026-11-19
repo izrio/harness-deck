@@ -174,15 +174,25 @@ export function BackendCard({
         )}
 
         {active && backend.kind === 'dsh' ? (
-          <div className="ml-auto flex flex-wrap items-center gap-1">
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
               <KeyIcon className="size-3 text-ink-3" />
               <span>{t('apiKey.configure')}</span>
             </Button>
-            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'openWebUI', payload: {} })}>
-              <GlobeIcon className="size-3 text-ink-3" />
-              <span>{t('header.openWebUI')}</span>
-            </Button>
+            {backend.webUrl ? (
+              <Button
+                type="button"
+                variant="link"
+                size="default"
+                data-testid={`open-webui-${backend.id}`}
+                title={t('header.openWebUI')}
+                className="h-auto max-w-60 min-w-0 px-0 text-[11.5px] font-normal text-ink-2 hover:text-ink"
+                onClick={() => postToHost({ type: 'openWebUI', payload: {} })}
+              >
+                <GlobeIcon className="size-3 text-ink-3" />
+                <span className="truncate font-mono">{backend.webUrl}</span>
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>

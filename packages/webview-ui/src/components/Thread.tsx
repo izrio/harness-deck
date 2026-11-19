@@ -85,6 +85,22 @@ export function Thread() {
 
   // 连续的工具操作收成一条思考轨迹行；单条操作仍是独立一行
   const rows = useMemo(() => buildThreadRows(items), [items]);
+  // 本轮条目（最后一条非排队用户消息之后）：运行期间这些轨迹行保持展开，整轮操作结束后再统一收起
+  const currentTurnItemIds = useMemo(() => {
+    let turnStart = -1;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index]!;
+      if (item.kind === 'user' && item.pending !== 'queued') {
+        turnStart = index;
+        break;
+      }
+    }
+    return new Set(items.slice(turnStart + 1).map((item) => item.id));
+  }, [items]);
+  const isRowAutoOpen = useCallback(
+    (row: ThreadRow) => rowIsRunning(row) || (session.running && currentTurnItemIds.has(row.items[0]!.id)),
+    [session.running, currentTurnItemIds],
+  );
   // 按 sessionKey 隔离手动展开状态，切换会话时在首次 render 即刻清空，避免不同会话的轨迹行 id 冲突或闪烁
   const [openOverrides, setOpenOverrides] = useState<{
     readonly sessionKey: string;
@@ -95,21 +111,21 @@ export function Thread() {
     const activeOverrides = openOverrides.sessionKey === sessionKey ? openOverrides.map : undefined;
     const expanded = new Set<string>();
     for (const row of rows) {
-      if (row.grouped && (activeOverrides?.get(row.id) ?? rowIsRunning(row))) expanded.add(row.id);
+      if (row.grouped && (activeOverrides?.get(row.id) ?? isRowAutoOpen(row))) expanded.add(row.id);
     }
     return expanded;
-  }, [rows, openOverrides, sessionKey]);
+  }, [rows, openOverrides, sessionKey, isRowAutoOpen]);
 
   const toggleRow = useCallback(
     (row: ThreadRow) => {
       setOpenOverrides((prev) => {
         const base = prev.sessionKey === sessionKey ? prev.map : new Map<string, boolean>();
         const next = new Map(base);
-        next.set(row.id, !(base.get(row.id) ?? rowIsRunning(row)));
+        next.set(row.id, !(base.get(row.id) ?? isRowAutoOpen(row)));
         return { sessionKey, map: next };
       });
     },
-    [sessionKey],
+    [sessionKey, isRowAutoOpen],
   );
 
   const onLoadOlder = useCallback(() => {
@@ -148,7 +164,7 @@ export function Thread() {
       const nextRow = rows[index + 1];
       const current = row.grouped ? undefined : row.items[0];
       const prev = prevRow && !prevRow.grouped ? prevRow.items[0] : undefined;
-      const running = row.grouped ? rowIsRunning(row) : false;
+      const running = row.grouped ? isRowAutoOpen(row) : false;
       const mergeTurnDone =
         nextRow?.items[0]?.kind === 'turnDone' && current?.kind === 'assistant' && !current.streaming && Boolean(current.markdown);
       const turnDoneCopyText =

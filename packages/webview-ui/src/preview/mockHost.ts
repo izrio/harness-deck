@@ -74,13 +74,28 @@ const nextId = (prefix: string) => `${prefix}-${++seq}`;
 function installMockHost(): void {
   const sessions: Record<string, PreviewSessionData> = createInitialSessions();
   let sessionList = createInitialSessionList(sessions);
+  let backends: BackendsState = PREVIEW_BACKENDS;
+  const backendNameOf = (id: string): string => backends.items.find((b) => b.id === id)?.name ?? id;
   let tabs: TabView[] = [
-    { key: 'tab-main', sessionId: 'session-preview-main', title: sessions['session-preview-main']!.header.title, running: false },
-    { key: 'tab-approval', sessionId: 'session-preview-approval', title: sessions['session-preview-approval']!.header.title, running: false, needsAttention: true },
+    {
+      key: 'tab-main',
+      sessionId: 'session-preview-main',
+      backendId: 'dsh',
+      backendName: backendNameOf('dsh'),
+      title: sessions['session-preview-main']!.header.title,
+      running: false,
+    },
+    {
+      key: 'tab-approval',
+      sessionId: 'session-preview-approval',
+      backendId: 'claude',
+      backendName: backendNameOf('claude'),
+      title: sessions['session-preview-approval']!.header.title,
+      running: false,
+      needsAttention: true,
+    },
   ];
   let activeTabKey = 'tab-main';
-
-  let backends: BackendsState = PREVIEW_BACKENDS;
   let models: ModelState = PREVIEW_MODELS;
   let permissions: PermissionState = PREVIEW_PERMISSIONS;
   let preferences: PreferencesState = PREVIEW_PREFERENCES;
@@ -321,10 +336,22 @@ function installMockHost(): void {
       case 'newSession': {
         const emptyTab = tabs.find((t) => !t.sessionId);
         if (emptyTab) {
+          tabs = tabs.map((t) =>
+            t.key === emptyTab.key ? { ...t, backendId: backends.active, backendName: backendNameOf(backends.active) } : t,
+          );
           activeTabKey = emptyTab.key;
         } else {
           const key = nextId('tab');
-          tabs = [...tabs, { key, title: locale === 'zh' ? '新对话' : 'New chat', running: false }];
+          tabs = [
+            ...tabs,
+            {
+              key,
+              backendId: backends.active,
+              backendName: backendNameOf(backends.active),
+              title: locale === 'zh' ? '新对话' : 'New chat',
+              running: false,
+            },
+          ];
           activeTabKey = key;
         }
         syncTabsAndList();
@@ -336,10 +363,24 @@ function installMockHost(): void {
         const existing = tabs.find((t) => t.sessionId === message.payload.sessionId);
         if (existing) {
           activeTabKey = existing.key;
+          if (existing.backendId && existing.backendId !== backends.active) {
+            backends = { ...backends, active: existing.backendId };
+            postToWebview({ type: 'backends', payload: backends });
+          }
         } else {
           const key = nextId('tab');
           const title = sessions[message.payload.sessionId]?.header.title ?? message.payload.label ?? '会话';
-          tabs = [...tabs, { key, sessionId: message.payload.sessionId, title, running: false }];
+          tabs = [
+            ...tabs,
+            {
+              key,
+              sessionId: message.payload.sessionId,
+              backendId: backends.active,
+              backendName: backendNameOf(backends.active),
+              title,
+              running: false,
+            },
+          ];
           activeTabKey = key;
         }
         syncTabsAndList();
@@ -348,19 +389,38 @@ function installMockHost(): void {
         return;
       }
 
-      case 'activateTab':
+      case 'activateTab': {
         activeTabKey = message.payload.key;
+        const target = tabs.find((t) => t.key === activeTabKey);
+        if (target?.backendId && target.backendId !== backends.active) {
+          backends = { ...backends, active: target.backendId };
+          postToWebview({ type: 'backends', payload: backends });
+        }
         syncTabsAndList();
         pushActiveSession();
         return;
+      }
 
       case 'closeTab': {
         tabs = tabs.filter((t) => t.key !== message.payload.key);
         if (tabs.length === 0) {
           const key = nextId('tab');
-          tabs = [{ key, title: locale === 'zh' ? '新对话' : 'New chat', running: false }];
+          tabs = [
+            {
+              key,
+              backendId: backends.active,
+              backendName: backendNameOf(backends.active),
+              title: locale === 'zh' ? '新对话' : 'New chat',
+              running: false,
+            },
+          ];
         }
         if (!tabs.some((t) => t.key === activeTabKey)) activeTabKey = tabs[tabs.length - 1]!.key;
+        const nextActive = tabs.find((t) => t.key === activeTabKey);
+        if (nextActive?.backendId && nextActive.backendId !== backends.active) {
+          backends = { ...backends, active: nextActive.backendId };
+          postToWebview({ type: 'backends', payload: backends });
+        }
         syncTabsAndList();
         pushActiveSession();
         return;
@@ -425,10 +485,38 @@ function installMockHost(): void {
         postToWebview({ type: 'permissions', payload: permissions });
         return;
 
-      case 'selectBackend':
-        backends = { ...backends, active: message.payload.id };
+      case 'selectBackend': {
+        const nextIdVal = message.payload.id;
+        backends = { ...backends, active: nextIdVal };
+        const cur = tabs.find((t) => t.key === activeTabKey);
+        if (cur && !cur.sessionId) {
+          tabs = tabs.map((t) =>
+            t.key === cur.key ? { ...t, backendId: nextIdVal, backendName: backendNameOf(nextIdVal) } : t,
+          );
+        } else {
+          const existing = [...tabs].reverse().find((t) => t.backendId === nextIdVal);
+          if (existing) {
+            activeTabKey = existing.key;
+          } else {
+            const key = nextId('tab');
+            tabs = [
+              ...tabs,
+              {
+                key,
+                backendId: nextIdVal,
+                backendName: backendNameOf(nextIdVal),
+                title: locale === 'zh' ? '新对话' : 'New chat',
+                running: false,
+              },
+            ];
+            activeTabKey = key;
+          }
+        }
         postToWebview({ type: 'backends', payload: backends });
+        syncTabsAndList();
+        pushActiveSession();
         return;
+      }
 
       case 'setAppearance': {
         const p = message.payload;

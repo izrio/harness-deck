@@ -719,6 +719,7 @@ export class ClaudeController implements ChatBackendController {
     }
     const title = initialTitle || projection?.title || t('acp.untitled');
     this.remember(realSessionId, title);
+    this.options.onSessionRekey?.(oldKey, realSessionId);
   }
 
   private async ensureSessionLink(

@@ -1,11 +1,11 @@
 /**
- * 运行状态（Beautiful UI LoadingState 像素波纹 + Shimmer + 等宽计时器）。
+ * 运行状态（Beautiful UI Loading State Orbit 模式 + 等宽计时器）。
  */
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Item } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { cn } from '../lib/utils.ts';
-import { LoaderGrid, Shimmer } from './beautifului/index.ts';
+import { LoadingState } from './beautifului/index.ts';
 import { CheckIcon, CopyIcon } from './icons.tsx';
 import { useT, type Translate } from '../i18n.ts';
 
@@ -56,27 +56,35 @@ export function RunStatus() {
   if (!running) return null;
   const start = since ?? seenAt ?? now;
   const label = activityOf(items, waiting, t);
+  const elapsed = formatDuration(now - start, t);
+  if (waiting) {
+    return (
+      <div
+        className="run-status run-status--waiting flex w-fit max-w-full items-center gap-2.5 self-start py-0.5 text-[13px] text-orange"
+        role="status"
+        aria-label={t('thread.busy')}
+        data-testid="run-status"
+        style={{ animation: 'fade-up 220ms cubic-bezier(0.23,1,0.32,1) both' }}
+      >
+        <span className="run-status__icon inline-flex size-4 shrink-0 items-center justify-center">
+          <span className="dot dot--attention inline-block size-2 rounded-full bg-orange" />
+        </span>
+        <span className="run-status__label min-w-0 truncate font-medium">{label}</span>
+        <span className="run-status__time shrink-0 font-mono text-[12px] text-ink-3 tabular-nums">{elapsed}</span>
+      </div>
+    );
+  }
   return (
-    <div
-      className={cn(
-        'run-status flex w-fit max-w-full items-center gap-2 self-start py-0.5 text-[12.5px]',
-        waiting ? 'run-status--waiting text-orange' : 'text-ink-2',
-      )}
+    <LoadingState
+      variant="Orbit"
+      label={label}
+      elapsed={elapsed}
+      className="run-status self-start py-0.5"
       role="status"
       aria-label={t('thread.busy')}
       data-testid="run-status"
       style={{ animation: 'fade-up 220ms cubic-bezier(0.23,1,0.32,1) both' }}
-    >
-      <span className="run-status__icon inline-flex size-4 shrink-0 items-center justify-center">
-        {waiting ? <span className="dot dot--attention inline-block size-2 rounded-full bg-orange" /> : <LoaderGrid />}
-      </span>
-      <span className="run-status__label min-w-0 truncate font-medium">
-        {waiting ? label : <Shimmer>{label}</Shimmer>}
-      </span>
-      <span className="run-status__time shrink-0 font-mono text-[11.5px] text-ink-3 tabular-nums">
-        {formatDuration(now - start, t)}
-      </span>
-    </div>
+    />
   );
 }
 

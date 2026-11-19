@@ -14,6 +14,7 @@ const reasoning: Item = { kind: 'assistant', id: 'r1', markdown: '', reasoning: 
 const edit: Item = { kind: 'activity', id: 'a1', tool: 'edit', variant: 'edit', label: 'src/a.ts', status: 'ok' };
 const run: Item = { kind: 'activity', id: 'a2', tool: 'bash', variant: 'command', label: 'bash pnpm test', status: 'ok', output: '3 passed' };
 const answer: Item = { kind: 'assistant', id: 'm1', markdown: '改好了', streaming: false };
+const prompt: Item = { kind: 'user', id: 'u1', text: '继续处理' };
 
 function pushItems(items: Item[], running = false) {
   act(() => {
@@ -57,6 +58,15 @@ describe('思考轨迹卡片', () => {
 
     const runStatus = screen.getByTestId('run-status');
     expect(runStatus.textContent).toContain('正在运行命令');
+    expect(runStatus.getAttribute('data-loading-state')).toBe('Orbit');
+    const grid = runStatus.querySelector('[data-variant="Orbit"]');
+    expect(grid).not.toBeNull();
+    const cells = grid?.querySelectorAll('span') ?? [];
+    expect(cells).toHaveLength(9);
+    // Orbit 模式：中心格（索引 4）静态微亮，外圈 8 格按 950ms 顺时针公转
+    expect((cells[4] as HTMLElement).style.animation).toBe('none');
+    expect((cells[4] as HTMLElement).style.opacity).toBe('0.07');
+    expect((cells[0] as HTMLElement).style.animation).toContain('pixel-on 950ms');
     expect(runStatus.className).not.toMatch(/rounded-full|bg-surface|shadow-card|bg-orange-tint/u);
 
     pushItems([edit, run], false);
@@ -75,6 +85,29 @@ describe('思考轨迹卡片', () => {
     // 流式更新重渲染后仍保持折叠
     pushItems([edit, { ...run, status: 'running' }, { ...reasoning, id: 'r2' }], true);
     expect(container.querySelectorAll('.activity')).toHaveLength(0);
+  });
+
+  it('运行期间轨迹行保持展开，整轮操作结束后才收起', () => {
+    const midAnswer: Item = { kind: 'assistant', id: 'm0', markdown: '先处理第一个文件', streaming: false };
+    const nextReasoning: Item = { kind: 'assistant', id: 'r2', markdown: '', reasoning: '继续处理', streaming: false };
+    const nextEdit: Item = { kind: 'activity', id: 'a3', tool: 'edit', variant: 'edit', label: 'src/b.ts', status: 'running' };
+
+    // 本轮两组轨迹：中间夹着一段有正文的回复，第一组操作已全部完成但整轮还在跑
+    pushItems([prompt, reasoning, edit, run, midAnswer, nextReasoning, nextEdit], true);
+    const { container } = render(<Thread />);
+
+    const traces = screen.getAllByTestId('thinking-trace');
+    expect(traces).toHaveLength(2);
+    expect(traces[0]!.getAttribute('data-active')).toBe('true');
+    expect(traces[0]!.textContent).toContain('执行中 · 2 项操作');
+    expect(screen.getAllByTestId('thinking-toggle')[0]!.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelectorAll('.activity')).toHaveLength(3);
+
+    // 整轮结束：两组轨迹统一收起
+    pushItems([prompt, reasoning, edit, run, midAnswer, nextReasoning, { ...nextEdit, status: 'ok' }], false);
+    expect(screen.getAllByTestId('thinking-toggle').every((toggle) => toggle.getAttribute('aria-expanded') === 'false')).toBe(true);
+    expect(container.querySelectorAll('.activity')).toHaveLength(0);
+    expect(screen.getAllByTestId('thinking-trace')[0]!.textContent).toContain('已执行 2 项操作');
   });
 
   it('单条工具操作与有正文的回复不套卡片', () => {

@@ -5,11 +5,13 @@ import { useEffect, useRef } from 'react';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
+import { BackendLogo } from './BackendLogo.tsx';
 import { CloseIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
 export function TabBar() {
   const tabs = useView((s) => s.tabs);
+  const backends = useView((s) => s.backends);
   const strip = useRef<HTMLDivElement>(null);
   const t = useT();
 
@@ -29,11 +31,14 @@ export function TabBar() {
     >
       {tabs.items.map((tab) => {
         const active = tab.key === tabs.active;
+        const backendId = tab.backendId ?? backends.active;
+        const backendName = tab.backendName ?? backends.items.find((item) => item.id === backendId)?.name ?? backendId;
+        const backend = backendId ? { id: backendId, name: backendName || backendId } : undefined;
         return (
           <div
             key={tab.key}
             className={cn(
-              'tab group/tab relative flex min-w-[72px] max-w-[168px] flex-none items-center gap-1.5 rounded-[6px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,opacity] duration-100',
+              'tab group/tab relative flex min-w-[72px] max-w-[184px] flex-none items-center gap-1.5 rounded-[6px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,opacity] duration-100',
               active
                 ? 'tab--active cursor-default bg-field font-medium text-ink opacity-100'
                 : 'cursor-pointer text-ink opacity-55 hover:bg-hover hover:opacity-85',
@@ -41,7 +46,8 @@ export function TabBar() {
             role="tab"
             aria-selected={active}
             tabIndex={active ? 0 : -1}
-            title={tab.title}
+            data-backend-id={backendId}
+            title={backend?.name ? `${backend.name} · ${tab.title}` : tab.title}
             onClick={() => !active && postToHost({ type: 'activateTab', payload: { key: tab.key } })}
             onAuxClick={(event) => {
               if (event.button === 1) close(tab.key);
@@ -64,6 +70,7 @@ export function TabBar() {
             ) : tab.running ? (
               <span className="dot dot--running inline-block size-1.5 shrink-0 rounded-full bg-brand" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} aria-label={t('header.running')} />
             ) : null}
+            {backend ? <BackendLogo backend={backend} size="sm" /> : null}
             <span className="tab__title min-w-0 flex-1 truncate">{tab.title}</span>
             <button
               type="button"

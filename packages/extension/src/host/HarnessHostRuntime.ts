@@ -29,6 +29,7 @@ import {
   type ProjectsState,
   type ProvidersState,
   type RuntimeStatus,
+  type TabsState,
   type WebviewToHost,
   type WorkbenchModule,
   type WorkbenchState,
@@ -119,11 +120,13 @@ import { extraSearchDirsForCommand, locateDsh, locateExecutable, verifyExecutabl
 import { isWslEnvironment, isWslWindowsPath } from '../runtime/wsl.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { locateZcode, verifyZcodeTarget } from '../zcode/locate.ts';
+import { UnifiedTabsModel } from '../vm/UnifiedTabs.ts';
 import type { HostCommandId, HostPlatform } from './HostPlatform.ts';
 
 const FOLDER_KEY = 'harnessDeck.folder';
 const BACKEND_KEY = 'harnessDeck.backend';
 const RECENT_PROJECTS_KEY = 'harnessDeck.recentProjects';
+const UNIFIED_TABS_KEY = 'harnessDeck.unifiedTabs';
 /** 改名前保存的键：读取时兼容，写入只写新键。 */
 const LEGACY_FOLDER_KEY = 'dsh.folder';
 const LEGACY_BACKEND_KEY = 'dsh.backend';
@@ -326,6 +329,154 @@ export function createHarnessHostRuntime(
     ]);
   };
 
+  // ---- 跨智能体统一会话标签 ----
+  const unifiedTabsStorageKey = (): string =>
+    folders().length > 1 || workspacePath !== defaultWorkspacePath()
+      ? `${UNIFIED_TABS_KEY}:${workspacePath}`
+      : UNIFIED_TABS_KEY;
+
+  const unifiedTabs = new UnifiedTabsModel({
+    load: () => platform.workspaceState.get<unknown>(unifiedTabsStorageKey()),
+    save: (next) => void platform.workspaceState.update(unifiedTabsStorageKey(), next),
+  });
+  let unifiedTabsRestored = false;
+  let suppressTabSync = false;
+  let lastPostedTabsJson = '';
+
+  const withSuppressedTabSync = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const prev = suppressTabSync;
+    suppressTabSync = true;
+    try {
+      return await fn();
+    } finally {
+      suppressTabSync = prev;
+    }
+  };
+
+  const ensureUnifiedTabsRestored = (seedEntry?: ManagedBackend): { readonly restoredFromPersisted: boolean } => {
+    if (unifiedTabsRestored) return { restoredFromPersisted: false };
+    const currentProfiles = profiles();
+    const validBackendIds = new Set(currentProfiles.map((p) => p.id));
+    const seedId = seedEntry?.backend.profile.id ?? targetBackendId;
+    const snap = seedEntry?.backend.controller.peekSnapshot?.();
+    const fallbackTabs = snap?.tabs.items.map((item) => ({
+      ...(item.sessionId ? { sessionId: item.sessionId } : {}),
+      title: item.title,
+    }));
+    const fallbackActiveSessionId = snap?.tabs.items.find((item) => item.key === snap.tabs.active)?.sessionId;
+    const res = unifiedTabs.restore({
+      defaultBackendId: seedId,
+      validBackendIds,
+      ...(fallbackTabs ? { fallbackTabs } : {}),
+      ...(fallbackActiveSessionId ? { fallbackActiveSessionId } : {}),
+    });
+    unifiedTabsRestored = true;
+    return res;
+  };
+
+  const buildUnifiedTabsState = (): TabsState => {
+    const profileNames = new Map(profiles().map((p) => [p.id, p.name]));
+    if (!unifiedTabsRestored || unifiedTabs.items.length === 0) {
+      const fallbackId = active?.backend.profile.id ?? targetBackendId;
+      const fallbackName = profileNames.get(fallbackId) ?? fallbackId;
+      return {
+        items: [
+          {
+            key: 'draft',
+            backendId: fallbackId,
+            backendName: fallbackName,
+            title: t('session.new'),
+            running: false,
+          },
+        ],
+        active: 'draft',
+      };
+    }
+    const newTitle = t('session.new');
+    return unifiedTabs.view((tab) => {
+      const backendName = profileNames.get(tab.backendId) ?? tab.backendId;
+      if (!tab.sessionId) {
+        return { backendName, title: newTitle, running: false };
+      }
+      const managed = managedBackends.get(tab.backendId);
+      const snap = managed?.backend.controller.peekSnapshot?.();
+      let title = tab.cachedTitle || newTitle;
+      let running = false;
+      let needsAttention = false;
+      if (snap) {
+        const matchedTab = snap.tabs.items.find((item) => item.sessionId === tab.sessionId);
+        const matchedSess = snap.sessions.find((s) => s.id === tab.sessionId);
+        if (snap.session.id === tab.sessionId) {
+          title = snap.session.title || matchedTab?.title || matchedSess?.title || tab.cachedTitle || newTitle;
+          running = snap.session.running;
+          needsAttention = snap.interactions.length > 0 || matchedTab?.needsAttention === true || matchedSess?.needsAttention === true;
+        } else if (matchedTab) {
+          title = matchedTab.title || matchedSess?.title || tab.cachedTitle || newTitle;
+          running = matchedTab.running;
+          needsAttention = matchedTab.needsAttention === true || matchedSess?.needsAttention === true;
+        } else if (matchedSess) {
+          title = matchedSess.title || tab.cachedTitle || newTitle;
+          running = matchedSess.running;
+          needsAttention = matchedSess.needsAttention === true;
+        }
+        if (title && title !== newTitle) {
+          unifiedTabs.updateCachedTitle(tab.backendId, tab.sessionId, title);
+        }
+      }
+      return {
+        backendName,
+        title,
+        running,
+        ...(needsAttention ? { needsAttention: true } : {}),
+      };
+    });
+  };
+
+  const withUnifiedTabs = (snapshot: HostSnapshot): HostSnapshot => ({
+    ...snapshot,
+    tabs: buildUnifiedTabsState(),
+  });
+
+  const pushUnifiedTabs = (force = false): void => {
+    if (!platform.isWebviewVisible()) return;
+    const next = buildUnifiedTabsState();
+    const json = JSON.stringify(next);
+    if (!force && json === lastPostedTabsJson) return;
+    lastPostedTabsJson = json;
+    post({ type: 'tabs', payload: next });
+  };
+
+  const syncUnifiedTabsFromBackendTabs = (backendId: string, backendTabs: TabsState): void => {
+    if (suppressTabSync || active?.backend.profile.id !== backendId || !unifiedTabsRestored) return;
+    const activeBackendTab = backendTabs.items.find((item) => item.key === backendTabs.active);
+    if (!activeBackendTab) return;
+    const reportedSessionId = activeBackendTab.sessionId;
+    const cur = unifiedTabs.current;
+    if (!cur || cur.backendId !== backendId) return;
+    const liveTitle = activeBackendTab.title && activeBackendTab.title !== t('session.new') ? activeBackendTab.title : undefined;
+    if (!cur.sessionId && reportedSessionId) {
+      unifiedTabs.bindCurrentSession(backendId, reportedSessionId, liveTitle);
+    } else if (cur.sessionId && !reportedSessionId) {
+      unifiedTabs.openNew(backendId);
+    } else if (cur.sessionId && reportedSessionId && cur.sessionId !== reportedSessionId) {
+      unifiedTabs.open(backendId, reportedSessionId, liveTitle);
+    } else if (cur.sessionId && reportedSessionId && liveTitle) {
+      unifiedTabs.updateCachedTitle(backendId, reportedSessionId, liveTitle);
+    }
+  };
+
+  const closeSessionInController = async (backendId: string, sessionId: string | undefined): Promise<void> => {
+    if (!sessionId || unifiedTabs.hasSession(backendId, sessionId)) return;
+    const managed = managedBackends.get(backendId);
+    if (!managed) return;
+    const snap = managed.backend.controller.peekSnapshot?.();
+    const internalTab = snap?.tabs.items.find((item) => item.sessionId === sessionId);
+    if (!internalTab) return;
+    await withSuppressedTabSync(() =>
+      managed.backend.controller.handle({ type: 'closeTab', payload: { key: internalTab.key } }),
+    );
+  };
+
   const backendsState = (): BackendsState => {
     const builtinList = builtins();
     const builtinIds = new Set<string>([DSH_PROFILE.id, ...builtinList.map((b) => b.id)]);
@@ -347,6 +498,7 @@ export function createHarnessHostRuntime(
           status.kind !== 'untrusted' &&
           status.kind !== 'failed';
         const running = lastBackendRunning.get(p.id) === true;
+        const webUrl = managed?.backend.webUrl?.();
         return {
           ...profileView(p, {
             ...(availability.has(p.id) ? { available: availability.get(p.id) } : {}),
@@ -360,6 +512,7 @@ export function createHarnessHostRuntime(
           }),
           ...(alive ? { alive: true } : {}),
           ...(running ? { running: true } : {}),
+          ...(webUrl ? { webUrl } : {}),
         };
       }),
       active: active?.backend.profile.id ?? targetBackendId,
@@ -504,6 +657,9 @@ export function createHarnessHostRuntime(
   };
 
   let switchBackendFn: (id: string, forceReload?: boolean) => Promise<void> = async () => undefined;
+  let openSessionInActiveFn: (
+    payload: Extract<WebviewToHost, { type: 'switchSession' }>['payload'],
+  ) => Promise<void> = async () => undefined;
 
   const notifierFor = (backendId: string): NotificationDispatcher => {
     let dispatcher = notifiers.get(backendId);
@@ -523,10 +679,7 @@ export function createHarnessHostRuntime(
           }
           post({ type: 'navigateToSession', payload: sessionId ? { sessionId } : {} });
           if (sessionId) {
-            await managedBackends.get(backendId)?.backend.controller.handle({
-              type: 'switchSession',
-              payload: { sessionId },
-            });
+            await openSessionInActiveFn({ sessionId });
           }
         },
       });
@@ -916,7 +1069,7 @@ export function createHarnessHostRuntime(
     runtime: backendBusy.has(targetBackendId) ? { kind: 'starting' } : { kind: 'idle' },
     connection: 'idle',
     sessions: [],
-    tabs: { items: [{ key: 'draft', title: t('session.new'), running: false }], active: 'draft' },
+    tabs: buildUnifiedTabsState(),
     session: { title: t('session.new'), running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
     items: [],
     models: { options: [] },
@@ -957,19 +1110,38 @@ export function createHarnessHostRuntime(
     workspacePath = nextPath;
     await platform.workspaceState.update(FOLDER_KEY, workspacePath);
     await saveRecentProjectPath(workspacePath);
+    unifiedTabsRestored = false;
     if (active) {
       active.workspacePath = workspacePath;
       active.lastObservedSessionId = undefined;
       notifierFor(active.backend.profile.id).reset();
       active.backend.controller.setWorkspace(workspacePath);
+      ensureUnifiedTabsRestored(active);
       active.backend.controller.backendsChanged();
+      pushUnifiedTabs(true);
     }
     pushProjects();
   };
 
   const postForBackend = (backendId: string, message: HostToWebview): void => {
+    if (message.type === 'tabs') {
+      syncUnifiedTabsFromBackendTabs(backendId, message.payload);
+      pushUnifiedTabs();
+      return;
+    }
+    if (message.type === 'snapshot') {
+      if (active?.backend.profile.id === backendId) {
+        const patched = withUnifiedTabs(message.payload);
+        lastPostedTabsJson = JSON.stringify(patched.tabs);
+        post({ type: 'snapshot', payload: patched });
+      }
+      return;
+    }
     if (active?.backend.profile.id === backendId || message.type === 'toast') {
       post(message);
+    }
+    if (message.type === 'session' || message.type === 'sessions' || message.type === 'interactions') {
+      pushUnifiedTabs();
     }
   };
 
@@ -1055,6 +1227,19 @@ export function createHarnessHostRuntime(
       onSessionObserve: (obs) => {
         const entry = managedBackends.get(profile.id);
         if (entry && obs.sessionId) entry.lastObservedSessionId = obs.sessionId;
+        if (!suppressTabSync && active?.backend.profile.id === profile.id && obs.sessionId && unifiedTabsRestored) {
+          const cur = unifiedTabs.current;
+          if (cur && cur.backendId === profile.id && !cur.sessionId) {
+            unifiedTabs.bindCurrentSession(
+              profile.id,
+              obs.sessionId,
+              obs.title && obs.title !== t('session.new') ? obs.title : undefined,
+            );
+          }
+        }
+        if (obs.sessionId && obs.title && obs.title !== t('session.new')) {
+          unifiedTabs.updateCachedTitle(profile.id, obs.sessionId, obs.title);
+        }
         notifierFor(profile.id).observeSession({
           ...obs,
           agentName: profile.name,
@@ -1069,7 +1254,13 @@ export function createHarnessHostRuntime(
           lastBackendRunning.set(profile.id, obs.running);
           pushBackends();
         }
+        pushUnifiedTabs();
         hub?.observeSession(obs, profile.id);
+      },
+      onSessionRekey: (oldSessionId, newSessionId) => {
+        if (unifiedTabs.rekeySession(profile.id, oldSessionId, newSessionId)) {
+          pushUnifiedTabs();
+        }
       },
       isHiddenSession: (sessionId) => hub?.isHiddenSession(sessionId) ?? false,
       workbenchState: () => {
@@ -1201,37 +1392,73 @@ export function createHarnessHostRuntime(
     return entry;
   };
 
-  const activateBackend = async (id: string, forceReload = false): Promise<void> => {
-    targetBackendId = id;
-    const profile = profiles().find((p) => p.id === id) ?? DSH_PROFILE;
-    if (forceReload) {
-      await stopAndDeleteManagedBackend(profile.id);
-    }
-    let entry = managedBackends.get(profile.id);
-    if (!entry) {
-      try {
-        entry = createManagedEntry(profile);
-      } catch (error) {
-        log(`启动底层 ${profile.name} 失败：${error instanceof Error ? error.message : String(error)}`);
-        if (forceReload) {
-          await stopAndDeleteManagedBackend(DSH_PROFILE.id);
-        }
-        entry = managedBackends.get(DSH_PROFILE.id) ?? createManagedEntry(DSH_PROFILE);
+  interface ActivateBackendOptions {
+    readonly openBlank?: boolean;
+    readonly targetSessionId?: string;
+  }
+
+  const activateBackend = async (
+    id: string,
+    forceReload = false,
+    options?: ActivateBackendOptions,
+  ): Promise<void> =>
+    withSuppressedTabSync(async () => {
+      targetBackendId = id;
+      const profile = profiles().find((p) => p.id === id) ?? DSH_PROFILE;
+      if (forceReload) {
+        await stopAndDeleteManagedBackend(profile.id);
       }
-    } else if (entry.workspacePath !== workspacePath) {
-      entry.workspacePath = workspacePath;
-      entry.backend.controller.setWorkspace(workspacePath);
-    }
-    active = entry;
-    targetBackendId = entry.backend.profile.id;
-    updateStatusBar();
-    if (platform.isWebviewVisible()) {
-      startIfNeeded();
-      post({ type: 'snapshot', payload: entry.backend.controller.snapshot() });
-    } else {
-      pushBackends();
-    }
-  };
+      let entry = managedBackends.get(profile.id);
+      if (!entry) {
+        try {
+          entry = createManagedEntry(profile);
+        } catch (error) {
+          log(`启动底层 ${profile.name} 失败：${error instanceof Error ? error.message : String(error)}`);
+          if (forceReload) {
+            await stopAndDeleteManagedBackend(DSH_PROFILE.id);
+          }
+          entry = managedBackends.get(DSH_PROFILE.id) ?? createManagedEntry(DSH_PROFILE);
+        }
+      } else if (entry.workspacePath !== workspacePath) {
+        entry.workspacePath = workspacePath;
+        entry.backend.controller.setWorkspace(workspacePath);
+      }
+      let desiredBlank = options?.openBlank === true;
+      let desiredSessionId = options?.targetSessionId;
+      if (!unifiedTabsRestored) {
+        const { restoredFromPersisted } = ensureUnifiedTabsRestored(entry);
+        if (restoredFromPersisted && !options) {
+          const curTab = unifiedTabs.current;
+          if (curTab?.backendId === entry.backend.profile.id) {
+            const currentControllerSession = entry.backend.controller.peekSnapshot?.().session.id;
+            if (curTab.sessionId && curTab.sessionId !== currentControllerSession) {
+              desiredSessionId = curTab.sessionId;
+            } else if (!curTab.sessionId && currentControllerSession) {
+              desiredBlank = true;
+            }
+          }
+        }
+      }
+      active = entry;
+      targetBackendId = entry.backend.profile.id;
+      if (desiredBlank) {
+        await entry.backend.controller.handle({ type: 'newSession', payload: {} });
+      } else if (desiredSessionId) {
+        await entry.backend.controller.handle({
+          type: 'switchSession',
+          payload: { sessionId: desiredSessionId },
+        });
+      }
+      updateStatusBar();
+      if (platform.isWebviewVisible()) {
+        startIfNeeded();
+        const snap = withUnifiedTabs(entry.backend.controller.snapshot());
+        lastPostedTabsJson = JSON.stringify(snap.tabs);
+        post({ type: 'snapshot', payload: snap });
+      } else {
+        pushBackends();
+      }
+    });
 
   let switching: Promise<void> = Promise.resolve();
   const enqueueBackendTransition = (task: () => Promise<void>): Promise<void> => {
@@ -1250,6 +1477,131 @@ export function createHarnessHostRuntime(
       log(`已切换到底层 ${active?.backend.profile.name ?? id}`);
     });
   switchBackendFn = switchBackend;
+
+  const openNewTabInActive = (): Promise<void> =>
+    enqueueBackendTransition(async () => {
+      ensureUnifiedTabsRestored(active);
+      const backendId = active?.backend.profile.id ?? targetBackendId;
+      unifiedTabs.openNew(backendId);
+      if (active) {
+        await withSuppressedTabSync(() => active!.backend.controller.handle({ type: 'newSession', payload: {} }));
+      }
+      pushUnifiedTabs();
+    });
+
+  const openSessionInActive = (
+    payload: Extract<WebviewToHost, { type: 'switchSession' }>['payload'],
+  ): Promise<void> =>
+    enqueueBackendTransition(async () => {
+      ensureUnifiedTabsRestored(active);
+      const backendId = active?.backend.profile.id ?? targetBackendId;
+      unifiedTabs.open(backendId, payload.sessionId, payload.label);
+      if (active) {
+        await withSuppressedTabSync(() => active!.backend.controller.handle({ type: 'switchSession', payload }));
+      }
+      pushUnifiedTabs();
+    });
+  openSessionInActiveFn = openSessionInActive;
+
+  const activateUnifiedTab = (key: string): Promise<void> =>
+    enqueueBackendTransition(async () => {
+      ensureUnifiedTabsRestored(active);
+      const tab = unifiedTabs.setActive(key);
+      if (!tab) return;
+      if (tab.backendId !== active?.backend.profile.id) {
+        await activateBackend(
+          tab.backendId,
+          false,
+          tab.sessionId ? { targetSessionId: tab.sessionId } : { openBlank: true },
+        );
+        log(`已通过标签切换到底层 ${active?.backend.profile.name ?? tab.backendId}`);
+        return;
+      }
+      if (active) {
+        await withSuppressedTabSync(async () => {
+          if (tab.sessionId) {
+            await active!.backend.controller.handle({
+              type: 'switchSession',
+              payload: { sessionId: tab.sessionId },
+            });
+          } else {
+            await active!.backend.controller.handle({ type: 'newSession', payload: {} });
+          }
+        });
+      }
+      pushUnifiedTabs();
+    });
+
+  const closeUnifiedTab = (key: string): Promise<void> =>
+    enqueueBackendTransition(async () => {
+      ensureUnifiedTabsRestored(active);
+      const res = unifiedTabs.close(key);
+      if (!res) return;
+      if (res.activeChanged && res.nextActive.backendId !== active?.backend.profile.id) {
+        await activateBackend(
+          res.nextActive.backendId,
+          false,
+          res.nextActive.sessionId ? { targetSessionId: res.nextActive.sessionId } : { openBlank: true },
+        );
+        await closeSessionInController(res.closed.backendId, res.closed.sessionId);
+        pushUnifiedTabs();
+        return;
+      }
+      await closeSessionInController(res.closed.backendId, res.closed.sessionId);
+      if (res.activeChanged && active) {
+        await withSuppressedTabSync(async () => {
+          if (res.nextActive.sessionId) {
+            await active!.backend.controller.handle({
+              type: 'switchSession',
+              payload: { sessionId: res.nextActive.sessionId },
+            });
+          } else {
+            await active!.backend.controller.handle({ type: 'newSession', payload: {} });
+          }
+        });
+      }
+      pushUnifiedTabs();
+    });
+
+  const selectBackendForCurrentTab = (id: string, persistDefault = true): Promise<void> =>
+    enqueueBackendTransition(async () => {
+      ensureUnifiedTabsRestored(active);
+      const resolved = resolveBackendId(id);
+      if (persistDefault) {
+        await persistDefaultBackend(resolved);
+      }
+      const cur = unifiedTabs.current;
+      if (cur && !cur.sessionId) {
+        // 当前在空的新对话标签上切换智能体：就地更新该标签的智能体归属，保留其他所有标签
+        unifiedTabs.setTabBackend(cur.key, resolved);
+        if (resolved !== active?.backend.profile.id) {
+          await activateBackend(resolved, false, { openBlank: true });
+          log(`已切换到底层 ${active?.backend.profile.name ?? resolved}`);
+        } else {
+          pushBackends();
+          pushUnifiedTabs();
+        }
+        return;
+      }
+      if (resolved === active?.backend.profile.id) {
+        pushBackends();
+        return;
+      }
+      // 当前在已有会话的标签上切换智能体：保留当前标签，切到目标智能体已有标签或新开一个空标签
+      const existing = unifiedTabs.findLastByBackend(resolved);
+      if (existing) {
+        unifiedTabs.setActive(existing.key);
+        await activateBackend(
+          resolved,
+          false,
+          existing.sessionId ? { targetSessionId: existing.sessionId } : { openBlank: true },
+        );
+      } else {
+        unifiedTabs.openNew(resolved);
+        await activateBackend(resolved, false, { openBlank: true });
+      }
+      log(`已切换到底层 ${active?.backend.profile.name ?? resolved}`);
+    });
 
   const reloadActiveIfExtensionsChanged = (): void => {
     for (const [id, entry] of [...managedBackends.entries()]) {
@@ -1467,12 +1819,15 @@ export function createHarnessHostRuntime(
       if (nextPath !== workspacePath) {
         workspacePath = nextPath;
         await platform.workspaceState.update(FOLDER_KEY, workspacePath);
+        unifiedTabsRestored = false;
         if (!switchingBackend && active) {
           active.workspacePath = workspacePath;
           active.lastObservedSessionId = undefined;
           notifierFor(active.backend.profile.id).reset();
           active.backend.controller.setWorkspace(workspacePath);
+          ensureUnifiedTabsRestored(active);
           active.backend.controller.backendsChanged();
+          pushUnifiedTabs(true);
         }
         pushProjects();
       } else {
@@ -1485,15 +1840,25 @@ export function createHarnessHostRuntime(
     },
     startProgrammaticSession: async (req) => {
       startIfNeeded();
-      return current()?.controller.startProgrammaticSession?.(req);
+      ensureUnifiedTabsRestored(active);
+      const backendId = active?.backend.profile.id ?? targetBackendId;
+      unifiedTabs.openNew(backendId);
+      const sessionId = await withSuppressedTabSync(async () =>
+        current()?.controller.startProgrammaticSession?.(req),
+      );
+      if (sessionId) {
+        unifiedTabs.bindCurrentSession(backendId, sessionId, req.title);
+      }
+      pushUnifiedTabs();
+      return sessionId;
     },
     switchSessionInActive: async (sessionId) => {
       startIfNeeded();
-      await current()?.controller.handle({ type: 'switchSession', payload: { sessionId } });
+      await openSessionInActive({ sessionId });
     },
     openNewSessionInActive: async () => {
       startIfNeeded();
-      await current()?.controller.handle({ type: 'newSession', payload: {} });
+      await openNewTabInActive();
     },
     post,
     focusView,
@@ -1553,7 +1918,7 @@ export function createHarnessHostRuntime(
             defaultBackendId = resolved;
             void persistBackendKeys(resolved);
             if (resolved !== active?.backend.profile.id) {
-              void switchBackend(resolved);
+              void selectBackendForCurrentTab(resolved, false);
             } else {
               pushBackends();
             }
@@ -1567,6 +1932,13 @@ export function createHarnessHostRuntime(
           defaultBackendId = DSH_PROFILE.id;
           void persistDefaultBackend(DSH_PROFILE.id);
         }
+        if (unifiedTabsRestored) {
+          for (const tab of [...unifiedTabs.items]) {
+            if (!byId.has(tab.backendId)) {
+              unifiedTabs.removeBackend(tab.backendId, defaultBackendId);
+            }
+          }
+        }
         for (const [id, entry] of [...managedBackends.entries()]) {
           const updated = byId.get(id);
           if (!updated) {
@@ -1579,6 +1951,7 @@ export function createHarnessHostRuntime(
               void enqueueBackendTransition(async () => {
                 await stopAndDeleteManagedBackend(id);
                 pushBackends();
+                pushUnifiedTabs();
               });
             }
             continue;
@@ -1595,6 +1968,7 @@ export function createHarnessHostRuntime(
           }
         }
         pushBackends();
+        pushUnifiedTabs();
         void checkAvailability();
       }
       if (affects('dsh.path') || affects('zcode.path') || affects('claude.path') || affects('pi.path')) {
@@ -1671,6 +2045,7 @@ export function createHarnessHostRuntime(
         else post({ type: 'locale', payload: getLocale() });
         pushPreferences();
         pushBackends();
+        pushUnifiedTabs();
         updateStatusBar();
       }
     }),
@@ -1682,12 +2057,23 @@ export function createHarnessHostRuntime(
       return;
     }
     if (message.type === 'selectBackend') {
-      void (async () => {
-        const id = resolveBackendId(message.payload.id);
-        await persistDefaultBackend(id);
-        if (id !== active?.backend.profile.id) await switchBackend(id);
-        else pushBackends();
-      })();
+      void selectBackendForCurrentTab(message.payload.id, true);
+      return;
+    }
+    if (message.type === 'newSession') {
+      void openNewTabInActive();
+      return;
+    }
+    if (message.type === 'switchSession') {
+      void openSessionInActive(message.payload);
+      return;
+    }
+    if (message.type === 'activateTab') {
+      void activateUnifiedTab(message.payload.key);
+      return;
+    }
+    if (message.type === 'closeTab') {
+      void closeUnifiedTab(message.payload.key);
       return;
     }
     if (message.type === 'checkBackendEnv') {
@@ -2131,12 +2517,15 @@ export function createHarnessHostRuntime(
         if (matching) {
           workspacePath = normalizeProjectPath(matching.path) || matching.path;
           await platform.workspaceState.update(FOLDER_KEY, workspacePath);
+          unifiedTabsRestored = false;
           if (active) {
             active.workspacePath = workspacePath;
             active.lastObservedSessionId = undefined;
             notifierFor(active.backend.profile.id).reset();
             active.backend.controller.setWorkspace(workspacePath);
+            ensureUnifiedTabsRestored(active);
             active.backend.controller.backendsChanged();
+            pushUnifiedTabs(true);
           }
           pushProjects();
         } else {
@@ -2311,7 +2700,7 @@ export function createHarnessHostRuntime(
         return;
       case 'newSession':
         await focusModule('sessions');
-        await current()?.controller.handle({ type: 'newSession', payload: {} });
+        await openNewTabInActive();
         return;
       case 'interrupt':
         await current()?.controller.handle({ type: 'interrupt', payload: {} });
@@ -2336,10 +2725,7 @@ export function createHarnessHostRuntime(
           { placeHolder: t('ext.selectBackend') },
         );
         if (!picked) return;
-        const resolved = resolveBackendId(picked.id);
-        await persistDefaultBackend(resolved);
-        if (resolved !== active?.backend.profile.id) await switchBackend(resolved);
-        else pushBackends();
+        await selectBackendForCurrentTab(picked.id, true);
         return;
       }
       case 'selectModel': {
