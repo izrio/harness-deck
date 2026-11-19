@@ -1,5 +1,16 @@
 # 更新记录 / Changelog
 
+## 0.5.5
+
+**npm 版本探测与代理环境修复、JetBrains Sidecar 环境同步及 macOS CI 修复**：修复 npm 版本列表拉取超时或错误不透明的问题，同步 JetBrains IDE 登录 shell 环境，并修复 macOS 下的 WSL 单元测试。
+
+**npm version lookup & proxy fixes, JetBrains Sidecar environment sync, and macOS CI fixes**: Improved npm version fetching reliability and error reporting, synced login shell environment for JetBrains sidecar, and fixed WSL unit tests on macOS.
+
+- **npm 与代理环境修复**：`processEnvWithProxy` 跳过 `socks://` 代理避免 npm 挂起至超时；`npmManager` 统一在用户主目录执行 npm 命令以免受工作区 `.npmrc` 干扰，`fetchNpmVersions` 增加 `--fetch-retries=0 --fetch-timeout=8000` 并返回更可读的错误详情；设置页智能体卡片直接展示 `versionsError` 具体原因，JetBrains `SidecarProcessManager` 通过 `EnvironmentUtil.getEnvironmentMap()` 注入完整 shell 环境。
+  **npm & proxy fixes**: Skipped `socks://` proxies in `processEnvWithProxy` to prevent npm hangs; ran npm commands in `homedir()` to avoid project `.npmrc` interference; added `--fetch-retries=0 --fetch-timeout=8000` and clearer error messages in `fetchNpmVersions`; displayed `versionsError` details in `BackendCard`; synced shell environment in JetBrains `SidecarProcessManager` via `EnvironmentUtil.getEnvironmentMap()`.
+- **跨平台测试与 CI 修复**：`RuntimeManager` 支持可选 `platform` 配置以在非 Linux 主机测试 WSL 缓存逻辑；`wslLocate` 与 `runtimeManager` 测试通过 `realpath` 规范化 macOS `/var` 软链接临时目录；`browserBridge` 测试改用 `path.delimiter` 适配 Windows 分隔符。
+  **Cross-platform test & CI fixes**: Added optional `platform` override on `RuntimeManager` for WSL cache tests; canonicalized macOS `/var` symlinked temp dirs with `realpath` in `wslLocate` and `runtimeManager` tests; used `path.delimiter` in `browserBridge` tests.
+
 ## 0.5.4
 
 **跨智能体统一标签栏、共享加载态组件与智能体图标更新**：顶部标签栏不再按底层隔离，DeepSeek、Claude、Pi、ZCode、ACP 的会话可以并排打开并各自显示智能体图标；新增 Beautiful UI `LoadingState`（Drive / Dots / Orbit），运行状态改用 Orbit 轨道动效；底层图标改用 SVG，设置页直接展示 dsh 网页地址。
