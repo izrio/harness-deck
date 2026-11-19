@@ -88,3 +88,20 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+## 推送与发版规范
+
+仅推送到 `main` 只会触发 `.github/workflows/ci.yml`（构建与测试），**不会**发布 GitHub Release；发布新版本必须同步更新版本号、`CHANGELOG.md` 并推送 `v*` 标签以触发 `.github/workflows/release.yml`。
+
+1. **推送前验证**：确保 `pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm build` 全部通过。
+2. **同步版本号与更新日志**（若需要发版）：
+   - 同步更新 `packages/extension/package.json` 的 `"version"` 与 `packages/jetbrains/build.gradle.kts` 的 `version = "<x.y.z>"`（`release.yml` 会校验两者必须与标签 `v<x.y.z>` 一致）。
+   - 在 `packages/extension/CHANGELOG.md` 顶部添加 `## <x.y.z>` 节（中英双语），`release.yml` 会提取该节作为 Release 说明。
+3. **提交、打标签并推送**：
+   ```bash
+   git add -A
+   git commit -m "Release <x.y.z>: <summary>"
+   git tag v<x.y.z>
+   git push origin main v<x.y.z>
+   ```
+4. **推送后核验**：确认 GitHub Actions 中 `CI` 与 `Release` 工作流均执行成功，并在 GitHub Releases 页面确认新版本及 `.vsix`、`.zip`、`.sha256` 产物已生成。
