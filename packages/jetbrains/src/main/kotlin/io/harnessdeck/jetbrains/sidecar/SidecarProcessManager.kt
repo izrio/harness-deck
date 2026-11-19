@@ -3,6 +3,7 @@ package io.harnessdeck.jetbrains.sidecar
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.intellij.openapi.Disposable
+import com.intellij.util.EnvironmentUtil
 import io.harnessdeck.jetbrains.protocol.EditorStateChangedParams
 import io.harnessdeck.jetbrains.protocol.JsonRpcTransport
 import io.harnessdeck.jetbrains.protocol.SidecarGson
@@ -40,6 +41,10 @@ class SidecarProcessManager(
         if (workingDirectory != null) {
             pb.directory(workingDirectory.toFile())
         }
+        // 从桌面/启动器打开的 IDEA 进程环境常常缺少登录 shell 的 PATH 与代理变量，
+        // 导致 sidecar 里跑 npm 时连不上 registry。用 JetBrains 读取的 shell 环境覆盖，
+        // 保证插件内 npm 与用户终端看到一致的环境。
+        pb.environment().putAll(EnvironmentUtil.getEnvironmentMap())
         val proc = pb.start()
         process = proc
 

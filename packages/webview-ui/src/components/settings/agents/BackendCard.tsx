@@ -56,6 +56,7 @@ export function BackendCard({
 
   const npmReady = Boolean(nodeEnv?.checked && nodeEnv.hasNode && nodeEnv.hasNpm);
   const isBusy = Boolean(backend.busy);
+  const versionsError = backend.versionsError;
   const canSwitchVersion = npmReady && !isBusy && pickedVersion.length > 0 && pickedVersion !== backend.version;
 
   return (
@@ -269,12 +270,21 @@ export function BackendCard({
               <SpinnerIcon className="size-3" />
               <span>{t('settings.backend.loadingVersions')}</span>
             </div>
-          ) : backend.versionsError ? (
-            <div className="flex items-center gap-1.5 text-[11.5px] text-red">
-              <span>{t('settings.backend.versionsError')}</span>
-              <button type="button" className="font-medium text-ink hover:underline" onClick={() => postToHost({ type: 'fetchBackendVersions', payload: { id: backend.id } })}>
-                {t('settings.backend.retryVersions')}
-              </button>
+          ) : versionsError ? (
+            <div className="flex flex-col gap-0.5 text-[11.5px] text-red">
+              <div className="flex items-center gap-1.5">
+                <span>{t('settings.backend.versionsError')}</span>
+                <button
+                  type="button"
+                  className="font-medium text-ink hover:underline"
+                  onClick={() => postToHost({ type: 'fetchBackendVersions', payload: { id: backend.id } })}
+                >
+                  {t('settings.backend.retryVersions')}
+                </button>
+              </div>
+              <span className="break-all font-mono text-[11px] text-ink-3" title={versionsError}>
+                {versionsError}
+              </span>
             </div>
           ) : !npmReady && nodeEnv?.checked ? (
             <div className="text-[11.5px] text-ink-3">{t('settings.backend.needNpm')}</div>

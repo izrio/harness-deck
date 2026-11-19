@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAcpBrowserOpener } from '../src/backend/acp.ts';
@@ -240,7 +240,7 @@ describe('BrowserBridge 端到端进程桥接', () => {
       { preserveBrowser: true },
     );
     expect(patched.BROWSER).toBe('/custom/browser');
-    expect(patched.PATH?.startsWith(`${bridge.directory}:`)).toBe(true);
+    expect(patched.PATH?.startsWith(`${bridge.directory}${delimiter}`)).toBe(true);
   });
 });
 

@@ -1,7 +1,7 @@
 /**
  * RuntimeManager 测试：用一个假的 dsh 可执行文件（Node 脚本）模拟版本输出、就绪 URL 和崩溃。
  */
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -154,8 +154,8 @@ describe.skipIf(process.platform === 'win32')('RuntimeManager', () => {
   });
 
   it('WSL 环境下自动忽略并清除指向 Windows 宿主机挂载目录的缓存 dsh，回退到 WSL 中的 dsh', async () => {
-    const winDir = await mkdtemp(join(tmpdir(), 'fake-win-dsh-'));
-    const wslDir = await mkdtemp(join(tmpdir(), 'fake-wsl-dsh-'));
+    const winDir = await realpath(await mkdtemp(join(tmpdir(), 'fake-win-dsh-')));
+    const wslDir = await realpath(await mkdtemp(join(tmpdir(), 'fake-wsl-dsh-')));
     dirs.push(winDir, wslDir);
 
     const winDsh = join(winDir, 'dsh');
@@ -176,6 +176,7 @@ describe.skipIf(process.platform === 'win32')('RuntimeManager', () => {
         cwd: wslDir,
         env: { ...process.env, PATH: `${winDir}:${wslDir}:${process.env.PATH ?? ''}`, FAKE_DSH_MODE: 'ok' },
         readyTimeoutMs: 5_000,
+        platform: 'linux',
         isWsl: true,
         wslMountRoots: [winDir],
         cachedExecutable: {

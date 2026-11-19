@@ -30,6 +30,8 @@ export interface RuntimeConfig {
   /** 已缓存的可执行文件路径与版本元数据；命中时跳过 PATH 扫描与重复 `--version` 探测。 */
   readonly cachedExecutable?: CachedDshExecutable;
   readonly onResolvedExecutable?: (resolved: CachedDshExecutable | undefined) => void;
+  /** 可选覆盖运行平台（主要用于测试）。 */
+  readonly platform?: NodeJS.Platform;
   /** 可选覆盖 WSL 判定（主要用于测试）。 */
   readonly isWsl?: boolean;
   /** 可选覆盖 WSL 宿主机挂载根列表（主要用于测试）。 */
@@ -150,7 +152,8 @@ export class RuntimeManager {
     let statMeta: ExecutableStat | undefined;
     let version: string | undefined;
 
-    const inWsl = process.platform === 'linux' && (config.isWsl ?? isWslEnvironment(config.env));
+    const platform = config.platform ?? process.platform;
+    const inWsl = platform === 'linux' && (config.isWsl ?? isWslEnvironment(config.env));
 
     if (config.cachedExecutable) {
       const skipWslWindowsCache =
@@ -160,7 +163,7 @@ export class RuntimeManager {
       if (signal.aborted) return undefined;
       const verified = skipWslWindowsCache
         ? undefined
-        : await verifyExecutableFile(config.cachedExecutable.command, process.platform);
+        : await verifyExecutableFile(config.cachedExecutable.command, platform);
       if (signal.aborted) return undefined;
       if (verified) {
         commandPath = verified.command;
@@ -185,7 +188,7 @@ export class RuntimeManager {
       const located = await locateDsh({
         configuredPath: config.configuredPath,
         env: config.env,
-        platform: process.platform,
+        platform,
         ...(config.isWsl !== undefined ? { isWsl: config.isWsl } : {}),
         ...(config.wslMountRoots !== undefined ? { wslMountRoots: config.wslMountRoots } : {}),
       });
@@ -198,7 +201,7 @@ export class RuntimeManager {
       }
       this.options.log(`使用 dsh：${located.command}（来源：${located.source === 'setting' ? '设置项' : 'PATH'}）`);
       commandPath = located.command;
-      statMeta = await verifyExecutableFile(commandPath, process.platform);
+      statMeta = await verifyExecutableFile(commandPath, platform);
       if (signal.aborted) return undefined;
     } else {
       this.options.log(`使用缓存的 dsh：${commandPath}`);

@@ -1642,7 +1642,9 @@ export function createHarnessHostRuntime(
       availableVersions.set(id, versions);
       persistEnvCache();
     } catch (error) {
-      versionsError.set(id, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      versionsError.set(id, message);
+      log(`读取 ${pkg} 的版本列表失败（npm: ${npmCommand}）：${message}`);
     } finally {
       versionsLoading.delete(id);
       pushBackends();

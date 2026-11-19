@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,7 +12,7 @@ import { locateZcode } from '../src/zcode/locate.ts';
 const dirs: string[] = [];
 
 async function makeTempDir(prefix: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
+  const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   dirs.push(dir);
   return dir;
 }

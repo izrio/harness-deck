@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -150,6 +150,8 @@ esac
       '@deepseek-ai/dsh': '0.2.1',
     });
     expect(await fetchNpmVersions(npmCmd, '@deepseek-ai/dsh', { PATH: dir }, 'linux')).toEqual(['0.2.2', '0.2.1', '0.2.0']);
+    const calls = (await readFile(logFile, 'utf8')).trim().split('\n');
+    expect(calls).toContain('view @deepseek-ai/dsh versions --json --fetch-retries=0 --fetch-timeout=8000');
 
     const logs: string[] = [];
     const installRes = await installNpmPackage(npmCmd, '@deepseek-ai/dsh', '0.2.2', { PATH: dir }, 'linux', (l) => logs.push(l));
@@ -161,5 +163,14 @@ esac
 
     const uninstallRes = await uninstallNpmPackage(npmCmd, '@deepseek-ai/dsh', { PATH: dir }, 'linux', (l) => logs.push(l));
     expect(uninstallRes).toEqual({ ok: true });
+  });
+
+  it('npm view 输出不是合法 JSON 时给出可读错误', async () => {
+    const dir = await makeTempBinDir({
+      npm: '#!/bin/sh\necho "npm notice something unrelated"\n',
+    });
+    await expect(fetchNpmVersions(join(dir, 'npm'), '@deepseek-ai/dsh', { PATH: dir }, 'linux')).rejects.toThrow(
+      /不是合法 JSON.*npm notice something unrelated/u,
+    );
   });
 });

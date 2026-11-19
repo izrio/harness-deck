@@ -3,6 +3,7 @@
  * 不依赖 vscode API，便于单元测试和跨平台复用（Windows 上自动通过 spawnSpec 调 npm.cmd）。
  */
 import { execFile, spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { NodeEnvState } from '@harness-deck/shared';
 import { locateExecutable } from '../runtime/locate.ts';
@@ -80,6 +81,7 @@ interface ExecResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly error?: Error;
+  readonly timedOut?: boolean;
 }
 
 function runCommand(
@@ -88,6 +90,7 @@ function runCommand(
   env: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform,
   timeoutMs: number,
+  cwd?: string,
 ): Promise<ExecResult> {
   const spec = spawnSpec(command, args, platform, env);
   return new Promise((resolve) => {
@@ -99,6 +102,7 @@ function runCommand(
         timeout: timeoutMs,
         maxBuffer: 8 * 1024 * 1024,
         windowsHide: true,
+        ...(cwd ? { cwd } : {}),
         ...(spec.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       },
       (error, stdout, stderr) => {
@@ -108,6 +112,7 @@ function runCommand(
           stdout: String(stdout ?? ''),
           stderr: String(stderr ?? ''),
           ...(error ? { error } : {}),
+          ...(error?.killed === true ? { timedOut: true } : {}),
         });
       },
     );
@@ -127,6 +132,8 @@ function runStreamingNpm(
     let settled = false;
     const child = spawn(spec.file, spec.args, {
       env: { ...env, NO_COLOR: '1' } as NodeJS.ProcessEnv,
+      // npm 读项目目录的 .npmrc；在 IDE 里 cwd 是工作区，切到 home 才与用户在终端里的行为一致。
+      cwd: homedir(),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: platform !== 'win32',
       windowsHide: true,
@@ -205,8 +212,8 @@ export async function detectNodeEnv(options: {
   let npmGlobalBin: string | undefined;
   if (npmLoc.kind === 'found') {
     const [verRes, prefixRes] = await Promise.all([
-      runCommand(npmLoc.command, ['--version'], options.env, platform, 5_000),
-      runCommand(npmLoc.command, ['prefix', '-g'], options.env, platform, 5_000),
+      runCommand(npmLoc.command, ['--version'], options.env, platform, 5_000, homedir()),
+      runCommand(npmLoc.command, ['prefix', '-g'], options.env, platform, 5_000, homedir()),
     ]);
     if (verRes.code === 0 && verRes.stdout.trim()) npmVersion = verRes.stdout.trim();
     else if (verRes.error) hasNpm = false;
@@ -239,7 +246,7 @@ export async function listNpmGlobalPackages(
   env: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform = process.platform,
 ): Promise<Record<string, string>> {
-  const res = await runCommand(npmCommand, ['list', '-g', '--depth=0', '--json'], env, platform, 10_000);
+  const res = await runCommand(npmCommand, ['list', '-g', '--depth=0', '--json'], env, platform, 10_000, homedir());
   if (!res.stdout.trim()) return {};
   return parseNpmGlobalList(res.stdout);
 }
@@ -251,11 +258,29 @@ export async function fetchNpmVersions(
   env: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform = process.platform,
 ): Promise<string[]> {
-  const res = await runCommand(npmCommand, ['view', pkg, 'versions', '--json'], env, platform, 15_000);
+  const timeoutMs = 20_000;
+  // 让 npm 自己快速失败并打印真实错误码，而不是在内置重试里耗到被外层 kill（那时 stderr 往往为空）。
+  const res = await runCommand(
+    npmCommand,
+    ['view', pkg, 'versions', '--json', '--fetch-retries=0', '--fetch-timeout=8000'],
+    env,
+    platform,
+    timeoutMs,
+    homedir(),
+  );
+  if (res.timedOut) {
+    throw new Error(`npm view 超时（${String(timeoutMs)}ms），请检查网络、代理或 registry 配置`);
+  }
   if (res.code !== 0) {
     throw new Error(res.stderr.trim() || res.error?.message || `npm view failed (${String(res.code)})`);
   }
-  return parseNpmVersionsOutput(res.stdout);
+  try {
+    return parseNpmVersionsOutput(res.stdout);
+  } catch (error) {
+    const snippet = res.stdout.trim().slice(0, 200).replace(/\s+/gu, ' ');
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`npm view 输出不是合法 JSON${snippet ? `：${snippet}` : ''}（${detail}）`);
+  }
 }
 
 /** 通过 `npm install -g <pkg>[@<version>]` 安装或切换版本。 */

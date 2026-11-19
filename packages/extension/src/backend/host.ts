@@ -86,7 +86,8 @@ export function processEnvWithProxy(
   }
   const env = envWithExtraPath(merged, extraBinDir, process.platform);
   const proxy = httpProxy?.trim();
-  if (proxy) {
+  // npm 等 CLI 只认 HTTP(S) 代理；socks:// 会让请求一直挂到超时，这里直接跳过。
+  if (proxy && /^https?:\/\//iu.test(proxy)) {
     env.HTTPS_PROXY ??= proxy;
     env.HTTP_PROXY ??= proxy;
   }
