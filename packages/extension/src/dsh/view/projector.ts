@@ -9,7 +9,7 @@
  */
 import { joinLabel, type ChangedFileView, type ImageView, type Item, type LineStats, type SessionChangesView } from '@harness-deck/shared';
 import { resolve } from 'node:path';
-import type { ChangesSummary } from '../DshClient.ts';
+import type { ChangesSummary, ImageAttachmentRef } from '../DshClient.ts';
 import type { PendingPrompt } from '../SessionService.ts';
 import { liveBlocksText, type WireEvent } from '../remote/follow.ts';
 import type { LiveAttempt } from '../session/journal.ts';
@@ -85,6 +85,8 @@ export interface Projection {
   readonly queuedRequestIds: ReadonlySet<string>;
   /** 绝对路径 → 改动历史。 */
   readonly fileHistory: ReadonlyMap<string, readonly FileStep[]>;
+  /** 历史和队列消息里的持久图片附件引用（`attachmentId → ImageAttachmentRef`），用于 dsh 0.2.2-rc.5+ 读取图片。 */
+  readonly imageAttachments: ReadonlyMap<string, ImageAttachmentRef>;
   readonly sessionChanges?: SessionChangesView;
 }
 
@@ -114,6 +116,7 @@ export interface EventsProjection {
   readonly changeSeqs: readonly number[];
   readonly missingCredentialRef?: string;
   readonly fileHistory: ReadonlyMap<string, readonly FileStep[]>;
+  readonly imageAttachments: ReadonlyMap<string, ImageAttachmentRef>;
   readonly sessionChanges?: SessionChangesView;
   /** 进行中这一轮的开始时间。 */
   readonly turnStartedAt?: number;
@@ -137,6 +140,7 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
   /** /permission 命令的预设显示名，命令结束时用。 */
   const permissionArgs = new Map<string, string>();
   const fileHistory = new Map<string, FileStep[]>();
+  const imageAttachments = new Map<string, ImageAttachmentRef>();
   const pushStep = (path: string, step: FileStep) => {
     const steps = fileHistory.get(path);
     if (steps) steps.push(step);
@@ -155,10 +159,12 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
     if (source.rpcId) persistedRequestIds.add(source.rpcId);
     // 子代理会话的第一条消息：dsh 在任务后面追加了给子代理的说明（父代理 id、怎样回报），不显示
     const content = Array.isArray(data.content)
-      ? (data.content as ContentBlock[]).filter((block) => !(block.type === 'text' && /^Your parent agent id is /u.test(block.text ?? '')))
+      ? (data.content as ContentBlock[]).filter(
+          (block) => !(block.type === 'text' && /^(?:Your parent agent id is |Your final answer is delivered automatically )/u.test(block.text ?? '')),
+        )
       : data.content;
     const { text, attachments } = splitContext(textOf(content));
-    const images = imagesOf(data.content);
+    const images = imagesOf(data.content, imageAttachments);
     if (text || attachments.length || images.length) {
       items.push({ kind: 'user', id: `u:${event.seq}`, text, ...(attachments.length ? { attachments } : {}), ...(images.length ? { images } : {}) });
     }
@@ -174,10 +180,11 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
    * @returns 是这类通知（已处理，不再当作用户消息）。
    */
   const settleSubagent = (event: WireEvent, data: Record<string, unknown>): boolean => {
-    const source = data.source as { kind?: string; senderSessionId?: unknown; summary?: unknown } | undefined;
+    const source = data.source as { kind?: string; senderSessionId?: unknown; summary?: unknown; stopReason?: unknown } | undefined;
     if (source?.kind !== 'subagent-settled') return false;
     const childId = typeof source.senderSessionId === 'string' ? source.senderSessionId : undefined;
-    const { result, failed } = settledResult(data.content, typeof source.summary === 'string' ? source.summary : '');
+    const stopReason = typeof source.stopReason === 'string' ? source.stopReason : undefined;
+    const { result, failed } = settledResult(data.content, typeof source.summary === 'string' ? source.summary : '', stopReason);
     const index = childId ? subagentIndex.get(childId) : undefined;
     const previous = index !== undefined ? items[index] : undefined;
     if (index !== undefined && previous?.kind === 'activity' && previous.subagent) {
@@ -451,6 +458,7 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
     toolCalls,
     changeSeqs,
     fileHistory,
+    imageAttachments,
     ...(sessionChanges ? { sessionChanges } : {}),
     ...(missingCredentialRef ? { missingCredentialRef } : {}),
     ...(turnOpen && turnStartedAt !== undefined ? { turnStartedAt } : {}),
@@ -519,7 +527,8 @@ export function project(input: ProjectionInput, base: EventsProjection = project
 
   // dsh 队列里的消息（插队的先送达，排在前面）
   const inboxRpcIds = new Set<string>();
-  for (const queued of inboxItems(input.inbox)) {
+  const inboxAttachments = new Map<string, ImageAttachmentRef>();
+  for (const queued of inboxItems(input.inbox, inboxAttachments)) {
     if (queued.rpcId) inboxRpcIds.add(queued.rpcId);
     if (queued.rpcId && persistedRequestIds.has(queued.rpcId)) continue;
     const { text, attachments } = splitContext(queued.text);
@@ -554,6 +563,9 @@ export function project(input: ProjectionInput, base: EventsProjection = project
     });
   }
 
+  const imageAttachments =
+    inboxAttachments.size > 0 ? new Map([...base.imageAttachments, ...inboxAttachments]) : base.imageAttachments;
+
   return {
     items,
     persistedRequestIds,
@@ -562,6 +574,7 @@ export function project(input: ProjectionInput, base: EventsProjection = project
     toolCalls: base.toolCalls,
     changeSeqs: base.changeSeqs,
     fileHistory: base.fileHistory,
+    imageAttachments,
     ...(base.sessionChanges ? { sessionChanges: base.sessionChanges } : {}),
     ...(base.missingCredentialRef ? { missingCredentialRef: base.missingCredentialRef } : {}),
   };
@@ -576,7 +589,7 @@ interface InboxItem {
 }
 
 /** `inbox` 投影：`{ 'next-turn': [...], 'next-step': [...] }`，每项是一条待送达的用户消息。只取用户自己发的。 */
-function inboxItems(inbox: unknown): InboxItem[] {
+function inboxItems(inbox: unknown, refs?: Map<string, ImageAttachmentRef>): InboxItem[] {
   if (!inbox || typeof inbox !== 'object') return [];
   const result: InboxItem[] = [];
   for (const target of ['next-step', 'next-turn'] as const) {
@@ -585,7 +598,7 @@ function inboxItems(inbox: unknown): InboxItem[] {
     for (const raw of list) {
       const item = raw as { id?: unknown; content?: unknown; source?: { kind?: unknown; rpcId?: unknown } };
       if (typeof item.id !== 'string' || item.source?.kind !== 'user') continue;
-      result.push({ id: item.id, text: textOf(item.content), images: imagesOf(item.content), target, ...(typeof item.source.rpcId === 'string' ? { rpcId: item.source.rpcId } : {}) });
+      result.push({ id: item.id, text: textOf(item.content), images: imagesOf(item.content, refs), target, ...(typeof item.source.rpcId === 'string' ? { rpcId: item.source.rpcId } : {}) });
     }
   }
   return result;
@@ -593,13 +606,17 @@ function inboxItems(inbox: unknown): InboxItem[] {
 
 /**
  * 子代理结束通知的内容：第一段是摘要（「Background subagent <id> finished …」），
- * 「Its closing message:」之后是子代理的最终回答。摘要里没有 finished 时当作失败或被停止。
+ * 「Its closing message:」之后是子代理的最终回答。dsh 0.2.2-rc.5 起在 `source.stopReason` 提供精确结束原因；
+ * 缺失时回退到摘要文本判断（注意 `"before it finished"` 也是未完成）。
  */
-function settledResult(content: unknown, summary: string): { result?: string; failed: boolean } {
+function settledResult(content: unknown, summary: string, stopReason?: string): { result?: string; failed: boolean } {
   const texts = Array.isArray(content) ? (content as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text ?? '') : [];
   const marker = texts.findIndex((text) => /closing message:?\s*$/iu.test(text.trim()));
   const head = summary || texts[0] || '';
-  const failed = !/\bfinished\b/iu.test(head);
+  const failed =
+    stopReason !== undefined
+      ? stopReason !== 'completed'
+      : !/\bfinished\b/iu.test(head) || /\bbefore it finished\b/iu.test(head);
   const rest = (marker >= 0 ? texts.slice(marker + 1) : failed ? texts : texts.slice(1)).join('\n\n').trim();
   return { ...(rest ? { result: truncate(rest) } : {}), failed };
 }
@@ -672,17 +689,40 @@ function isToolDiff(value: unknown): value is ToolDiff {
   return typeof d.newText === 'string' && (d.oldText === null || d.oldText === undefined || typeof d.oldText === 'string');
 }
 
-/** 消息里的图片：dsh 收下后存成附件 `{ type: 'image', attachment: { attachmentId, mediaType, width, height, name } }`。 */
-function imagesOf(content: unknown): ImageView[] {
+/** 消息里的图片：dsh 收下后存成附件 `{ type: 'image', attachment: { attachmentId, mediaType, bytes, width, height, name, originalDimensions } }`。 */
+function imagesOf(content: unknown, refs?: Map<string, ImageAttachmentRef>): ImageView[] {
   if (!Array.isArray(content)) return [];
   const images: ImageView[] = [];
   for (const block of content as { type?: unknown; attachment?: unknown }[]) {
     if (block?.type !== 'image' || !block.attachment || typeof block.attachment !== 'object') continue;
-    const a = block.attachment as { attachmentId?: unknown; mediaType?: unknown; width?: unknown; height?: unknown; name?: unknown };
+    const a = block.attachment as {
+      attachmentId?: unknown;
+      mediaType?: unknown;
+      bytes?: unknown;
+      width?: unknown;
+      height?: unknown;
+      name?: unknown;
+      originalDimensions?: unknown;
+    };
     if (typeof a.attachmentId !== 'string') continue;
+    const mediaType = typeof a.mediaType === 'string' ? a.mediaType : 'image/png';
+    if (refs && typeof a.mediaType === 'string' && typeof a.bytes === 'number' && typeof a.width === 'number' && typeof a.height === 'number') {
+      const orig = a.originalDimensions as { width?: unknown; height?: unknown } | undefined;
+      refs.set(a.attachmentId, {
+        attachmentId: a.attachmentId,
+        mediaType: a.mediaType,
+        bytes: a.bytes,
+        width: a.width,
+        height: a.height,
+        ...(typeof a.name === 'string' && a.name ? { name: a.name } : {}),
+        ...(orig && typeof orig.width === 'number' && typeof orig.height === 'number'
+          ? { originalDimensions: { width: orig.width, height: orig.height } }
+          : {}),
+      });
+    }
     images.push({
       attachmentId: a.attachmentId,
-      mediaType: typeof a.mediaType === 'string' ? a.mediaType : 'image/png',
+      mediaType,
       ...(typeof a.name === 'string' && a.name ? { name: a.name } : {}),
       ...(typeof a.width === 'number' ? { width: a.width } : {}),
       ...(typeof a.height === 'number' ? { height: a.height } : {}),

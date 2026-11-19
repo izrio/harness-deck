@@ -498,14 +498,28 @@ describe('ChatController', () => {
       expect(JSON.stringify(echo)).not.toContain(image.data);
     });
 
-    it('历史消息里的图片按需读取，结果以 data URL 回传', async () => {
+    it('历史消息里的图片按需读取，结果以 data URL 回传并透传完整附件引用', async () => {
       const { controller, fake, posted } = setup();
-      Object.assign(fake.client, { attachment: async () => ({ mediaType: 'image/png', data: 'AAAA' }) });
+      const attachmentRef = { attachmentId: 'sha256:abc', mediaType: 'image/png', bytes: 70, width: 1, height: 1, name: 'shot.png' };
+      const calls: unknown[] = [];
+      Object.assign(fake.client, {
+        attachment: async (sessionId: string, attachmentId: string, ref?: unknown) => {
+          calls.push({ sessionId, attachmentId, ref });
+          return { mediaType: 'image/png', data: 'AAAA' };
+        },
+      });
       controller.setClient(fake.client);
       await flush();
       await controller.handle({ type: 'sendMessage', payload: { text: '看图' } });
       await flush();
+      const sessionId = controller.snapshot().session.id!;
+      fake.emit(sessionId, 'user/message', {
+        content: [{ type: 'image', attachment: attachmentRef }],
+        source: { kind: 'user' },
+      });
+      await flush();
       await controller.handle({ type: 'loadImage', payload: { attachmentId: 'sha256:abc' } });
+      expect(calls).toEqual([{ sessionId, attachmentId: 'sha256:abc', ref: attachmentRef }]);
       expect(posted).toContainEqual({ type: 'imageData', payload: { attachmentId: 'sha256:abc', dataUrl: 'data:image/png;base64,AAAA' } });
     });
   });

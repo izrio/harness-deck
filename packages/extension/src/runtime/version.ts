@@ -9,8 +9,8 @@
 /** 支持的最低 dsh 版本（M0 实测）。 */
 export const MINIMUM_DSH_VERSION = '0.2.1-rc.5';
 
-/** 已经完整测试过的最高 dsh 版本（M0 实测）。 */
-export const TESTED_DSH_VERSION = '0.2.2-alpha.3';
+/** 已经完整测试过的最高 dsh 版本。 */
+export const TESTED_DSH_VERSION = '0.2.2-rc.5';
 
 export interface SemVer {
   readonly major: number;

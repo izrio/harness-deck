@@ -17,10 +17,11 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { DshClient } from '../src/dsh/DshClient.ts';
+import { DshClient, type PromptImageInput } from '../src/dsh/DshClient.ts';
 import { isMethodUnavailable } from '../src/dsh/remote/errors.ts';
 import { liveBlocksText, type FollowFrame } from '../src/dsh/remote/follow.ts';
 import { SessionJournal } from '../src/dsh/session/journal.ts';
+import { projectEvents } from '../src/dsh/view/projector.ts';
 import type { WaterfallRequest } from '../src/dsh/remote/events.ts';
 import { RuntimeManager } from '../src/runtime/RuntimeManager.ts';
 import { startMockModel } from '../test/mock-model/server.ts';
@@ -257,12 +258,12 @@ try {
 
   check('session/follow 收到开场快照', await waitFor(() => snapshotSeen, 10_000));
 
-  async function scenario(name: string, prompt: string, timeoutMs = 60_000) {
+  async function scenario(name: string, prompt: string, timeoutMs = 60_000, images: readonly PromptImageInput[] = []) {
     const startFrame = frames.length;
     const startSeq = journal.lastSeq;
     const endsBefore = turnEnds();
     const samplesBefore = liveSamples.length;
-    await client!.prompt(sessionId, prompt);
+    await client!.prompt(sessionId, prompt, undefined, images);
     const finished = await waitFor(() => turnEnds() > endsBefore, timeoutMs);
     const scenarioFrames = frames.slice(startFrame);
     if (cli.record) {
@@ -293,6 +294,25 @@ try {
     findings.sessionTitleEvents = journal.events.filter((event) => event.type === 'session/title').map((event) => sanitize(event.data));
     findings.sessionListAfterHello = sanitize(await client.listSessions());
     findings.projectionsAfterHello = sanitize(await client.unary.call('session/projections', { request: { sessionId } }));
+  }
+
+  // 1b. 图片附件：发送 1x1 PNG 并通过 session/attachment 读回（验证 0.2.1-rc.5 与 0.2.2-rc.5+ 兼容）
+  {
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const result = await scenario('image', 'M0_IMAGE 看看这张图', 60_000, [
+      { mediaType: 'image/png', data: pngBase64, name: 'pixel.png' },
+    ]);
+    check('场景 image：轮次结束', result.finished);
+    const projected = projectEvents({ events: result.events });
+    const ref = [...projected.imageAttachments.values()][0];
+    check('场景 image：投影提取到图片附件引用', ref !== undefined, ref);
+    if (ref) {
+      const loaded = await client.attachment(sessionId, ref.attachmentId, ref);
+      check('场景 image：session/attachment 读回图片成功', loaded.mediaType.startsWith('image/') && loaded.data.length > 0, {
+        mediaType: loaded.mediaType,
+        bytes: Buffer.from(loaded.data, 'base64').byteLength,
+      });
+    }
   }
 
   // 2. 写文件：tool/call、tool/result.meta 中的 diff 展示数据、workspace/changes

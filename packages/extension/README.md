@@ -20,7 +20,7 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 
 **用 DeepSeek（dsh）**
 
-1. 安装 dsh（`0.2.1-rc.5` 及以上，已测试到 `0.2.2-alpha.3`），任选一种：
+1. 安装 dsh（`0.2.1-rc.5` 及以上，已测试到 `0.2.2-rc.5`），任选一种：
    - 安装 [DeepSeek Desktop](https://www.deepseek.com/en/download/)，在它的菜单「管理 dsh 命令…」中安装 `dsh` 命令；
    - 或执行 `npm install -g @deepseek-ai/dsh`（需要 Node ≥ 24.9）。
 

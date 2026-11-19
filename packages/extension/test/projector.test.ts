@@ -215,10 +215,20 @@ describe('project：按工具类型渲染（M2）', () => {
       }),
       event(2, 'user/message', { content: [{ type: 'image', attachment: { attachmentId: 'sha256:d5', mediaType: 'image/jpeg' } }], source: { kind: 'user' } }),
     ];
-    expect(project({ events, pending: [] }).items).toEqual([
+    const projection = project({ events, pending: [] });
+    expect(projection.items).toEqual([
       { kind: 'user', id: 'u:1', text: '看看这张图', images: [{ attachmentId: 'sha256:c4', mediaType: 'image/png', name: 'shot.png', width: 1, height: 1 }] },
       { kind: 'user', id: 'u:2', text: '', images: [{ attachmentId: 'sha256:d5', mediaType: 'image/jpeg' }] },
     ]);
+    expect(projection.imageAttachments.get('sha256:c4')).toEqual({
+      attachmentId: 'sha256:c4',
+      mediaType: 'image/png',
+      width: 1,
+      height: 1,
+      bytes: 70,
+      name: 'shot.png',
+    });
+    expect(projection.imageAttachments.get('sha256:d5')).toBeUndefined();
   });
 
   it('子代理：一行显示描述和状态，结束通知补上最终回答，通知本身不显示成用户消息', () => {
@@ -259,6 +269,43 @@ describe('project：按工具类型渲染（M2）', () => {
       ],
     }).items;
     expect(items).toMatchObject([{ kind: 'activity', variant: 'subagent', subagent: { childId: 'x', state: 'failed' } }]);
+  });
+
+  it('0.2.2-rc.5 子代理：按 stopReason 和 before it finished 识别失败，并隐藏回报指引', () => {
+    const items = projectEvents({
+      events: [
+        event(1, 'user/message', {
+          content: [
+            { type: 'text', text: '核对配置' },
+            { type: 'text', text: 'Your final answer is delivered automatically if your parent is still online.' },
+          ],
+          source: { kind: 'user' },
+        }),
+        {
+          type: 'user/message',
+          seq: 2,
+          time: 2,
+          data: {
+            content: [{ type: 'text', text: 'Background subagent agent-1 failed before it finished.' }],
+            source: { kind: 'subagent-settled', summary: 'Background subagent agent-1 failed before it finished.', stopReason: 'error', senderSessionId: 'c1' },
+          },
+        },
+        {
+          type: 'user/message',
+          seq: 3,
+          time: 3,
+          data: {
+            content: [{ type: 'text', text: 'Background subagent agent-2 was stopped before it finished.' }],
+            source: { kind: 'subagent-settled', summary: 'Background subagent agent-2 was stopped before it finished.', senderSessionId: 'c2' },
+          },
+        },
+      ],
+    }).items;
+    expect(items).toMatchObject([
+      { kind: 'user', text: '核对配置' },
+      { kind: 'activity', variant: 'subagent', status: 'error', subagent: { childId: 'c1', state: 'failed' } },
+      { kind: 'activity', variant: 'subagent', status: 'error', subagent: { childId: 'c2', state: 'failed' } },
+    ]);
   });
 
   it('write 新建文件：标记新建，新增行数取内容行数', () => {

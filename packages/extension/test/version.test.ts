@@ -38,8 +38,10 @@ describe('checkVersionSupport', () => {
   });
 
   it('范围内为 supported，高于已测试版本时标记 newerThanTested', () => {
-    expect(checkVersionSupport('0.2.1-rc.5', '0.2.1-rc.5', '0.2.2-alpha.3')).toEqual({ kind: 'supported', newerThanTested: false });
-    expect(checkVersionSupport('0.2.2', '0.2.1-rc.5', '0.2.2-alpha.3')).toEqual({ kind: 'supported', newerThanTested: true });
+    expect(checkVersionSupport('0.2.1-rc.5')).toEqual({ kind: 'supported', newerThanTested: false });
+    expect(checkVersionSupport('0.2.2-rc.5')).toEqual({ kind: 'supported', newerThanTested: false });
+    expect(checkVersionSupport('0.2.2')).toEqual({ kind: 'supported', newerThanTested: true });
+    expect(checkVersionSupport('0.2.2-rc.6', '0.2.1-rc.5', '0.2.2-rc.5')).toEqual({ kind: 'supported', newerThanTested: true });
   });
 
   it('无法解析时 invalid', () => {

@@ -26,7 +26,7 @@ import type {
   TabsState,
   WebviewToHost,
 } from '@harness-deck/shared';
-import { ChangesUnavailableError, type ChangesDiff, type ChangesSummary, type DshClient, type ModelSelection } from '../DshClient.ts';
+import { ChangesUnavailableError, type ChangesDiff, type ChangesSummary, type DshClient, type ImageAttachmentRef, type ModelSelection } from '../DshClient.ts';
 import type { ConnectionStatus } from '../DshConnection.ts';
 import { InteractionService } from '../InteractionService.ts';
 import { RemoteError } from '../remote/errors.ts';
@@ -146,6 +146,8 @@ export class ChatController implements ChatBackendController {
   private readonly publisher: ViewPublisher;
   /** 当前会话每个文件的改动历史（绝对路径），用于打开累计 Diff 和某一轮的 Diff。 */
   private fileHistory: ReadonlyMap<string, readonly FileStep[]> = new Map();
+  /** 当前会话持久图片附件引用（`attachmentId → ImageAttachmentRef`），用于 dsh 0.2.2-rc.5+ 的 `session/attachment`。 */
+  private imageAttachments: ReadonlyMap<string, ImageAttachmentRef> = new Map();
   /** `/api/changes.diff` 的结果，键是 `会话:seq:index`；一轮结束后内容不再变化。 */
   private readonly turnDiffs = new Map<string, Promise<ChangesDiff>>();
   /** 正在打开的 Diff：重复点击不重复请求。 */
@@ -856,7 +858,7 @@ export class ChatController implements ChatBackendController {
     let dataUrl: string | undefined;
     if (sessionId && client) {
       try {
-        const image = await client.attachment(sessionId, attachmentId);
+        const image = await client.attachment(sessionId, attachmentId, this.imageAttachments.get(attachmentId));
         dataUrl = `data:${image.mediaType};base64,${image.data}`;
       } catch (error) {
         this.options.log(`读取图片失败：${describe(error)}`);
@@ -1195,6 +1197,7 @@ export class ChatController implements ChatBackendController {
   private sync({ projection, sessionId, service, canLoadChanges }: ReturnType<ChatController['buildView']>): void {
     this.toolCalls = projection.toolCalls;
     this.fileHistory = projection.fileHistory;
+    this.imageAttachments = projection.imageAttachments;
     if (projection.missingCredentialRef) this.credentialRef = projection.missingCredentialRef;
     if (sessionId && canLoadChanges) this.loadChanges(sessionId, projection.changeSeqs);
     // 已经出现在历史或 dsh 队列里的本地回显撤掉：之后从队列里删除的消息不能再以回显的形式冒出来

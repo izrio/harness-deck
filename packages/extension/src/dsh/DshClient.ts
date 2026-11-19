@@ -10,7 +10,7 @@ import { connectApiPeer, type ApiCredential, type FetchLike } from './remote/con
 import { RemoteEvents, type ReadyInfo } from './remote/events.ts';
 import { followFrameSchema, wireEventSchema, type FollowFrame, type WireEvent } from './remote/follow.ts';
 import { MuxClient } from './remote/mux.ts';
-import { isMethodUnavailable, TransportError } from './remote/errors.ts';
+import { isMethodUnavailable, RemoteError, TransportError } from './remote/errors.ts';
 import { UnaryClient } from './remote/unary.ts';
 
 export const sessionSummarySchema = z.object({
@@ -160,6 +160,17 @@ export type ChangesDiff = z.infer<typeof changesDiffSchema>;
 
 const attachmentValue = z.object({ attachment: z.object({ mediaType: z.string() }).loose(), data: z.string() });
 
+/** dsh 持久图片附件引用（0.2.2-rc.5 起 `session/attachment` 请求需要完整引用对象）。 */
+export interface ImageAttachmentRef {
+  readonly attachmentId: string;
+  readonly mediaType: string;
+  readonly bytes: number;
+  readonly width: number;
+  readonly height: number;
+  readonly name?: string;
+  readonly originalDimensions?: { readonly width: number; readonly height: number };
+}
+
 /** 随消息发送的一张图片。 */
 export interface PromptImageInput {
   readonly mediaType: string;
@@ -194,6 +205,8 @@ export interface DshClientOptions {
 export class DshClient {
   /** `session/events`（0.2.2-alpha 起）是否可用；undefined 表示还没探测过。 */
   private eventsMethodAvailable: boolean | undefined;
+  /** `session/attachment` 请求格式：0.2.2-rc.5 起用 `attachment` 对象，更早版本用 `attachmentId`。 */
+  private attachmentRequestStyle: 'ref' | 'id' | undefined;
 
   private constructor(
     readonly credential: ApiCredential,
@@ -338,8 +351,36 @@ export class DshClient {
     return parse(changesSummarySchema, await this.getJson('/api/changes.summary', { sessionId, seq: String(seq) }), 'changes.summary');
   }
 
-  /** 读取消息里的一张图片（`session/attachment`）。 */
-  async attachment(sessionId: string, attachmentId: string): Promise<{ mediaType: string; data: string }> {
+  /**
+   * 读取消息里的一张图片（`session/attachment`）。
+   * 0.2.2-rc.5 起需要传入完整 `attachment` 引用对象，更早版本接收 `attachmentId`；根据可用字段和 Host 响应自动兼容。
+   */
+  async attachment(sessionId: string, attachmentId: string, ref?: ImageAttachmentRef): Promise<{ mediaType: string; data: string }> {
+    const canUseRef = ref !== undefined && this.attachmentRequestStyle !== 'id';
+    if (canUseRef) {
+      try {
+        const value = parse(
+          attachmentValue,
+          await this.unary.call('session/attachment', { request: { sessionId, attachment: ref } }),
+          'session/attachment',
+        );
+        this.attachmentRequestStyle = 'ref';
+        return { mediaType: value.attachment.mediaType, data: value.data };
+      } catch (firstError) {
+        if (this.attachmentRequestStyle === 'ref' || !(firstError instanceof RemoteError)) throw firstError;
+        try {
+          const fallback = parse(
+            attachmentValue,
+            await this.unary.call('session/attachment', { request: { sessionId, attachmentId } }),
+            'session/attachment',
+          );
+          this.attachmentRequestStyle = 'id';
+          return { mediaType: fallback.attachment.mediaType, data: fallback.data };
+        } catch {
+          throw firstError;
+        }
+      }
+    }
     const value = parse(attachmentValue, await this.unary.call('session/attachment', { request: { sessionId, attachmentId } }), 'session/attachment');
     return { mediaType: value.attachment.mediaType, data: value.data };
   }

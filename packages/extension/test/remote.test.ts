@@ -293,3 +293,53 @@ describe('session/control 帧兼容', () => {
     ]);
   });
 });
+
+describe('session/attachment 请求兼容', () => {
+  const ref = {
+    attachmentId: 'sha256:0123456789abcdef',
+    mediaType: 'image/png',
+    bytes: 70,
+    width: 1,
+    height: 1,
+    name: 'pixel.png',
+  } as const;
+
+  it('dsh 0.2.2-rc.5+ 使用完整 attachment 引用对象', async () => {
+    const calls: unknown[] = [];
+    const client = Object.create(DshClient.prototype) as DshClient;
+    Object.assign(client, {
+      unary: {
+        call: async (endpoint: string, args: unknown) => {
+          calls.push({ endpoint, args });
+          return { attachment: ref, data: 'AAAA' };
+        },
+      },
+    });
+    await expect(client.attachment('s1', ref.attachmentId, ref)).resolves.toEqual({ mediaType: 'image/png', data: 'AAAA' });
+    expect(calls).toEqual([{ endpoint: 'session/attachment', args: { request: { sessionId: 's1', attachment: ref } } }]);
+  });
+
+  it('旧版 dsh 拒绝 attachment 对象时自动回退到 attachmentId 并记住风格', async () => {
+    const calls: { endpoint: string; args: Record<string, unknown> }[] = [];
+    const client = Object.create(DshClient.prototype) as DshClient;
+    Object.assign(client, {
+      unary: {
+        call: async (endpoint: string, args: Record<string, unknown>) => {
+          calls.push({ endpoint, args });
+          const req = args.request as { attachmentId?: string };
+          if (!req.attachmentId) {
+            throw new RemoteError('session/attachment', 'gateway/input-invalid', 'attachmentId required');
+          }
+          return { attachment: { mediaType: 'image/png' }, data: 'BBBB' };
+        },
+      },
+    });
+    await expect(client.attachment('s1', ref.attachmentId, ref)).resolves.toEqual({ mediaType: 'image/png', data: 'BBBB' });
+    await expect(client.attachment('s1', ref.attachmentId, ref)).resolves.toEqual({ mediaType: 'image/png', data: 'BBBB' });
+    expect(calls).toEqual([
+      { endpoint: 'session/attachment', args: { request: { sessionId: 's1', attachment: ref } } },
+      { endpoint: 'session/attachment', args: { request: { sessionId: 's1', attachmentId: ref.attachmentId } } },
+      { endpoint: 'session/attachment', args: { request: { sessionId: 's1', attachmentId: ref.attachmentId } } },
+    ]);
+  });
+});
