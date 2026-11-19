@@ -469,11 +469,14 @@ function commandStem(cmd: string): string {
 }
 
 /** 判断 ACP 配置对应的原生技能注入模式。 */
-export function detectAcpSkillMode(profile: Extract<BackendProfile, { kind: 'acp' }>): 'omp' | 'codebuddy' | 'claude' | 'generic' {
+export function detectAcpSkillMode(
+  profile: Extract<BackendProfile, { kind: 'acp' }>,
+): 'omp' | 'codebuddy' | 'claude' | 'antigravity' | 'generic' {
   const stem = commandStem(profile.command);
   if (profile.id === 'oh-my-pi' || stem === 'omp' || stem === 'pi') return 'omp';
   if (profile.id === 'codebuddy' || stem === 'codebuddy') return 'codebuddy';
   if (profile.id === 'claude' || stem.includes('claude')) return 'claude';
+  if (profile.id === 'antigravity' || stem === 'agy') return 'antigravity';
   return 'generic';
 }
 
@@ -575,7 +578,7 @@ export async function prepareBackendLaunch(params: {
       mcpServers: activeMcp,
     };
   }
-  if (kind === 'codebuddy') {
+  if (kind === 'codebuddy' || kind === 'antigravity') {
     return {
       launcherArgs: [],
       extraArgs: staged.skillDirs.length > 0 ? ['--add-dir', staged.bundleDir] : [],

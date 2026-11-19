@@ -57,6 +57,7 @@ export const PREVIEW_BACKENDS: BackendsState = {
     { id: 'zcode', name: 'ZCode', kind: 'zcode', builtin: true, available: false, installHint: 'npm install -g zcode-app-cli' },
     { id: 'codebuddy', name: 'CodeBuddy', kind: 'acp', builtin: true, available: true, version: '2.1.0', command: 'codebuddy --acp' },
     { id: 'opencode', name: 'OpenCode', kind: 'acp', builtin: true, available: true, version: '0.4.8', command: 'opencode acp' },
+    { id: 'antigravity', name: 'Antigravity', kind: 'acp', builtin: true, available: true, version: '1.5.12', command: 'agy acp' },
   ],
 };
 

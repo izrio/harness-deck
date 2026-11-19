@@ -103,10 +103,11 @@ export function resolveMappedProviderModel(
       : undefined;
   if (validSelected && reqModel === validSelected) return undefined;
 
+  const isKnownModel = provider.models.some((m) => m.id === reqModel);
   const hasSeparateSmall = Boolean(provider.smallModel && provider.smallModel !== provider.defaultModel);
   const isSmallTask =
-    /haiku|small|fast|flash|mini|turbo|air/iu.test(reqModel) ||
-    Boolean(hasSeparateSmall && reqModel === provider.smallModel);
+    Boolean(hasSeparateSmall && reqModel === provider.smallModel) ||
+    (!isKnownModel && /haiku|small|fast|flash|mini|turbo|air/iu.test(reqModel));
 
   if (validSelected) {
     if (isSmallTask) {

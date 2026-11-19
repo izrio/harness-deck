@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="agy-grad" x1="56" y1="204" x2="200" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="48%" stop-color="#34A853"/>
+      <stop offset="76%" stop-color="#FBBC05"/>
+      <stop offset="100%" stop-color="#EA4335"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="#181A20"/>
+  <path fill="url(#agy-grad)" d="M128 46C116.5 46 107.2 53.1 101.6 64.9L50.8 176.2C44.9 189.2 53.9 204 68.1 204C78.4 204 86.2 197.4 91.6 187.8C101.4 170.5 113.8 156 128 156C142.2 156 154.6 170.5 164.4 187.8C169.8 197.4 177.6 204 187.9 204C202.1 204 211.1 189.2 205.2 176.2L154.4 64.9C148.8 53.1 139.5 46 128 46ZM128 84.5L151.8 137.4C144.4 132.4 136.4 129.5 128 129.5C119.6 129.5 111.6 132.4 104.2 137.4L128 84.5Z"/>
+</svg>

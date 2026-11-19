@@ -8,6 +8,7 @@ export const FALLBACK_BACKENDS: readonly Pick<BackendView, 'id' | 'name'>[] = [
   { id: 'codebuddy', name: 'CodeBuddy' },
   { id: 'claude', name: 'Claude Code' },
   { id: 'opencode', name: 'OpenCode' },
+  { id: 'antigravity', name: 'Antigravity' },
 ];
 
 /** 项目下拉选项：当前工作区优先，其后是最近项目（按路径去重）。返回 `[path, name]`。 */

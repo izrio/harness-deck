@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from 'react';
 import { cn } from '../../lib/utils.ts';
-import { CollapsibleDrawer, Shimmer } from '../beautifului/index.ts';
+import { CollapsibleDrawer } from '../beautifului/index.ts';
 import { Markdown } from '../Markdown.tsx';
 import { AssistantActions } from '../RunStatus.tsx';
 import { ChevronDownIcon, SparkleIcon } from '../icons.tsx';
@@ -36,9 +36,9 @@ export function Reasoning({ text, active }: { text: string; active: boolean }) {
           height={15}
           fill="currentColor"
           stroke="none"
-          className={cn('shrink-0', active ? 'text-ink-2' : 'text-ink-3')}
+          className={cn('shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}
         />
-        {active ? <Shimmer>{t('reasoning.active')}</Shimmer> : <span>{t('reasoning.done')}</span>}
+        <span className={active ? 'text-accent-ink' : undefined}>{active ? t('reasoning.active') : t('reasoning.done')}</span>
         <ChevronDownIcon
  width={13}
  height={13}

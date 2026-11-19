@@ -4,6 +4,7 @@
  * 按会话以 `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio`
  * 启动双向流式进程并挂载 `ClaudeController`。
  */
+import { join } from 'node:path';
 import type { RuntimeStatus } from '@harness-deck/shared';
 import type { StoredSession } from '../acp/AcpController.ts';
 import { ClaudeConnection } from '../claude/connection.ts';
@@ -12,7 +13,7 @@ import { locateClaude } from '../claude/locate.ts';
 import { resolveClaudeConfigDir } from '../claude/sessions.ts';
 import type { PreparedBackendLaunch } from '../extensions/mcpService.ts';
 import { t } from '../i18n.ts';
-import { prepareClaudeProviderRuntime } from '../providers/ProviderRuntime.ts';
+import { prepareClaudeProviderRuntime, writeClaudeProviderSettingsFile } from '../providers/ProviderRuntime.ts';
 import { verifyExecutableFile } from '../runtime/locate.ts';
 import { commandSpecForProfile } from './envCache.ts';
 import type { BackendHost } from './host.ts';
@@ -122,6 +123,7 @@ export function createClaudeBackend(
     const resolvedCmd = executablePath;
     controller.setSpawner(async (spawnParams) => {
       let launchEnv: Record<string, string | undefined> = host.processEnv();
+      const providerExtraArgs: string[] = [];
       const boundProvider = host.boundProvider?.(profile.id);
       if (boundProvider && host.ensureProviderProxy) {
         try {
@@ -136,8 +138,23 @@ export function createClaudeBackend(
           });
           if (adapted) {
             launchEnv = adapted.env;
+            try {
+              const settingsPath = await writeClaudeProviderSettingsFile(
+                join(host.storageRoot, 'runtime'),
+                boundProvider.id,
+                adapted.settingsJson,
+              );
+              providerExtraArgs.push('--settings', settingsPath);
+            } catch (error) {
+              host.log(
+                `写入 Claude Code 服务商覆盖配置失败（将仅通过环境变量注入）：${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
             const chosen = spawnParams.model ?? boundProvider.defaultModel ?? boundProvider.models[0]?.id;
             if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen);
+            host.log(
+              `Claude Code 已绑定服务商 ${boundProvider.name}，代理地址：${adapted.env.ANTHROPIC_BASE_URL}${adapted.converted ? '（OpenAI -> Claude 本地协议转换）' : ''}`,
+            );
           } else {
             host.log(
               `服务商 ${boundProvider.name} 未满足 Claude Code 协议要求（需配置 Anthropic 地址，或开启「本地协议转换网关」并配置 OpenAI 地址），本次将使用本机默认 Claude 环境启动。`,
@@ -151,7 +168,7 @@ export function createClaudeBackend(
         launchEnv = { ...launchEnv, CLAUDE_CODE_EFFORT_LEVEL: spawnParams.effort };
       }
 
-      const extraArgs = prepared?.extraArgs ?? [];
+      const extraArgs = [...(prepared?.extraArgs ?? []), ...providerExtraArgs];
       const conn = new ClaudeConnection({
         command: resolvedCmd,
         ...(spawnParams.resumeSessionId ? { resumeSessionId: spawnParams.resumeSessionId } : {}),

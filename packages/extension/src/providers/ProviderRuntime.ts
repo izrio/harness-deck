@@ -51,13 +51,22 @@ function mergeLoopbackNoProxy(raw: string | undefined): string {
 }
 
 function withLoopbackNoProxy(env: Record<string, string | undefined>): Record<string, string | undefined> {
-  const merged = mergeLoopbackNoProxy(env.NO_PROXY ?? env.no_proxy);
-  return {
-    ...env,
-    NO_PROXY: merged,
-    no_proxy: merged,
-  };
+  const next: Record<string, string | undefined> = {};
+  const existingValues: string[] = [];
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toLowerCase() === 'no_proxy') {
+      if (v) existingValues.push(v);
+      continue;
+    }
+    next[k] = v;
+  }
+  const merged = mergeLoopbackNoProxy(existingValues.join(','));
+  next.NO_PROXY = merged;
+  next.no_proxy = merged;
+  return next;
 }
+
+const CLAUDE_CONFLICT_ENV_RE = /^(?:ANTHROPIC_|CLAUDE_CODE_USE_|CLAUDE_CODE_OAUTH_TOKEN$)/iu;
 
 /** 生成 dsh 的 Cordis `--patch` YAML 内容（挂载到 `@deepseek-ai/dsh-llm-pi-ai`）。 */
 export function buildDshPatchYaml(
@@ -188,7 +197,15 @@ export function buildPiModelsJson(
   )}\n`;
 }
 
-/** 为原生 Claude Code (`claude -p`) 准备绑定服务商后的环境变量（剥离宿主冲突变量并注入本地代理地址与令牌）。 */
+export interface ClaudeProviderRuntimePatch {
+  readonly env: Record<string, string | undefined>;
+  /** 通过 `--settings <file>` 注入的最高优先级 `env` 覆盖项，防止 `~/.claude/settings.json` 中的旧网关配置反过来覆盖本地代理。 */
+  readonly settingsEnv: Readonly<Record<string, string>>;
+  readonly settingsJson: string;
+  readonly converted: boolean;
+}
+
+/** 为原生 Claude Code (`claude -p`) 准备绑定服务商后的环境变量与 `--settings` 覆盖配置（剥离宿主冲突变量并注入本地代理地址与令牌）。 */
 export function prepareClaudeProviderRuntime(params: {
   readonly provider: ProviderConfig;
   readonly proxyOrigin: string;
@@ -196,7 +213,7 @@ export function prepareClaudeProviderRuntime(params: {
   readonly baseEnv: Record<string, string | undefined>;
   readonly protocolGatewayEnabled?: boolean;
   readonly selectedModel?: string;
-}): { readonly env: Record<string, string | undefined> } | undefined {
+}): ClaudeProviderRuntimePatch | undefined {
   const { provider, proxyOrigin, proxyToken, baseEnv, protocolGatewayEnabled, selectedModel } = params;
   if (
     !isProviderReadyForBackend(
@@ -222,25 +239,62 @@ export function prepareClaudeProviderRuntime(params: {
 
   const cleanedEnv: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(baseEnv)) {
-    if (/^(ANTHROPIC_|CLAUDE_CODE_USE_)/u.test(k)) continue;
+    if (CLAUDE_CONFLICT_ENV_RE.test(k)) continue;
     cleanedEnv[k] = v;
   }
-  cleanedEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic');
-  cleanedEnv.ANTHROPIC_API_KEY = proxyToken;
-  cleanedEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
-  if (shouldConvertOpenaiToAnthropic(provider, protocolGatewayEnabled === true, defaultModel, selectedModel)) {
-    cleanedEnv.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1';
+
+  const converted = shouldConvertOpenaiToAnthropic(
+    provider,
+    protocolGatewayEnabled === true,
+    defaultModel,
+    selectedModel,
+  );
+  const injected: Record<string, string> = {
+    ANTHROPIC_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'anthropic'),
+    ANTHROPIC_API_KEY: proxyToken,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  };
+  if (converted) {
+    injected.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1';
   }
   if (defaultModel) {
-    cleanedEnv.ANTHROPIC_MODEL = defaultModel;
-    cleanedEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = defaultModel;
-    cleanedEnv.ANTHROPIC_DEFAULT_OPUS_MODEL = defaultModel;
+    injected.ANTHROPIC_MODEL = defaultModel;
+    injected.ANTHROPIC_DEFAULT_SONNET_MODEL = defaultModel;
+    injected.ANTHROPIC_DEFAULT_OPUS_MODEL = defaultModel;
   }
   if (smallModel) {
-    cleanedEnv.ANTHROPIC_SMALL_FAST_MODEL = smallModel;
-    cleanedEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = smallModel;
+    injected.ANTHROPIC_SMALL_FAST_MODEL = smallModel;
+    injected.ANTHROPIC_DEFAULT_HAIKU_MODEL = smallModel;
   }
-  return { env: withLoopbackNoProxy(cleanedEnv) };
+
+  const finalEnv = withLoopbackNoProxy({ ...cleanedEnv, ...injected });
+  // 通过 --settings 显式覆盖 ~/.claude/settings.json（及项目 .claude/settings*.json）里残留的 env，
+  // 避免用户此前在终端配置的 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN 劫持本地回环代理。
+  const settingsEnv: Record<string, string> = {
+    ...injected,
+    ANTHROPIC_AUTH_TOKEN: '',
+    ANTHROPIC_CUSTOM_HEADERS: '',
+    CLAUDE_CODE_USE_BEDROCK: '',
+    CLAUDE_CODE_USE_VERTEX: '',
+    CLAUDE_CODE_USE_FOUNDRY: '',
+    CLAUDE_CODE_OAUTH_TOKEN: '',
+    ...(finalEnv.NO_PROXY ? { NO_PROXY: finalEnv.NO_PROXY, no_proxy: finalEnv.NO_PROXY } : {}),
+  };
+  const settingsJson = `${JSON.stringify({ env: settingsEnv }, null, 2)}\n`;
+  return { env: finalEnv, settingsEnv, settingsJson, converted };
+}
+
+/** 将 Claude Code 的 `--settings` 临时覆盖配置写入运行目录（仅含本机回环地址与一次性本地代理令牌，不含真实 API Key）。 */
+export async function writeClaudeProviderSettingsFile(
+  storageDir: string,
+  providerId: string,
+  settingsJson: string,
+): Promise<string> {
+  await mkdir(storageDir, { recursive: true });
+  const safeId = providerId.replace(/[^a-zA-Z0-9._-]+/gu, '_') || 'provider';
+  const filePath = join(storageDir, `claude-provider-${safeId}.settings.json`);
+  await writeFile(filePath, settingsJson, { encoding: 'utf8', mode: 0o600 });
+  return filePath;
 }
 
 /** 为原生 Pi (`pi --mode rpc`) 准备隔离的 `PI_CODING_AGENT_DIR` 与 `models.json` 配置。 */
@@ -402,7 +456,7 @@ export async function prepareAcpProviderRuntime(params: {
   if (idLower === 'claude' || /\bclaude\b/iu.test(cmdHint)) {
     const cleanedEnv: Record<string, string | undefined> = {};
     for (const [k, v] of Object.entries(baseEnv)) {
-      if (/^(ANTHROPIC_|CLAUDE_CODE_USE_)/u.test(k)) continue;
+      if (CLAUDE_CONFLICT_ENV_RE.test(k)) continue;
       cleanedEnv[k] = v;
     }
     cleanedEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic');

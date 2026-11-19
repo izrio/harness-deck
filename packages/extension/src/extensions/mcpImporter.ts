@@ -606,6 +606,11 @@ export async function scanAgentMcpConfigs(options: ScanMcpConfigsOptions = {}): 
     { agentId: 'gemini', agentName: 'Gemini CLI', path: join(home, '.gemini', 'settings.json') },
     ...(ws ? [{ agentId: 'gemini', agentName: 'Gemini CLI', path: join(ws, '.gemini', 'settings.json') }] : []),
 
+    // Antigravity
+    { agentId: 'antigravity', agentName: 'Antigravity', path: join(home, '.gemini', 'config', 'mcp_config.json') },
+    { agentId: 'antigravity', agentName: 'Antigravity', path: join(home, '.gemini', 'antigravity', 'mcp_config.json') },
+    ...(ws ? [{ agentId: 'antigravity', agentName: 'Antigravity', path: join(ws, '.agents', 'mcp_config.json') }] : []),
+
     // OpenCode
     { agentId: 'opencode', agentName: 'OpenCode', path: join(home, '.config', 'opencode', 'opencode.json') },
     { agentId: 'opencode', agentName: 'OpenCode', path: join(home, '.config', 'opencode', 'opencode.jsonc') },

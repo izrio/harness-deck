@@ -5,7 +5,7 @@ import { postToHost } from '../../vscode.ts';
 import { cn } from '../../lib/utils.ts';
 import { CollapsibleDrawer } from '../beautifului/index.ts';
 import { isMarkdownPath } from '../MarkdownPreviewModal.tsx';
-import { ChevronDownIcon, ErrorIcon, EyeIcon, FileEditIcon, GlobeIcon, PlanIcon, QuestionIcon, SearchIcon, SlashIcon, SpinnerIcon, TerminalIcon, ToolIcon } from '../icons.tsx';
+import { ChevronDownIcon, ErrorIcon, EyeIcon, FileEditIcon, GlobeIcon, PlanIcon, QuestionIcon, SearchIcon, SlashIcon, TerminalIcon, ToolIcon } from '../icons.tsx';
 import { useT } from '../../i18n.ts';
 import type { Of } from './types.ts';
 import { FilePath, Stats, openDiff, useDiffOpening } from './ChangesCard.tsx';
@@ -15,11 +15,11 @@ export function StatusIcon({ status, icon, expandable }: { status: 'running' | '
     <span
       className={cn(
         'activity__icon relative inline-flex size-4 shrink-0 items-center justify-center',
-        status === 'error' ? 'text-red' : 'text-ink-3',
+        status === 'error' ? 'text-red' : status === 'running' ? 'text-accent-ink' : 'text-ink-3',
         expandable && 'transition-opacity duration-100 group-hover/row:opacity-0',
       )}
     >
-      {status === 'running' ? <SpinnerIcon className="size-3.5 text-brand" /> : status === 'error' ? <ErrorIcon className="size-3.5" /> : icon}
+      {status === 'error' ? <ErrorIcon className="size-3.5" /> : icon}
     </span>
   );
 }
@@ -58,7 +58,12 @@ export function ActivityRow({ item }: { item: Of<'activity'> }) {
  />
           ) : null}
         </span>
-        <span className={cn('activity__name shrink-0 font-medium', item.status === 'error' ? 'text-red' : 'text-ink')}>
+        <span
+          className={cn(
+            'activity__name shrink-0 font-medium',
+            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink',
+          )}
+        >
           {command ? commandVerb : name}
         </span>
         {chipText ? (
@@ -120,7 +125,14 @@ export function EditRow({ item }: { item: Of<'activity'> }) {
  />
           ) : null}
         </span>
-        <span className={cn('activity__name shrink-0 font-medium', item.status === 'error' ? 'text-red' : 'text-ink')}>{verb}</span>
+        <span
+          className={cn(
+            'activity__name shrink-0 font-medium',
+            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink',
+          )}
+        >
+          {verb}
+        </span>
         <FilePath
           path={item.label}
           className={cn(
@@ -165,7 +177,12 @@ export function ExploreRow({ item }: { item: Of<'explore'> }) {
  style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
  />
         </span>
-        <span className={cn('activity__name shrink-0 font-medium', item.status === 'error' ? 'text-red' : 'text-ink')}>
+        <span
+          className={cn(
+            'activity__name shrink-0 font-medium',
+            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink',
+          )}
+        >
           {item.status === 'running' ? t('explore.running') : t('explore.done')}
         </span>
         <span className="activity__detail activity__detail--plain min-w-0 truncate text-ink-2">{item.summary}</span>

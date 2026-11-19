@@ -473,29 +473,42 @@ export class ProviderProxy {
     this.options.onLogChange?.();
   }
 
-  private appendGatewayLog(entry: Omit<ProviderGatewayLogEntry, 'id' | 'timestamp'>): void {
+  private appendGatewayLog(
+    entry: Omit<ProviderGatewayLogEntry, 'id' | 'timestamp'>,
+    opts?: { readonly replaceId?: string; readonly writeOutput?: boolean },
+  ): string {
+    const existingIdx = opts?.replaceId ? this.logs.findIndex((item) => item.id === opts.replaceId) : -1;
+    const id = opts?.replaceId ?? randomUUID();
+    const timestamp = existingIdx >= 0 ? this.logs[existingIdx]!.timestamp : Date.now();
     const full: ProviderGatewayLogEntry = {
-      id: randomUUID(),
-      timestamp: Date.now(),
+      id,
+      timestamp,
       ...entry,
       ...(entry.targetUrl ? { targetUrl: redactSecrets(entry.targetUrl) } : {}),
       message: redactSecrets(entry.message),
       ...(entry.detail ? { detail: redactSecrets(entry.detail) } : {}),
     };
-    this.logs = [full, ...this.logs].slice(0, MAX_GATEWAY_LOGS);
-    const tag = full.converted ? 'OpenAI转换' : full.protocol;
-    const modelInfo =
-      full.mappedModel && full.requestModel && full.mappedModel !== full.requestModel
-        ? ` [${full.requestModel} -> ${full.mappedModel}]`
-        : full.mappedModel || full.requestModel
-          ? ` [${full.mappedModel ?? full.requestModel}]`
-          : '';
-    const statusInfo = full.status !== undefined ? ` HTTP ${full.status}` : '';
-    const durInfo = full.durationMs !== undefined ? ` (${full.durationMs}ms)` : '';
-    this.options.log?.(
-      `[网关][${full.level.toUpperCase()}][${full.providerName ?? full.providerId}][${tag}] ${full.method} ${full.path}${modelInfo}${statusInfo}${durInfo} - ${full.message}${full.detail ? ` | ${full.detail}` : ''}`,
-    );
+    if (existingIdx >= 0) {
+      this.logs = this.logs.map((item, idx) => (idx === existingIdx ? full : item));
+    } else {
+      this.logs = [full, ...this.logs].slice(0, MAX_GATEWAY_LOGS);
+    }
+    if (opts?.writeOutput !== false) {
+      const tag = full.converted ? 'OpenAI转换' : full.protocol;
+      const modelInfo =
+        full.mappedModel && full.requestModel && full.mappedModel !== full.requestModel
+          ? ` [${full.requestModel} -> ${full.mappedModel}]`
+          : full.mappedModel || full.requestModel
+            ? ` [${full.mappedModel ?? full.requestModel}]`
+            : '';
+      const statusInfo = full.status !== undefined ? ` HTTP ${full.status}` : '';
+      const durInfo = full.durationMs !== undefined ? ` (${full.durationMs}ms)` : '';
+      this.options.log?.(
+        `[网关][${full.level.toUpperCase()}][${full.providerName ?? full.providerId}][${tag}] ${full.method} ${full.path}${modelInfo}${statusInfo}${durInfo} - ${full.message}${full.detail ? ` | ${full.detail}` : ''}`,
+      );
+    }
     this.options.onLogChange?.();
+    return id;
   }
 
   endpointFor(providerId: string, protocol: ProviderProtocol): string {
@@ -682,6 +695,23 @@ export class ProviderProxy {
     };
     res.once('close', onClose);
 
+    const pendingLogId = this.appendGatewayLog(
+      {
+        level: 'info',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: route.protocol,
+        converted: false,
+        method,
+        path: route.subPath,
+        targetUrl,
+        ...(requestModel ? { requestModel } : {}),
+        ...(mappedModel ? { mappedModel } : {}),
+        message: 'Forwarding request to upstream...',
+      },
+      { writeOutput: false },
+    );
+
     try {
       const hasBody = method !== 'GET' && method !== 'HEAD' && bodyBuf.length > 0;
       const upstreamRes = await this.fetchImpl(targetUrl, {
@@ -700,22 +730,25 @@ export class ProviderProxy {
 
       if (!upstreamRes.ok) {
         const errText = await upstreamRes.text().catch(() => '');
-        this.appendGatewayLog({
-          level: 'error',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: route.protocol,
-          converted: false,
-          method,
-          path: route.subPath,
-          targetUrl,
-          ...(requestModel ? { requestModel } : {}),
-          ...(mappedModel ? { mappedModel } : {}),
-          status: upstreamRes.status,
-          durationMs: Date.now() - startedAt,
-          message: parseUpstreamErrorText(errText, upstreamRes.status),
-          ...(errText ? { detail: errText.slice(0, 500) } : {}),
-        });
+        this.appendGatewayLog(
+          {
+            level: 'error',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: route.protocol,
+            converted: false,
+            method,
+            path: route.subPath,
+            targetUrl,
+            ...(requestModel ? { requestModel } : {}),
+            ...(mappedModel ? { mappedModel } : {}),
+            status: upstreamRes.status,
+            durationMs: Date.now() - startedAt,
+            message: parseUpstreamErrorText(errText, upstreamRes.status),
+            ...(errText ? { detail: errText.slice(0, 500) } : {}),
+          },
+          { replaceId: pendingLogId },
+        );
         res.writeHead(upstreamRes.status, outHeaders);
         res.end(errText);
         return;
@@ -724,21 +757,24 @@ export class ProviderProxy {
       res.writeHead(upstreamRes.status, outHeaders);
       if (!upstreamRes.body) {
         res.end();
-        this.appendGatewayLog({
-          level: 'info',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: route.protocol,
-          converted: false,
-          method,
-          path: route.subPath,
-          targetUrl,
-          ...(requestModel ? { requestModel } : {}),
-          ...(mappedModel ? { mappedModel } : {}),
-          status: upstreamRes.status,
-          durationMs: Date.now() - startedAt,
-          message: 'Direct proxy response completed',
-        });
+        this.appendGatewayLog(
+          {
+            level: 'info',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: route.protocol,
+            converted: false,
+            method,
+            path: route.subPath,
+            targetUrl,
+            ...(requestModel ? { requestModel } : {}),
+            ...(mappedModel ? { mappedModel } : {}),
+            status: upstreamRes.status,
+            durationMs: Date.now() - startedAt,
+            message: 'Direct proxy response completed',
+          },
+          { replaceId: pendingLogId },
+        );
         return;
       }
 
@@ -755,38 +791,44 @@ export class ProviderProxy {
         reader.releaseLock();
       }
       if (!res.destroyed) res.end();
-      this.appendGatewayLog({
-        level: 'info',
-        providerId: provider.id,
-        providerName: provider.name,
-        protocol: route.protocol,
-        converted: false,
-        method,
-        path: route.subPath,
-        targetUrl,
-        ...(requestModel ? { requestModel } : {}),
-        ...(mappedModel ? { mappedModel } : {}),
-        status: upstreamRes.status,
-        durationMs: Date.now() - startedAt,
-        message: 'Direct proxy response completed',
-      });
+      this.appendGatewayLog(
+        {
+          level: 'info',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: route.protocol,
+          converted: false,
+          method,
+          path: route.subPath,
+          targetUrl,
+          ...(requestModel ? { requestModel } : {}),
+          ...(mappedModel ? { mappedModel } : {}),
+          status: upstreamRes.status,
+          durationMs: Date.now() - startedAt,
+          message: 'Direct proxy response completed',
+        },
+        { replaceId: pendingLogId },
+      );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      this.appendGatewayLog({
-        level: abort.signal.aborted ? 'warn' : 'error',
-        providerId: provider.id,
-        providerName: provider.name,
-        protocol: route.protocol,
-        converted: false,
-        method,
-        path: route.subPath,
-        targetUrl,
-        ...(requestModel ? { requestModel } : {}),
-        ...(mappedModel ? { mappedModel } : {}),
-        status: 502,
-        durationMs: Date.now() - startedAt,
-        message: abort.signal.aborted ? 'Client closed connection' : errMsg,
-      });
+      this.appendGatewayLog(
+        {
+          level: abort.signal.aborted ? 'warn' : 'error',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: route.protocol,
+          converted: false,
+          method,
+          path: route.subPath,
+          targetUrl,
+          ...(requestModel ? { requestModel } : {}),
+          ...(mappedModel ? { mappedModel } : {}),
+          status: 502,
+          durationMs: Date.now() - startedAt,
+          message: abort.signal.aborted ? 'Client closed connection' : errMsg,
+        },
+        { replaceId: pendingLogId },
+      );
       throw err;
     } finally {
       res.removeListener('close', onClose);
@@ -945,6 +987,23 @@ export class ProviderProxy {
     };
     res.once('close', onClose);
 
+    const pendingLogId = this.appendGatewayLog(
+      {
+        level: 'info',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        targetUrl,
+        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+        mappedModel: converted.model,
+        message: 'Converting and forwarding request to upstream...',
+      },
+      { writeOutput: false },
+    );
+
     const finalizeStreamSummary = (
       summary: Awaited<ReturnType<typeof pipeOpenAiStreamToAnthropicSse>>,
       retryDetail: string | undefined,
@@ -954,27 +1013,30 @@ export class ProviderProxy {
         const errMessage = summary.streamError
           ? `Upstream stream error: ${summary.streamError}`
           : 'Upstream SSE stream completed with empty output';
-        this.appendGatewayLog({
-          level: 'error',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: 'anthropic',
-          converted: true,
-          method,
-          path: subPath,
-          targetUrl,
-          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-          mappedModel: converted.model,
-          status: 502,
-          durationMs: Date.now() - startedAt,
-          message: errMessage,
-          detail: [
-            `mode=${currentMode}`,
-            `chunks=${summary.chunkCount}`,
-            `finish=${summary.finishReason || 'none'}`,
-            ...(retryDetail ? [`retry=${retryDetail}`] : []),
-          ].join(', '),
-        });
+        this.appendGatewayLog(
+          {
+            level: 'error',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: 'anthropic',
+            converted: true,
+            method,
+            path: subPath,
+            targetUrl,
+            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+            mappedModel: converted.model,
+            status: 502,
+            durationMs: Date.now() - startedAt,
+            message: errMessage,
+            detail: [
+              `mode=${currentMode}`,
+              `chunks=${summary.chunkCount}`,
+              `finish=${summary.finishReason || 'none'}`,
+              ...(retryDetail ? [`retry=${retryDetail}`] : []),
+            ].join(', '),
+          },
+          { replaceId: pendingLogId },
+        );
         writeJson(res, 502, {
           type: 'error',
           error: { type: 'api_error', message: errMessage },
@@ -991,26 +1053,29 @@ export class ProviderProxy {
         `out=${summary.outputTokens}`,
         ...(retryDetail ? [`retry=${retryDetail}`] : []),
       ].join(', ');
-      this.appendGatewayLog({
-        level: summary.streamError ? 'error' : summary.hasOutput ? 'info' : 'warn',
-        providerId: provider.id,
-        providerName: provider.name,
-        protocol: 'anthropic',
-        converted: true,
-        method,
-        path: subPath,
-        targetUrl,
-        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-        mappedModel: converted.model,
-        status: 200,
-        durationMs: Date.now() - startedAt,
-        message: summary.streamError
-          ? `Upstream stream error: ${summary.streamError}`
-          : summary.hasOutput
-            ? sourceLabel
-            : 'Upstream SSE stream completed with empty output',
-        detail: streamDetail,
-      });
+      this.appendGatewayLog(
+        {
+          level: summary.streamError ? 'error' : summary.hasOutput ? 'info' : 'warn',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 200,
+          durationMs: Date.now() - startedAt,
+          message: summary.streamError
+            ? `Upstream stream error: ${summary.streamError}`
+            : summary.hasOutput
+              ? sourceLabel
+              : 'Upstream SSE stream completed with empty output',
+          detail: streamDetail,
+        },
+        { replaceId: pendingLogId },
+      );
     };
 
     try {
@@ -1102,22 +1167,25 @@ export class ProviderProxy {
       if (!upstreamRes.ok) {
         const errText = lastErrText ?? (await upstreamRes.text().catch(() => ''));
         const message = parseUpstreamErrorText(errText, upstreamRes.status);
-        this.appendGatewayLog({
-          level: 'error',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: 'anthropic',
-          converted: true,
-          method,
-          path: subPath,
-          targetUrl,
-          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-          mappedModel: converted.model,
-          status: upstreamRes.status,
-          durationMs: Date.now() - startedAt,
-          message,
-          ...(errText ? { detail: errText.slice(0, 500) } : {}),
-        });
+        this.appendGatewayLog(
+          {
+            level: 'error',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: 'anthropic',
+            converted: true,
+            method,
+            path: subPath,
+            targetUrl,
+            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+            mappedModel: converted.model,
+            status: upstreamRes.status,
+            durationMs: Date.now() - startedAt,
+            message,
+            ...(errText ? { detail: errText.slice(0, 500) } : {}),
+          },
+          { replaceId: pendingLogId },
+        );
         writeJson(res, upstreamRes.status, {
           type: 'error',
           error: { type: 'api_error', message },
@@ -1165,22 +1233,25 @@ export class ProviderProxy {
         openAiJson = parsed as Record<string, unknown>;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        this.appendGatewayLog({
-          level: 'error',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: 'anthropic',
-          converted: true,
-          method,
-          path: subPath,
-          targetUrl,
-          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-          mappedModel: converted.model,
-          status: 502,
-          durationMs: Date.now() - startedAt,
-          message: msg,
-          ...(rawRespText ? { detail: rawRespText.slice(0, 400) } : {}),
-        });
+        this.appendGatewayLog(
+          {
+            level: 'error',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: 'anthropic',
+            converted: true,
+            method,
+            path: subPath,
+            targetUrl,
+            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+            mappedModel: converted.model,
+            status: 502,
+            durationMs: Date.now() - startedAt,
+            message: msg,
+            ...(rawRespText ? { detail: rawRespText.slice(0, 400) } : {}),
+          },
+          { replaceId: pendingLogId },
+        );
         writeJson(res, 502, {
           type: 'error',
           error: { message: msg, type: 'api_error' },
@@ -1193,22 +1264,25 @@ export class ProviderProxy {
         anthropicResp = convertOpenAiToAnthropicResponse(openAiJson, converted.model);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        this.appendGatewayLog({
-          level: 'error',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: 'anthropic',
-          converted: true,
-          method,
-          path: subPath,
-          targetUrl,
-          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-          mappedModel: converted.model,
-          status: 502,
-          durationMs: Date.now() - startedAt,
-          message: `Upstream error in response: ${msg}`,
-          ...(rawRespText ? { detail: rawRespText.slice(0, 400) } : {}),
-        });
+        this.appendGatewayLog(
+          {
+            level: 'error',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: 'anthropic',
+            converted: true,
+            method,
+            path: subPath,
+            targetUrl,
+            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+            mappedModel: converted.model,
+            status: 502,
+            durationMs: Date.now() - startedAt,
+            message: `Upstream error in response: ${msg}`,
+            ...(rawRespText ? { detail: rawRespText.slice(0, 400) } : {}),
+          },
+          { replaceId: pendingLogId },
+        );
         writeJson(res, 502, {
           type: 'error',
           error: { message: msg, type: 'api_error' },
@@ -1219,7 +1293,31 @@ export class ProviderProxy {
       if (converted.stream) {
         writeAnthropicResponseAsSse(res, anthropicResp);
         if (!res.destroyed && !res.writableEnded) res.end();
-        this.appendGatewayLog({
+        this.appendGatewayLog(
+          {
+            level: 'info',
+            providerId: provider.id,
+            providerName: provider.name,
+            protocol: 'anthropic',
+            converted: true,
+            method,
+            path: subPath,
+            targetUrl,
+            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+            mappedModel: converted.model,
+            status: 200,
+            durationMs: Date.now() - startedAt,
+            message: 'Non-stream upstream JSON wrapped as Anthropic SSE',
+            ...(retryDetail ? { detail: `retry=${retryDetail}` } : {}),
+          },
+          { replaceId: pendingLogId },
+        );
+        return;
+      }
+
+      writeJson(res, 200, anthropicResp);
+      this.appendGatewayLog(
+        {
           level: 'info',
           providerId: provider.id,
           providerName: provider.name,
@@ -1232,49 +1330,34 @@ export class ProviderProxy {
           mappedModel: converted.model,
           status: 200,
           durationMs: Date.now() - startedAt,
-          message: 'Non-stream upstream JSON wrapped as Anthropic SSE',
+          message:
+            currentMode === 'responses'
+              ? 'Non-stream response converted (OpenAI Responses -> Anthropic)'
+              : 'Non-stream response converted (OpenAI -> Anthropic)',
           ...(retryDetail ? { detail: `retry=${retryDetail}` } : {}),
-        });
-        return;
-      }
-
-      writeJson(res, 200, anthropicResp);
-      this.appendGatewayLog({
-        level: 'info',
-        providerId: provider.id,
-        providerName: provider.name,
-        protocol: 'anthropic',
-        converted: true,
-        method,
-        path: subPath,
-        targetUrl,
-        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-        mappedModel: converted.model,
-        status: 200,
-        durationMs: Date.now() - startedAt,
-        message:
-          currentMode === 'responses'
-            ? 'Non-stream response converted (OpenAI Responses -> Anthropic)'
-            : 'Non-stream response converted (OpenAI -> Anthropic)',
-        ...(retryDetail ? { detail: `retry=${retryDetail}` } : {}),
-      });
+        },
+        { replaceId: pendingLogId },
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.appendGatewayLog({
-        level: abort.signal.aborted ? 'warn' : 'error',
-        providerId: provider.id,
-        providerName: provider.name,
-        protocol: 'anthropic',
-        converted: true,
-        method,
-        path: subPath,
-        targetUrl,
-        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-        mappedModel: converted.model,
-        status: 502,
-        durationMs: Date.now() - startedAt,
-        message: abort.signal.aborted ? 'Client closed connection' : msg,
-      });
+      this.appendGatewayLog(
+        {
+          level: abort.signal.aborted ? 'warn' : 'error',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 502,
+          durationMs: Date.now() - startedAt,
+          message: abort.signal.aborted ? 'Client closed connection' : msg,
+        },
+        { replaceId: pendingLogId },
+      );
       if (!res.headersSent) {
         writeJson(res, 502, {
           type: 'error',

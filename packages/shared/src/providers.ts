@@ -323,9 +323,12 @@ export function backendProtocolCapability(backend: {
   if (id === 'codebuddy') {
     return { kind: 'supported', protocols: ['openai-chat'] };
   }
+  if (id === 'antigravity') {
+    return { kind: 'account-only' };
+  }
 
   const hint = `${id} ${backend.name ?? ''} ${backend.executable ?? ''} ${backend.command ?? ''}`.toLowerCase();
-  if (/\b(cursor|antigravity|gemini|kimi[-_\s]?code|kimi[-_\s]?cli)\b/iu.test(hint)) {
+  if (/\b(cursor|antigravity|agy|gemini|kimi[-_\s]?code|kimi[-_\s]?cli)\b/iu.test(hint)) {
     return { kind: 'account-only' };
   }
   if (/\bcodex\b/iu.test(hint)) {

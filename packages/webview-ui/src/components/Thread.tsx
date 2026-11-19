@@ -14,7 +14,7 @@ import { buildThreadRows, rowIsRunning, rowToolCount, type ThreadRow } from '../
 import { LoaderGrid, Shimmer, ThinkingTrace } from './beautifului/index.ts';
 import { InteractionCard } from './Interactions.tsx';
 import { ItemView } from './Items.tsx';
-import { RunStatus, formatDuration } from './RunStatus.tsx';
+import { RunStatus } from './RunStatus.tsx';
 import { ArrowDownIcon, SpinnerIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
@@ -161,8 +161,7 @@ export function Thread() {
             <ThinkingTrace
               active={running}
               open={expandedRowIds.has(row.id)}
-              label={running ? t('trace.running') : t('trace.count', rowToolCount(row))}
-              formatDuration={(ms) => formatDuration(ms, t)}
+              label={running ? t('trace.running', rowToolCount(row)) : t('trace.count', rowToolCount(row))}
               onToggle={() => toggleRow(row)}
             >
               {row.items.map((item) => (

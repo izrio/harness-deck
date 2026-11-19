@@ -34,7 +34,7 @@ export function parseArguments(raw: unknown): Record<string, unknown> {
 }
 
 /** 表示目标文件的参数名（各家工具叫法不同）。 */
-export const FILE_KEYS = ['file_path', 'filePath', 'notebook_path', 'file', 'filename', 'target_file', 'filepath'] as const;
+export const FILE_KEYS = ['file_path', 'filePath', 'notebook_path', 'file', 'filename', 'target_file', 'filepath', 'Path', 'AbsolutePath', 'TargetFile'] as const;
 
 /** 字符串数组参数；元素也可以是带 path 的对象。 */
 export function stringList(args: Readonly<Record<string, unknown>>, ...keys: string[]): string[] {
@@ -72,7 +72,7 @@ export function activityLabel(tool: string, rawArguments: unknown, workspacePath
     const first = (args.questions as { question?: unknown }[] | undefined)?.[0]?.question;
     return typeof first === 'string' ? joinLabel(t('question.label'), firstLine(first)) : t('question.label');
   }
-  const command = pick('command', 'cmd', 'script');
+  const command = pick('command', 'CommandLine', 'command_line', 'cmd', 'script');
   if (command) return joinLabel(tool, firstLine(command));
   const file = pick(...FILE_KEYS);
   if (file) return joinLabel(tool, displayPath(file, workspacePath));

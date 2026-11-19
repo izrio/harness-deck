@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.5.3
+
+**Google Antigravity 原生支持、思考轨迹与状态栏精简、Claude 服务商运行时与代理增强**：新增 Google Antigravity（`agy acp`）内置智能体及协议适配；精简 `ThinkingTrace`、`RunStatus` 与活动行视觉状态，消除重复加载动效；增强 Claude 服务商 `--settings` 环境变量注入、`NO_PROXY` 处理与服务商代理稳定性。
+
+**Google Antigravity support, ThinkingTrace & RunStatus polish, and Claude provider runtime & proxy enhancements**: Added built-in Google Antigravity (`agy acp`) backend support and ACP projection compatibility; streamlined `ThinkingTrace`, `RunStatus`, and activity row visuals by removing duplicate loaders; enhanced Claude provider `--settings` overrides, `NO_PROXY` handling, and provider proxy stability.
+
+- **Google Antigravity 底层接入**：内置 `antigravity`（`agy acp`）配置、图标与安装/登录引导，标记为账号认证模式；兼容 Antigravity 工具参数与 Diff 字段（`Path` / `Content` / `CommandLine` / `Target` / `Replacement`）及 `current_model_update` 保护，并补充 `acpAntigravity` 单测。
+  **Google Antigravity backend**: Added built-in `antigravity` (`agy acp`) profile, icon, install/sign-in hints, and account-only provider capability; added ACP projection support for Antigravity tool inputs/diffs (`Path` / `Content` / `CommandLine` / `Target` / `Replacement`) and `current_model_update` guard, backed by `acpAntigravity` tests.
+- **对话流视觉精简**：`ThinkingTrace` 改用静态星芒图标，移除重复加载指示器与独立计时，由底部 `RunStatus` 统一承担运行态与计时；精简 `RunStatus` 外层胶囊样式，运行中活动行统一使用 `text-accent-ink` 高亮。
+  **Thread visual polish**: Switched `ThinkingTrace` to a static sparkle icon and removed its duplicate loader/timer so `RunStatus` serves as the single running indicator; removed `RunStatus` pill/card chrome and highlighted running activity rows with `text-accent-ink`.
+- **服务商代理与运行时修复**：为原生 `claude -p` 补充 `--settings` 最高优先级环境变量覆盖以防止宿主配置回退覆盖本地代理；修复 `NO_PROXY` 大小写重复键与已知模型误判小模型的问题；完善运行时可执行文件定位、MCP 导入及无人值守调度逻辑。
+  **Provider proxy & runtime fixes**: Added `--settings` overrides for native `claude -p` to prevent host settings from overriding the local proxy; fixed case-insensitive `NO_PROXY` deduplication and known-model routing in `OpenaiToAnthropicConverter`; improved runtime discovery, MCP importer/service, and unattended runner handling.
+
 ## 0.5.2
 
 **思考轨迹折叠、首页智能体快捷切换、设置页视觉与布局打磨**：将连续工具操作与推理折叠为「思考轨迹」行，支持首页下拉直接切换已安装智能体，统一设置页分区标题样式与控件尺寸，优化状态栏与侧边栏会话列表布局。

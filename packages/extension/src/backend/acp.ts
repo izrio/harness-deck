@@ -22,7 +22,7 @@ import {
   resolveBrowserUrl,
   shouldEnableBrowserBridgeAsync,
 } from '../runtime/browserBridge.ts';
-import { locateExecutable, verifyExecutableFile } from '../runtime/locate.ts';
+import { extraSearchDirsForCommand, locateExecutable, verifyExecutableFile } from '../runtime/locate.ts';
 import { t } from '../i18n.ts';
 import { commandSpecForProfile } from './envCache.ts';
 import type { BackendHost } from './host.ts';
@@ -105,7 +105,11 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
     if (!executablePath) {
       if (cached) host.setCachedExecutable?.(profile.id, cmdSpec, undefined);
       setStatus({ kind: 'locating' });
-      const located = await locateExecutable(profile.command, { env, platform: process.platform });
+      const located = await locateExecutable(profile.command, {
+        env,
+        platform: process.platform,
+        extraDirs: extraSearchDirsForCommand(profile.command, env, process.platform),
+      });
       if (current !== generation) return;
       if (located.kind === 'notFound') {
         host.log(`找不到 ${profile.name} 的命令 ${profile.command}`);

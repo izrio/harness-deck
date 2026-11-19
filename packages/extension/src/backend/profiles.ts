@@ -36,6 +36,8 @@ export type BuiltinHintId =
   | 'claude-sign-in'
   | 'opencode'
   | 'opencode-sign-in'
+  | 'antigravity'
+  | 'antigravity-sign-in'
   | 'zcode'
   | 'zcode-sign-in';
 
@@ -54,6 +56,8 @@ export function builtinProfiles(hint: (id: BuiltinHintId) => string): BackendPro
     { ...CLAUDE_PROFILE, installHint: hint('claude'), signInHint: hint('claude-sign-in') },
     // OpenCode 原生内置 ACP 子命令（opencode acp）
     { id: 'opencode', kind: 'acp', name: 'OpenCode', command: 'opencode', args: ['acp'], env: {}, installHint: hint('opencode'), signInHint: hint('opencode-sign-in') },
+    // Google Antigravity 原生内置 ACP 子命令（agy acp）
+    { id: 'antigravity', kind: 'acp', name: 'Antigravity', command: 'agy', args: ['acp'], env: {}, installHint: hint('antigravity'), signInHint: hint('antigravity-sign-in') },
     // 智谱 ZCode 原生通过 `zcode app-server --stdio` 专有协议接入
     { ...ZCODE_PROFILE, installHint: hint('zcode'), signInHint: hint('zcode-sign-in') },
   ];

@@ -26,7 +26,7 @@ import { PiConnection, PiTimeoutError } from '../pi/connection.ts';
 import { locatePi } from '../pi/locate.ts';
 import { PiSessionProjection } from '../pi/projection.ts';
 import { launchRuntime, probeVersion, stopRuntime, type LaunchedRuntime } from '../runtime/launch.ts';
-import { locateDsh, locateExecutable } from '../runtime/locate.ts';
+import { extraSearchDirsForCommand, locateDsh, locateExecutable } from '../runtime/locate.ts';
 import { checkVersionSupport, MINIMUM_DSH_VERSION } from '../runtime/version.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
 import { parseArguments, toolVariant } from '../vm/toolRows.ts';
@@ -263,7 +263,11 @@ export class UnattendedRunner {
     req: UnattendedRunRequest,
   ): Promise<UnattendedRunOutcome> {
     const env = this.host.getEnvForProfile(profile.env);
-    const located = await locateExecutable(profile.command, { env, platform: process.platform });
+    const located = await locateExecutable(profile.command, {
+      env,
+      platform: process.platform,
+      extraDirs: extraSearchDirsForCommand(profile.command, env, process.platform),
+    });
     if (located.kind === 'notFound') {
       return { status: 'failed', error: profile.installHint ?? `Command not found: ${profile.command}` };
     }

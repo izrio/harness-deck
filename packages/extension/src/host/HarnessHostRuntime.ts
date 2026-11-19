@@ -115,7 +115,7 @@ import {
   upsertProviderSetting,
 } from '../providers/ProviderStore.ts';
 import { safeProfile } from '../runtime/launch.ts';
-import { locateDsh, locateExecutable, verifyExecutableFile } from '../runtime/locate.ts';
+import { extraSearchDirsForCommand, locateDsh, locateExecutable, verifyExecutableFile } from '../runtime/locate.ts';
 import { isWslEnvironment, isWslWindowsPath } from '../runtime/wsl.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { locateZcode, verifyZcodeTarget } from '../zcode/locate.ts';
@@ -136,6 +136,8 @@ const BUILTIN_HINTS: Readonly<Record<BuiltinHintId, HostMessageKey>> = {
   'claude-sign-in': 'claude.signIn',
   opencode: 'acp.opencodeHint',
   'opencode-sign-in': 'acp.opencodeSignIn',
+  antigravity: 'acp.antigravityHint',
+  'antigravity-sign-in': 'acp.antigravitySignIn',
   zcode: 'zcode.hint',
   'zcode-sign-in': 'zcode.signIn',
 };
@@ -756,7 +758,12 @@ export function createHarnessHostRuntime(
                 resolvedTarget = located.command;
               }
             } else {
-              const located = await locateExecutable(p.command, { env: processEnv(p.env), platform: osPlatform });
+              const acpEnv = processEnv(p.env);
+              const located = await locateExecutable(p.command, {
+                env: acpEnv,
+                platform: osPlatform,
+                extraDirs: extraSearchDirsForCommand(p.command, acpEnv, osPlatform),
+              });
               if (located.kind === 'found') {
                 isAvailable = true;
                 resolvedTarget = located.command;
@@ -772,9 +779,17 @@ export function createHarnessHostRuntime(
               !version &&
               isAvailable &&
               resolvedTarget &&
-              (p.kind === 'dsh' || p.kind === 'claude' || p.kind === 'pi' || (p.kind === 'zcode' && !isZcodeScript))
+              (p.kind === 'dsh' ||
+                p.kind === 'claude' ||
+                p.kind === 'pi' ||
+                p.id === 'antigravity' ||
+                (p.kind === 'zcode' && !isZcodeScript))
             ) {
-              version = await probeCommandVersion(resolvedTarget, processEnv(), osPlatform);
+              version = await probeCommandVersion(
+                resolvedTarget,
+                p.kind === 'acp' ? processEnv(p.env) : processEnv(),
+                osPlatform,
+              );
             }
             if (version) installedVersions.set(p.id, version);
             else installedVersions.delete(p.id);

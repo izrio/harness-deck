@@ -43,16 +43,25 @@ describe('思考轨迹卡片', () => {
     expect(container.querySelector('.thinking__body')?.textContent).toContain('思考过程');
   });
 
-  it('运行中自动展开，结束后自动收起', () => {
+  it('运行中自动展开且不重复渲染 loading 动效，结束后自动收起', () => {
     pushItems([edit, { ...run, status: 'running' }], true);
     const { container } = render(<Thread />);
 
+    const trace = screen.getByTestId('thinking-trace');
     expect(container.querySelectorAll('.activity')).toHaveLength(2);
-    expect(screen.getByTestId('thinking-trace').textContent).toContain('思考中');
-    expect(screen.getByTestId('thinking-trace').querySelector('.thinking__loader')).not.toBeNull();
+    expect(trace.getAttribute('data-active')).toBe('true');
+    expect(trace.textContent).toContain('执行中 · 2 项操作');
+    // 轨迹头和运行中的活动行都不再叠加额外 spinner / loader，由底部 RunStatus 统一承载唯一 loading
+    expect(trace.querySelector('.thinking__loader')).toBeNull();
+    expect(trace.querySelector('.spin')).toBeNull();
+
+    const runStatus = screen.getByTestId('run-status');
+    expect(runStatus.textContent).toContain('正在运行命令');
+    expect(runStatus.className).not.toMatch(/rounded-full|bg-surface|shadow-card|bg-orange-tint/u);
 
     pushItems([edit, run], false);
     expect(container.querySelectorAll('.activity')).toHaveLength(0);
+    expect(screen.getByTestId('thinking-trace').getAttribute('data-active')).toBeNull();
     expect(screen.getByTestId('thinking-trace').textContent).toContain('已执行 2 项操作');
   });
 
@@ -119,6 +128,21 @@ describe('思考轨迹卡片', () => {
     expect(screen.getByTestId('thinking-trace').textContent).toContain('Ran 1 tool');
     expect(screen.getByTestId('thinking-trace').textContent).not.toContain('Ran 1 tools');
     unmount();
+
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          locale: 'en',
+          session: { ...session, running: true },
+          items: [reasoning, { ...edit, status: 'running' }],
+        }),
+      });
+    });
+    const { unmount: unmountActive } = render(<Thread />);
+    expect(screen.getByTestId('thinking-trace').textContent).toContain('Running · 1 tool');
+    expect(screen.getByTestId('thinking-trace').textContent).not.toContain('Running · 1 tools');
+    unmountActive();
 
     act(() => {
       applyHostMessage({

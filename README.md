@@ -58,6 +58,7 @@
 | <img src="packages/webview-ui/src/assets/backends/codebuddy.png" width="16"> **CodeBuddy** | ACP：`codebuddy --acp` | `npm install -g @tencent-ai/codebuddy-code` | 浏览器登录，或 `CODEBUDDY_API_KEY` |
 | <img src="packages/webview-ui/src/assets/backends/claude.svg" width="16"> **Claude Code** | 原生：`claude -p`（`stream-json`） | `npm install -g @anthropic-ai/claude-code` | `claude` → `/login`，或绑定服务商 / `ANTHROPIC_API_KEY` |
 | <img src="packages/webview-ui/src/assets/backends/opencode.svg" width="16"> **OpenCode** | ACP：`opencode acp` | `npm install -g opencode-ai` | `opencode auth login`（或 `/connect`） |
+| <img src="packages/webview-ui/src/assets/backends/antigravity.svg" width="16"> **Antigravity** | ACP：`agy acp` | `curl -fsSL https://antigravity.google/cli/install.sh \| bash`（Windows：`irm https://antigravity.google/cli/install.ps1 \| iex`） | Google 账号 / `agy acp --login` / Gemini API Key |
 | <img src="packages/webview-ui/src/assets/backends/zcode.svg" width="16"> **ZCode** | 原生：`zcode app-server --stdio` | [ZCode 桌面端](https://zcode.z.ai/)，或 `npm install -g zcode-app-cli` | 智谱 BigModel / Z.ai Coding Plan 登录或 API Key |
 | 其他 ACP 代理 | 设置 `harnessDeck.backends` | 按代理的说明 | 按代理的说明 |
 
@@ -201,6 +202,7 @@ packages/
 | v0.5.0 | JetBrains IDE 插件与独立 Sidecar、Claude/Pi/ZCode 原生底层、工作台（总览/定时任务/智能体/看板/跨项目会话）、服务商代理与 MCP/Skill 管理、shadcn-ui 界面重构与稳定性打磨 |
 | v0.5.1 | 对话虚拟列表、统一控件尺寸与离线 Iconify 图标规范、WSL 运行时发现、浏览器桥接与 OpenAI 转 Anthropic 代理增强 |
 | v0.5.2 | 对话思考轨迹折叠（`ThinkingTrace`）、首页智能体快捷下拉切换、设置页统一分区布局与控件尺寸对齐、状态栏与会话列表视觉打磨 |
+| v0.5.3 | Google Antigravity（`agy acp`）内置接入、思考轨迹与运行状态视觉精简、Claude 服务商 `--settings` 覆盖与代理/运行时增强 |
 
 里程碑细节见 [DESIGN.md 第 12 节](./docs/DESIGN.md#12-里程碑与任务拆解)，每个版本的改动见 [CHANGELOG](./packages/extension/CHANGELOG.md)。
 

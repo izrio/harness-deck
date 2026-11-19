@@ -17,6 +17,7 @@ export const DESCRIPTIONS: Readonly<Record<string, MessageKey>> = {
   codebuddy: 'backend.desc.codebuddy',
   claude: 'backend.desc.claude',
   opencode: 'backend.desc.opencode',
+  antigravity: 'backend.desc.antigravity',
   zcode: 'backend.desc.zcode',
 };
 

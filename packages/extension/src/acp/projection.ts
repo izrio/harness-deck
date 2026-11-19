@@ -72,15 +72,34 @@ export interface AcpSessionMeta {
   } | null;
 }
 
-/** 从工具调用的原始参数里提取目标文件路径（兼容 omp 的 path、Claude 的 file_path、OpenCode 的 filePath）。 */
+/** 从工具调用的原始参数里提取目标文件路径（兼容 omp 的 path、Claude 的 file_path、OpenCode 的 filePath、Antigravity 的 Path）。 */
 export function inputFilePath(rawInput: unknown): string | undefined {
   if (!rawInput || typeof rawInput !== 'object') return undefined;
   const args = rawInput as Record<string, unknown>;
-  for (const key of ['path', 'file_path', 'filePath', 'notebook_path']) {
+  for (const key of ['path', 'Path', 'file_path', 'filePath', 'notebook_path', 'AbsolutePath', 'TargetFile']) {
     const val = args[key];
     if (typeof val === 'string' && val.trim()) return val;
   }
   return undefined;
+}
+
+/** 从工具调用中提取全部 diff：优先取标准 ACP content 里的 diff，缺失时从 rawInput（如 Antigravity edit_file 的 Target/Replacement）回退。 */
+function callDiffs(call: AcpToolCall): readonly AcpDiff[] {
+  const fromContent = (call.content ?? []).flatMap((c) =>
+    c.type === 'diff' ? [{ path: c.path, oldText: c.oldText ?? null, newText: c.newText }] : [],
+  );
+  if (fromContent.length > 0) return fromContent;
+  if (!call.rawInput || typeof call.rawInput !== 'object') return [];
+  const args = call.rawInput as Record<string, unknown>;
+  const path = call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
+  if (!path) return [];
+  if (typeof args.Target === 'string' && typeof args.Replacement === 'string') {
+    return [{ path, oldText: args.Target, newText: args.Replacement }];
+  }
+  if (typeof args.old_string === 'string' && typeof args.new_string === 'string') {
+    return [{ path, oldText: args.old_string, newText: args.new_string }];
+  }
+  return [];
 }
 
 export interface AcpCommand {
@@ -170,13 +189,14 @@ export class AcpSessionProjection {
     const files = new Map<string, { diffs: AcpDiff[]; calls: string[]; created: boolean; additions: number; deletions: number }>();
     for (const call of this.tools.values()) {
       if (call.status !== 'completed' || this.variantOf(call) !== 'edit') continue;
-      const diffs = (call.content ?? []).filter((c): c is Extract<AcpToolContent, { type: 'diff' }> => c.type === 'diff');
-      const args = (call.rawInput ?? {}) as { content?: unknown };
+      const diffs = callDiffs(call);
+      const args = (call.rawInput ?? {}) as { content?: unknown; Content?: unknown };
+      const writeContent = typeof args.content === 'string' ? args.content : typeof args.Content === 'string' ? args.Content : undefined;
       const fallbackPath = call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
       const entries: { path: string; diff?: AcpDiff; stats: LineStats }[] = diffs.length
-        ? diffs.map((d) => ({ path: d.path, diff: { path: d.path, oldText: d.oldText ?? null, newText: d.newText }, stats: lineStats(d.oldText ?? '', d.newText) }))
-        : fallbackPath && typeof args.content === 'string'
-          ? [{ path: fallbackPath, stats: { additions: countLines(args.content), deletions: 0 } }]
+        ? diffs.map((d) => ({ path: d.path, diff: d, stats: lineStats(d.oldText ?? '', d.newText) }))
+        : fallbackPath && writeContent !== undefined
+          ? [{ path: fallbackPath, stats: { additions: countLines(writeContent), deletions: 0 } }]
           : [];
       for (const entry of entries) {
         let file = files.get(entry.path);
@@ -196,7 +216,7 @@ export class AcpSessionProjection {
   /** 某次工具调用的修改（打开 Diff）。 */
   diffsOf(toolCallId: string): readonly AcpDiff[] {
     const call = this.tools.get(toolCallId);
-    return (call?.content ?? []).flatMap((c) => (c.type === 'diff' ? [{ path: c.path, oldText: c.oldText ?? null, newText: c.newText }] : []));
+    return call ? callDiffs(call) : [];
   }
 
   toolCall(toolCallId: string): AcpToolCall | undefined {
@@ -297,7 +317,17 @@ export class AcpSessionProjection {
         if (typeof update.currentModeId === 'string') this.setOption('mode', update.currentModeId);
         break;
       case 'current_model_update':
-        if (typeof update.currentModelId === 'string') this.setOption('model', update.currentModelId);
+        if (typeof update.currentModelId === 'string') {
+          const cur = update.currentModelId;
+          this.configOptions = this.configOptions.map((o) => {
+            if (o.category !== 'model' && o.id !== 'model') return o;
+            // 若 configOptions 已提供模型列表且当前推送的旧版组合模型 ID（如 gemini-4-neon-high）不在其中，不覆盖 configOptions
+            if (o.legacyMethod !== 'session/set_model' && o.options?.length && o.currentValue && !o.options.some((opt) => opt.value === cur)) {
+              return o;
+            }
+            return { ...o, currentValue: cur };
+          });
+        }
         break;
       case 'session_info_update':
         if (typeof update.title === 'string' && update.title.trim()) this.title = update.title.trim();
@@ -482,13 +512,15 @@ export class AcpSessionProjection {
     const base = { kind: 'activity' as const, id: `t:${call.toolCallId}`, tool: call.name ?? call.kind ?? 'tool', status };
     const output = outputOf(call);
     if (variant === 'command') {
-      const args = (call.rawInput ?? {}) as { command?: unknown };
-      const command = typeof args.command === 'string' ? args.command.split('\n', 1)[0] : (call.title ?? '').replace(/^\$\s*/u, '');
+      const args = (call.rawInput ?? {}) as { command?: unknown; CommandLine?: unknown };
+      const rawCommand = typeof args.command === 'string' ? args.command : typeof args.CommandLine === 'string' ? args.CommandLine : undefined;
+      const command = rawCommand !== undefined ? rawCommand.split('\n', 1)[0] : (call.title ?? '').replace(/^\$\s*/u, '');
       return { ...base, variant, label: joinLabel(base.tool, command), ...(output ? { output } : {}) };
     }
     if (variant === 'edit') {
-      const diffs = (call.content ?? []).filter((c): c is Extract<AcpToolContent, { type: 'diff' }> => c.type === 'diff');
-      const args = (call.rawInput ?? {}) as { content?: unknown };
+      const diffs = callDiffs(call);
+      const args = (call.rawInput ?? {}) as { content?: unknown; Content?: unknown };
+      const writeContent = typeof args.content === 'string' ? args.content : typeof args.Content === 'string' ? args.Content : undefined;
       const path = diffs[0]?.path ?? call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
       const label = path ? displayPath(path, this.workspacePath) : (call.title ?? base.tool);
       let stats: LineStats | undefined;
@@ -496,8 +528,8 @@ export class AcpSessionProjection {
       if (diffs.length) {
         stats = sumStats(diffs.map((d) => lineStats(d.oldText ?? '', d.newText)));
         created = diffs.every((d) => d.oldText === null || d.oldText === undefined);
-      } else if (status === 'ok' && typeof args.content === 'string') {
-        stats = { additions: countLines(args.content), deletions: 0 };
+      } else if (status === 'ok' && writeContent !== undefined) {
+        stats = { additions: countLines(writeContent), deletions: 0 };
       }
       return {
         ...base,
@@ -579,6 +611,7 @@ export function mergeSessionMeta(
   const base = meta.configOptions ? [...meta.configOptions] : [...existing];
   let changed = Boolean(meta.configOptions);
 
+  const hasCanonicalModel = Boolean(meta.configOptions?.some((o) => (o.category === 'model' || o.id === 'model') && o.currentValue));
   if (meta.models?.availableModels?.length && !base.some((o) => o.category === 'model' || o.id === 'model')) {
     base.push({
       id: 'model',
@@ -592,17 +625,23 @@ export function mergeSessionMeta(
       legacyMethod: 'session/set_model',
     });
     changed = true;
-  } else if (meta.models?.currentModelId) {
+  } else if (meta.models?.currentModelId && !hasCanonicalModel) {
     const cur = meta.models.currentModelId;
     for (let i = 0; i < base.length; i++) {
       const opt = base[i]!;
-      if ((opt.category === 'model' || opt.id === 'model') && opt.currentValue !== cur) {
+      const canApply =
+        opt.legacyMethod === 'session/set_model' ||
+        !opt.currentValue ||
+        !opt.options?.length ||
+        opt.options.some((o) => o.value === cur);
+      if ((opt.category === 'model' || opt.id === 'model') && opt.currentValue !== cur && canApply) {
         base[i] = { ...opt, currentValue: cur };
         changed = true;
       }
     }
   }
 
+  const hasCanonicalMode = Boolean(meta.configOptions?.some((o) => (o.category === 'mode' || o.id === 'mode') && o.currentValue));
   if (meta.modes?.availableModes?.length && !base.some((o) => o.category === 'mode' || o.id === 'mode')) {
     base.push({
       id: 'mode',
@@ -616,11 +655,16 @@ export function mergeSessionMeta(
       legacyMethod: 'session/set_mode',
     });
     changed = true;
-  } else if (meta.modes?.currentModeId) {
+  } else if (meta.modes?.currentModeId && !hasCanonicalMode) {
     const cur = meta.modes.currentModeId;
     for (let i = 0; i < base.length; i++) {
       const opt = base[i]!;
-      if ((opt.category === 'mode' || opt.id === 'mode') && opt.currentValue !== cur) {
+      const canApply =
+        opt.legacyMethod === 'session/set_mode' ||
+        !opt.currentValue ||
+        !opt.options?.length ||
+        opt.options.some((o) => o.value === cur);
+      if ((opt.category === 'mode' || opt.id === 'mode') && opt.currentValue !== cur && canApply) {
         base[i] = { ...opt, currentValue: cur };
         changed = true;
       }

@@ -9,6 +9,7 @@
 | `codebuddy.png` | `@tencent-ai/codebuddy-code`（CodeBuddy CLI）`vendor/assets/icon.png` | 缩小到 96×96 |
 | `claude.svg` | `@anthropic-ai/sdk`（Anthropic 官方 SDK，Claude ACP 适配器的依赖）`.github/logo.svg` | 无 |
 | `opencode.svg` | `anomalyco/opencode`（OpenCode 几何徽标） | 圆角底板封装 |
+| `antigravity.svg` | Google Antigravity 弧形 A 徽标 | 圆角底板封装 |
 | `zcode.svg` | `zcode.z.ai` / Z.ai 官方徽标（`z-cdn.chatglm.cn/z-ai/static/logo.svg`） | 去掉外描边并缩放到 256×256 圆角底板 |
 
 这些图标只用来指明对应的产品，不表示 Harness Deck 与它们有关联或得到认可。

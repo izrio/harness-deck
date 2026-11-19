@@ -72,7 +72,15 @@ describe('Claude 的 ACP 帧', () => {
 describe('Claude 底层', () => {
   it('内置在 CodeBuddy 后面，原生以 claude -p 运行，带安装提示和登录说明', () => {
     const builtins = builtinProfiles((id) => `hint:${id}`);
-    expect(parseProfiles([], undefined, builtins).map((p) => p.id)).toEqual(['dsh', 'pi', 'codebuddy', 'claude', 'opencode', 'zcode']);
+    expect(parseProfiles([], undefined, builtins).map((p) => p.id)).toEqual([
+      'dsh',
+      'pi',
+      'codebuddy',
+      'claude',
+      'opencode',
+      'antigravity',
+      'zcode',
+    ]);
     const claude = builtins.find((p) => p.id === 'claude');
     expect(claude).toMatchObject({
       id: 'claude',

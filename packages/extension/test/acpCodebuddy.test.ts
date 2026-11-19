@@ -108,6 +108,7 @@ describe('内置底层', () => {
       'codebuddy',
       'claude',
       'opencode',
+      'antigravity',
       'zcode',
       'gemini-cli',
     ]);
@@ -116,7 +117,7 @@ describe('内置底层', () => {
 
   it('设置里 id 相同的项替换内置 ACP 项，位置不变；没写安装提示时沿用内置的', () => {
     const profiles = parseProfiles([{ id: 'codebuddy', name: 'CodeBuddy', command: '/opt/cb/bin/codebuddy', args: ['--acp'], env: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' } }], undefined, builtins);
-    expect(profiles.map((p) => p.id)).toEqual(['dsh', 'pi', 'codebuddy', 'claude', 'opencode', 'zcode']);
+    expect(profiles.map((p) => p.id)).toEqual(['dsh', 'pi', 'codebuddy', 'claude', 'opencode', 'antigravity', 'zcode']);
     expect(profiles[2]).toMatchObject({ command: '/opt/cb/bin/codebuddy', env: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' }, installHint: 'install codebuddy' });
   });
 

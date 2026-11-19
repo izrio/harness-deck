@@ -5,7 +5,7 @@
  */
 import { constants } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { basename, delimiter, isAbsolute, join } from 'node:path';
 import { isWslEnvironment, isWslWindowsPath } from './wsl.ts';
 
 export interface LocateOptions {
@@ -13,6 +13,8 @@ export interface LocateOptions {
   readonly configuredPath?: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly platform: NodeJS.Platform;
+  /** PATH 未命中时额外回退扫描的目录列表（仍遵循 WSL 宿主机路径隔离）。 */
+  readonly extraDirs?: readonly string[];
   /** 可选覆盖 WSL 判定（主要用于测试）；未传时在 Linux 平台自动判定。 */
   readonly isWsl?: boolean;
   /** 可选覆盖 WSL 下的 Windows 宿主机挂载根列表（主要用于测试）。 */
@@ -106,8 +108,13 @@ export async function locateExecutable(name: string, options: LocateOptions): Pr
   const inWsl = options.platform === 'linux' && (options.isWsl ?? isWslEnvironment(options.env));
   const pathValue = options.env.PATH ?? options.env.Path ?? '';
   const names = candidateNames(name, options.platform, options.env);
-  for (const directory of pathValue.split(delimiter)) {
+  const dirs = [...pathValue.split(delimiter), ...(options.extraDirs ?? [])];
+  const seenDirs = new Set<string>();
+  for (const directory of dirs) {
     if (!directory) continue;
+    const dedupKey = options.platform === 'win32' ? directory.toLowerCase() : directory;
+    if (seenDirs.has(dedupKey)) continue;
+    seenDirs.add(dedupKey);
     if (inWsl && isWslWindowsPath(directory, options.wslMountRoots)) continue;
     for (const candidateName of names) {
       const candidate = join(directory, candidateName);
@@ -117,4 +124,31 @@ export async function locateExecutable(name: string, options: LocateOptions): Pr
     }
   }
   return { kind: 'notFound', configuredPathInvalid: false };
+}
+
+/**
+ * 针对通过独立安装脚本装到非默认 PATH 目录的 CLI（如 Antigravity 的 `~/.local/bin/agy`），
+ * 提供额外的回退搜索目录；仅依赖 `env` 中声明的主目录环境变量，避免污染隔离环境测试。
+ */
+export function extraSearchDirsForCommand(
+  command: string,
+  env: LocateOptions['env'],
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const trimmed = command.trim();
+  if (!trimmed || isAbsolute(trimmed) || /[\\/]/u.test(trimmed)) return [];
+  const stem = basename(trimmed)
+    .toLowerCase()
+    .replace(/\.(cmd|exe|bat|ps1)$/iu, '');
+  if (stem !== 'agy') return [];
+  const home = platform === 'win32' ? (env.USERPROFILE ?? env.HOME) : env.HOME;
+  const dirs: string[] = [];
+  if (home) {
+    dirs.push(join(home, '.local', 'bin'));
+  }
+  if (platform === 'win32' && env.LOCALAPPDATA) {
+    dirs.push(join(env.LOCALAPPDATA, 'Programs', 'antigravity'));
+    dirs.push(join(env.LOCALAPPDATA, 'antigravity'));
+  }
+  return dirs;
 }

@@ -17,7 +17,12 @@ import {
   joinUpstreamUrl,
   rewriteModelInPayload,
 } from '../src/providers/ProviderProxy.ts';
-import { prepareAcpProviderRuntime, prepareClaudeProviderRuntime, prepareDshProviderRuntime } from '../src/providers/ProviderRuntime.ts';
+import {
+  prepareAcpProviderRuntime,
+  prepareClaudeProviderRuntime,
+  prepareDshProviderRuntime,
+  writeClaudeProviderSettingsFile,
+} from '../src/providers/ProviderRuntime.ts';
 import {
   bindProviderSetting,
   buildProvidersState,
@@ -1013,6 +1018,129 @@ describe('本地协议转换网关（OpenAI 兼容 -> Claude Anthropic）', () =
       expect(r5.status).toBe(200);
       const t5 = await r5.text();
       expect(t5).toContain('来自注释前缀流');
+    } finally {
+      await proxy.dispose();
+    }
+  });
+
+  it('生成 --settings 覆盖配置防止 ~/.claude/settings.json 劫持代理，不误将含 Flash 的已配置模型改写为小模型，并实时记录进行中日志', async () => {
+    const acoProvider: ProviderConfig = {
+      id: 'aco',
+      name: 'aco',
+      openaiChatUrl: 'http://aco.teg.cn/v1',
+      convertOpenaiToAnthropic: true,
+      models: [
+        { id: 'DeepSeek-V4.1-Flash', contextWindow: '230000', maxOutputTokens: '32000' },
+        { id: 'DeepSeek-V4-Flash-0731', contextWindow: '230000', maxOutputTokens: '32000' },
+        { id: 'Qwen3.6-35B-A', contextWindow: '230000', maxOutputTokens: '32000' },
+      ],
+      defaultModel: 'DeepSeek-V4.1-Flash',
+      smallModel: 'DeepSeek-V4-Flash-0731',
+      boundBackendIds: ['claude', 'codebuddy'],
+    };
+
+    // 1. 大小写不敏感清理冲突环境变量，并生成 --settings 覆盖 JSON（中和 ~/.claude/settings.json 的旧 env）
+    const adapted = prepareClaudeProviderRuntime({
+      provider: acoProvider,
+      proxyOrigin: 'http://127.0.0.1:56630',
+      proxyToken: 'sk-hd-proxy-test',
+      baseEnv: {
+        PATH: '/usr/bin',
+        anthropic_base_url: 'https://old.example.com',
+        ANTHROPIC_AUTH_TOKEN: 'old-auth',
+        CLAUDE_CODE_OAUTH_TOKEN: 'old-oauth',
+        No_Proxy: 'internal.corp',
+      },
+      protocolGatewayEnabled: true,
+    });
+    expect(adapted).toBeDefined();
+    expect(adapted!.converted).toBe(true);
+    expect(adapted!.env.anthropic_base_url).toBeUndefined();
+    expect(adapted!.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(adapted!.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(adapted!.env.No_Proxy).toBeUndefined();
+    expect(adapted!.env.NO_PROXY).toContain('internal.corp');
+    expect(adapted!.env.NO_PROXY).toContain('127.0.0.1');
+    expect(adapted!.env.NO_PROXY).toContain('localhost');
+    expect(adapted!.settingsEnv.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:56630/p/aco/anthropic');
+    expect(adapted!.settingsEnv.ANTHROPIC_API_KEY).toBe('sk-hd-proxy-test');
+    expect(adapted!.settingsEnv.ANTHROPIC_AUTH_TOKEN).toBe('');
+    expect(adapted!.settingsEnv.CLAUDE_CODE_OAUTH_TOKEN).toBe('');
+
+    const dir = await mkdtemp(join(tmpdir(), 'hd-claude-settings-'));
+    try {
+      const settingsPath = await writeClaudeProviderSettingsFile(dir, acoProvider.id, adapted!.settingsJson);
+      const parsed = JSON.parse(await readFile(settingsPath, 'utf8')) as { env: Record<string, string> };
+      expect(parsed.env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:56630/p/aco/anthropic');
+      expect(parsed.env.ANTHROPIC_AUTH_TOKEN).toBe('');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+
+    // 2. 已配置主模型名称含 Flash 时，即使 selectedModel 切到其他模型，也不应被误判为小模型改写成 smallModel
+    const flashBody = Buffer.from(JSON.stringify({ model: 'DeepSeek-V4.1-Flash', messages: [] }));
+    expect(JSON.parse(rewriteModelInPayload(flashBody, acoProvider, 'Qwen3.6-35B-A').toString('utf8')).model).toBe(
+      'Qwen3.6-35B-A',
+    );
+    expect(JSON.parse(rewriteModelInPayload(flashBody, acoProvider, 'DeepSeek-V4.1-Flash').toString('utf8')).model).toBe(
+      'DeepSeek-V4.1-Flash',
+    );
+    // 未配置的 haiku 别名仍正确映射到 smallModel
+    const haikuBody = Buffer.from(JSON.stringify({ model: 'claude-haiku-4-5', messages: [] }));
+    expect(JSON.parse(rewriteModelInPayload(haikuBody, acoProvider, 'Qwen3.6-35B-A').toString('utf8')).model).toBe(
+      'DeepSeek-V4-Flash-0731',
+    );
+
+    // 3. 网关在上游请求进行中即实时写入日志条目，完成后原地更新不产生重复行
+    let releaseUpstream!: () => void;
+    const upstreamGate = new Promise<void>((resolve) => {
+      releaseUpstream = resolve;
+    });
+    let inFlightLogsCount = 0;
+    let inFlightMessage = '';
+    const proxy = new ProviderProxy({
+      getProvider: (id) => (id === 'aco' ? acoProvider : undefined),
+      getApiKey: async () => 'real-aco-key',
+      isProtocolGatewayEnabled: () => true,
+      fetchImpl: async () => {
+        const snapshot = proxy.getLogs();
+        inFlightLogsCount = snapshot.length;
+        inFlightMessage = snapshot[0]?.message ?? '';
+        await upstreamGate;
+        return new Response(
+          JSON.stringify({
+            id: 'chatcmpl-live',
+            model: 'DeepSeek-V4.1-Flash',
+            choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'pong' } }],
+            usage: { prompt_tokens: 5, completion_tokens: 2 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+    try {
+      await proxy.ensureStarted();
+      const pendingReq = fetch(`${proxy.endpointFor('aco', 'anthropic')}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'DeepSeek-V4.1-Flash', stream: false, max_tokens: 128, messages: [{ role: 'user', content: 'ping' }] }),
+      });
+      // 等待上游回调触发后再放行
+      await new Promise((r) => setTimeout(r, 30));
+      releaseUpstream();
+      const res = await pendingReq;
+      expect(res.status).toBe(200);
+      expect(inFlightLogsCount).toBe(1);
+      expect(inFlightMessage).toContain('forwarding');
+      // 完成后原地更新，总条数仍为 1
+      const finalLogs = proxy.getLogs();
+      expect(finalLogs).toHaveLength(1);
+      expect(finalLogs[0]).toMatchObject({
+        providerId: 'aco',
+        converted: true,
+        status: 200,
+        level: 'info',
+      });
     } finally {
       await proxy.dispose();
     }

@@ -59,17 +59,15 @@ export function RunStatus() {
   return (
     <div
       className={cn(
-        'run-status flex w-fit max-w-full items-center gap-2.5 self-start rounded-full px-3 py-1.5 text-[12.5px]',
-        waiting
-          ? 'run-status--waiting bg-orange-tint text-orange shadow-[0_0_0_1px_color-mix(in_srgb,var(--orange)_34%,transparent)]'
-          : 'bg-surface text-ink shadow-card',
+        'run-status flex w-fit max-w-full items-center gap-2 self-start py-0.5 text-[12.5px]',
+        waiting ? 'run-status--waiting text-orange' : 'text-ink-2',
       )}
       role="status"
       aria-label={t('thread.busy')}
       data-testid="run-status"
       style={{ animation: 'fade-up 220ms cubic-bezier(0.23,1,0.32,1) both' }}
     >
-      <span className="run-status__icon inline-flex shrink-0">
+      <span className="run-status__icon inline-flex size-4 shrink-0 items-center justify-center">
         {waiting ? <span className="dot dot--attention inline-block size-2 rounded-full bg-orange" /> : <LoaderGrid />}
       </span>
       <span className="run-status__label min-w-0 truncate font-medium">

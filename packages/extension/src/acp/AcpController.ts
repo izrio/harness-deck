@@ -1218,7 +1218,8 @@ export class AcpController implements ChatBackendController {
         await this.setOption(sessionId, option.id, acpModelValue);
       }
       const effortOption = this.effortOption(this.currentProjection());
-      if (effort && effortOption && effort !== effortOption.currentValue && (!bound || effortOption.options?.some((o) => o.value === effort))) {
+      const effortSupported = !effortOption?.options?.length || effortOption.options.some((o) => o.value === effort);
+      if (effort && effortOption && effort !== effortOption.currentValue && effortSupported) {
         await this.setOption(sessionId, effortOption.id, effort);
       }
       // 已经建好、还没用过的草稿会话也换过来
@@ -1334,11 +1335,12 @@ export class AcpController implements ChatBackendController {
 
   private interactionOf(pending: PendingPermission): PendingInteraction {
     const call = pending.toolCall;
-    const args = (call.rawInput ?? {}) as { command?: unknown };
+    const args = (call.rawInput ?? {}) as { command?: unknown; CommandLine?: unknown };
+    const rawCommand = typeof args.command === 'string' ? args.command : typeof args.CommandLine === 'string' ? args.CommandLine : undefined;
     const path = call.locations?.[0]?.path ?? inputFilePath(call.rawInput);
     const subject =
-      typeof args.command === 'string' && args.command.trim()
-        ? { subject: args.command.trim(), subjectKind: 'command' as const }
+      rawCommand && rawCommand.trim()
+        ? { subject: rawCommand.trim(), subjectKind: 'command' as const }
         : path
           ? { subject: displayPath(path, this.workspacePath), subjectKind: 'file' as const }
           : undefined;
