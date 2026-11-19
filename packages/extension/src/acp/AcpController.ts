@@ -1039,10 +1039,10 @@ export class AcpController implements ChatBackendController {
       ...(wireText.trim() ? [{ type: 'text', text: wireText }] : []),
       ...sent.map((image) => ({ type: 'image', mimeType: image.mediaType, data: image.data })),
     ];
-    const send = () => link.request<{ stopReason?: string } | null>('session/prompt', { sessionId, prompt: content });
+    const send = () => link.request<{ stopReason?: string; usage?: unknown } | null>('session/prompt', { sessionId, prompt: content });
     let endedNormally = false;
     try {
-      let result: { stopReason?: string } | null;
+      let result: { stopReason?: string; usage?: unknown } | null;
       try {
         result = await send();
       } catch (error) {
@@ -1050,6 +1050,7 @@ export class AcpController implements ChatBackendController {
         if (!isAuthRequired(error) || !(await this.signIn(link).catch(() => false))) throw error;
         result = await send();
       }
+      if (result?.usage) projection.applyPromptUsage(result.usage);
       const stopReason = result?.stopReason ?? 'end_turn';
       projection.endTurn(Date.now(), stopReason);
       endedNormally = stopReason !== 'cancelled';
@@ -1503,6 +1504,10 @@ export class AcpController implements ChatBackendController {
       loadingOlder: false,
       sync: !this.activeId ? 'idle' : this.loading.has(this.activeId) || !this.link ? 'opening' : 'live',
       ...(usage ? { contextUsage: Math.min(1, usage.used / usage.size), contextTokens: { used: usage.used, window: usage.size } } : {}),
+      ...(() => {
+        const contextDetail = projection?.usageTracker.detail();
+        return contextDetail ? { contextDetail } : {};
+      })(),
       ...(mode?.currentValue === 'plan' ? { planMode: true } : {}),
       ...(projection?.todos?.length ? { todos: projection.todos } : {}),
       ...(running && projection?.runningSince !== undefined ? { runningSince: projection.runningSince } : {}),

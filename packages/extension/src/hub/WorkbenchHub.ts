@@ -91,6 +91,8 @@ interface StoredRegistrySession {
   readonly unread?: boolean;
   readonly unreadSummary?: string;
   readonly agentName?: string;
+  /** 该会话最近一次使用的模型显示名，随会话打开时记录。 */
+  readonly model?: string;
 }
 
 export interface ActiveControllerContext {
@@ -888,6 +890,7 @@ export class WorkbenchHub {
       updatedAt: this.now(),
       ...(existing?.unread ? { unread: true } : {}),
       ...(existing?.unreadSummary ? { unreadSummary: existing.unreadSummary } : {}),
+      ...(existing?.model ? { model: existing.model } : {}),
       agentName,
     });
     this.persistRegistry();
@@ -911,6 +914,7 @@ export class WorkbenchHub {
           ...(prev?.unread ? { unread: true } : {}),
           ...(prev?.unreadSummary ? { unreadSummary: prev.unreadSummary } : {}),
           ...(prev?.agentName ? { agentName: prev.agentName } : {}),
+          ...(prev?.model ? { model: prev.model } : {}),
         });
         dirty = true;
       }
@@ -938,6 +942,22 @@ export class WorkbenchHub {
       const prevResolved = prev ? resolveEnclosingProjectPath(prev.projectPath, knownPaths) : undefined;
       const targetProject = prevResolved ?? currentProject;
       if (targetProject) upsert(s.id, s.title, targetProject, ctx.backendId, s.updatedAt);
+    }
+
+    // 当前打开的会话能拿到正在使用的模型：记到注册表里，供会话列表逐条展示
+    const activeSessionId = ctx.snapshot.session.id;
+    const currentModel = ctx.snapshot.models.current;
+    if (activeSessionId && currentModel) {
+      const key = `${ctx.backendId}:${activeSessionId}`;
+      const rec = this.registry.get(key);
+      const option = ctx.snapshot.models.options.find(
+        (o) => o.provider === currentModel.provider && o.model === currentModel.model,
+      );
+      const modelLabel = option?.name ?? currentModel.model;
+      if (rec && modelLabel && rec.model !== modelLabel) {
+        this.registry.set(key, { ...rec, model: modelLabel });
+        dirty = true;
+      }
     }
 
     if (this.registry.size > MAX_REGISTRY_SESSIONS) {
@@ -999,6 +1019,7 @@ export class WorkbenchHub {
         ...(live?.needsAttention ? { needsAttention: true } : {}),
         ...(rec.unread ? { unread: true } : {}),
         ...(rec.agentName ? { agentName: rec.agentName } : {}),
+        ...(rec.model ? { model: rec.model } : {}),
       });
     }
 
@@ -1337,6 +1358,7 @@ export class WorkbenchHub {
         ...(r.unread ? { unread: true } : {}),
         ...(typeof r.unreadSummary === 'string' && r.unreadSummary ? { unreadSummary: r.unreadSummary } : {}),
         ...(typeof r.agentName === 'string' && r.agentName ? { agentName: r.agentName } : {}),
+        ...(typeof r.model === 'string' && r.model ? { model: r.model } : {}),
       });
     }
   }

@@ -1238,6 +1238,7 @@ export class ClaudeController implements ChatBackendController {
     ];
 
     const usage = projection?.usage;
+    const contextDetail = projection?.contextDetail();
     const mode = this.currentMode();
     const changes = this.sessionChanges(projection);
     const session: SessionHeader = {
@@ -1253,6 +1254,7 @@ export class ClaudeController implements ChatBackendController {
             contextTokens: { used: usage.used, window: usage.size },
           }
         : {}),
+      ...(contextDetail ? { contextDetail } : {}),
       ...(mode === 'plan' ? { planMode: true } : {}),
       ...(projection?.todos?.length ? { todos: projection.todos } : {}),
       ...(projection?.goal ? { goal: projection.goal } : {}),

@@ -106,6 +106,7 @@ import {
   updateProjectConfigsMap,
 } from '../projects/ProjectService.ts';
 import { fetchRemoteProviderModels, ProviderProxy } from '../providers/ProviderProxy.ts';
+import { queryAntigravityQuota, queryClaudeQuota, queryCodebuddyQuota, quotaProviderFor } from '../quota/provider.ts';
 import {
   bindProviderSetting,
   buildProvidersState,
@@ -1278,6 +1279,8 @@ export function createHarnessHostRuntime(
         if (active?.backend.profile.id === profile.id) {
           updateStatusBar();
         }
+        // 会话列表按会话展示模型，模型切换后让 Hub 立即同步注册表并推送
+        hub?.schedulePush();
       },
     }),
     getCachedExecutable: (profileId, commandSpec) => {
@@ -2229,6 +2232,37 @@ export function createHarnessHostRuntime(
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
           post({ type: 'providerModelsFetched', payload: { requestId, models: [], error: errMsg } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'fetchQuota') {
+      const { requestId } = message.payload;
+      void (async () => {
+        // Claude / Antigravity / CodeBuddy 分别有自己的订阅额度来源；其它底层直接回 unavailable，
+        // 不读凭据、不发请求。绑定第三方服务商时（Claude / CodeBuddy）实际消耗的是编程套餐额度，
+        // 官方订阅额度不再适用，同样隐藏。启动初期 active 可能还没建好，按默认后端判断。
+        const backendId = active?.backend.profile.id ?? defaultBackendId;
+        const profile = active?.backend.profile ?? profiles().find((p) => p.id === backendId);
+        const providerId = quotaProviderFor(profile);
+        if (!providerId || (providerId !== 'antigravity' && providerForBackend(readProviders(), backendId))) {
+          post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
+          return;
+        }
+        try {
+          const query = providerId === 'claude' ? queryClaudeQuota : providerId === 'antigravity' ? queryAntigravityQuota : queryCodebuddyQuota;
+          const quota = await query({
+            env: process.env,
+            getHttpProxy: () => platform.settings.getHttpProxy(),
+          });
+          post(
+            quota
+              ? { type: 'quotaFetched', payload: { requestId, quota } }
+              : { type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } },
+          );
+        } catch {
+          // 额度查询失败不应该打扰用户，前端收到 unavailable 会隐藏标识。
+          post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
         }
       })();
       return;

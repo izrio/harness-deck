@@ -162,6 +162,7 @@ function sampleWorkbench(): WorkbenchState {
             backendName: 'DeepSeek',
             updatedAt: Date.now() - 10_000,
             running: true,
+            model: 'DeepSeek R1',
           },
         ],
       },
@@ -179,6 +180,7 @@ function sampleWorkbench(): WorkbenchState {
             updatedAt: Date.now() - 50_000,
             running: false,
             unread: true,
+            model: 'Claude Sonnet 4.5',
           },
         ],
       },
@@ -204,6 +206,7 @@ function workbenchSnapshot(): HostSnapshot {
           efforts: [],
         },
       ],
+      current: { provider: 'deepseek', model: 'deepseek-reasoner' },
     },
     interactions: [],
     permissions: { options: ['read-only', 'workspace-write', 'danger-full-access'] },
@@ -471,6 +474,11 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 会话�
     const s2Button = screen.getByTestId('grouped-session-s2');
     expect(s2Button.textContent).toContain('Beta 接口设计');
     expect(s2Button.textContent).toContain('Claude Code');
+
+    // 每条会话在底层图标后展示各自使用的模型
+    const s1Button = screen.getByTestId('grouped-session-s1');
+    expect(s1Button.textContent).toContain('DeepSeek R1');
+    expect(s2Button.textContent).toContain('Claude Sonnet 4.5');
 
     // 搜索框过滤并支持一键清除
     const sidebar = screen.getByTestId('project-sessions-sidebar');

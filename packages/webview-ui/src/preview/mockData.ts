@@ -227,6 +227,12 @@ export function createInitialSessions(): Record<string, PreviewSessionData> {
         sync: 'live',
         contextUsage: 0.28,
         contextTokens: { used: 36_400, window: 128_000 },
+        contextDetail: {
+          lastRequest: { input: 1_840, output: 6_200, cacheRead: 24_800, cacheWrite: 3_560, reasoning: 2_400 },
+          session: { input: 9_620, output: 21_400, cacheRead: 118_000, cacheWrite: 12_900, reasoning: 8_300 },
+          requests: 14,
+          cost: { amount: 1.284, currency: 'USD' },
+        },
         folder: 'harness-deck',
         todos: [
           { content: '梳理 webview-ui 通信入口与主题变量', status: 'completed' },
@@ -515,9 +521,9 @@ export function createInitialWorkbench(): WorkbenchState {
         projectName: 'harness-deck',
         isCurrent: true,
         sessions: [
-          { id: 'session-preview-main', title: '浏览器本地预览模式调试', projectPath: PREVIEW_WORKSPACE_PATH, backendId: 'dsh', backendName: 'DeepSeek', updatedAt: now - 2 * min, running: false },
-          { id: 'session-preview-approval', title: '待确认：验证生产包构建与清理', projectPath: PREVIEW_WORKSPACE_PATH, backendId: 'dsh', backendName: 'DeepSeek', updatedAt: now - 15 * min, running: false, needsAttention: true },
-          { id: 'session-preview-question', title: '重构计划审阅：Mock Bridge', projectPath: PREVIEW_WORKSPACE_PATH, backendId: 'claude', backendName: 'Claude Code', updatedAt: now - 32 * min, running: false, needsAttention: true },
+          { id: 'session-preview-main', title: '浏览器本地预览模式调试', projectPath: PREVIEW_WORKSPACE_PATH, backendId: 'dsh', backendName: 'DeepSeek', updatedAt: now - 2 * min, running: false, model: 'DeepSeek Reasoner' },
+          { id: 'session-preview-approval', title: '待确认：验证生产包构建与清理', projectPath: PREVIEW_WORKSPACE_PATH, backendId: 'dsh', backendName: 'DeepSeek', updatedAt: now - 15 * min, running: false, needsAttention: true, model: 'DeepSeek Chat' },
+          { id: 'session-preview-question', title: '重构计划审阅：Mock Bridge', projectPath: PREVIEW_WORKSPACE_PATH, backendId: 'claude', backendName: 'Claude Code', updatedAt: now - 32 * min, running: false, needsAttention: true, model: 'Claude Sonnet 4' },
         ],
       },
     ],

@@ -50,6 +50,11 @@ export function SessionsView({
   const sessionGroups = useView((s) => s.workbench.sessionGroups);
   const currentSessionId = useView((s) => s.session.id);
   const activeBackendId = useView((s) => s.backends.active);
+  const currentModelLabel = useView((s) => {
+    const current = s.models.current;
+    if (!current) return undefined;
+    return s.models.options.find((o) => o.provider === current.provider && o.model === current.model)?.name ?? current.model;
+  });
 
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     try {
@@ -206,6 +211,7 @@ export function SessionsView({
                     hasQuery={q.length > 0}
                     currentSessionId={currentSessionId}
                     activeBackendId={activeBackendId}
+                    currentModelLabel={currentModelLabel}
                     onToggle={() => toggleGroup(group.projectPath)}
                   />
                 </Fragment>
@@ -228,6 +234,7 @@ function ProjectSessionGroupBlock({
   hasQuery,
   currentSessionId,
   activeBackendId,
+  currentModelLabel,
   onToggle,
 }: {
   readonly group: ProjectSessionGroup;
@@ -236,6 +243,7 @@ function ProjectSessionGroupBlock({
   readonly hasQuery: boolean;
   readonly currentSessionId: string | undefined;
   readonly activeBackendId: string;
+  readonly currentModelLabel: string | undefined;
   readonly onToggle: () => void;
 }) {
   const t = useT();
@@ -293,6 +301,7 @@ function ProjectSessionGroupBlock({
                   key={`${sess.backendId}:${sess.id}`}
                   session={sess}
                   isCurrent={group.isCurrent && sess.id === currentSessionId && sess.backendId === activeBackendId}
+                  currentModelLabel={currentModelLabel}
                 />
               ))}
             </SidebarMenu>
@@ -306,11 +315,15 @@ function ProjectSessionGroupBlock({
 function SessionListItemRow({
   session,
   isCurrent,
+  currentModelLabel,
 }: {
   readonly session: GroupedSessionItem;
   readonly isCurrent: boolean;
+  readonly currentModelLabel?: string | undefined;
 }) {
   const t = useT();
+  // 逐条会话展示各自最近使用的模型；当前会话在注册表同步前先用实时模型兜底
+  const modelLabel = session.model ?? (isCurrent ? currentModelLabel : undefined);
 
   return (
     <SidebarMenuItem>
@@ -362,6 +375,11 @@ function SessionListItemRow({
             title={session.agentName ? `${session.backendName} · ${session.agentName}` : session.backendName}
           >
             <BackendLogo backend={{ id: session.backendId, name: session.backendName }} size="sm" />
+            {modelLabel ? (
+              <span className="min-w-0 truncate" title={modelLabel}>
+                {modelLabel}
+              </span>
+            ) : null}
             <span className="sr-only">{session.backendName}</span>
           </span>
           {session.updatedAt > 0 ? (

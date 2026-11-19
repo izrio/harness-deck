@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseWebviewMessage } from '../src/index.ts';
+import { parseWebviewMessage, type HostToWebview, type QuotaView } from '../src/index.ts';
 
 describe('parseWebviewMessage', () => {
   it('接受合法消息', () => {
@@ -135,6 +135,11 @@ describe('parseWebviewMessage', () => {
       type: 'fetchProviderModels',
       payload: { requestId: 1, openaiChatUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3' },
     });
+    expect(parseWebviewMessage({ type: 'fetchQuota', payload: { requestId: 7 } })).toEqual({
+      type: 'fetchQuota',
+      payload: { requestId: 7 },
+    });
+    expect(parseWebviewMessage({ type: 'fetchQuota', payload: { requestId: 'x' } })).toBeUndefined();
     expect(
       parseWebviewMessage({
         type: 'scanGitSkills',
@@ -229,6 +234,24 @@ describe('parseWebviewMessage', () => {
         agents: ['dsh', 'claude'],
       },
     });
+  });
+
+  it('quotaFetched 消息支持 cycle 计费周期窗口', () => {
+    const quota: QuotaView = {
+      windows: [
+        { kind: 'cycle', label: '', usedPercent: 63, remainingPercent: 37, resetsAt: Date.parse('2026-11-24T00:00:00.000Z') },
+        { kind: 'cycle', label: 'Pro', usedPercent: 20, remainingPercent: 80 },
+      ],
+      queriedAt: Date.parse('2026-11-19T12:00:00.000Z'),
+    };
+    const message: HostToWebview = { type: 'quotaFetched', payload: { requestId: 9, quota } };
+
+    expect(message.type).toBe('quotaFetched');
+    if (message.type !== 'quotaFetched') return;
+    expect(message.payload.quota?.windows.map((w) => [w.kind, w.label])).toEqual([
+      ['cycle', ''],
+      ['cycle', 'Pro'],
+    ]);
   });
 
   it('拒绝未知类型和缺少 payload 的消息', () => {

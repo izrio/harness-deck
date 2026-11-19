@@ -600,4 +600,95 @@ describe('WorkbenchHub 五大模块协同与顺序调度', () => {
 
     hub.dispose();
   });
+
+  it('逐条会话记录最近使用的模型：切换会话后各自保留，并随注册表持久化', () => {
+    const store = new MemoryStore();
+    const now = 1_700_000_000_000;
+    const workspacePath = '/repo/alpha';
+    const projects: ProjectsState = {
+      currentPath: workspacePath,
+      recent: [{ path: workspacePath, name: 'alpha', lastOpenedAt: now, isCurrent: true }],
+      configs: {},
+    };
+    const claudeModel = {
+      provider: 'anthropic',
+      model: 'claude-sonnet-4',
+      name: 'Claude Sonnet 4',
+      group: 'Anthropic',
+      efforts: [],
+    };
+    const deepseekModel = {
+      provider: 'deepseek',
+      model: 'deepseek-reasoner',
+      name: 'DeepSeek R1',
+      group: 'DeepSeek',
+      efforts: [],
+    };
+    let snapshot = makeBaseSnapshot({
+      sessions: [
+        { id: 's1', title: '会话一', updatedAt: now - 2_000, running: false },
+        { id: 's2', title: '会话二', updatedAt: now - 1_000, running: false },
+      ],
+      session: { id: 's1', title: '会话一', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+      models: { options: [claudeModel, deepseekModel], current: { provider: 'anthropic', model: 'claude-sonnet-4' } },
+    });
+
+    const createHub = () =>
+      new WorkbenchHub({
+        globalState: store,
+        runner: { run: async () => ({ status: 'succeeded', sessionId: 'unused', output: '' }) } as unknown as UnattendedRunner,
+        locale: () => 'zh',
+        isWorkspaceTrusted: () => true,
+        isWebviewVisible: () => true,
+        workspacePath: () => workspacePath,
+        projects: () => projects,
+        profiles: () => [
+          { id: 'dsh', kind: 'dsh', name: 'DeepSeek' },
+          { id: 'claude', kind: 'claude', name: 'Claude Code' },
+        ],
+        schedulePermission: () => 'workspace-write',
+        activeContext: () => ({
+          backendId: 'dsh',
+          backendName: 'DeepSeek',
+          workspacePath,
+          snapshot,
+          crossProjectSessions: [],
+          latestAssistantText: () => undefined,
+        }),
+        switchProjectAndBackend: async () => undefined,
+        startProgrammaticSession: async () => undefined,
+        switchSessionInActive: async () => undefined,
+        openNewSessionInActive: async () => undefined,
+        post: () => undefined,
+        focusView: async () => undefined,
+        openPanel: () => undefined,
+        log: () => undefined,
+        now: () => now,
+        enableTimer: false,
+      });
+
+    const hub = createHub();
+    const modelsOf = (state: ReturnType<WorkbenchHub['state']>) =>
+      Object.fromEntries(
+        state.sessionGroups.flatMap((g) => g.sessions.map((s) => [s.id, s.model])),
+      );
+
+    // 当前打开的会话记录正在使用的模型，未打开过的会话还没有模型
+    const st1 = hub.state();
+    expect(modelsOf(st1)).toEqual({ s1: 'Claude Sonnet 4', s2: undefined });
+
+    // 切到会话二并改用 DeepSeek：两条会话各自保留自己的模型
+    snapshot = {
+      ...snapshot,
+      session: { id: 's2', title: '会话二', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+      models: { ...snapshot.models, current: { provider: 'deepseek', model: 'deepseek-reasoner' } },
+    };
+    expect(modelsOf(hub.state())).toEqual({ s1: 'Claude Sonnet 4', s2: 'DeepSeek R1' });
+
+    // 重启后从注册表恢复，模型不丢
+    hub.dispose();
+    const revived = createHub();
+    expect(modelsOf(revived.state())).toEqual({ s1: 'Claude Sonnet 4', s2: 'DeepSeek R1' });
+    revived.dispose();
+  });
 });

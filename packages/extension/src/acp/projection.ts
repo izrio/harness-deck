@@ -15,6 +15,7 @@ import { countLines, lineStats, sumStats } from '../vm/diffs.ts';
 import { activityLabel, summarizeExplore, toolVariant } from '../vm/toolRows.ts';
 import { displayPath } from '../vm/paths.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
+import { normalizeUsage, UsageTracker } from '../vm/usage.ts';
 import { t } from '../i18n.ts';
 
 const OUTPUT_LIMIT = 4_000;
@@ -156,6 +157,8 @@ export class AcpSessionProjection {
   title?: string;
   todos?: readonly Todo[];
   usage?: { readonly used: number; readonly size: number };
+  /** 每轮用量（`session/prompt` 结果里的 usage）和 `usage_update.cost` 累计费用。 */
+  readonly usageTracker = new UsageTracker();
   commands: readonly AcpCommand[] = [];
   configOptions: readonly AcpConfigOption[] = [];
   /** 正在进行的一轮：开始时间。 */
@@ -221,6 +224,17 @@ export class AcpSessionProjection {
 
   toolCall(toolCallId: string): AcpToolCall | undefined {
     return this.tools.get(toolCallId);
+  }
+
+  /**
+   * 一轮结束时 `session/prompt` 结果里的用量（ACP 不稳定字段 `usage`：inputTokens、outputTokens、
+   * cachedReadTokens、cachedWriteTokens、thoughtTokens）：记为最近一次并累加。
+   */
+  applyPromptUsage(raw: unknown): void {
+    const b = normalizeUsage(raw);
+    if (!b) return;
+    this.usageTracker.addRequest(b);
+    this.changed();
   }
 
   /** 清空（重新加载历史前）。 */
@@ -304,9 +318,12 @@ export class AcpSessionProjection {
         }));
         break;
       }
-      case 'usage_update':
+      case 'usage_update': {
         if (typeof update.used === 'number' && typeof update.size === 'number' && update.size > 0) this.usage = { used: update.used, size: update.size };
+        const cost = update.cost && typeof update.cost === 'object' ? (update.cost as { amount?: unknown; currency?: unknown }) : undefined;
+        if (typeof cost?.amount === 'number' && Number.isFinite(cost.amount)) this.usageTracker.setCost(cost.amount, typeof cost.currency === 'string' && cost.currency ? cost.currency : 'USD');
         break;
+      }
       case 'available_commands_update':
         this.commands = Array.isArray(update.availableCommands) ? (update.availableCommands as AcpCommand[]).filter((c) => typeof c?.name === 'string') : [];
         break;

@@ -3,7 +3,7 @@
  * 同时支持实时流式事件（`system`、`stream_event`、`assistant`、`user`、`result`）
  * 与本地 `~/.claude/projects/<project>/<id>.jsonl` 历史会话回放。
  */
-import { joinLabel, type ImageView, type Item, type LineStats, type SessionHeader } from '@harness-deck/shared';
+import { joinLabel, type ContextDetail, type ImageView, type Item, type LineStats, type SessionHeader } from '@harness-deck/shared';
 import { inputFilePath, type AcpDiff, type FileChange } from '../acp/projection.ts';
 import { t } from '../i18n.ts';
 import { splitContext } from '../vm/context.ts';
@@ -11,6 +11,7 @@ import { countLines, lineStats, sumStats } from '../vm/diffs.ts';
 import { displayPath } from '../vm/paths.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
 import { activityLabel, parseArguments, summarizeExplore, toolVariant } from '../vm/toolRows.ts';
+import { addUsage, normalizeUsage } from '../vm/usage.ts';
 
 const OUTPUT_LIMIT = 4_000;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -40,6 +41,13 @@ export class ClaudeSessionProjection {
   private streamedText = false;
   private streamedThinking = false;
   private contextWindow = DEFAULT_CONTEXT_WINDOW;
+  /** 每次模型请求（按 API 消息 id）的用量：流式时 message_start / message_delta / assistant 会多次报告同一条消息，取各字段最大值。 */
+  private readonly messageUsage = new Map<string, Record<string, unknown>>();
+  private currentMessageId?: string;
+  private lastMessageId?: string;
+  /** `result.total_cost_usd` 是进程内累计值：记下上一次，进程重启（值变小）时重新累加。 */
+  private lastResultCost?: number;
+  private sessionCost?: number;
 
   version = 0;
   sessionId?: string;
@@ -114,7 +122,40 @@ export class ClaudeSessionProjection {
     this.goal = undefined;
     this.streamedText = false;
     this.streamedThinking = false;
+    // 历史回放会重新统计每次请求的用量；费用只来自实时 result，保留
+    this.messageUsage.clear();
+    this.currentMessageId = undefined;
+    this.lastMessageId = undefined;
     this.changed();
+  }
+
+  /** 悬浮在上下文圆环上展示的用量明细。 */
+  contextDetail(): ContextDetail | undefined {
+    let session;
+    for (const raw of this.messageUsage.values()) {
+      const b = normalizeUsage(raw);
+      if (b) session = addUsage(session, b);
+    }
+    const last = this.lastMessageId ? normalizeUsage(this.messageUsage.get(this.lastMessageId)) : undefined;
+    if (!session && this.sessionCost === undefined) return undefined;
+    return {
+      ...(last ? { lastRequest: last } : {}),
+      ...(session ? { session, requests: this.messageUsage.size } : {}),
+      ...(this.sessionCost !== undefined ? { cost: { amount: this.sessionCost, currency: 'USD' } } : {}),
+    };
+  }
+
+  private recordMessageUsage(id: string | undefined, raw: unknown): void {
+    if (!raw || typeof raw !== 'object') return;
+    const key = id ?? this.currentMessageId ?? `anon:${this.messageUsage.size}`;
+    const prev = this.messageUsage.get(key) ?? {};
+    const merged: Record<string, unknown> = { ...prev };
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === 'number') merged[k] = Math.max(typeof prev[k] === 'number' ? (prev[k] as number) : 0, v);
+      else if (v && typeof v === 'object') merged[k] = v;
+    }
+    this.messageUsage.set(key, merged);
+    this.lastMessageId = key;
   }
 
   addUserMessage(text: string, images: readonly ImageView[] = []): void {
@@ -229,7 +270,11 @@ export class ClaudeSessionProjection {
           this.streamedText = false;
           this.streamedThinking = false;
           const msg = event.message && typeof event.message === 'object' ? (event.message as Record<string, unknown>) : undefined;
-          if (msg?.usage) this.applyUsageObject(msg.usage);
+          this.currentMessageId = typeof msg?.id === 'string' && msg.id ? msg.id : undefined;
+          if (msg?.usage) {
+            this.applyUsageObject(msg.usage);
+            this.recordMessageUsage(this.currentMessageId, msg.usage);
+          }
         } else if (evType === 'content_block_start') {
           const cb =
             event.content_block && typeof event.content_block === 'object'
@@ -256,7 +301,10 @@ export class ClaudeSessionProjection {
             this.streamedThinking = true;
           }
         } else if (evType === 'message_delta') {
-          if (event.usage) this.applyUsageObject(event.usage);
+          if (event.usage) {
+            this.applyUsageObject(event.usage);
+            this.recordMessageUsage(this.currentMessageId, event.usage);
+          }
         } else if (evType === 'error') {
           const errText = extractClaudeErrorText(event.error ?? event) ?? t('notice.errorUnknown');
           if (!isReplay) {
@@ -272,7 +320,10 @@ export class ClaudeSessionProjection {
       case 'assistant': {
         if (parentToolId) return;
         const msg = raw.message && typeof raw.message === 'object' ? (raw.message as Record<string, unknown>) : raw;
-        if (msg.usage) this.applyUsageObject(msg.usage);
+        if (msg.usage) {
+          this.applyUsageObject(msg.usage);
+          this.recordMessageUsage(typeof msg.id === 'string' && msg.id ? msg.id : undefined, msg.usage);
+        }
         if (typeof msg.model === 'string' && msg.model) this.model = msg.model;
 
         const content = Array.isArray(msg.content) ? (msg.content as Record<string, unknown>[]) : [];
@@ -371,6 +422,12 @@ export class ClaudeSessionProjection {
       case 'result': {
         this.applyModelUsageWindow(raw.modelUsage);
         if (raw.usage) this.applyUsageObject(raw.usage);
+        if (!isReplay && typeof raw.total_cost_usd === 'number' && Number.isFinite(raw.total_cost_usd) && raw.total_cost_usd >= 0) {
+          const cost = raw.total_cost_usd;
+          const prev = this.lastResultCost;
+          this.sessionCost = (this.sessionCost ?? 0) + (prev !== undefined && cost >= prev ? cost - prev : cost);
+          this.lastResultCost = cost;
+        }
         const rawErrorText = extractClaudeErrorText(raw.error);
         const isError =
           raw.is_error === true ||

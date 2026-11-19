@@ -18,6 +18,7 @@ import type {
   ProjectsState,
   ProviderModelItem,
   ProvidersState,
+  QuotaView,
   SessionHeader,
   SessionListItem,
   BackendsState,
@@ -492,6 +493,8 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       openaiResponsesUrl: z.string().max(2_000).optional(),
     }),
   }),
+  /** 悬浮上下文旁的用量标识时查询官方订阅额度；宿主按激活后端判断是否有官方 OAuth 凭据。 */
+  z.object({ type: z.literal('fetchQuota'), payload: z.object({ requestId: z.number().int() }) }),
 ]);
 
 export type WebviewToHost = z.infer<typeof webviewToHostSchema>;
@@ -554,6 +557,11 @@ export type HostToWebview =
   | {
       readonly type: 'providerModelsFetched';
       readonly payload: { readonly requestId: number; readonly models: readonly ProviderModelItem[]; readonly error?: string };
+    }
+  /** 官方订阅额度查询结果；`quota` 缺失表示查不到（非官方订阅、凭据失效或请求失败），前端应隐藏标识。 */
+  | {
+      readonly type: 'quotaFetched';
+      readonly payload: { readonly requestId: number; readonly quota?: QuotaView; readonly error?: string };
     }
   | { readonly type: 'projects'; readonly payload: ProjectsState }
   | { readonly type: 'extensions'; readonly payload: ExtensionsState }

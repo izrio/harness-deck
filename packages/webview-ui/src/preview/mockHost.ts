@@ -10,6 +10,7 @@ import type {
   PermissionState,
   PreferencesState,
   ProjectsState,
+  QuotaView,
   ScheduleRule,
   TabView,
   WebviewToHost,
@@ -562,6 +563,45 @@ function installMockHost(): void {
         const q = message.payload.query.trim().toLowerCase();
         const matched = q ? PREVIEW_FILES.filter((f) => f.path.toLowerCase().includes(q)) : PREVIEW_FILES;
         postToWebview({ type: 'fileCandidates', payload: { requestId: message.payload.requestId, items: matched } });
+        return;
+      }
+
+      case 'fetchQuota': {
+        // 预览模式按当前后端返回不同额度形态，方便直接查看标识与悬浮明细；
+        // 其它后端（dsh / pi / …）返回 unavailable，标识随之隐藏。
+        const { requestId } = message.payload;
+        const now = Date.now();
+        const quota: QuotaView | undefined =
+          backends.active === 'claude'
+            ? {
+                windows: [
+                  { kind: 'session', label: '', usedPercent: 42, remainingPercent: 58, resetsAt: now + 2 * 60 * 60_000, severity: 'normal' },
+                  { kind: 'weekly', label: '', usedPercent: 76, remainingPercent: 24, resetsAt: now + 3 * 86_400_000, severity: 'warning' },
+                  { kind: 'weeklyModel', label: 'Fable', usedPercent: 91, remainingPercent: 9, severity: 'critical' },
+                ],
+                extraUsage: { usedPercent: 18, remainingPercent: 82 },
+                queriedAt: now,
+              }
+            : backends.active === 'codebuddy'
+              ? {
+                  windows: [{ kind: 'cycle', label: '', usedPercent: 63, remainingPercent: 37, resetsAt: now + 5 * 86_400_000 }],
+                  queriedAt: now,
+                }
+              : backends.active === 'antigravity'
+                ? {
+                    windows: [
+                      { kind: 'session', label: 'gemini', usedPercent: 12, remainingPercent: 88, resetsAt: now + 4 * 60 * 60_000 },
+                      { kind: 'weekly', label: 'gemini', usedPercent: 34, remainingPercent: 66, resetsAt: now + 3 * 86_400_000 },
+                      { kind: 'session', label: '3p', usedPercent: 80, remainingPercent: 20, resetsAt: now + 3 * 60 * 60_000 },
+                      { kind: 'weekly', label: '3p', usedPercent: 92, remainingPercent: 8, resetsAt: now + 2 * 86_400_000 },
+                    ],
+                    queriedAt: now,
+                  }
+                : undefined;
+        postToWebview({
+          type: 'quotaFetched',
+          payload: quota ? { requestId, quota } : { requestId, error: 'unavailable' },
+        });
         return;
       }
 

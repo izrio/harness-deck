@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { HostSnapshot, HostToWebview, RuntimeStatus } from '@harness-deck/shared';
 import type { BackendHost } from '../src/backend/host.ts';
 import type { BackendProfile, ChatBackendController, RunningBackend } from '../src/backend/types.ts';
@@ -350,6 +353,10 @@ async function flushAsync(ms = 25): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function emptyTempHome(): Promise<string> {
+  return mkdtemp(join(tmpdir(), 'hd-host-quota-'));
+}
+
 describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', () => {
   const runtimes: HarnessHostRuntime[] = [];
 
@@ -358,6 +365,8 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
       const rt = runtimes.pop();
       if (rt) await rt.dispose();
     }
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it('启动时默认启动设置中的 defaultBackend，未配置时回退到已保存的默认智能体', async () => {
@@ -615,5 +624,84 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
 
     expect(factory.created.map((b) => b.profile.id)).toEqual(['claude', 'dsh']);
     expect(factory.byId.get('dsh')?.[0]?.switchedSessions).toContain('dsh-old');
+  });
+
+  it('非 Claude 底层请求订阅额度时只回复 unavailable，不查询本机凭据', async () => {
+    const env = createFakePlatform({ initialSettings: { defaultBackend: 'dsh' } });
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, { createBackend: factory.createBackend });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 11 } });
+    await flushAsync();
+
+    const reply = env.posted.find((m) => m.type === 'quotaFetched');
+    expect(reply).toMatchObject({ type: 'quotaFetched', payload: { requestId: 11 } });
+    if (reply?.type === 'quotaFetched') {
+      expect(reply.payload.quota).toBeUndefined();
+      expect(reply.payload.error).toBeTruthy();
+    }
+  });
+
+  it('Antigravity 后端没有本机 token 时不发请求，回复 unavailable', async () => {
+    const home = await emptyTempHome();
+    vi.stubEnv('HOME', home);
+    const env = createFakePlatform({ initialSettings: { defaultBackend: 'antigravity' } });
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, { createBackend: factory.createBackend });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    env.posted.length = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 21 } });
+    await flushAsync();
+
+    const reply = env.posted.find((m) => m.type === 'quotaFetched');
+    expect(reply).toMatchObject({ type: 'quotaFetched', payload: { requestId: 21 } });
+    if (reply?.type === 'quotaFetched') {
+      expect(reply.payload.quota).toBeUndefined();
+      expect(reply.payload.error).toBeTruthy();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('CodeBuddy 绑定第三方服务商时不读本机 Cookie，回复 unavailable', async () => {
+    const home = await emptyTempHome();
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('CODEBUDDY_COOKIE', 'session=should-not-be-used');
+    const env = createFakePlatform({
+      initialSettings: {
+        defaultBackend: 'codebuddy',
+        providers: [
+          {
+            name: '智谱 GLM',
+            anthropicUrl: 'https://open.bigmodel.cn/api/anthropic',
+            boundBackendIds: ['codebuddy'],
+          },
+        ],
+      },
+    });
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, { createBackend: factory.createBackend });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    env.posted.length = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 22 } });
+    await flushAsync();
+
+    const reply = env.posted.find((m) => m.type === 'quotaFetched');
+    expect(reply).toMatchObject({ type: 'quotaFetched', payload: { requestId: 22 } });
+    if (reply?.type === 'quotaFetched') {
+      expect(reply.payload.quota).toBeUndefined();
+      expect(reply.payload.error).toBeTruthy();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    await rm(home, { recursive: true, force: true });
   });
 });

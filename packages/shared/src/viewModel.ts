@@ -302,6 +302,53 @@ export interface PermissionState {
   readonly labels?: Readonly<Record<string, { readonly name: string; readonly description?: string }>>;
 }
 
+/** 一组 token 用量。`input` 只算未命中缓存的输入；缓存读取、写入单独计数。 */
+export interface TokenBreakdown {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  /** 输出中的推理部分（已包含在 output 里），底层不提供时为 undefined。 */
+  readonly reasoning?: number;
+}
+
+/** 上下文用量明细。 */
+export interface ContextDetail {
+  /** 最近一次模型请求的用量。 */
+  readonly lastRequest?: TokenBreakdown;
+  /** 本会话累计用量（底层给出的或本插件观察到的部分）。 */
+  readonly session?: TokenBreakdown;
+  /** 累计的模型请求次数。 */
+  readonly requests?: number;
+  /** 累计费用。 */
+  readonly cost?: { readonly amount: number; readonly currency: string };
+}
+
+/** 官方订阅的一个限额窗口（5 小时 / 每周 / 按模型的每周 / 计费周期）。百分比均为 0–100。 */
+export interface QuotaWindowView {
+  readonly kind: 'session' | 'weekly' | 'weeklyModel' | 'cycle';
+  /**
+   * 窗口附加名：按模型的每周填模型名（如 `Fable`）；Antigravity 的额度池填保留值
+   * `gemini` / `3p`（Webview 翻译成池名）；CodeBuddy 计费周期可留空或用包名。
+   */
+  readonly label: string;
+  readonly usedPercent: number;
+  readonly remainingPercent: number;
+  /** 重置时间（epoch ms），底层没给时为 undefined。 */
+  readonly resetsAt?: number;
+  readonly severity?: 'normal' | 'warning' | 'critical';
+  readonly isActive?: boolean;
+}
+
+/** 官方订阅用量与限额余量。由宿主查询后下发，不含任何凭据信息。 */
+export interface QuotaView {
+  readonly windows: readonly QuotaWindowView[];
+  /** 额外用量（按量计费的额度池），底层没开启时为 undefined。 */
+  readonly extraUsage?: { readonly usedPercent: number; readonly remainingPercent: number };
+  /** 查询时间（epoch ms）。 */
+  readonly queriedAt: number;
+}
+
 /** 当前会话（或尚未创建的新对话）的元信息。 */
 export interface SessionHeader {
   /** undefined 表示新对话：第一条消息发送时才在 dsh 里创建会话。 */
@@ -317,6 +364,8 @@ export interface SessionHeader {
   readonly contextUsage?: number;
   /** 上下文已用和窗口大小（token），用于提示。 */
   readonly contextTokens?: { readonly used: number; readonly window: number };
+  /** 上下文用量明细（缓存读写、输入输出、累计与费用），悬浮在上下文圆环上时展示；底层不提供时为 undefined。 */
+  readonly contextDetail?: ContextDetail;
   /** 会话列表还在读取。 */
   readonly listLoading?: boolean;
   /** 计划模式（`/plan`）：dsh 只做计划，不改文件。 */
@@ -717,6 +766,8 @@ export interface GroupedSessionItem {
   readonly needsAttention?: boolean;
   readonly unread?: boolean;
   readonly agentName?: string;
+  /** 该会话最近一次使用的模型显示名；从未上报过模型的会话没有。 */
+  readonly model?: string;
 }
 
 /** 按项目归组的会话集合。 */

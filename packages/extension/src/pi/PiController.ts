@@ -1141,6 +1141,7 @@ export class PiController implements ChatBackendController {
     ];
 
     const usage = projection?.usage;
+    const contextDetail = projection?.usageTracker.detail();
     const changes = this.sessionChanges(projection);
     const session: SessionHeader = {
       ...(sessionId ? { id: sessionId } : {}),
@@ -1155,6 +1156,7 @@ export class PiController implements ChatBackendController {
             contextTokens: { used: usage.used, window: usage.size },
           }
         : {}),
+      ...(contextDetail ? { contextDetail } : {}),
       ...(this.draftMode === 'plan' ? { planMode: true } : {}),
       ...(projection?.todos?.length ? { todos: projection.todos } : {}),
       ...(projection?.goal ? { goal: projection.goal } : {}),

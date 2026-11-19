@@ -25,6 +25,7 @@ import type {
   PromptImage,
   ProviderModelItem,
   ProvidersState,
+  QuotaView,
   RuntimeStatus,
   SessionHeader,
   SessionListItem,
@@ -70,6 +71,12 @@ export interface ViewState {
   readonly providerFetchResult?: {
     readonly requestId: number;
     readonly models: readonly ProviderModelItem[];
+    readonly error?: string;
+  };
+  /** 最近一次官方订阅额度查询结果；`quota` 缺失表示不可用。 */
+  readonly quotaFetchResult?: {
+    readonly requestId: number;
+    readonly quota?: QuotaView;
     readonly error?: string;
   };
   readonly session: SessionHeader;
@@ -443,6 +450,9 @@ export function applyHostMessage(message: HostToWebview): void {
       return;
     case 'providerModelsFetched':
       set({ providerFetchResult: message.payload });
+      return;
+    case 'quotaFetched':
+      set({ quotaFetchResult: message.payload });
       return;
     case 'session':
       set({ session: message.payload });

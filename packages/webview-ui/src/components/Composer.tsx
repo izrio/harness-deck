@@ -17,6 +17,7 @@ import { AgentIcon, ArrowUpIcon, CloseIcon, FileIcon, PlanIcon, PlusIcon, StopIc
 import { ModelPicker } from './ModelPicker.tsx';
 import { PermissionPicker } from './PermissionPicker.tsx';
 import { StatusDock } from './StatusDock.tsx';
+import { UsageBadge } from './UsageBadge.tsx';
 import { GlideMenu, MenuItem } from './beautifului/index.ts';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useT } from '../i18n.ts';
@@ -533,7 +534,14 @@ export function Composer() {
               <CloseIcon className="size-3" />
             </button>
           ) : null}
-          {session.contextUsage !== undefined ? <ContextRing usage={session.contextUsage} {...(session.contextTokens ? { tokens: session.contextTokens } : {})} /> : null}
+          {session.contextUsage !== undefined ? (
+            <ContextRing
+              usage={session.contextUsage}
+              {...(session.contextTokens ? { tokens: session.contextTokens } : {})}
+              {...(session.contextDetail ? { detail: session.contextDetail } : {})}
+            />
+          ) : null}
+          <UsageBadge />
           <span className="composer__spacer min-w-0 flex-1!" />
           {showStop ? (
             <button

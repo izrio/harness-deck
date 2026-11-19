@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.6.0
+
+**订阅额度标识、上下文用量明细与会话模型标签**：输入框旁新增官方订阅用量标识，可展开查看 5 小时 / 每周 / 每周按模型窗口的已用、剩余与重置时间，支持 Claude、Antigravity 与 CodeBuddy；上下文圆环悬停展开用量明细（最近一次请求、会话累计、缓存读写、推理与费用）；会话列表逐条展示该会话最近使用的模型。
+
+**Subscription quota badge, context usage details, and per-session model labels**: Added an official subscription usage badge next to the composer showing 5-hour / weekly / per-model weekly windows with used, remaining, and reset time for Claude, Antigravity, and CodeBuddy; hovering the context ring now expands a usage breakdown (last request, session total, cache read/write, reasoning, and cost); session history rows show the last model used by each session.
+
+- **订阅用量标识**：新增 `UsageBadge` 与 `fetchQuota` / `quotaFetched` 协议，宿主按激活后端分发到 `quota/` 提供方——Claude 读取本机 OAuth 凭据调用 `/api/oauth/usage`，Antigravity 读取 CLI / IDE 落盘凭据调用 `retrieveUserQuotaSummary`，CodeBuddy 使用 `CODEBUDDY_COOKIE` 或 `~/.codebuddy/usage-cookie` 调用计费接口；成功结果按 token 缓存 5 分钟并走宿主代理，凭据只读不刷新、不进日志与视图模型；绑定第三方服务商或查不到额度时隐藏标识。
+  **Subscription quota badge**: Added `UsageBadge` plus `fetchQuota` / `quotaFetched` messages that dispatch to `quota/` providers by active backend—Claude reads local OAuth credentials and calls `/api/oauth/usage`, Antigravity reads CLI/IDE credential files and calls `retrieveUserQuotaSummary`, and CodeBuddy uses `CODEBUDDY_COOKIE` or `~/.codebuddy/usage-cookie` against its billing API; successful results are cached for 5 minutes per token through the host proxy, credentials are read-only, never refreshed, logged, or sent to the webview; the badge hides itself when a third-party provider is bound or no quota is available.
+- **上下文用量明细**：`ContextRing` 悬停 / 点击弹出 Popover，展示最近一次请求与本会话累计的四段占比条（输入、缓存读取、缓存写入、输出）、推理部分、合计与费用；新增 `TokenBreakdown` / `ContextDetail` 视图模型与共享 `UsageTracker`，Claude 按消息 id 合并流式重复上报的用量并按 `total_cost_usd` 增量累计费用，Pi 与 ACP 分别从助手消息和 `session/prompt` 结果 / `usage_update.cost` 采集。
+  **Context usage details**: The `ContextRing` now opens a Popover on hover or click with four-segment bars (input, cache read, cache write, output) for the last request and the session total, plus reasoning, totals, and cost; added the `TokenBreakdown` / `ContextDetail` view models and a shared `UsageTracker`, with Claude merging streamed duplicate reports by message id and accumulating cost from `total_cost_usd` deltas, Pi reading assistant messages, and ACP reading `session/prompt` results and `usage_update.cost`.
+- **会话模型标签**：`WorkbenchHub` 注册表记录每个会话最近使用的模型显示名并随模型切换同步推送，会话历史列表在智能体图标旁逐条展示，当前会话在注册表同步前先用实时模型兜底。
+  **Per-session model labels**: The `WorkbenchHub` registry now stores each session's last-used model name and pushes updates when the model changes, session history rows display it next to the backend icon, and the current session falls back to the live model until the registry syncs.
+
 ## 0.5.5
 
 **npm 版本探测与代理环境修复、JetBrains Sidecar 环境同步及 macOS CI 修复**：修复 npm 版本列表拉取超时或错误不透明的问题，同步 JetBrains IDE 登录 shell 环境，并修复 macOS 下的 WSL 单元测试。

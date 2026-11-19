@@ -11,6 +11,7 @@ import { countLines, lineStats, sumStats } from '../vm/diffs.ts';
 import { displayPath } from '../vm/paths.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
 import { activityLabel, parseArguments, summarizeExplore, toolVariant } from '../vm/toolRows.ts';
+import { costOf, normalizeUsage, UsageTracker } from '../vm/usage.ts';
 
 const OUTPUT_LIMIT = 4_000;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -47,6 +48,8 @@ export class PiSessionProjection {
   todos?: readonly Todo[];
   goal?: SessionHeader['goal'];
   usage?: { readonly used: number; readonly size: number };
+  /** 每条助手消息的用量和费用（悬浮明细）。 */
+  readonly usageTracker = new UsageTracker();
   runningSince?: number;
 
   constructor(private readonly workspacePath: string) {}
@@ -118,6 +121,7 @@ export class PiSessionProjection {
     this.runningSince = undefined;
     this.todos = undefined;
     this.goal = undefined;
+    this.usageTracker.reset();
     this.streamedText = false;
     this.streamedThinking = false;
     this.pendingTurnError = undefined;
@@ -422,6 +426,8 @@ export class PiSessionProjection {
   private applyPiUsage(raw: unknown): void {
     if (!raw || typeof raw !== 'object') return;
     const u = raw as Record<string, unknown>;
+    this.usageTracker.addRequest(normalizeUsage(u));
+    this.usageTracker.addCost(costOf(u));
     const total =
       typeof u.totalTokens === 'number' && u.totalTokens > 0
         ? u.totalTokens
