@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.6.1
+
+**重新发布 0.6.0 功能**：本版与 0.6.0 代码一致，仅提升版本号以重新走发布流程——订阅额度标识、上下文用量明细与会话模型标签。
+
+**Re-release of 0.6.0 features**: This release ships the same code as 0.6.0 with only a version bump to re-run the release pipeline—subscription quota badge, context usage details, and per-session model labels.
+
+- **订阅用量标识**：输入框旁的 `UsageBadge` 支持 Claude、Antigravity 与 CodeBuddy 官方订阅额度，展示 5 小时 / 每周 / 每周按模型窗口的已用、剩余与重置时间；查不到额度或绑定第三方服务商时自动隐藏，成功结果缓存 5 分钟并经宿主代理请求，凭据只读不刷新。
+  **Subscription quota badge**: `UsageBadge` next to the composer shows official Claude, Antigravity, and CodeBuddy subscription windows (5-hour / weekly / per-model weekly) with used, remaining, and reset time; it hides itself when no quota is available or a third-party provider is bound, caches successful results for 5 minutes through the host proxy, and never refreshes or logs credentials.
+- **上下文用量明细**：上下文圆环悬停 / 点击展开浮层，展示最近一次请求与会话累计的输入、缓存读写、输出占比条，以及推理部分、合计与费用；Claude、Pi、ACP 均已接入统一用量采集。
+  **Context usage details**: The context ring opens a Popover on hover or click with input / cache read / cache write / output bars for the last request and the session total, plus reasoning, totals, and cost; Claude, Pi, and ACP all feed the shared usage tracker.
+- **会话模型标签**：会话历史列表逐条展示该会话最近使用的模型，模型切换后立即同步。
+  **Per-session model labels**: Session history rows show each session's last-used model and update as soon as the model changes.
+
 ## 0.6.0
 
 **订阅额度标识、上下文用量明细与会话模型标签**：输入框旁新增官方订阅用量标识，可展开查看 5 小时 / 每周 / 每周按模型窗口的已用、剩余与重置时间，支持 Claude、Antigravity 与 CodeBuddy；上下文圆环悬停展开用量明细（最近一次请求、会话累计、缓存读写、推理与费用）；会话列表逐条展示该会话最近使用的模型。
