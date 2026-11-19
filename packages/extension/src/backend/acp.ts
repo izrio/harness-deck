@@ -13,6 +13,15 @@ import {
 } from '../extensions/mcpService.ts';
 import { skillsForBackend } from '../extensions/skillService.ts';
 import { prepareAcpProviderRuntime } from '../providers/ProviderRuntime.ts';
+import {
+  BrowserBridge,
+  extractAuthUrlsFromOutput,
+  extractUrlsFromPayload,
+  formatUrlForLog,
+  parseHttpUrl,
+  resolveBrowserUrl,
+  shouldEnableBrowserBridgeAsync,
+} from '../runtime/browserBridge.ts';
 import { locateExecutable, verifyExecutableFile } from '../runtime/locate.ts';
 import { t } from '../i18n.ts';
 import { commandSpecForProfile } from './envCache.ts';
@@ -31,8 +40,10 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
   const key = (name: string) => host.stateKey(`acp.${profile.id}.${name}`);
   let status: RuntimeStatus = { kind: 'idle' };
   let connection: AcpConnection | undefined;
+  let browserBridge: BrowserBridge | undefined;
   let generation = 0;
   let latestPrepared: PreparedBackendLaunch | undefined;
+  const opener = createAcpBrowserOpener(profile.name, host);
   const fallbackSkillMode: AcpSkillInjectionMode = (() => {
     const kind = detectAcpSkillMode(profile);
     return kind === 'claude' ? 'claude-meta' : kind === 'generic' ? 'prompt' : 'cli';
@@ -53,7 +64,11 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
     savePreferredModel: (preferred) => void host.globalState.update(`harnessDeck.acp.${profile.id}.model`, preferred),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
-    authenticate: (methods, run) => signIn(profile.name, methods, run, host),
+    authenticate: (methods, run) =>
+      signIn(profile.name, methods, run, host, {
+        onStart: () => opener.beginSignIn(),
+        onEnd: () => opener.endSignIn(),
+      }),
     singleSession: profile.singleSession === true,
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
     boundProvider: () => host.boundProvider?.(profile.id),
@@ -151,13 +166,44 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
       }
     }
 
+    if (await shouldEnableBrowserBridgeAsync(launchEnv, process.platform)) {
+      if (current !== generation) return;
+      try {
+        if (!browserBridge) {
+          browserBridge = new BrowserBridge({
+            storageRoot: host.storageRoot,
+            onOpenUrl: (url) => {
+              void opener.openUrl(url, 'bridge');
+            },
+            log: host.log,
+          });
+        }
+        await browserBridge.start();
+        if (current !== generation) return;
+        if (browserBridge.running) {
+          launchEnv = browserBridge.patchEnv(launchEnv, {
+            preserveBrowser: Boolean(profile.env.BROWSER?.trim()),
+          });
+          host.log(`已为 ${profile.name} 启用宿主浏览器桥接`);
+        }
+      } catch (error) {
+        host.log(`启动 ${profile.name} 宿主浏览器桥接失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
     const conn = new AcpConnection({
       command: executablePath,
       args: launchArgs,
       cwd: host.workspacePath(),
       env: launchEnv,
       log: host.log,
-      onStderr: (line) => host.runtimeLog(line, 'stderr'),
+      onStderr: (line) => {
+        host.runtimeLog(line, 'stderr');
+        opener.observeOutput(line);
+      },
+      onRawStdout: (line) => {
+        opener.observeOutput(line);
+      },
       // 排查用：设置 harnessDeck.backendTrace 打开后，收发的 ACP 消息原文写到运行日志
       trace: (direction, line) => {
         if (!host.settings.get<boolean>('backendTrace', false)) return;
@@ -165,6 +211,7 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
       },
       onNotification: (method, params) => {
         if (method === 'session/update') controller.onSessionUpdate(params);
+        else opener.observeNotification(method, params);
       },
       onRequest: (method, params) => controller.onAgentRequest(method, params),
       onExit: (code, signal, stderr) => {
@@ -228,9 +275,108 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
     currentStatus: () => status,
     stop: async () => {
       await stopConnection();
+      const bridge = browserBridge;
+      browserBridge = undefined;
+      await bridge?.dispose();
       controller.dispose();
     },
   };
+}
+
+const OPEN_DEDUP_MS = 10_000;
+
+export interface AcpBrowserOpener {
+  readonly beginSignIn: () => void;
+  readonly endSignIn: () => void;
+  readonly openUrl: (rawUrl: string, source: 'bridge' | 'notification' | 'output') => Promise<boolean>;
+  readonly observeOutput: (line: string) => void;
+  readonly observeNotification: (method: string, params: unknown) => void;
+}
+
+/**
+ * 统一处理 ACP 代理（例如 CodeBuddy）的浏览器登录链接打开：
+ * - 来自宿主浏览器桥接（$BROWSER / xdg-open / wslview）、ACP 通知与登录期 stderr/stdout 的链接按 URL 去重；
+ * - 回环地址先由宿主转发端口再打开，外部 OAuth 链接原样交给宿主 `openExternal`；
+ * - 若宿主未能打开或浏览器未自动聚焦，提供「在浏览器打开」/「复制链接」兜底操作。
+ */
+export function createAcpBrowserOpener(
+  agent: string,
+  host: Pick<BackendHost, 'openExternal' | 'resolveExternalOrigin' | 'writeClipboard' | 'showMessage' | 'log'>,
+): AcpBrowserOpener {
+  let signingIn = false;
+  let signInOpenedNotified = false;
+  const recentOpened = new Map<string, number>();
+
+  const pruneRecent = (now: number): void => {
+    if (recentOpened.size <= 32) return;
+    for (const [key, ts] of recentOpened) {
+      if (now - ts > OPEN_DEDUP_MS) recentOpened.delete(key);
+    }
+  };
+
+  const openUrl = async (rawUrl: string, source: 'bridge' | 'notification' | 'output'): Promise<boolean> => {
+    const trimmed = rawUrl.trim();
+    if (!parseHttpUrl(trimmed)) return false;
+    const now = Date.now();
+    const prev = recentOpened.get(trimmed);
+    if (prev !== undefined && now - prev < OPEN_DEDUP_MS) return true;
+    recentOpened.set(trimmed, now);
+    pruneRecent(now);
+
+    const targetUrl = await resolveBrowserUrl(trimmed, host.resolveExternalOrigin, host.log);
+    host.log(`通过宿主浏览器打开 ${agent} 链接（${source}）：${formatUrlForLog(targetUrl)}`);
+    let opened = false;
+    try {
+      opened = await host.openExternal(targetUrl);
+    } catch (error) {
+      host.log(`宿主打开 ${agent} 链接失败：${error instanceof Error ? error.message : String(error)}`);
+      opened = false;
+    }
+
+    const copyBtn = t('ext.copyLink');
+    if (!opened) {
+      const openBtn = t('acp.signInOpenBrowser');
+      void host.showMessage('warning', t('acp.signInOpenFailed', agent), [openBtn, copyBtn]).then((choice) => {
+        if (choice === openBtn) void host.openExternal(targetUrl);
+        else if (choice === copyBtn) void host.writeClipboard(targetUrl);
+      });
+    } else if (signingIn && !signInOpenedNotified) {
+      signInOpenedNotified = true;
+      void host.showMessage('info', t('acp.signInBrowserOpened', agent), [copyBtn]).then((choice) => {
+        if (choice === copyBtn) void host.writeClipboard(targetUrl);
+      });
+    }
+    return opened;
+  };
+
+  return {
+    beginSignIn: () => {
+      signingIn = true;
+      signInOpenedNotified = false;
+      recentOpened.clear();
+    },
+    endSignIn: () => {
+      signingIn = false;
+    },
+    openUrl,
+    observeOutput: (line: string) => {
+      if (!signingIn) return;
+      for (const url of extractAuthUrlsFromOutput(line)) {
+        void openUrl(url, 'output');
+      }
+    },
+    observeNotification: (method: string, params: unknown) => {
+      if (!signingIn || method === 'session/update') return;
+      for (const url of extractUrlsFromPayload(params)) {
+        void openUrl(url, 'notification');
+      }
+    },
+  };
+}
+
+interface SignInHooks {
+  readonly onStart?: () => void;
+  readonly onEnd?: () => void;
 }
 
 /**
@@ -242,6 +388,7 @@ async function signIn(
   methods: readonly AuthMethod[],
   run: (methodId: string) => Promise<unknown>,
   host: BackendHost,
+  hooks?: SignInHooks,
 ): Promise<boolean> {
   let method = methods[0];
   if (methods.length > 1) {
@@ -254,13 +401,18 @@ async function signIn(
   if (!method) return false;
   const chosen = method;
   host.log(`登录 ${agent}：${chosen.id}`);
-  return host.withCancellableProgress(t('acp.signingIn', agent), (onCancel) =>
-    new Promise<boolean>((resolve, reject) => {
-      onCancel(() => resolve(false));
-      run(chosen.id).then(
-        () => resolve(true),
-        (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))),
-      );
-    }),
-  );
+  hooks?.onStart?.();
+  try {
+    return await host.withCancellableProgress(t('acp.signingIn', agent), (onCancel) =>
+      new Promise<boolean>((resolve, reject) => {
+        onCancel(() => resolve(false));
+        run(chosen.id).then(
+          () => resolve(true),
+          (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))),
+        );
+      }),
+    );
+  } finally {
+    hooks?.onEnd?.();
+  }
 }

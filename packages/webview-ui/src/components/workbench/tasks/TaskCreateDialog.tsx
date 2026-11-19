@@ -24,6 +24,7 @@ export function TaskCreateDialog({ agents, backends, prompt, setPrompt, title, s
           <label className="flex flex-col gap-1">
             <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.fieldTitle')}</span>
             <Input
+              size="sm"
               data-testid="task-input-title"
               value={title}
               placeholder={t('wb.tasks.newTitlePlaceholder')}

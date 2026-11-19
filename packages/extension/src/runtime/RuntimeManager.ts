@@ -7,8 +7,9 @@
 import type { ChildProcess } from 'node:child_process';
 import type { RuntimeStatus } from '@harness-deck/shared';
 import { launchRuntime, LaunchError, probeVersion, stopRuntime, type LaunchedRuntime } from './launch.ts';
-import { locateDsh, verifyExecutableFile, type ExecutableStat } from './locate.ts';
+import { isWslWindowsExecutable, locateDsh, verifyExecutableFile, type ExecutableStat } from './locate.ts';
 import { checkVersionSupport, MINIMUM_DSH_VERSION } from './version.ts';
+import { isWslEnvironment } from './wsl.ts';
 import { t } from '../i18n.ts';
 
 export interface CachedDshExecutable {
@@ -29,6 +30,10 @@ export interface RuntimeConfig {
   /** 已缓存的可执行文件路径与版本元数据；命中时跳过 PATH 扫描与重复 `--version` 探测。 */
   readonly cachedExecutable?: CachedDshExecutable;
   readonly onResolvedExecutable?: (resolved: CachedDshExecutable | undefined) => void;
+  /** 可选覆盖 WSL 判定（主要用于测试）。 */
+  readonly isWsl?: boolean;
+  /** 可选覆盖 WSL 宿主机挂载根列表（主要用于测试）。 */
+  readonly wslMountRoots?: readonly string[];
 }
 
 export interface RuntimeEndpoint {
@@ -145,8 +150,17 @@ export class RuntimeManager {
     let statMeta: ExecutableStat | undefined;
     let version: string | undefined;
 
+    const inWsl = process.platform === 'linux' && (config.isWsl ?? isWslEnvironment(config.env));
+
     if (config.cachedExecutable) {
-      const verified = await verifyExecutableFile(config.cachedExecutable.command, process.platform);
+      const skipWslWindowsCache =
+        inWsl &&
+        !config.configuredPath?.trim() &&
+        (await isWslWindowsExecutable(config.cachedExecutable.command, config.wslMountRoots));
+      if (signal.aborted) return undefined;
+      const verified = skipWslWindowsCache
+        ? undefined
+        : await verifyExecutableFile(config.cachedExecutable.command, process.platform);
       if (signal.aborted) return undefined;
       if (verified) {
         commandPath = verified.command;
@@ -159,13 +173,22 @@ export class RuntimeManager {
           version = config.cachedExecutable.version;
         }
       } else {
+        if (skipWslWindowsCache) {
+          this.options.log(`已忽略 WSL 中指向 Windows 宿主机的缓存 dsh：${config.cachedExecutable.command}`);
+        }
         config.onResolvedExecutable?.(undefined);
       }
     }
 
     if (!commandPath) {
       this.setStatus({ kind: 'locating' });
-      const located = await locateDsh({ configuredPath: config.configuredPath, env: config.env, platform: process.platform });
+      const located = await locateDsh({
+        configuredPath: config.configuredPath,
+        env: config.env,
+        platform: process.platform,
+        ...(config.isWsl !== undefined ? { isWsl: config.isWsl } : {}),
+        ...(config.wslMountRoots !== undefined ? { wslMountRoots: config.wslMountRoots } : {}),
+      });
       if (signal.aborted) return undefined;
       if (located.kind === 'notFound') {
         this.options.log(located.configuredPathInvalid ? '设置项 harnessDeck.dsh.path 指向的文件不存在或不可执行' : 'PATH 中找不到 dsh');

@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@harness-deck/shared": "workspace:*",
+    "@iconify-icons/lucide": "^2.0.32",
+    "@iconify/react": "^6.0.4",
     "@tailwindcss/vite": "^4.3.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

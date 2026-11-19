@@ -259,7 +259,10 @@ export class ClaudeSessionProjection {
           if (event.usage) this.applyUsageObject(event.usage);
         } else if (evType === 'error') {
           const errText = extractClaudeErrorText(event.error ?? event) ?? t('notice.errorUnknown');
-          if (!isReplay) this.endTurn(now, 'failed', errText);
+          if (!isReplay) {
+            if (!this.running && /^\[ede_diagnostic\]/u.test(errText)) return;
+            this.endTurn(now, 'failed', errText);
+          }
           return;
         }
         this.changed();
@@ -382,7 +385,10 @@ export class ClaudeSessionProjection {
             rawErrorText ||
             errors.join('\n') ||
             t('notice.errorUnknown');
-          if (!isReplay) this.endTurn(now, 'failed', errText);
+          if (!isReplay) {
+            if (!this.running && /^\[ede_diagnostic\]/u.test(errText)) return;
+            this.endTurn(now, 'failed', errText);
+          }
           return;
         }
         if (

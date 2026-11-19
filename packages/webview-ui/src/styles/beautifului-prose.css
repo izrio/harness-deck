@@ -12,6 +12,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-anchor: none;
   padding: 12px max(14px, calc((100% - var(--content-width)) / 2)) 16px;
   display: flex;
   flex-direction: column;
@@ -20,14 +21,6 @@
 
 .thread > * {
   flex-shrink: 0;
-}
-
-.thread > .user,
-.thread > .assistant,
-.thread > .activity,
-.thread > .changes {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 48px;
 }
 
 /* ---------- Shared Reading & Chat Prose (.markdown & .prose-surface) ----------

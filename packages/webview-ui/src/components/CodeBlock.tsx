@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { cachedHighlight, highlight, type HighlightedLines } from './highlighter.ts';
 import { cn } from '../lib/utils.ts';
-import { CheckIcon, CopyIcon } from './icons.tsx';
+import { CheckIcon, CodeIcon, CopyIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
 /** Beautiful UI CodeBlock：统一 surface + shadow-card、顶栏标题与复制按钮、行号与竖线分割。 */
@@ -51,9 +51,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string;
     <div className="code-block my-2.5 w-full overflow-hidden rounded-card bg-surface shadow-card">
       <div className="flex h-9 items-center gap-2 border-b border-line px-3.5 text-[12px]">
         <span className="inline-flex min-w-0 items-center gap-2 text-ink">
-          <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-ink-3">
-            <path d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
-          </svg>
+          <CodeIcon width={14} height={14} strokeWidth={1.8} className="shrink-0 text-ink-3" />
           <span className="truncate font-mono leading-none text-ink-2">{lang ?? t('code.plainLabel')}</span>
         </span>
         <button

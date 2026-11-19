@@ -176,6 +176,13 @@ describe('本机回环代理与密钥隔离（ProviderProxy）', () => {
     expect(joinUpstreamUrl('https://ark.cn-beijing.volces.com/api/coding/v3', '/v1/chat/completions')).toBe(
       'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions',
     );
+    expect(joinUpstreamUrl('https://generativelanguage.googleapis.com/v1beta/openai', '/v1/chat/completions')).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    );
+    expect(
+      joinUpstreamUrl('https://my-res.openai.azure.com/openai/deployments/gpt-4o?api-version=2024-06-01', '/chat/completions'),
+    ).toBe('https://my-res.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-06-01');
+    expect(joinUpstreamUrl('https://example.com/v1/responses', '/v1/responses')).toBe('https://example.com/v1/responses');
     expect(joinUpstreamUrl('https://open.bigmodel.cn/api/anthropic', '/v1/messages', '?beta=true')).toBe(
       'https://open.bigmodel.cn/api/anthropic/v1/messages?beta=true',
     );
@@ -410,6 +417,7 @@ describe('本地协议转换网关（OpenAI 兼容 -> Claude Anthropic）', () =
     expect(enabledEnv?.env.ANTHROPIC_API_KEY).toBe('tok-local');
     expect(enabledEnv?.env.ANTHROPIC_MODEL).toBe('deepseek-chat');
     expect(enabledEnv?.env.ANTHROPIC_SMALL_FAST_MODEL).toBe('deepseek-mini');
+    expect(enabledEnv?.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS).toBe('1');
   });
 
   it('网关关闭时拒绝无 Anthropic 地址的 /anthropic 请求；开启后支持非流式消息与工具调用双向转换以及 count_tokens', async () => {
@@ -493,7 +501,19 @@ describe('本地协议转换网关（OpenAI 兼容 -> Claude Anthropic）', () =
             {
               name: 'Read',
               description: 'Read a file',
-              input_schema: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'] },
+              input_schema: {
+                $schema: 'https://json-schema.org/draft/2020-12/schema',
+                type: 'object',
+                properties: {
+                  file_path: { type: 'string' },
+                  url: { type: 'string', format: 'uri' },
+                },
+                required: ['file_path'],
+              },
+            },
+            {
+              name: 'EmptyArgsTool',
+              input_schema: { type: 'object' },
             },
           ],
           tool_choice: { type: 'auto' },
@@ -511,13 +531,17 @@ describe('本地协议转换网关（OpenAI 兼容 -> Claude Anthropic）', () =
         }),
       });
       expect(okRes.status).toBe(200);
-      expect(capturedUrl).toBe('https://example.com/v1/chat/completions?beta=true');
+      expect(capturedUrl).toBe('https://example.com/v1/chat/completions');
       expect(capturedHeaders.authorization).toBe('Bearer real-openai-key');
       expect(capturedHeaders['x-api-key']).toBeUndefined();
       expect(capturedHeaders['anthropic-version']).toBeUndefined();
       expect(capturedBody.model).toBe('deepseek-chat');
       expect(capturedBody.max_tokens).toBe(8_000);
       expect(capturedBody.tool_choice).toBe('auto');
+      const sentTools = capturedBody.tools as { function: { name: string; parameters: Record<string, unknown> } }[];
+      expect(sentTools[0]?.function.parameters.$schema).toBeUndefined();
+      expect((sentTools[0]?.function.parameters.properties as Record<string, Record<string, unknown>>).url?.format).toBeUndefined();
+      expect(sentTools[1]?.function.parameters).toEqual({ type: 'object', properties: {} });
       expect(capturedBody.messages).toEqual([
         { role: 'system', content: 'Be concise.' },
         { role: 'user', content: '查看入口文件' },
@@ -796,6 +820,199 @@ describe('本地协议转换网关（OpenAI 兼容 -> Claude Anthropic）', () =
       expect(logs.some((l) => l.level === 'warn' && l.message.includes('retrying'))).toBe(true);
       expect(logs.some((l) => l.level === 'error' && l.message.includes('Upstream quota exceeded'))).toBe(true);
       expect(JSON.stringify(logs)).not.toContain('sk-real-secret');
+    } finally {
+      await proxy.dispose();
+    }
+  });
+
+  it('支持 OpenAI Responses API（含直连与 Chat 404/400 自动回退）、交错并行 tool_calls、延迟写头报错与注释前缀 SSE', async () => {
+    const responsesOnlyProvider: ProviderConfig = {
+      id: 'codex-resp',
+      name: 'Codex Responses',
+      openaiResponsesUrl: 'https://resp.example.com/v1',
+      models: [{ id: 'gpt-5.3-codex' }],
+      defaultModel: 'gpt-5.3-codex',
+      boundBackendIds: ['claude'],
+    };
+
+    const chatWithFallbackProvider: ProviderConfig = {
+      id: 'chat-fallback',
+      name: 'Chat With Fallback',
+      openaiChatUrl: 'https://api.example.com/v1',
+      openaiResponsesUrl: 'https://api.example.com/v1',
+      models: [{ id: 'custom-model' }],
+      defaultModel: 'custom-model',
+      boundBackendIds: ['claude'],
+    };
+
+    let scenario: 'responses-sse' | 'fallback-responses' | 'interleaved-tools' | 'empty-sse' | 'comment-sse' =
+      'responses-sse';
+    const seenUrls: string[] = [];
+
+    const proxy = new ProviderProxy({
+      getProvider: (id) =>
+        id === 'codex-resp'
+          ? responsesOnlyProvider
+          : id === 'chat-fallback'
+            ? chatWithFallbackProvider
+            : id === 'openai-only'
+              ? openaiOnlyProvider
+              : undefined,
+      getApiKey: async () => 'real-key',
+      isProtocolGatewayEnabled: () => true,
+      fetchImpl: async (input) => {
+        const url = String(input);
+        seenUrls.push(url);
+        const encoder = new TextEncoder();
+
+        if (scenario === 'responses-sse') {
+          const events = [
+            'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.3-codex"}}\n\n',
+            'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":"先思考"}\n\n',
+            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"你好世界"}\n\n',
+            'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"id":"fc_1","call_id":"call_r1","type":"function_call","name":"Read"}}\n\n',
+            'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\\"path\\":\\"a.ts\\"}"}\n\n',
+            'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":15,"output_tokens":9}}}\n\n',
+          ];
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                for (const ev of events) controller.enqueue(encoder.encode(ev));
+                controller.close();
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
+
+        if (scenario === 'fallback-responses') {
+          if (url.endsWith('/chat/completions')) {
+            return new Response(
+              JSON.stringify({ error: { message: 'This model is only supported in v1/responses and not in v1/chat/completions.' } }),
+              { status: 404, headers: { 'content-type': 'application/json' } },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              id: 'resp_fb',
+              object: 'response',
+              model: 'custom-model',
+              output: [{ type: 'message', content: [{ type: 'output_text', text: '回退 Responses 成功' }] }],
+              usage: { input_tokens: 8, output_tokens: 6 },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+
+        if (scenario === 'interleaved-tools') {
+          const chunks = [
+            // 工具 0 先发 id、后发 name，同时与工具 1 交错传输参数
+            'data: {"id":"chatcmpl-t","model":"deepseek-chat","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":""}}]}}]}\n\n',
+            'data: {"id":"chatcmpl-t","model":"deepseek-chat","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"Read","arguments":"{\\"a\\":"}},{"index":1,"id":"call_b","type":"function","function":{"name":"Glob","arguments":"{\\"b\\":"}}]}}]}\n\n',
+            'data: {"id":"chatcmpl-t","model":"deepseek-chat","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}},{"index":1,"function":{"arguments":"2}"}}]},"finish_reason":"tool_calls"}]}\n\n',
+            'data: [DONE]\n\n',
+          ];
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                for (const c of chunks) controller.enqueue(encoder.encode(c));
+                controller.close();
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'Text/Event-Stream' } },
+          );
+        }
+
+        if (scenario === 'empty-sse') {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                controller.close();
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
+
+        // comment-sse（模拟 OpenRouter 首行注释 + 非标准 content-type）
+        return new Response(
+          ': OPENROUTER PROCESSING\n\ndata: {"id":"or-1","model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"来自注释前缀流"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+          { status: 200, headers: { 'content-type': 'text/plain' } },
+        );
+      },
+    });
+
+    try {
+      await proxy.ensureStarted();
+
+      // 1. 仅配置 openaiResponsesUrl 时直接走 /v1/responses 并实时转 Anthropic SSE
+      scenario = 'responses-sse';
+      const r1 = await fetch(`${proxy.endpointFor('codex-resp', 'anthropic')}/v1/messages?beta=true`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'gpt-5.3-codex', stream: true, max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      expect(r1.status).toBe(200);
+      const t1 = await r1.text();
+      expect(seenUrls.at(-1)).toBe('https://resp.example.com/v1/responses');
+      expect(t1).toContain('"type":"thinking_delta","thinking":"先思考"');
+      expect(t1).toContain('"type":"text_delta","text":"你好世界"');
+      expect(t1).toContain('"type":"tool_use","id":"call_r1","name":"Read"');
+      expect(t1).toContain('"stop_reason":"tool_use"');
+
+      // 2. /chat/completions 返回仅支持 v1/responses 时自动回退到 /v1/responses
+      scenario = 'fallback-responses';
+      const r2 = await fetch(`${proxy.endpointFor('chat-fallback', 'anthropic')}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'custom-model', stream: true, max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      expect(r2.status).toBe(200);
+      const t2 = await r2.text();
+      expect(t2).toContain('回退 Responses 成功');
+      expect(seenUrls.slice(-2)).toEqual([
+        'https://api.example.com/v1/chat/completions',
+        'https://api.example.com/v1/responses',
+      ]);
+
+      // 3. 交错并行 tool_calls 与延迟 name 不丢参数
+      scenario = 'interleaved-tools';
+      const r3 = await fetch(`${proxy.endpointFor('openai-only', 'anthropic')}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'deepseek-chat', stream: true, max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      expect(r3.status).toBe(200);
+      const t3 = await r3.text();
+      expect(t3).toContain('"type":"tool_use","id":"call_a","name":"Read"');
+      expect(t3).toContain('"type":"tool_use","id":"call_b","name":"Glob"');
+      expect(t3).toContain('"partial_json":"{\\"a\\":"');
+      expect(t3).toContain('"partial_json":"1}"');
+      expect(t3).toContain('"partial_json":"{\\"b\\":2}"');
+
+      // 4. 上游返回空 SSE 流时返回 HTTP 502 错误 JSON 而非空 200 SSE
+      scenario = 'empty-sse';
+      const r4 = await fetch(`${proxy.endpointFor('openai-only', 'anthropic')}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'deepseek-chat', stream: true, max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      expect(r4.status).toBe(502);
+      const e4 = (await r4.json()) as { type: string; error: { message: string } };
+      expect(e4.type).toBe('error');
+      expect(e4.error.message).toContain('empty output');
+
+      // 5. 首行带 `: comment` 且 content-type 为 text/plain 的 SSE 正确转换
+      scenario = 'comment-sse';
+      const r5 = await fetch(`${proxy.endpointFor('openai-only', 'anthropic')}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': proxy.token },
+        body: JSON.stringify({ model: 'deepseek-chat', stream: true, max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      expect(r5.status).toBe(200);
+      const t5 = await r5.text();
+      expect(t5).toContain('来自注释前缀流');
     } finally {
       await proxy.dispose();
     }

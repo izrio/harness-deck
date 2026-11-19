@@ -3,7 +3,7 @@ import { cn } from '../../lib/utils.ts';
 import { CollapsibleDrawer, Shimmer } from '../beautifului/index.ts';
 import { Markdown } from '../Markdown.tsx';
 import { AssistantActions } from '../RunStatus.tsx';
-import { ChevronDownIcon } from '../icons.tsx';
+import { ChevronDownIcon, SparkleIcon } from '../icons.tsx';
 import { useT } from '../../i18n.ts';
 import type { Of } from './types.ts';
 
@@ -31,9 +31,13 @@ export function Reasoning({ text, active }: { text: string; active: boolean }) {
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill={active ? 'var(--ink-2)' : 'var(--ink-3)'} className="shrink-0" aria-hidden>
-          <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
-        </svg>
+        <SparkleIcon
+          width={15}
+          height={15}
+          fill="currentColor"
+          stroke="none"
+          className={cn('shrink-0', active ? 'text-ink-2' : 'text-ink-3')}
+        />
         {active ? <Shimmer>{t('reasoning.active')}</Shimmer> : <span>{t('reasoning.done')}</span>}
         <ChevronDownIcon
  width={13}

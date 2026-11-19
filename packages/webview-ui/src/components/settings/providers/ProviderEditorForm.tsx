@@ -81,6 +81,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
         <label className="flex flex-col gap-1">
           <span className="text-[12px] font-medium text-ink-2">{t('settings.providers.name')}</span>
           <Input
+            size="sm"
             data-testid="provider-form-name"
             value={editor.name}
             placeholder={t('settings.providers.namePlaceholder')}
@@ -119,6 +120,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
             ) : null}
           </div>
           <Input
+            size="sm"
             type="password"
             autoComplete="off"
             data-testid="provider-form-apikey"
@@ -155,8 +157,9 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlAnthropic')}</span>
                   <Input
+                    size="sm"
                     data-testid="provider-url-anthropic"
-                    className="h-8 font-mono text-[12px]"
+                    className="font-mono text-[12px]"
                     placeholder="https://api.anthropic.com"
                     value={editor.anthropicUrl}
                     onChange={(e) => setEditor({ ...editor, anthropicUrl: e.target.value })}
@@ -165,8 +168,9 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlOpenaiChat')}</span>
                   <Input
+                    size="sm"
                     data-testid="provider-url-openai-chat"
-                    className="h-8 font-mono text-[12px]"
+                    className="font-mono text-[12px]"
                     placeholder="https://api.openai.com/v1"
                     value={editor.openaiChatUrl}
                     onChange={(e) => setEditor({ ...editor, openaiChatUrl: e.target.value })}
@@ -177,8 +181,9 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                     {t('settings.providers.urlOpenaiResponses')}
                   </span>
                   <Input
+                    size="sm"
                     data-testid="provider-url-openai-responses"
-                    className="h-8 font-mono text-[12px]"
+                    className="font-mono text-[12px]"
                     placeholder="https://api.openai.com/v1"
                     value={editor.openaiResponsesUrl}
                     onChange={(e) => setEditor({ ...editor, openaiResponsesUrl: e.target.value })}

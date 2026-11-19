@@ -139,6 +139,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1 border-t border-line pt-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshPath')}</span>
           <Input
+            size="sm"
             data-testid="adv-dsh-path"
             className="font-mono text-[12px]"
             value={dshPath}
@@ -152,6 +153,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshProfile')}</span>
           <Input
+            size="sm"
             data-testid="adv-dsh-profile"
             className="font-mono text-[12px]"
             value={dshProfile}
@@ -165,6 +167,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1 border-t border-line pt-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.zcodePath')}</span>
           <Input
+            size="sm"
             data-testid="adv-zcode-path"
             className="font-mono text-[12px]"
             value={zcodePath}
@@ -178,6 +181,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.claudePath')}</span>
           <Input
+            size="sm"
             data-testid="adv-claude-path"
             className="font-mono text-[12px]"
             value={claudePath}
@@ -191,6 +195,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.piPath')}</span>
           <Input
+            size="sm"
             data-testid="adv-pi-path"
             className="font-mono text-[12px]"
             value={piPath}

@@ -1,5 +1,16 @@
 # 更新记录 / Changelog
 
+## 0.5.1
+
+**对话虚拟列表、统一控件尺寸与离线图标规范、WSL 与服务商代理增强**：优化长对话渲染性能，统一表单控件高度体系与离线图标打包，增强 WSL 环境运行时发现、浏览器桥接及 OpenAI 转 Anthropic 代理兼容性。
+
+**Virtualized thread, unified control sizes & offline icons, WSL and provider proxy enhancements**: Improved long-thread rendering performance, unified control sizing and offline Iconify icon bundling, and enhanced WSL runtime discovery, browser bridge, and OpenAI-to-Anthropic proxy compatibility.
+
+- **对话性能与界面规范**：引入对话消息虚拟滚动（`useVirtualThread`）；统一 `Input`、`NativeSelect`、`SelectTrigger`、`NumberStepper` 等控件的 `size` 高度体系；全面迁移至 `@iconify/react/offline` 静态按需打包图标，并补充控件尺寸、离线图标与虚拟列表测试。
+  **Thread performance & UI standards**: Added virtualized thread rendering (`useVirtualThread`); unified the `size` height system across `Input`, `NativeSelect`, `SelectTrigger`, and `NumberStepper`; migrated UI icons to statically bundled `@iconify/react/offline` with new tests for control sizes, offline icons, and virtual scrolling.
+- **运行时与服务商代理**：新增 WSL 环境定位与浏览器桥接支持，优化环境缓存与各底层（ACP / Claude / Pi / ZCode）路径发现；增强 `OpenaiToAnthropicConverter`、`ProviderProxy` 与 `proxyFetch` 的协议转换与稳定性。
+  **Runtime & provider proxy**: Added WSL runtime discovery and browser bridge support, improved environment caching and backend path detection (ACP / Claude / Pi / ZCode), and enhanced `OpenaiToAnthropicConverter`, `ProviderProxy`, and `proxyFetch` compatibility and stability.
+
 ## 0.5.0
 
 **JetBrains IDE 插件与独立 Sidecar、原生多底层扩展、工作台与界面重构**：新增 JetBrains IDE 插件（IntelliJ IDEA、WebStorm、PyCharm、GoLand、Rider 等）与独立 Node.js Sidecar；新增 Claude Code、Pi、ZCode 原生底层；上线工作台（总览、定时任务、智能体、看板任务、跨项目会话）、服务商代理与绑定、MCP / Skill 管理；前端组件体系重构为 `shadcn-ui` + `beautifului` 并补齐组件级测试与无障碍改进。

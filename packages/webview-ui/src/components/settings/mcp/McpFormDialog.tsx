@@ -66,6 +66,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.name')}</span>
                 <Input
+                  size="sm"
                   data-testid="mcp-form-name"
                   className="font-mono text-[12px]"
                   value={form.name}
@@ -95,6 +96,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.command')}</span>
                   <Input
+                    size="sm"
                     data-testid="mcp-form-command"
                     className="font-mono text-[12px]"
                     value={form.command}
@@ -105,6 +107,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.args')}</span>
                   <Input
+                    size="sm"
                     data-testid="mcp-form-args"
                     className="font-mono text-[12px]"
                     value={form.argsText}
@@ -129,6 +132,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.url')}</span>
                   <Input
+                    size="sm"
                     data-testid="mcp-form-url"
                     className="font-mono text-[12px]"
                     value={form.url}

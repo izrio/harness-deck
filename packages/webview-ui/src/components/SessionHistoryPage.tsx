@@ -129,12 +129,13 @@ export function SessionHistoryPage() {
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-ink-3" />
             <Input
+              size="sm"
               data-testid="history-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('header.search')}
               aria-label={t('header.search')}
-              className="h-9 bg-surface pr-8 pl-8 text-[13px] shadow-card"
+              className="bg-surface pr-8 pl-8 text-[13px] shadow-card"
             />
             {query ? (
               <button

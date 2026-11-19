@@ -19,14 +19,20 @@ import {
 import { redactSecrets } from '../util/redact.ts';
 import {
   convertAnthropicToOpenAiRequest,
+  convertAnthropicToOpenAiResponsesRequest,
   convertOpenAiToAnthropicResponse,
   estimateAnthropicTokens,
   extractOpenAiErrorMessage,
+  looksLikeSsePayload,
   pipeOpenAiStreamToAnthropicSse,
   resolveMappedProviderModel,
+  selectOpenAiUpstreamMode,
   shouldConvertOpenaiToAnthropic,
   writeAnthropicResponseAsSse,
+  writeSseEvent,
+  type OpenAiUpstreamMode,
 } from './OpenaiToAnthropicConverter.ts';
+import { createProxyAwareFetch } from './proxyFetch.ts';
 
 export type FetchImpl = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -46,6 +52,7 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 const MAX_GATEWAY_LOGS = 100;
+const MAX_PARAM_RETRIES = 3;
 
 export interface ProviderProxyOptions {
   readonly getProvider: (id: string) => ProviderConfig | undefined;
@@ -54,6 +61,8 @@ export interface ProviderProxyOptions {
   readonly getSelectedModel?: (providerId: string) => string | undefined;
   /** 是否启用本地协议转换网关（将 OpenAI 兼容接口转换为 Claude Anthropic 协议，默认 false）。 */
   readonly isProtocolGatewayEnabled?: () => boolean;
+  /** 可选 IDE HTTP 代理配置（供纯 Node.js Sidecar 环境访问上游外网接口）。 */
+  readonly getHttpProxy?: () => string | undefined;
   readonly log?: (line: string) => void;
   /** 网关请求日志更新时触发。 */
   readonly onLogChange?: () => void;
@@ -61,20 +70,51 @@ export interface ProviderProxyOptions {
 }
 
 /**
- * 拼接服务商配置的 Base URL 与智能体发来的子路径，自动消除重复斜杠及重复的 `/v1` 或完整端点路径。
+ * 拼接服务商配置的 Base URL 与智能体发来的子路径，自动消除重复斜杠、保留原有查询参数，
+ * 并去重 `/v1`、`/v1beta/openai`、`/chat/completions` 或 `/responses` 等完整端点路径。
  */
 export function joinUpstreamUrl(baseUrl: string, subPath: string, search = ''): string {
-  const cleanBase = baseUrl.trim().replace(/\/+$/u, '');
+  const trimmedBase = baseUrl.trim();
+  const qIdx = trimmedBase.indexOf('?');
+  const baseNoQuery = (qIdx >= 0 ? trimmedBase.slice(0, qIdx) : trimmedBase).replace(/\/+$/u, '');
+  const baseQuery = qIdx >= 0 ? trimmedBase.slice(qIdx + 1) : '';
+  const extraQuery = search.startsWith('?') ? search.slice(1) : search;
+
+  let cleanBase = baseNoQuery;
   let cleanSub = subPath.startsWith('/') ? subPath : `/${subPath}`;
-  // 若 Base URL 已包含完整端点路径（如 /chat/completions），避免再次拼接 /v1/chat/completions 或 /chat/completions
   if (/\/chat\/completions$/iu.test(cleanBase) && /^\/(?:v1\/)?chat\/completions$/iu.test(cleanSub)) {
     cleanSub = '/';
-  } else if (/\/v\d+$/iu.test(cleanBase) && /^\/v1(\/|$)/iu.test(cleanSub)) {
-    // 若 Base URL 已以 /v1、/v2、/v3、/v4 结尾，而客户端又拼了 /v1/...（例如 /v1/messages 或 /v1/chat/completions），去重 /v1
+  } else if (/\/responses$/iu.test(cleanBase) && /^\/(?:v1\/)?responses$/iu.test(cleanSub)) {
+    cleanSub = '/';
+  } else if (/\/chat\/completions$/iu.test(cleanBase) && /^\/(?:v1\/)?responses$/iu.test(cleanSub)) {
+    cleanBase = cleanBase.replace(/\/chat\/completions$/iu, '');
+    cleanSub = '/responses';
+  } else if (/\/responses$/iu.test(cleanBase) && /^\/(?:v1\/)?chat\/completions$/iu.test(cleanSub)) {
+    cleanBase = cleanBase.replace(/\/responses$/iu, '');
+    cleanSub = '/chat/completions';
+  } else if (/(?:\/v\d+(?:(?:alpha|beta)\d*)?|\/openai)$/iu.test(cleanBase) && /^\/v1(\/|$)/iu.test(cleanSub)) {
+    // 若 Base URL 已以 /v1、/v3、/v4、/v1beta 或 /openai 结尾，而客户端又拼了 /v1/...，去重 /v1
     cleanSub = cleanSub.slice(3) || '/';
   }
+
   const joined = cleanSub === '/' ? cleanBase : `${cleanBase}${cleanSub}`;
-  return `${joined}${search}`;
+  const mergedParams = new URLSearchParams(baseQuery);
+  if (extraQuery) {
+    for (const [k, v] of new URLSearchParams(extraQuery).entries()) {
+      mergedParams.set(k, v);
+    }
+  }
+  const finalQuery = mergedParams.toString();
+  return finalQuery ? `${joined}?${finalQuery}` : joined;
+}
+
+/** 剥离仅适用于 Anthropic 接口的查询参数（例如 Claude Code 固定附加的 `?beta=true`），避免 OpenAI 网关拒收。 */
+function stripAnthropicSearchParams(search: string): string {
+  if (!search) return '';
+  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  params.delete('beta');
+  const next = params.toString();
+  return next ? `?${next}` : '';
 }
 
 /**
@@ -206,13 +246,15 @@ function buildForwardHeaders(rawHeaders: IncomingMessage['headers']): Record<str
   return headers;
 }
 
-function buildOpenAiForwardHeaders(rawHeaders: IncomingMessage['headers']): Record<string, string> {
+function buildOpenAiForwardHeaders(rawHeaders: IncomingMessage['headers'], stream: boolean): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(rawHeaders)) {
     const lower = key.toLowerCase();
     if (
       HOP_BY_HOP_HEADERS.has(lower) ||
       lower === 'accept-encoding' ||
+      lower === 'content-encoding' ||
+      lower === 'accept' ||
       lower.startsWith('anthropic-') ||
       lower.startsWith('x-stainless-') ||
       lower.startsWith('x-claude-') ||
@@ -225,13 +267,23 @@ function buildOpenAiForwardHeaders(rawHeaders: IncomingMessage['headers']): Reco
     headers[key] = Array.isArray(value) ? value.join(', ') : value;
   }
   headers['content-type'] = 'application/json';
+  headers['accept'] = stream ? 'text/event-stream, application/json' : 'application/json';
   return headers;
+}
+
+function shouldFallbackToResponsesApi(status: number, errText: string, mode: OpenAiUpstreamMode): boolean {
+  if (mode !== 'chat') return false;
+  if (status !== 400 && status !== 404 && status !== 422) return false;
+  return /\/v1\/responses|\/responses\b|not a chat model|only supported in.*responses|does not support chat completions|use the responses api/iu.test(
+    errText,
+  );
 }
 
 function buildRetryOpenAiPayload(
   payloadBuf: Buffer,
   status: number,
   errText: string,
+  mode: OpenAiUpstreamMode,
 ): { readonly body: Buffer; readonly reason: string } | undefined {
   if (status !== 400 && status !== 422) return undefined;
   let parsed: Record<string, unknown>;
@@ -246,22 +298,40 @@ function buildRetryOpenAiPayload(
   let changed = false;
   const reasons: string[] = [];
 
-  if (/max_completion_tokens/iu.test(errText) && 'max_tokens' in parsed) {
-    parsed.max_completion_tokens = parsed.max_tokens;
-    delete parsed.max_tokens;
-    changed = true;
-    reasons.push('max_tokens -> max_completion_tokens');
-  } else if (
+  if (mode === 'chat') {
+    if (
+      /max_completion_tokens/iu.test(errText) &&
+      'max_tokens' in parsed &&
+      !/unsupported|unknown|unrecognized|not allowed|extra/iu.test(
+        errText.replace(/max_tokens/giu, ''),
+      )
+    ) {
+      parsed.max_completion_tokens = parsed.max_tokens;
+      delete parsed.max_tokens;
+      changed = true;
+      reasons.push('max_tokens -> max_completion_tokens');
+    } else if (/max_completion_tokens/iu.test(errText) && 'max_completion_tokens' in parsed) {
+      parsed.max_tokens = parsed.max_completion_tokens;
+      delete parsed.max_completion_tokens;
+      changed = true;
+      reasons.push('max_completion_tokens -> max_tokens');
+    }
+  }
+
+  if (
+    !changed &&
     /max_tokens|max_output_tokens|max_completion_tokens|context_length|range of \[1,\s*\d+\]|less than or equal to \d+/iu.test(
       errText,
     )
   ) {
     const curKey =
-      typeof parsed.max_tokens === 'number'
-        ? 'max_tokens'
-        : typeof parsed.max_completion_tokens === 'number'
-          ? 'max_completion_tokens'
-          : undefined;
+      typeof parsed.max_output_tokens === 'number'
+        ? 'max_output_tokens'
+        : typeof parsed.max_tokens === 'number'
+          ? 'max_tokens'
+          : typeof parsed.max_completion_tokens === 'number'
+            ? 'max_completion_tokens'
+            : undefined;
     if (curKey) {
       const curLimit = parsed[curKey] as number;
       const capMatch =
@@ -291,7 +361,11 @@ function buildRetryOpenAiPayload(
     reasons.push('strip stream_options');
   }
 
-  if (/reasoning_content/iu.test(errText) && Array.isArray(parsed.messages)) {
+  const isUnknownFieldErr = /extra inputs are not permitted|unrecognized|unknown (?:field|parameter|property)|additional properties/iu.test(
+    errText,
+  );
+
+  if ((/reasoning_content/iu.test(errText) || isUnknownFieldErr) && Array.isArray(parsed.messages)) {
     let stripped = false;
     for (const msg of parsed.messages) {
       if (msg && typeof msg === 'object' && !Array.isArray(msg) && 'reasoning_content' in msg) {
@@ -315,6 +389,31 @@ function buildRetryOpenAiPayload(
     delete parsed.top_p;
     changed = true;
     reasons.push('strip top_p');
+  }
+
+  if (/\bstop\b/iu.test(errText) && 'stop' in parsed) {
+    delete parsed.stop;
+    changed = true;
+    reasons.push('strip stop');
+  }
+
+  if (/tool_choice/iu.test(errText) && 'tool_choice' in parsed) {
+    delete parsed.tool_choice;
+    changed = true;
+    reasons.push('strip tool_choice');
+  }
+
+  if (mode === 'responses' && /\bstore\b/iu.test(errText) && 'store' in parsed) {
+    delete parsed.store;
+    changed = true;
+    reasons.push('strip store');
+  }
+
+  // 部分 OpenAI 兼容网关不支持 stream_options 但只返回笼统的参数错误，兜底剥离一次重试
+  if (!changed && 'stream_options' in parsed && (isUnknownFieldErr || /invalid|unsupported|parameter|参数/iu.test(errText))) {
+    delete parsed.stream_options;
+    changed = true;
+    reasons.push('strip stream_options');
   }
 
   if (!changed) return undefined;
@@ -357,7 +456,7 @@ export class ProviderProxy {
   private logs: ProviderGatewayLogEntry[] = [];
 
   constructor(private readonly options: ProviderProxyOptions) {
-    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.fetchImpl = options.fetchImpl ?? createProxyAwareFetch(options.getHttpProxy);
   }
 
   get origin(): string | undefined {
@@ -456,23 +555,45 @@ export class ProviderProxy {
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const parsedUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+    const route = parseRoute(parsedUrl.pathname);
+
     if (!isClientAuthorized(req, this.token)) {
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: { message: 'Unauthorized local proxy token', type: 'authentication_error' } }));
+      if (route) {
+        const provider = this.options.getProvider(route.providerId);
+        this.appendGatewayLog({
+          level: 'warn',
+          providerId: route.providerId,
+          ...(provider?.name ? { providerName: provider.name } : {}),
+          protocol: route.protocol,
+          converted: false,
+          method: req.method ?? 'POST',
+          path: route.subPath,
+          status: 401,
+          message: 'Unauthorized local proxy token',
+        });
+      }
+      writeJson(res, 401, {
+        type: 'error',
+        error: { message: 'Unauthorized local proxy token', type: 'authentication_error' },
+      });
       return;
     }
 
-    const parsedUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
-    const route = parseRoute(parsedUrl.pathname);
     if (!route) {
-      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: { message: 'Unknown provider proxy route', type: 'not_found_error' } }));
+      writeJson(res, 404, {
+        type: 'error',
+        error: { message: 'Unknown provider proxy route', type: 'not_found_error' },
+      });
       return;
     }
 
     const provider = this.options.getProvider(route.providerId);
     if (!provider) {
-      writeJson(res, 404, { error: { message: `Provider "${route.providerId}" not found`, type: 'not_found_error' } });
+      writeJson(res, 404, {
+        type: 'error',
+        error: { message: `Provider "${route.providerId}" not found`, type: 'not_found_error' },
+      });
       return;
     }
 
@@ -714,9 +835,37 @@ export class ProviderProxy {
       return;
     }
 
-    const openaiBase = provider.openaiChatUrl?.trim() || provider.openaiResponsesUrl?.trim();
-    if (!openaiBase) {
-      const msg = `Provider "${provider.name}" has no OpenAI Chat URL configured`;
+    const singleModelMatch = method === 'GET' ? /^\/(?:v1\/)?models\/([^/]+)$/u.exec(subPath) : null;
+    if (singleModelMatch) {
+      const wantedId = decodeURIComponent(singleModelMatch[1]!);
+      const found = provider.models.find((m) => m.id === wantedId);
+      writeJson(res, 200, {
+        id: found?.id ?? wantedId,
+        display_name: found?.name || found?.id || wantedId,
+        type: 'model',
+      });
+      return;
+    }
+
+    if (method !== 'POST') {
+      writeJson(res, 404, {
+        type: 'error',
+        error: { message: `Unsupported Anthropic gateway endpoint: ${method} ${subPath}`, type: 'not_found_error' },
+      });
+      return;
+    }
+
+    const selectedModel = this.options.getSelectedModel?.(provider.id);
+    const reqModelHint = extractModelFromBody(bodyBuf);
+    const previewModel =
+      (reqModelHint ? resolveMappedProviderModel(reqModelHint, provider, selectedModel) : undefined) ??
+      reqModelHint ??
+      selectedModel ??
+      provider.defaultModel;
+
+    const initialUpstream = selectOpenAiUpstreamMode(provider, previewModel);
+    if (!initialUpstream) {
+      const msg = `Provider "${provider.name}" has no OpenAI URL configured`;
       this.appendGatewayLog({
         level: 'error',
         providerId: provider.id,
@@ -736,13 +885,14 @@ export class ProviderProxy {
       return;
     }
 
+    let currentMode: OpenAiUpstreamMode = initialUpstream.mode;
+    let currentBaseUrl = initialUpstream.baseUrl;
     let converted: ReturnType<typeof convertAnthropicToOpenAiRequest>;
     try {
-      converted = convertAnthropicToOpenAiRequest(
-        bodyBuf,
-        provider,
-        this.options.getSelectedModel?.(provider.id),
-      );
+      converted =
+        currentMode === 'responses'
+          ? convertAnthropicToOpenAiResponsesRequest(bodyBuf, provider, selectedModel)
+          : convertAnthropicToOpenAiRequest(bodyBuf, provider, selectedModel);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.appendGatewayLog({
@@ -764,9 +914,13 @@ export class ProviderProxy {
       return;
     }
 
-    const targetUrl = joinUpstreamUrl(openaiBase, '/v1/chat/completions', search);
+    const cleanSearch = stripAnthropicSearchParams(search);
+    const buildTargetUrl = (base: string, mode: OpenAiUpstreamMode): string =>
+      joinUpstreamUrl(base, mode === 'responses' ? '/v1/responses' : '/v1/chat/completions', cleanSearch);
+
+    let targetUrl = buildTargetUrl(currentBaseUrl, currentMode);
     const realApiKey = (await this.options.getApiKey(provider.id))?.trim();
-    const headers = buildOpenAiForwardHeaders(req.headers);
+    const headers = buildOpenAiForwardHeaders(req.headers, converted.stream);
     if (realApiKey) {
       headers['authorization'] = `Bearer ${realApiKey}`;
     } else {
@@ -791,9 +945,77 @@ export class ProviderProxy {
     };
     res.once('close', onClose);
 
+    const finalizeStreamSummary = (
+      summary: Awaited<ReturnType<typeof pipeOpenAiStreamToAnthropicSse>>,
+      retryDetail: string | undefined,
+      sourceLabel: string,
+    ): void => {
+      if (!res.headersSent) {
+        const errMessage = summary.streamError
+          ? `Upstream stream error: ${summary.streamError}`
+          : 'Upstream SSE stream completed with empty output';
+        this.appendGatewayLog({
+          level: 'error',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: 502,
+          durationMs: Date.now() - startedAt,
+          message: errMessage,
+          detail: [
+            `mode=${currentMode}`,
+            `chunks=${summary.chunkCount}`,
+            `finish=${summary.finishReason || 'none'}`,
+            ...(retryDetail ? [`retry=${retryDetail}`] : []),
+          ].join(', '),
+        });
+        writeJson(res, 502, {
+          type: 'error',
+          error: { type: 'api_error', message: errMessage },
+        });
+        return;
+      }
+
+      if (!res.destroyed && !res.writableEnded) res.end();
+      const streamDetail = [
+        `mode=${currentMode}`,
+        `chunks=${summary.chunkCount}`,
+        `finish=${summary.finishReason || 'stop'}`,
+        `in=${summary.inputTokens}`,
+        `out=${summary.outputTokens}`,
+        ...(retryDetail ? [`retry=${retryDetail}`] : []),
+      ].join(', ');
+      this.appendGatewayLog({
+        level: summary.streamError ? 'error' : summary.hasOutput ? 'info' : 'warn',
+        providerId: provider.id,
+        providerName: provider.name,
+        protocol: 'anthropic',
+        converted: true,
+        method,
+        path: subPath,
+        targetUrl,
+        ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+        mappedModel: converted.model,
+        status: 200,
+        durationMs: Date.now() - startedAt,
+        message: summary.streamError
+          ? `Upstream stream error: ${summary.streamError}`
+          : summary.hasOutput
+            ? sourceLabel
+            : 'Upstream SSE stream completed with empty output',
+        detail: streamDetail,
+      });
+    };
+
     try {
       let currentPayload = converted.body;
-      let retryDetail: string | undefined;
+      const retryReasons: string[] = [];
       let upstreamRes = await this.fetchImpl(targetUrl, {
         method: 'POST',
         headers,
@@ -801,62 +1023,84 @@ export class ProviderProxy {
         signal: abort.signal,
       });
 
-      if (!upstreamRes.ok && (upstreamRes.status === 400 || upstreamRes.status === 422)) {
-        const firstErrText = await upstreamRes.text().catch(() => '');
-        const retryPlan = buildRetryOpenAiPayload(currentPayload, upstreamRes.status, firstErrText);
-        if (retryPlan) {
-          retryDetail = retryPlan.reason;
-          this.appendGatewayLog({
-            level: 'warn',
-            providerId: provider.id,
-            providerName: provider.name,
-            protocol: 'anthropic',
-            converted: true,
-            method,
-            path: subPath,
-            targetUrl,
-            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-            mappedModel: converted.model,
-            status: upstreamRes.status,
-            durationMs: Date.now() - startedAt,
-            message: `Upstream rejected parameters; retrying (${retryPlan.reason})`,
-            ...(firstErrText ? { detail: firstErrText.slice(0, 400) } : {}),
-          });
-          currentPayload = retryPlan.body;
-          upstreamRes = await this.fetchImpl(targetUrl, {
-            method: 'POST',
-            headers,
-            body: new Uint8Array(currentPayload),
-            signal: abort.signal,
-          });
-        } else {
-          const message = parseUpstreamErrorText(firstErrText, upstreamRes.status);
-          this.appendGatewayLog({
-            level: 'error',
-            providerId: provider.id,
-            providerName: provider.name,
-            protocol: 'anthropic',
-            converted: true,
-            method,
-            path: subPath,
-            targetUrl,
-            ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-            mappedModel: converted.model,
-            status: upstreamRes.status,
-            durationMs: Date.now() - startedAt,
-            message,
-            ...(firstErrText ? { detail: firstErrText.slice(0, 500) } : {}),
-          });
-          writeJson(res, upstreamRes.status, {
-            type: 'error',
-            error: { type: 'api_error', message },
-          });
-          return;
+      let lastErrText: string | undefined;
+      for (let attempt = 0; attempt < MAX_PARAM_RETRIES && !upstreamRes.ok; attempt++) {
+        if (upstreamRes.status !== 400 && upstreamRes.status !== 404 && upstreamRes.status !== 422) {
+          break;
         }
+        const errText = await upstreamRes.text().catch(() => '');
+        lastErrText = errText;
+
+        if (shouldFallbackToResponsesApi(upstreamRes.status, errText, currentMode)) {
+          const fallbackBase = provider.openaiResponsesUrl?.trim() || provider.openaiChatUrl?.trim();
+          if (fallbackBase) {
+            currentMode = 'responses';
+            currentBaseUrl = fallbackBase;
+            targetUrl = buildTargetUrl(currentBaseUrl, currentMode);
+            converted = convertAnthropicToOpenAiResponsesRequest(bodyBuf, provider, selectedModel);
+            currentPayload = converted.body;
+            retryReasons.push('fallback -> /v1/responses');
+            this.appendGatewayLog({
+              level: 'warn',
+              providerId: provider.id,
+              providerName: provider.name,
+              protocol: 'anthropic',
+              converted: true,
+              method,
+              path: subPath,
+              targetUrl,
+              ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+              mappedModel: converted.model,
+              status: upstreamRes.status,
+              durationMs: Date.now() - startedAt,
+              message: 'Upstream requires Responses API; retrying via /v1/responses',
+              ...(errText ? { detail: errText.slice(0, 400) } : {}),
+            });
+            lastErrText = undefined;
+            upstreamRes = await this.fetchImpl(targetUrl, {
+              method: 'POST',
+              headers,
+              body: new Uint8Array(currentPayload),
+              signal: abort.signal,
+            });
+            continue;
+          }
+        }
+
+        const retryPlan = buildRetryOpenAiPayload(currentPayload, upstreamRes.status, errText, currentMode);
+        if (!retryPlan) break;
+
+        retryReasons.push(retryPlan.reason);
+        this.appendGatewayLog({
+          level: 'warn',
+          providerId: provider.id,
+          providerName: provider.name,
+          protocol: 'anthropic',
+          converted: true,
+          method,
+          path: subPath,
+          targetUrl,
+          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
+          mappedModel: converted.model,
+          status: upstreamRes.status,
+          durationMs: Date.now() - startedAt,
+          message: `Upstream rejected parameters; retrying (${retryPlan.reason})`,
+          ...(errText ? { detail: errText.slice(0, 400) } : {}),
+        });
+        currentPayload = retryPlan.body;
+        lastErrText = undefined;
+        upstreamRes = await this.fetchImpl(targetUrl, {
+          method: 'POST',
+          headers,
+          body: new Uint8Array(currentPayload),
+          signal: abort.signal,
+        });
       }
 
+      const retryDetail = retryReasons.length > 0 ? retryReasons.join('; ') : undefined;
+
       if (!upstreamRes.ok) {
-        const errText = await upstreamRes.text().catch(() => '');
+        const errText = lastErrText ?? (await upstreamRes.text().catch(() => ''));
         const message = parseUpstreamErrorText(errText, upstreamRes.status);
         this.appendGatewayLog({
           level: 'error',
@@ -881,52 +1125,21 @@ export class ProviderProxy {
         return;
       }
 
-      const respContentType = upstreamRes.headers.get('content-type') ?? '';
+      const respContentType = (upstreamRes.headers.get('content-type') ?? '').toLowerCase();
       if (converted.stream && upstreamRes.body && respContentType.includes('text/event-stream')) {
-        res.writeHead(200, {
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive',
-        });
         const summary = await pipeOpenAiStreamToAnthropicSse(upstreamRes.body, res, converted.model);
-        if (!res.destroyed && !res.writableEnded) res.end();
-        const streamDetail = [
-          `chunks=${summary.chunkCount}`,
-          `finish=${summary.finishReason || 'stop'}`,
-          `in=${summary.inputTokens}`,
-          `out=${summary.outputTokens}`,
-          ...(retryDetail ? [`retry=${retryDetail}`] : []),
-        ].join(', ');
-        this.appendGatewayLog({
-          level: summary.streamError ? 'error' : summary.hasOutput ? 'info' : 'warn',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: 'anthropic',
-          converted: true,
-          method,
-          path: subPath,
-          targetUrl,
-          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-          mappedModel: converted.model,
-          status: 200,
-          durationMs: Date.now() - startedAt,
-          message: summary.streamError
-            ? `Upstream stream error: ${summary.streamError}`
-            : summary.hasOutput
-              ? 'Streamed response converted (OpenAI SSE -> Anthropic SSE)'
-              : 'Upstream SSE stream completed with empty output',
-          detail: streamDetail,
-        });
+        finalizeStreamSummary(
+          summary,
+          retryDetail,
+          currentMode === 'responses'
+            ? 'Streamed response converted (OpenAI Responses SSE -> Anthropic SSE)'
+            : 'Streamed response converted (OpenAI SSE -> Anthropic SSE)',
+        );
         return;
       }
 
       const rawRespText = await upstreamRes.text();
-      if (converted.stream && rawRespText.trimStart().startsWith('data:')) {
-        res.writeHead(200, {
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive',
-        });
+      if (converted.stream && looksLikeSsePayload(rawRespText)) {
         const encoded = new TextEncoder().encode(rawRespText);
         const fallbackStream = new ReadableStream<Uint8Array>({
           start(controller) {
@@ -935,25 +1148,11 @@ export class ProviderProxy {
           },
         });
         const summary = await pipeOpenAiStreamToAnthropicSse(fallbackStream, res, converted.model);
-        if (!res.destroyed && !res.writableEnded) res.end();
-        this.appendGatewayLog({
-          level: summary.streamError ? 'error' : summary.hasOutput ? 'info' : 'warn',
-          providerId: provider.id,
-          providerName: provider.name,
-          protocol: 'anthropic',
-          converted: true,
-          method,
-          path: subPath,
-          targetUrl,
-          ...(converted.requestModel ? { requestModel: converted.requestModel } : {}),
-          mappedModel: converted.model,
-          status: 200,
-          durationMs: Date.now() - startedAt,
-          message: summary.streamError
-            ? `Upstream stream error: ${summary.streamError}`
-            : 'Streamed response converted (OpenAI SSE payload -> Anthropic SSE)',
-          detail: `chunks=${summary.chunkCount}, finish=${summary.finishReason || 'stop'}`,
-        });
+        finalizeStreamSummary(
+          summary,
+          retryDetail,
+          'Streamed response converted (OpenAI SSE payload -> Anthropic SSE)',
+        );
         return;
       }
 
@@ -1018,11 +1217,6 @@ export class ProviderProxy {
       }
 
       if (converted.stream) {
-        res.writeHead(200, {
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive',
-        });
         writeAnthropicResponseAsSse(res, anthropicResp);
         if (!res.destroyed && !res.writableEnded) res.end();
         this.appendGatewayLog({
@@ -1058,7 +1252,10 @@ export class ProviderProxy {
         mappedModel: converted.model,
         status: 200,
         durationMs: Date.now() - startedAt,
-        message: 'Non-stream response converted (OpenAI -> Anthropic)',
+        message:
+          currentMode === 'responses'
+            ? 'Non-stream response converted (OpenAI Responses -> Anthropic)'
+            : 'Non-stream response converted (OpenAI -> Anthropic)',
         ...(retryDetail ? { detail: `retry=${retryDetail}` } : {}),
       });
     } catch (err) {
@@ -1084,6 +1281,10 @@ export class ProviderProxy {
           error: { message: msg, type: 'api_error' },
         });
       } else if (!res.destroyed && !res.writableEnded) {
+        writeSseEvent(res, 'error', {
+          type: 'error',
+          error: { type: 'api_error', message: msg },
+        });
         res.end();
       }
     } finally {

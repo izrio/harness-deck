@@ -14,6 +14,7 @@ import {
   type ProviderModelItem,
   type ProviderProtocol,
 } from '@harness-deck/shared';
+import { shouldConvertOpenaiToAnthropic } from './OpenaiToAnthropicConverter.ts';
 
 export interface DshProviderLaunchPatch {
   readonly launcherArgs: readonly string[];
@@ -227,6 +228,9 @@ export function prepareClaudeProviderRuntime(params: {
   cleanedEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic');
   cleanedEnv.ANTHROPIC_API_KEY = proxyToken;
   cleanedEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
+  if (shouldConvertOpenaiToAnthropic(provider, protocolGatewayEnabled === true, defaultModel, selectedModel)) {
+    cleanedEnv.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1';
+  }
   if (defaultModel) {
     cleanedEnv.ANTHROPIC_MODEL = defaultModel;
     cleanedEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = defaultModel;
@@ -404,6 +408,9 @@ export async function prepareAcpProviderRuntime(params: {
     cleanedEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic');
     cleanedEnv.ANTHROPIC_API_KEY = proxyToken;
     cleanedEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
+    if (shouldConvertOpenaiToAnthropic(provider, protocolGatewayEnabled === true, defaultModel)) {
+      cleanedEnv.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1';
+    }
     if (defaultModel) {
       cleanedEnv.ANTHROPIC_MODEL = defaultModel;
       cleanedEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = defaultModel;

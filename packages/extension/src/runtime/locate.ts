@@ -4,14 +4,19 @@
  * 2. PATH 中的 `dsh`（DeepSeek Desktop 安装的命令，或 npm 全局安装）
  */
 import { constants } from 'node:fs';
-import { access, stat } from 'node:fs/promises';
+import { access, realpath, stat } from 'node:fs/promises';
 import { delimiter, isAbsolute, join } from 'node:path';
+import { isWslEnvironment, isWslWindowsPath } from './wsl.ts';
 
 export interface LocateOptions {
   /** 用户在设置里指定的路径；空字符串视为未设置。 */
   readonly configuredPath?: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly platform: NodeJS.Platform;
+  /** 可选覆盖 WSL 判定（主要用于测试）；未传时在 Linux 平台自动判定。 */
+  readonly isWsl?: boolean;
+  /** 可选覆盖 WSL 下的 Windows 宿主机挂载根列表（主要用于测试）。 */
+  readonly wslMountRoots?: readonly string[];
 }
 
 export type LocateResult =
@@ -48,6 +53,22 @@ async function isExecutableFile(path: string, platform: NodeJS.Platform): Promis
   return (await verifyExecutableFile(path, platform)) !== undefined;
 }
 
+/**
+ * 判断候选可执行文件（含软链接目标）是否位于 WSL 挂载的 Windows 宿主机目录下。
+ */
+export async function isWslWindowsExecutable(
+  filePath: string,
+  mountRoots?: readonly string[],
+): Promise<boolean> {
+  if (isWslWindowsPath(filePath, mountRoots)) return true;
+  try {
+    const resolved = await realpath(filePath);
+    return isWslWindowsPath(resolved, mountRoots);
+  } catch {
+    return false;
+  }
+}
+
 function candidateNames(name: string, platform: NodeJS.Platform, env: LocateOptions['env']): string[] {
   if (platform !== 'win32') return [name];
   // 已经带扩展名（omp.cmd）时只找这个名字
@@ -69,7 +90,7 @@ export async function locateDsh(options: LocateOptions): Promise<LocateResult> {
 
 /**
  * 在 PATH（Windows 上加 PATHEXT）里查找可执行文件；`name` 是绝对路径或带目录时直接检查它。
- * 设置项 `configuredPath` 优先。
+ * 设置项 `configuredPath` 优先；在 WSL 环境中自动扫描 PATH 时跳过 Windows 宿主机挂载路径。
  */
 export async function locateExecutable(name: string, options: LocateOptions): Promise<LocateResult> {
   if (isAbsolute(name) || /[\\/]/u.test(name)) {
@@ -82,15 +103,17 @@ export async function locateExecutable(name: string, options: LocateOptions): Pr
     }
     return { kind: 'notFound', configuredPathInvalid: true };
   }
+  const inWsl = options.platform === 'linux' && (options.isWsl ?? isWslEnvironment(options.env));
   const pathValue = options.env.PATH ?? options.env.Path ?? '';
   const names = candidateNames(name, options.platform, options.env);
   for (const directory of pathValue.split(delimiter)) {
     if (!directory) continue;
-    for (const name of names) {
-      const candidate = join(directory, name);
-      if (await isExecutableFile(candidate, options.platform)) {
-        return { kind: 'found', command: candidate, source: 'path' };
-      }
+    if (inWsl && isWslWindowsPath(directory, options.wslMountRoots)) continue;
+    for (const candidateName of names) {
+      const candidate = join(directory, candidateName);
+      if (!(await isExecutableFile(candidate, options.platform))) continue;
+      if (inWsl && (await isWslWindowsExecutable(candidate, options.wslMountRoots))) continue;
+      return { kind: 'found', command: candidate, source: 'path' };
     }
   }
   return { kind: 'notFound', configuredPathInvalid: false };

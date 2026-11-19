@@ -122,7 +122,7 @@ export function SessionsView({
             data-testid="toggle-project-groups"
             aria-label={t('wb.sessions.toggleSidebar')}
             title={t('wb.sessions.toggleSidebar')}
-            className="text-ink-2 hover:bg-hover hover:text-ink min-[760px]:size-7 min-[760px]:px-0"
+            className="text-ink-2 hover:bg-hover hover:text-ink min-[760px]:size-6 min-[760px]:px-0"
             onClick={toggleSidebar}
           >
             <SidebarIcon className="size-3.5" />

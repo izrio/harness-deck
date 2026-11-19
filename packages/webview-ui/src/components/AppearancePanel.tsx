@@ -150,6 +150,7 @@ export function AppearancePanel() {
           </div>
         </div>
         <Input
+          size="sm"
           data-testid="prose-font-family"
           value={family}
           placeholder={t('appearance.familyPlaceholder')}

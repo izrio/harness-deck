@@ -11,6 +11,8 @@ export interface LocatePiOptions {
   readonly configuredPath?: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly platform: NodeJS.Platform;
+  readonly isWsl?: boolean;
+  readonly wslMountRoots?: readonly string[];
 }
 
 export type LocatePiResult =
@@ -25,7 +27,7 @@ function augmentedEnvWithPiDirs(
   env: LocatePiOptions['env'],
   platform: NodeJS.Platform,
 ): Record<string, string | undefined> {
-  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  const home = platform === 'win32' ? (env.HOME ?? env.USERPROFILE ?? homedir()) : (env.HOME ?? homedir());
   const extraDirs = [
     join(home, '.pi', 'bin'),
     join(home, '.local', 'bin'),
@@ -55,7 +57,12 @@ export async function locatePi(options: LocatePiOptions): Promise<LocatePiResult
   }
 
   const searchEnv = augmentedEnvWithPiDirs(options.env, options.platform);
-  const onPath = await locateExecutable('pi', { env: searchEnv, platform: options.platform });
+  const onPath = await locateExecutable('pi', {
+    env: searchEnv,
+    platform: options.platform,
+    ...(options.isWsl !== undefined ? { isWsl: options.isWsl } : {}),
+    ...(options.wslMountRoots !== undefined ? { wslMountRoots: options.wslMountRoots } : {}),
+  });
   if (onPath.kind === 'found') {
     return { kind: 'found', command: onPath.command, source: 'path' };
   }

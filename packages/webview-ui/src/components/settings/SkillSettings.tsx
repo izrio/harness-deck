@@ -240,6 +240,7 @@ export function SkillSettings() {
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.repoUrl')}</span>
                     <div className="flex items-center gap-2">
                       <Input
+                        size="sm"
                         data-testid="skill-repo-url"
                         className="flex-1 font-mono text-[12px]"
                         value={repoUrl}
@@ -266,6 +267,7 @@ export function SkillSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.ref')}</span>
                       <Input
+                        size="sm"
                         data-testid="skill-repo-ref"
                         className="font-mono text-[12px]"
                         value={ref}
@@ -276,6 +278,7 @@ export function SkillSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.subpath')}</span>
                       <Input
+                        size="sm"
                         data-testid="skill-repo-subpath"
                         className="font-mono text-[12px]"
                         value={subpath}

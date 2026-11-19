@@ -8,6 +8,7 @@ import type { NodeEnvState } from '@harness-deck/shared';
 import { locateExecutable } from '../runtime/locate.ts';
 import { LineSplitter, spawnSpec, stopRuntime, trackChild } from '../runtime/launch.ts';
 import { parseVersion } from '../runtime/version.ts';
+import { isWslEnvironment, isWslWindowsPath } from '../runtime/wsl.ts';
 
 const NPM_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,99}$/u;
 const MAX_RETURNED_VERSIONS = 80;
@@ -175,11 +176,20 @@ function runStreamingNpm(
 export async function detectNodeEnv(options: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly platform?: NodeJS.Platform;
+  readonly isWsl?: boolean;
+  readonly wslMountRoots?: readonly string[];
 }): Promise<NodeEnvDetection> {
   const platform = options.platform ?? process.platform;
+  const inWsl = platform === 'linux' && (options.isWsl ?? isWslEnvironment(options.env));
+  const locateOpts = {
+    env: options.env,
+    platform,
+    ...(options.isWsl !== undefined ? { isWsl: options.isWsl } : {}),
+    ...(options.wslMountRoots !== undefined ? { wslMountRoots: options.wslMountRoots } : {}),
+  };
   const [nodeLoc, npmLoc] = await Promise.all([
-    locateExecutable('node', { env: options.env, platform }),
-    locateExecutable('npm', { env: options.env, platform }),
+    locateExecutable('node', locateOpts),
+    locateExecutable('npm', locateOpts),
   ]);
 
   let hasNode = nodeLoc.kind === 'found';
@@ -202,7 +212,10 @@ export async function detectNodeEnv(options: {
     else if (verRes.error) hasNpm = false;
     if (prefixRes.code === 0 && prefixRes.stdout.trim()) {
       const prefix = prefixRes.stdout.trim();
-      npmGlobalBin = platform === 'win32' ? prefix : join(prefix, 'bin');
+      const candidateBin = platform === 'win32' ? prefix : join(prefix, 'bin');
+      if (!inWsl || !isWslWindowsPath(candidateBin, options.wslMountRoots)) {
+        npmGlobalBin = candidateBin;
+      }
     }
   }
 

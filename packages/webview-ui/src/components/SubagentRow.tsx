@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { CollapsibleDrawer, Shimmer, ValuePill } from './beautifului/index.ts';
 import { Markdown } from './Markdown.tsx';
 import { formatDuration } from './RunStatus.tsx';
-import { AgentIcon, CheckIcon, ErrorIcon } from './icons.tsx';
+import { AgentIcon, CheckIcon, ChevronDownIcon, ErrorIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
 type Activity = Extract<Item, { kind: 'activity' }>;
@@ -100,20 +100,13 @@ export function SubagentRow({ item }: { item: Activity }) {
           )}
         </span>
         <span aria-hidden className="-ml-1 flex size-6 shrink-0 items-center justify-center text-ink-3">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <ChevronDownIcon
+            width={14}
+            height={14}
+            strokeWidth={2.2}
             className="transition-transform duration-300"
             style={{ transform: open ? 'rotate(180deg)' : 'rotate(0)' }}
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
+          />
         </span>
       </button>
 

@@ -43,6 +43,8 @@ export interface AcpConnectionOptions {
   readonly log?: (line: string) => void;
   /** 代理的 stderr 输出（写到运行时日志）。 */
   readonly onStderr?: (line: string) => void;
+  /** 代理输出到 stdout 的非 JSON 行（例如个别代理把登录链接直接打印到了 stdout）。 */
+  readonly onRawStdout?: (line: string) => void;
   /** 排查用：收发的每一条消息（原文）。返回 false 或没有提供时不记录。 */
   readonly trace?: (direction: 'in' | 'out', line: string) => void;
 }
@@ -178,6 +180,7 @@ export class AcpConnection {
         message = JSON.parse(line) as typeof message;
       } catch {
         this.options.log?.(`ACP：跳过无法解析的输出：${line.slice(0, 200)}`);
+        this.options.onRawStdout?.(line);
         continue;
       }
       if (message.method === undefined) {

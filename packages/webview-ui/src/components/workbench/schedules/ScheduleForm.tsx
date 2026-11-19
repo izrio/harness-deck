@@ -20,6 +20,7 @@ export function ScheduleForm({ backends, setFormOpen, editingId, name, setName, 
         <label className="flex flex-col gap-1">
           <span className="text-[12px] font-medium text-ink-2">{t('wb.schedules.fieldName')}</span>
           <Input
+            size="sm"
             data-testid="schedule-input-name"
             value={name}
             placeholder={t('wb.schedules.fieldNamePlaceholder')}
@@ -56,6 +57,7 @@ export function ScheduleForm({ backends, setFormOpen, editingId, name, setName, 
 
             {freqKind === 'daily' || freqKind === 'weekly' ? (
               <Input
+                size="sm"
                 type="time"
                 data-testid="schedule-input-time"
                 value={timeHm}
@@ -64,6 +66,7 @@ export function ScheduleForm({ backends, setFormOpen, editingId, name, setName, 
               />
             ) : freqKind === 'interval' ? (
               <Input
+                size="sm"
                 type="number"
                 min={1}
                 max={10080}
@@ -74,6 +77,7 @@ export function ScheduleForm({ backends, setFormOpen, editingId, name, setName, 
               />
             ) : (
               <Input
+                size="sm"
                 type="datetime-local"
                 data-testid="schedule-input-once"
                 value={onceDateTime}

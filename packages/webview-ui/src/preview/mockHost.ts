@@ -366,6 +366,55 @@ function installMockHost(): void {
         return;
       }
 
+      case 'loadOlder': {
+        const sid = currentSessionId();
+        if (!sid || !sessions[sid]) return;
+        const current = sessions[sid]!;
+        const pages = current.olderPages ?? [];
+        if (!current.header.hasOlder || current.header.loadingOlder || pages.length === 0) return;
+        sessions[sid] = {
+          ...current,
+          header: { ...current.header, loadingOlder: true },
+        };
+        postToWebview({ type: 'session', payload: sessions[sid]!.header });
+        window.setTimeout(() => {
+          const latest = sessions[sid];
+          if (!latest) return;
+          const remaining = latest.olderPages ?? [];
+          const [nextPage, ...rest] = remaining;
+          if (!nextPage) {
+            sessions[sid] = {
+              ...latest,
+              header: { ...latest.header, hasOlder: false, loadingOlder: false },
+              olderPages: [],
+            };
+          } else {
+            const mergedItems = [...nextPage, ...latest.items];
+            sessions[sid] = {
+              ...latest,
+              header: { ...latest.header, hasOlder: rest.length > 0, loadingOlder: false },
+              items: mergedItems,
+              olderPages: rest,
+            };
+            if (currentSessionId() === sid) {
+              postToWebview({ type: 'session', payload: sessions[sid]!.header });
+              postToWebview({
+                type: 'items',
+                payload: {
+                  sessionKey: sid,
+                  reset: false,
+                  order: mergedItems.map((i) => i.id),
+                  upsert: [...nextPage],
+                },
+              });
+            }
+            return;
+          }
+          if (currentSessionId() === sid) postToWebview({ type: 'session', payload: sessions[sid]!.header });
+        }, 180);
+        return;
+      }
+
       case 'selectModel':
         models = { ...models, current: message.payload };
         postToWebview({ type: 'models', payload: models });

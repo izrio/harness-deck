@@ -194,6 +194,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.name')}</span>
                     <Input
+                      size="sm"
                       data-testid="agent-form-name"
                       value={form.name}
                       placeholder={t('settings.agents.form.namePlaceholder')}
@@ -204,6 +205,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.id')}</span>
                     <Input
+                      size="sm"
                       data-testid="agent-form-id"
                       disabled={!form.isNew}
                       className="font-mono text-[12px]"
@@ -218,6 +220,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.command')}</span>
                     <Input
+                      size="sm"
                       data-testid="agent-form-command"
                       className="font-mono text-[12px]"
                       value={form.command}
@@ -229,6 +232,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.args')}</span>
                     <Input
+                      size="sm"
                       data-testid="agent-form-args"
                       className="font-mono text-[12px]"
                       value={form.argsText}
@@ -253,6 +257,7 @@ export function AgentSettings() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.installHint')}</span>
                   <Input
+                    size="sm"
                     data-testid="agent-form-install-hint"
                     className="text-[12px]"
                     value={form.installHint}

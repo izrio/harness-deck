@@ -1,16 +1,19 @@
 /**
- * OpenAI Chat Completions ↔ Claude (Anthropic Messages) 本地协议转换器：
+ * OpenAI Chat Completions / Responses ↔ Claude (Anthropic Messages) 本地协议转换器：
  *
- * 当用户在设置中开启「本地协议转换网关（默认关闭）」且服务商配置了 OpenAI Chat Completions 地址时，
+ * 当用户在设置中开启「本地协议转换网关（默认关闭）」且服务商配置了 OpenAI 兼容地址时，
  * 代理层将 Claude Code 发出的 Anthropic `/v1/messages`（及 `/v1/messages/count_tokens`）请求
- * 转换为 OpenAI `/v1/chat/completions` 请求发往上游客服端，再将非流式 JSON 或流式 SSE 响应
+ * 转换为 OpenAI `/v1/chat/completions` 或 `/v1/responses` 请求发往上游，再将非流式 JSON 或流式 SSE 响应
  * 实时转换回 Anthropic Messages 协议格式。
  */
 import { randomUUID } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 import { parseTokenLimit, type ProviderConfig } from '@harness-deck/shared';
 
+export type OpenAiUpstreamMode = 'chat' | 'responses';
+
 export interface ConvertedOpenAiRequest {
+  readonly mode: OpenAiUpstreamMode;
   readonly body: Buffer;
   readonly requestModel: string;
   readonly model: string;
@@ -24,16 +27,52 @@ export interface StreamPipeSummary {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly streamError?: string;
+  readonly headersSent: boolean;
+}
+
+function stripOpenAiModelPrefix(model: string | undefined): string {
+  return (model?.trim() ?? '').replace(/^openai\//iu, '');
 }
 
 export function isTypicalOpenAiModelId(model: string | undefined): boolean {
-  const clean = model?.trim();
+  const clean = stripOpenAiModelPrefix(model);
   if (!clean) return false;
   return /^(gpt-|chatgpt-|o[134](?:-|$)|codex-)/iu.test(clean);
 }
 
+export function isReasoningOpenAiModelId(model: string | undefined): boolean {
+  const clean = stripOpenAiModelPrefix(model);
+  if (!clean) return false;
+  return /^(o[134](?:-|$)|gpt-5)/iu.test(clean);
+}
+
+export function isResponsesOnlyModelId(model: string | undefined): boolean {
+  const clean = stripOpenAiModelPrefix(model);
+  if (!clean) return false;
+  return /(?:^codex-|-codex(?:$|-)|^(?:gpt-5(?:\.\d+)?-pro|o[134]-pro)(?:$|-))/iu.test(clean);
+}
+
+export function selectOpenAiUpstreamMode(
+  provider: ProviderConfig,
+  targetModel?: string,
+): { readonly mode: OpenAiUpstreamMode; readonly baseUrl: string } | undefined {
+  const chatUrl = provider.openaiChatUrl?.trim();
+  const responsesUrl = provider.openaiResponsesUrl?.trim();
+  if (!chatUrl && !responsesUrl) return undefined;
+  if (!chatUrl && responsesUrl) {
+    return { mode: 'responses', baseUrl: responsesUrl };
+  }
+  if (chatUrl && /\/responses(?:\?.*)?$/iu.test(chatUrl)) {
+    return { mode: 'responses', baseUrl: chatUrl };
+  }
+  if (responsesUrl && isResponsesOnlyModelId(targetModel)) {
+    return { mode: 'responses', baseUrl: responsesUrl };
+  }
+  return { mode: 'chat', baseUrl: chatUrl! };
+}
+
 /**
- * 判断指定服务商的 Anthropic 请求是否应由本地网关转换为 OpenAI Chat Completions 协议。
+ * 判断指定服务商的 Anthropic 请求是否应由本地网关转换为 OpenAI 协议。
  * 全局网关未开启时始终返回 false。
  */
 export function shouldConvertOpenaiToAnthropic(
@@ -121,11 +160,29 @@ function extractTextFromBlocks(raw: unknown): string {
     }
     if (!block || typeof block !== 'object') continue;
     const obj = block as Record<string, unknown>;
-    if (obj.type === 'text' && typeof obj.text === 'string' && obj.text) {
+    if ((obj.type === 'text' || obj.type === 'output_text' || obj.type === 'input_text') && typeof obj.text === 'string' && obj.text) {
       parts.push(obj.text);
     }
   }
   return parts.join('\n');
+}
+
+function extractReasoningText(obj: Record<string, unknown>): string {
+  if (typeof obj.reasoning_content === 'string' && obj.reasoning_content) return obj.reasoning_content;
+  if (typeof obj.reasoning === 'string' && obj.reasoning) return obj.reasoning;
+  if (typeof obj.reasoning_text === 'string' && obj.reasoning_text) return obj.reasoning_text;
+  if (typeof obj.thinking === 'string' && obj.thinking) return obj.thinking;
+  if (Array.isArray(obj.reasoning_details)) {
+    const parts: string[] = [];
+    for (const item of obj.reasoning_details) {
+      if (!item || typeof item !== 'object') continue;
+      const detail = item as Record<string, unknown>;
+      if (typeof detail.text === 'string' && detail.text) parts.push(detail.text);
+      else if (typeof detail.summary === 'string' && detail.summary) parts.push(detail.summary);
+    }
+    return parts.join('');
+  }
+  return '';
 }
 
 function extractToolResultText(content: unknown, isError: boolean): string {
@@ -141,6 +198,8 @@ function extractToolResultText(content: unknown, isError: boolean): string {
         const obj = item as Record<string, unknown>;
         if (obj.type === 'text' && typeof obj.text === 'string') {
           parts.push(obj.text);
+        } else if (obj.type === 'image') {
+          parts.push('[Image]');
         } else {
           parts.push(JSON.stringify(obj));
         }
@@ -153,6 +212,50 @@ function extractToolResultText(content: unknown, isError: boolean): string {
     return JSON.stringify(content);
   }
   return isError ? 'Error' : '';
+}
+
+/**
+ * 清理 Anthropic JSON Schema 中部分 OpenAI 兼容网关拒绝的扩展字段（如 `$schema`、`cache_control`、`format: "uri"`），
+ * 并补齐无 `properties` 的 `type: "object"` 定义。
+ */
+export function sanitizeJsonSchemaForOpenAi(schema: unknown): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    return { type: 'object', properties: {} };
+  }
+  const cleanNode = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      return node.map(cleanNode);
+    }
+    if (!node || typeof node !== 'object') return node;
+    const src = node as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (k === '$schema' || k === 'cache_control') continue;
+      if (k === 'format' && v === 'uri') continue;
+      if (k === 'properties' && v && typeof v === 'object' && !Array.isArray(v)) {
+        const cleanProps: Record<string, unknown> = {};
+        for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
+          cleanProps[pk] = cleanNode(pv);
+        }
+        out.properties = cleanProps;
+        continue;
+      }
+      if ((k === '$defs' || k === 'definitions') && v && typeof v === 'object' && !Array.isArray(v)) {
+        const cleanDefs: Record<string, unknown> = {};
+        for (const [dk, dv] of Object.entries(v as Record<string, unknown>)) {
+          cleanDefs[dk] = cleanNode(dv);
+        }
+        out[k] = cleanDefs;
+        continue;
+      }
+      out[k] = cleanNode(v);
+    }
+    if (out.type === 'object' && out.properties === undefined) {
+      out.properties = {};
+    }
+    return out;
+  };
+  return cleanNode(schema) as Record<string, unknown>;
 }
 
 function convertAnthropicUserBlocks(
@@ -179,6 +282,14 @@ function convertAnthropicUserBlocks(
     if (block.type === 'text' && typeof block.text === 'string') {
       textParts.push(block.text);
       userParts.push({ type: 'text', text: block.text });
+      continue;
+    }
+    if (block.type === 'document' && block.source && typeof block.source === 'object') {
+      const src = block.source as Record<string, unknown>;
+      if (src.type === 'text' && typeof src.data === 'string' && src.data) {
+        textParts.push(src.data);
+        userParts.push({ type: 'text', text: src.data });
+      }
       continue;
     }
     if (block.type === 'image' && block.source && typeof block.source === 'object') {
@@ -252,6 +363,15 @@ function convertAnthropicAssistantBlocks(
   outMessages.push(msg);
 }
 
+function clampMaxTokens(reqMax: unknown, provider: ProviderConfig, model: string): number | undefined {
+  if (typeof reqMax !== 'number' || !Number.isFinite(reqMax) || reqMax <= 0) return undefined;
+  const modelCfg = provider.models.find((m) => m.id === model);
+  const maxCap = parseTokenLimit(modelCfg?.maxOutputTokens);
+  const requestedMax = Math.round(reqMax);
+  const effectiveCap = maxCap ?? 16_384;
+  return requestedMax > effectiveCap ? effectiveCap : requestedMax;
+}
+
 /**
  * 将 Anthropic `/v1/messages` 请求体转换为 OpenAI `/v1/chat/completions` 请求体。
  */
@@ -316,14 +436,14 @@ export function convertAnthropicToOpenAiRequest(
         function: {
           name,
           ...(description ? { description } : {}),
-          parameters: tool.input_schema,
+          parameters: sanitizeJsonSchemaForOpenAi(tool.input_schema),
         },
       });
     }
     if (tools.length > 0) out.tools = tools;
   }
 
-  if (req.tool_choice && typeof req.tool_choice === 'object' && !Array.isArray(req.tool_choice)) {
+  if (out.tools && req.tool_choice && typeof req.tool_choice === 'object' && !Array.isArray(req.tool_choice)) {
     const tc = req.tool_choice as Record<string, unknown>;
     if (tc.type === 'auto') out.tool_choice = 'auto';
     else if (tc.type === 'none') out.tool_choice = 'none';
@@ -333,24 +453,23 @@ export function convertAnthropicToOpenAiRequest(
     }
   }
 
-  if (typeof req.max_tokens === 'number' && Number.isFinite(req.max_tokens) && req.max_tokens > 0) {
-    const modelCfg = provider.models.find((m) => m.id === model);
-    const maxCap = parseTokenLimit(modelCfg?.maxOutputTokens);
-    const requestedMax = Math.round(req.max_tokens);
-    const effectiveCap = maxCap ?? 16_384;
-    const clampedMax = requestedMax > effectiveCap ? effectiveCap : requestedMax;
-    if (/^(o[134](?:-|$)|gpt-5)/iu.test(model)) {
+  const isReasoning = isReasoningOpenAiModelId(model);
+  const clampedMax = clampMaxTokens(req.max_tokens, provider, model);
+  if (clampedMax !== undefined) {
+    if (isReasoning) {
       out.max_completion_tokens = clampedMax;
     } else {
       out.max_tokens = clampedMax;
     }
   }
 
-  if (typeof req.temperature === 'number' && Number.isFinite(req.temperature)) {
-    out.temperature = req.temperature;
-  }
-  if (typeof req.top_p === 'number' && Number.isFinite(req.top_p)) {
-    out.top_p = req.top_p;
+  if (!isReasoning) {
+    if (typeof req.temperature === 'number' && Number.isFinite(req.temperature)) {
+      out.temperature = req.temperature;
+    }
+    if (typeof req.top_p === 'number' && Number.isFinite(req.top_p)) {
+      out.top_p = req.top_p;
+    }
   }
   if (Array.isArray(req.stop_sequences)) {
     const stops = req.stop_sequences.filter((s): s is string => typeof s === 'string');
@@ -364,6 +483,171 @@ export function convertAnthropicToOpenAiRequest(
   }
 
   return {
+    mode: 'chat',
+    body: Buffer.from(JSON.stringify(out), 'utf8'),
+    requestModel: reqModel,
+    model,
+    stream,
+  };
+}
+
+/**
+ * 将 Anthropic `/v1/messages` 请求体转换为 OpenAI `/v1/responses` 请求体。
+ */
+export function convertAnthropicToOpenAiResponsesRequest(
+  rawBody: Buffer,
+  provider: ProviderConfig,
+  selectedModel?: string,
+): ConvertedOpenAiRequest {
+  const parsedRaw = JSON.parse(rawBody.toString('utf8')) as unknown;
+  if (!parsedRaw || typeof parsedRaw !== 'object' || Array.isArray(parsedRaw)) {
+    throw new Error('Invalid Anthropic messages request JSON');
+  }
+  const req = parsedRaw as Record<string, unknown>;
+
+  const reqModel = typeof req.model === 'string' ? req.model.trim() : '';
+  const mappedModel = resolveMappedProviderModel(reqModel, provider, selectedModel);
+  const model = mappedModel ?? reqModel;
+
+  const input: Record<string, unknown>[] = [];
+  for (const item of Array.isArray(req.messages) ? req.messages : []) {
+    if (!item || typeof item !== 'object') continue;
+    const msg = item as Record<string, unknown>;
+    const role = msg.role === 'assistant' ? 'assistant' : 'user';
+    if (typeof msg.content === 'string') {
+      if (msg.content.length > 0) {
+        input.push({
+          role,
+          content: [{ type: role === 'assistant' ? 'output_text' : 'input_text', text: msg.content }],
+        });
+      }
+      continue;
+    }
+    if (!Array.isArray(msg.content)) continue;
+    if (role === 'user') {
+      const userContent: Record<string, unknown>[] = [];
+      for (const rawBlock of msg.content) {
+        if (!rawBlock || typeof rawBlock !== 'object') continue;
+        const block = rawBlock as Record<string, unknown>;
+        if (block.type === 'tool_result') {
+          const callId = typeof block.tool_use_id === 'string' ? block.tool_use_id : '';
+          input.push({
+            type: 'function_call_output',
+            call_id: callId,
+            output: extractToolResultText(block.content, block.is_error === true),
+          });
+        } else if (block.type === 'text' && typeof block.text === 'string' && block.text) {
+          userContent.push({ type: 'input_text', text: block.text });
+        } else if (block.type === 'document' && block.source && typeof block.source === 'object') {
+          const src = block.source as Record<string, unknown>;
+          if (src.type === 'text' && typeof src.data === 'string' && src.data) {
+            userContent.push({ type: 'input_text', text: src.data });
+          }
+        } else if (block.type === 'image' && block.source && typeof block.source === 'object') {
+          const src = block.source as Record<string, unknown>;
+          if (src.type === 'base64' && typeof src.data === 'string') {
+            const mediaType = typeof src.media_type === 'string' && src.media_type ? src.media_type : 'image/png';
+            userContent.push({ type: 'input_image', image_url: `data:${mediaType};base64,${src.data}` });
+          } else if (src.type === 'url' && typeof src.url === 'string') {
+            userContent.push({ type: 'input_image', image_url: src.url });
+          }
+        }
+      }
+      if (userContent.length > 0) {
+        input.push({ role: 'user', content: userContent });
+      }
+    } else {
+      const assistantTexts: Record<string, unknown>[] = [];
+      for (const rawBlock of msg.content) {
+        if (!rawBlock || typeof rawBlock !== 'object') continue;
+        const block = rawBlock as Record<string, unknown>;
+        if (block.type === 'text' && typeof block.text === 'string' && block.text) {
+          assistantTexts.push({ type: 'output_text', text: block.text });
+        } else if (block.type === 'tool_use') {
+          if (assistantTexts.length > 0) {
+            input.push({ role: 'assistant', content: [...assistantTexts] });
+            assistantTexts.length = 0;
+          }
+          const callId = typeof block.id === 'string' && block.id ? block.id : `call_${randomUUID().slice(0, 12)}`;
+          const name = typeof block.name === 'string' ? block.name : '';
+          const args = block.input !== undefined ? JSON.stringify(block.input) : '{}';
+          input.push({
+            type: 'function_call',
+            call_id: callId,
+            name,
+            arguments: args,
+          });
+        }
+      }
+      if (assistantTexts.length > 0) {
+        input.push({ role: 'assistant', content: assistantTexts });
+      }
+    }
+  }
+
+  const out: Record<string, unknown> = {
+    model,
+    input,
+    store: false,
+  };
+
+  const systemText = extractTextFromBlocks(req.system);
+  if (systemText) {
+    out.instructions = systemText;
+  }
+
+  if (Array.isArray(req.tools) && req.tools.length > 0) {
+    const tools: Record<string, unknown>[] = [];
+    for (const item of req.tools) {
+      if (!item || typeof item !== 'object') continue;
+      const tool = item as Record<string, unknown>;
+      const name = typeof tool.name === 'string' ? tool.name.trim() : '';
+      if (!name) continue;
+      if (!tool.input_schema || typeof tool.input_schema !== 'object' || Array.isArray(tool.input_schema)) {
+        continue;
+      }
+      const description = typeof tool.description === 'string' && tool.description ? tool.description : undefined;
+      tools.push({
+        type: 'function',
+        name,
+        ...(description ? { description } : {}),
+        parameters: sanitizeJsonSchemaForOpenAi(tool.input_schema),
+      });
+    }
+    if (tools.length > 0) out.tools = tools;
+  }
+
+  if (out.tools && req.tool_choice && typeof req.tool_choice === 'object' && !Array.isArray(req.tool_choice)) {
+    const tc = req.tool_choice as Record<string, unknown>;
+    if (tc.type === 'auto') out.tool_choice = 'auto';
+    else if (tc.type === 'none') out.tool_choice = 'none';
+    else if (tc.type === 'any') out.tool_choice = 'required';
+    else if (tc.type === 'tool' && typeof tc.name === 'string' && tc.name) {
+      out.tool_choice = { type: 'function', name: tc.name };
+    }
+  }
+
+  const clampedMax = clampMaxTokens(req.max_tokens, provider, model);
+  if (clampedMax !== undefined) {
+    out.max_output_tokens = clampedMax;
+  }
+
+  if (!isReasoningOpenAiModelId(model)) {
+    if (typeof req.temperature === 'number' && Number.isFinite(req.temperature)) {
+      out.temperature = req.temperature;
+    }
+    if (typeof req.top_p === 'number' && Number.isFinite(req.top_p)) {
+      out.top_p = req.top_p;
+    }
+  }
+
+  const stream = req.stream === true;
+  if (stream) {
+    out.stream = true;
+  }
+
+  return {
+    mode: 'responses',
     body: Buffer.from(JSON.stringify(out), 'utf8'),
     requestModel: reqModel,
     model,
@@ -393,7 +677,7 @@ function mapFinishReason(finishReason: string, hasToolCalls: boolean): 'tool_use
   if (finishReason === 'tool_calls' || finishReason === 'function_call' || hasToolCalls) {
     return 'tool_use';
   }
-  if (finishReason === 'length') {
+  if (finishReason === 'length' || finishReason === 'max_output_tokens') {
     return 'max_tokens';
   }
   return 'end_turn';
@@ -419,12 +703,118 @@ export function extractOpenAiErrorMessage(rawError: unknown): string | undefined
 }
 
 /**
- * 将 OpenAI `/v1/chat/completions` 非流式 JSON 响应转换为 Anthropic Message JSON 响应。
+ * 将 OpenAI `/v1/responses` 非流式 JSON 响应转换为 Anthropic Message JSON 响应。
+ */
+export function convertOpenAiResponsesToAnthropicResponse(
+  resp: Record<string, unknown>,
+  fallbackModel: string,
+): Record<string, unknown> {
+  const respError = extractOpenAiErrorMessage(resp.error);
+  if (respError || resp.status === 'failed') {
+    throw new Error(respError ?? 'Upstream OpenAI Responses request failed');
+  }
+
+  const id =
+    typeof resp.id === 'string' && resp.id
+      ? resp.id
+      : `msg_${randomUUID().replace(/-/gu, '')}`;
+  const model =
+    typeof resp.model === 'string' && resp.model
+      ? resp.model
+      : fallbackModel;
+
+  const contentBlocks: Record<string, unknown>[] = [];
+  let hasToolCalls = false;
+  const outputs = Array.isArray(resp.output) ? resp.output : [];
+
+  for (const rawItem of outputs) {
+    if (!rawItem || typeof rawItem !== 'object') continue;
+    const item = rawItem as Record<string, unknown>;
+    if (item.type === 'reasoning') {
+      const parts: string[] = [];
+      for (const list of [item.summary, item.content]) {
+        if (!Array.isArray(list)) continue;
+        for (const entry of list) {
+          if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).text === 'string') {
+            const text = (entry as Record<string, unknown>).text as string;
+            if (text) parts.push(text);
+          }
+        }
+      }
+      const thinking = parts.join('\n');
+      if (thinking) {
+        contentBlocks.push({ type: 'thinking', thinking, signature: 'hd-gateway' });
+      }
+    } else if (item.type === 'message') {
+      const text = extractTextFromBlocks(item.content);
+      if (text) {
+        contentBlocks.push({ type: 'text', text });
+      }
+    } else if (item.type === 'function_call') {
+      hasToolCalls = true;
+      const callId =
+        (typeof item.call_id === 'string' && item.call_id) ||
+        (typeof item.id === 'string' && item.id) ||
+        `toolu_${randomUUID().slice(0, 12)}`;
+      const name = typeof item.name === 'string' ? item.name : '';
+      contentBlocks.push({
+        type: 'tool_use',
+        id: callId,
+        name,
+        input: parseToolArguments(item.arguments),
+      });
+    }
+  }
+
+  if (contentBlocks.length === 0 && typeof resp.output_text === 'string' && resp.output_text) {
+    contentBlocks.push({ type: 'text', text: resp.output_text });
+  }
+  if (contentBlocks.length === 0) {
+    contentBlocks.push({ type: 'text', text: '' });
+  }
+
+  const incomplete =
+    resp.incomplete_details && typeof resp.incomplete_details === 'object'
+      ? (resp.incomplete_details as Record<string, unknown>)
+      : undefined;
+  const finishReason =
+    typeof incomplete?.reason === 'string' && incomplete.reason
+      ? incomplete.reason
+      : hasToolCalls
+        ? 'tool_calls'
+        : 'stop';
+
+  const usage =
+    resp.usage && typeof resp.usage === 'object'
+      ? (resp.usage as Record<string, unknown>)
+      : {};
+
+  return {
+    id,
+    type: 'message',
+    role: 'assistant',
+    model,
+    content: contentBlocks,
+    stop_reason: mapFinishReason(finishReason, hasToolCalls),
+    stop_sequence: null,
+    usage: {
+      input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
+      output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
+    },
+  };
+}
+
+/**
+ * 将 OpenAI `/v1/chat/completions`（或 `/v1/responses`）非流式 JSON 响应转换为 Anthropic Message JSON 响应。
  */
 export function convertOpenAiToAnthropicResponse(
   openAiResp: Record<string, unknown>,
   fallbackModel: string,
 ): Record<string, unknown> {
+  if (openAiResp.object === 'response' || Array.isArray(openAiResp.output)) {
+    return convertOpenAiResponsesToAnthropicResponse(openAiResp, fallbackModel);
+  }
+
   const choices = Array.isArray(openAiResp.choices) ? openAiResp.choices : [];
   const respError = extractOpenAiErrorMessage(openAiResp.error);
   if (respError && choices.length === 0) {
@@ -448,12 +838,7 @@ export function convertOpenAiToAnthropicResponse(
       : {};
 
   const contentBlocks: Record<string, unknown>[] = [];
-  const reasoning =
-    typeof message.reasoning_content === 'string'
-      ? message.reasoning_content
-      : typeof message.reasoning === 'string'
-        ? message.reasoning
-        : '';
+  const reasoning = extractReasoningText(message);
   if (reasoning) {
     contentBlocks.push({
       type: 'thinking',
@@ -486,11 +871,25 @@ export function convertOpenAiToAnthropicResponse(
     });
   }
 
+  if (toolCalls.length === 0 && message.function_call && typeof message.function_call === 'object') {
+    const fc = message.function_call as Record<string, unknown>;
+    const fcName = typeof fc.name === 'string' ? fc.name : '';
+    if (fcName) {
+      contentBlocks.push({
+        type: 'tool_use',
+        id: `toolu_${randomUUID().slice(0, 12)}`,
+        name: fcName,
+        input: parseToolArguments(fc.arguments),
+      });
+    }
+  }
+
   if (contentBlocks.length === 0) {
     if (respError) throw new Error(respError);
     contentBlocks.push({ type: 'text', text: '' });
   }
 
+  const hasToolCalls = contentBlocks.some((b) => b.type === 'tool_use');
   const finishReason = typeof choice0?.finish_reason === 'string' ? choice0.finish_reason : '';
   const usage =
     openAiResp.usage && typeof openAiResp.usage === 'object'
@@ -503,7 +902,7 @@ export function convertOpenAiToAnthropicResponse(
     role: 'assistant',
     model,
     content: contentBlocks,
-    stop_reason: mapFinishReason(finishReason, toolCalls.length > 0),
+    stop_reason: mapFinishReason(finishReason, hasToolCalls),
     stop_sequence: null,
     usage: {
       input_tokens: typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : 0,
@@ -518,13 +917,27 @@ type ActiveBlock =
   | { readonly kind: 'tool_use'; readonly blockIndex: number; readonly toolKey: string };
 
 interface ToolStreamState {
-  readonly blockIndex: number;
-  readonly id: string;
-  readonly name: string;
+  blockIndex?: number;
+  id: string;
+  name: string;
+  bufferedArgs: string[];
+  emittedStart: boolean;
+  emittedAnyArgs: boolean;
+  closed: boolean;
 }
 
-function writeSseEvent(res: ServerResponse, event: string, data: unknown): void {
+const SSE_RESPONSE_HEADERS = {
+  'content-type': 'text/event-stream; charset=utf-8',
+  'cache-control': 'no-cache',
+  connection: 'keep-alive',
+  'x-accel-buffering': 'no',
+} as const;
+
+export function writeSseEvent(res: ServerResponse, event: string, data: unknown): void {
   if (res.destroyed || res.writableEnded) return;
+  if (!res.headersSent) {
+    res.writeHead(200, SSE_RESPONSE_HEADERS);
+  }
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
@@ -625,7 +1038,20 @@ export function writeAnthropicResponseAsSse(res: ServerResponse, anthropicResp: 
 }
 
 /**
- * 将上游 OpenAI Chat Completions SSE 字节流实时转换为 Anthropic Messages SSE 事件流写入响应。
+ * 判断纯文本响应体是否实际为 SSE 事件流（兼容首行含 `: comment`、`event:`、`id:`、`retry:` 的服务商，如 OpenRouter）。
+ */
+export function looksLikeSsePayload(rawText: string): boolean {
+  const trimmed = rawText.trimStart();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('data:')) return true;
+  return /^(?:(?::|event:|id:|retry:)[^\n]*\r?\n)+\s*data:/u.test(trimmed);
+}
+
+/**
+ * 将上游 OpenAI Chat Completions 或 Responses API SSE 字节流实时转换为 Anthropic Messages SSE 事件流写入响应。
+ *
+ * 采用延迟写头策略：仅在真正收到可输出内容（或明确的 finish_reason）时才提交 HTTP 200 SSE 响应头；
+ * 若上游在首个有效输出前报错或返回空流，则保留 `res.headersSent === false`，便于代理层以标准 HTTP 502 JSON 错误返回给 Claude Code。
  */
 export async function pipeOpenAiStreamToAnthropicSse(
   upstreamBody: ReadableStream<Uint8Array>,
@@ -645,14 +1071,23 @@ export async function pipeOpenAiStreamToAnthropicSse(
   let outputTokens = 0;
   let chunkCount = 0;
   let streamError: string | undefined;
-  const toolStates = new Map<number, ToolStreamState>();
-  const toolBlocksWithArgs = new Set<number>();
+
+  const toolStates = new Map<string, ToolStreamState>();
+  const toolOrder: string[] = [];
+  const responseItemKeyById = new Map<string, string>();
+  let lastToolKey: string | undefined;
+
+  const updateMeta = (chunkId?: unknown, chunkModel?: unknown): void => {
+    if (!messageStarted) {
+      if (typeof chunkId === 'string' && chunkId) messageId = chunkId;
+      if (typeof chunkModel === 'string' && chunkModel) messageModel = chunkModel;
+    }
+  };
 
   const ensureMessageStart = (chunkId?: unknown, chunkModel?: unknown): void => {
+    updateMeta(chunkId, chunkModel);
     if (messageStarted) return;
     messageStarted = true;
-    if (typeof chunkId === 'string' && chunkId) messageId = chunkId;
-    if (typeof chunkModel === 'string' && chunkModel) messageModel = chunkModel;
     writeSseEvent(res, 'message_start', {
       type: 'message_start',
       message: {
@@ -679,12 +1114,19 @@ export async function pipeOpenAiStreamToAnthropicSse(
         index: activeBlock.blockIndex,
         delta: { type: 'signature_delta', signature: 'hd-gateway' },
       });
-    } else if (activeBlock.kind === 'tool_use' && !toolBlocksWithArgs.has(activeBlock.blockIndex)) {
-      writeSseEvent(res, 'content_block_delta', {
-        type: 'content_block_delta',
-        index: activeBlock.blockIndex,
-        delta: { type: 'input_json_delta', partial_json: '{}' },
-      });
+    } else if (activeBlock.kind === 'tool_use') {
+      const state = toolStates.get(activeBlock.toolKey);
+      if (state) {
+        if (!state.emittedAnyArgs) {
+          writeSseEvent(res, 'content_block_delta', {
+            type: 'content_block_delta',
+            index: activeBlock.blockIndex,
+            delta: { type: 'input_json_delta', partial_json: '{}' },
+          });
+          state.emittedAnyArgs = true;
+        }
+        state.closed = true;
+      }
     }
     writeSseEvent(res, 'content_block_stop', {
       type: 'content_block_stop',
@@ -694,6 +1136,7 @@ export async function pipeOpenAiStreamToAnthropicSse(
   };
 
   const openThinkingBlock = (): number => {
+    ensureMessageStart();
     if (activeBlock?.kind === 'thinking') return activeBlock.blockIndex;
     closeActiveBlock();
     const blockIndex = nextBlockIndex++;
@@ -708,6 +1151,7 @@ export async function pipeOpenAiStreamToAnthropicSse(
   };
 
   const openTextBlock = (): number => {
+    ensureMessageStart();
     if (activeBlock?.kind === 'text') return activeBlock.blockIndex;
     closeActiveBlock();
     const blockIndex = nextBlockIndex++;
@@ -719,6 +1163,261 @@ export async function pipeOpenAiStreamToAnthropicSse(
       content_block: { type: 'text', text: '' },
     });
     return blockIndex;
+  };
+
+  const emitThinkingDelta = (text: string): void => {
+    if (!text) return;
+    hasRealOutput = true;
+    const idx = openThinkingBlock();
+    writeSseEvent(res, 'content_block_delta', {
+      type: 'content_block_delta',
+      index: idx,
+      delta: { type: 'thinking_delta', thinking: text },
+    });
+  };
+
+  const emitTextDelta = (text: string): void => {
+    if (!text) return;
+    hasRealOutput = true;
+    const idx = openTextBlock();
+    writeSseEvent(res, 'content_block_delta', {
+      type: 'content_block_delta',
+      index: idx,
+      delta: { type: 'text_delta', text },
+    });
+  };
+
+  const activateToolState = (key: string, state: ToolStreamState): void => {
+    if (state.emittedStart || state.closed) return;
+    ensureMessageStart();
+    closeActiveBlock();
+    const blockIndex = nextBlockIndex++;
+    state.blockIndex = blockIndex;
+    state.emittedStart = true;
+    anyBlockOpened = true;
+    hasRealOutput = true;
+    sawToolCall = true;
+    activeBlock = { kind: 'tool_use', blockIndex, toolKey: key };
+    writeSseEvent(res, 'content_block_start', {
+      type: 'content_block_start',
+      index: blockIndex,
+      content_block: { type: 'tool_use', id: state.id, name: state.name, input: {} },
+    });
+    if (state.bufferedArgs.length > 0) {
+      const joined = state.bufferedArgs.join('');
+      state.bufferedArgs.length = 0;
+      if (joined.length > 0) {
+        state.emittedAnyArgs = true;
+        writeSseEvent(res, 'content_block_delta', {
+          type: 'content_block_delta',
+          index: blockIndex,
+          delta: { type: 'input_json_delta', partial_json: joined },
+        });
+      }
+    }
+  };
+
+  const recordToolDelta = (params: {
+    readonly key: string;
+    readonly id?: string;
+    readonly name?: string;
+    readonly argsChunk?: string;
+  }): void => {
+    const { key, id, name, argsChunk } = params;
+    let state = toolStates.get(key);
+    const isNewOnSameKey = Boolean(state && id && state.id !== id);
+    if (!state || isNewOnSameKey) {
+      const effectiveKey = isNewOnSameKey ? `${key}:${id}` : key;
+      state = {
+        id: id ?? `toolu_${toolOrder.length}_${randomUUID().slice(0, 6)}`,
+        name: name ?? '',
+        bufferedArgs: [],
+        emittedStart: false,
+        emittedAnyArgs: false,
+        closed: false,
+      };
+      toolStates.set(effectiveKey, state);
+      toolOrder.push(effectiveKey);
+      lastToolKey = effectiveKey;
+      sawToolCall = true;
+      hasRealOutput = true;
+      if (argsChunk) state.bufferedArgs.push(argsChunk);
+      // 仅当当前没有其他未关闭的工具块且已拿到工具名时立即实时流式输出，否则暂存待活跃块关闭后顺序冲刷
+      const anotherToolActive = activeBlock?.kind === 'tool_use' && activeBlock.toolKey !== effectiveKey;
+      if (!anotherToolActive && state.name) {
+        activateToolState(effectiveKey, state);
+      }
+      return;
+    }
+
+    lastToolKey = key;
+    sawToolCall = true;
+    hasRealOutput = true;
+    if (id && !state.emittedStart) state.id = id;
+    if (name && !state.name) state.name = name;
+
+    if (state.emittedStart && !state.closed && activeBlock?.kind === 'tool_use' && activeBlock.toolKey === key) {
+      if (argsChunk) {
+        state.emittedAnyArgs = true;
+        writeSseEvent(res, 'content_block_delta', {
+          type: 'content_block_delta',
+          index: state.blockIndex!,
+          delta: { type: 'input_json_delta', partial_json: argsChunk },
+        });
+      }
+    } else if (!state.closed) {
+      if (argsChunk) state.bufferedArgs.push(argsChunk);
+      const anotherToolActive = activeBlock?.kind === 'tool_use' && activeBlock.toolKey !== key;
+      if (!anotherToolActive && !state.emittedStart && state.name) {
+        activateToolState(key, state);
+      }
+    }
+  };
+
+  const flushPendingToolCalls = (): void => {
+    closeActiveBlock();
+    for (const key of toolOrder) {
+      const state = toolStates.get(key);
+      if (!state || state.closed) continue;
+      if (!state.emittedStart) {
+        activateToolState(key, state);
+      }
+      closeActiveBlock();
+    }
+  };
+
+  const processResponsesEvent = (chunk: Record<string, unknown>): boolean => {
+    const evType = typeof chunk.type === 'string' ? chunk.type : '';
+    if (!evType.startsWith('response.') && evType !== 'error') return false;
+
+    if (evType === 'error') {
+      const errMsg = extractOpenAiErrorMessage(chunk.error ?? chunk);
+      if (errMsg) streamError = errMsg;
+      return true;
+    }
+
+    const respObj =
+      chunk.response && typeof chunk.response === 'object' ? (chunk.response as Record<string, unknown>) : undefined;
+    if (respObj) {
+      updateMeta(respObj.id, respObj.model);
+      if (respObj.usage && typeof respObj.usage === 'object') {
+        const u = respObj.usage as Record<string, unknown>;
+        if (typeof u.input_tokens === 'number') inputTokens = u.input_tokens;
+        if (typeof u.output_tokens === 'number') outputTokens = u.output_tokens;
+      }
+    }
+
+    if (evType === 'response.failed') {
+      const errMsg = extractOpenAiErrorMessage(respObj?.error ?? chunk.error ?? 'Upstream Responses stream failed');
+      if (errMsg) streamError = errMsg;
+      return true;
+    }
+
+    if (evType === 'response.completed' || evType === 'response.incomplete') {
+      const incomplete =
+        respObj?.incomplete_details && typeof respObj.incomplete_details === 'object'
+          ? (respObj.incomplete_details as Record<string, unknown>)
+          : undefined;
+      if (typeof incomplete?.reason === 'string' && incomplete.reason) {
+        finishReason = incomplete.reason;
+      } else if (!finishReason) {
+        finishReason = sawToolCall ? 'tool_calls' : 'stop';
+      }
+      return true;
+    }
+
+    if (
+      evType === 'response.reasoning_summary_text.delta' ||
+      evType === 'response.reasoning_text.delta' ||
+      evType === 'response.reasoning.delta'
+    ) {
+      if (typeof chunk.delta === 'string' && chunk.delta) {
+        emitThinkingDelta(chunk.delta);
+      }
+      return true;
+    }
+
+    if (evType === 'response.output_text.delta') {
+      if (typeof chunk.delta === 'string' && chunk.delta) {
+        emitTextDelta(chunk.delta);
+      }
+      return true;
+    }
+
+    if (evType === 'response.output_item.added') {
+      const item = chunk.item && typeof chunk.item === 'object' ? (chunk.item as Record<string, unknown>) : undefined;
+      if (item?.type === 'function_call') {
+        const itemId = typeof item.id === 'string' && item.id ? item.id : undefined;
+        const callId = (typeof item.call_id === 'string' && item.call_id) || itemId;
+        const key = `resp:${callId ?? itemId ?? toolOrder.length}`;
+        if (itemId) responseItemKeyById.set(itemId, key);
+        if (callId) responseItemKeyById.set(callId, key);
+        const name = typeof item.name === 'string' && item.name ? item.name : undefined;
+        const args = typeof item.arguments === 'string' && item.arguments ? item.arguments : undefined;
+        recordToolDelta({
+          key,
+          ...(callId ? { id: callId } : {}),
+          ...(name ? { name } : {}),
+          ...(args ? { argsChunk: args } : {}),
+        });
+      }
+      return true;
+    }
+
+    if (evType === 'response.function_call_arguments.delta') {
+      const itemId = typeof chunk.item_id === 'string' ? chunk.item_id : '';
+      const key = responseItemKeyById.get(itemId) ?? lastToolKey ?? `resp:${itemId || toolOrder.length}`;
+      const args = typeof chunk.delta === 'string' ? chunk.delta : '';
+      if (args) {
+        recordToolDelta({ key, argsChunk: args });
+      }
+      return true;
+    }
+
+    if (evType === 'response.function_call_arguments.done') {
+      const itemId = typeof chunk.item_id === 'string' ? chunk.item_id : '';
+      const key = responseItemKeyById.get(itemId) ?? lastToolKey;
+      const state = key ? toolStates.get(key) : undefined;
+      if (key && state && !state.emittedAnyArgs && state.bufferedArgs.length === 0) {
+        const fullArgs = typeof chunk.arguments === 'string' ? chunk.arguments : '';
+        if (fullArgs) recordToolDelta({ key, argsChunk: fullArgs });
+      }
+      if (key && activeBlock?.kind === 'tool_use' && activeBlock.toolKey === key) {
+        closeActiveBlock();
+      }
+      return true;
+    }
+
+    if (evType === 'response.output_item.done') {
+      const item = chunk.item && typeof chunk.item === 'object' ? (chunk.item as Record<string, unknown>) : undefined;
+      if (item?.type === 'function_call') {
+        const itemId = typeof item.id === 'string' && item.id ? item.id : undefined;
+        const callId = (typeof item.call_id === 'string' && item.call_id) || itemId;
+        const key = (itemId && responseItemKeyById.get(itemId)) || (callId && responseItemKeyById.get(callId)) || `resp:${callId ?? toolOrder.length}`;
+        const existing = toolStates.get(key);
+        if (!existing) {
+          const name = typeof item.name === 'string' && item.name ? item.name : undefined;
+          const args = typeof item.arguments === 'string' && item.arguments ? item.arguments : undefined;
+          recordToolDelta({
+            key,
+            ...(callId ? { id: callId } : {}),
+            ...(name ? { name } : {}),
+            ...(args ? { argsChunk: args } : {}),
+          });
+        } else if (!existing.emittedAnyArgs && existing.bufferedArgs.length === 0 && typeof item.arguments === 'string' && item.arguments) {
+          recordToolDelta({ key, argsChunk: item.arguments });
+        }
+        if (activeBlock?.kind === 'tool_use' && activeBlock.toolKey === key) {
+          closeActiveBlock();
+        }
+      } else if (item?.type === 'message' && !hasRealOutput) {
+        const text = extractTextFromBlocks(item.content);
+        if (text) emitTextDelta(text);
+      }
+      return true;
+    }
+
+    return true;
   };
 
   const processDataPayload = (payloadText: string): void => {
@@ -734,6 +1433,8 @@ export async function pipeOpenAiStreamToAnthropicSse(
     }
 
     chunkCount++;
+    if (processResponsesEvent(chunk)) return;
+
     if (chunk.error) {
       const errMsg = extractOpenAiErrorMessage(chunk.error);
       if (errMsg) streamError = errMsg;
@@ -743,6 +1444,8 @@ export async function pipeOpenAiStreamToAnthropicSse(
       const usage = chunk.usage as Record<string, unknown>;
       if (typeof usage.prompt_tokens === 'number') inputTokens = usage.prompt_tokens;
       if (typeof usage.completion_tokens === 'number') outputTokens = usage.completion_tokens;
+      if (typeof usage.input_tokens === 'number') inputTokens = usage.input_tokens;
+      if (typeof usage.output_tokens === 'number') outputTokens = usage.output_tokens;
     }
 
     const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
@@ -750,7 +1453,7 @@ export async function pipeOpenAiStreamToAnthropicSse(
       choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : undefined;
     if (chunk.error && !choice0) return;
 
-    ensureMessageStart(chunk.id, chunk.model);
+    updateMeta(chunk.id, chunk.model);
     if (!choice0) return;
 
     if (typeof choice0.finish_reason === 'string' && choice0.finish_reason) {
@@ -765,31 +1468,14 @@ export async function pipeOpenAiStreamToAnthropicSse(
           : undefined;
     if (!delta) {
       if (typeof choice0.text === 'string' && choice0.text.length > 0) {
-        hasRealOutput = true;
-        const idx = openTextBlock();
-        writeSseEvent(res, 'content_block_delta', {
-          type: 'content_block_delta',
-          index: idx,
-          delta: { type: 'text_delta', text: choice0.text },
-        });
+        emitTextDelta(choice0.text);
       }
       return;
     }
 
-    const reasoning =
-      typeof delta.reasoning_content === 'string'
-        ? delta.reasoning_content
-        : typeof delta.reasoning === 'string'
-          ? delta.reasoning
-          : '';
+    const reasoning = extractReasoningText(delta);
     if (reasoning) {
-      hasRealOutput = true;
-      const idx = openThinkingBlock();
-      writeSseEvent(res, 'content_block_delta', {
-        type: 'content_block_delta',
-        index: idx,
-        delta: { type: 'thinking_delta', thinking: reasoning },
-      });
+      emitThinkingDelta(reasoning);
     }
 
     const deltaText =
@@ -799,56 +1485,50 @@ export async function pipeOpenAiStreamToAnthropicSse(
           ? extractTextFromBlocks(delta.content)
           : '';
     if (deltaText.length > 0) {
-      hasRealOutput = true;
-      const idx = openTextBlock();
-      writeSseEvent(res, 'content_block_delta', {
-        type: 'content_block_delta',
-        index: idx,
-        delta: { type: 'text_delta', text: deltaText },
-      });
+      emitTextDelta(deltaText);
     }
 
     if (Array.isArray(delta.tool_calls)) {
-      for (const rawTc of delta.tool_calls) {
+      for (let arrIdx = 0; arrIdx < delta.tool_calls.length; arrIdx++) {
+        const rawTc = delta.tool_calls[arrIdx];
         if (!rawTc || typeof rawTc !== 'object') continue;
         const tc = rawTc as Record<string, unknown>;
-        const tcIdx = typeof tc.index === 'number' ? tc.index : 0;
         const fn = tc.function && typeof tc.function === 'object' ? (tc.function as Record<string, unknown>) : {};
         const incomingId = typeof tc.id === 'string' && tc.id ? tc.id : undefined;
         const incomingName = typeof fn.name === 'string' && fn.name ? fn.name : undefined;
-
-        let toolState = toolStates.get(tcIdx);
-        const isNewCallOnSameIndex = Boolean(toolState && incomingId && toolState.id !== incomingId);
-        if (!toolState || isNewCallOnSameIndex) {
-          closeActiveBlock();
-          const blockIndex = nextBlockIndex++;
-          anyBlockOpened = true;
-          hasRealOutput = true;
-          sawToolCall = true;
-          const id = incomingId ?? `toolu_${blockIndex}_${randomUUID().slice(0, 6)}`;
-          const name = incomingName ?? '';
-          toolState = { blockIndex, id, name };
-          toolStates.set(tcIdx, toolState);
-          activeBlock = { kind: 'tool_use', blockIndex, toolKey: `${tcIdx}:${id}` };
-          writeSseEvent(res, 'content_block_start', {
-            type: 'content_block_start',
-            index: blockIndex,
-            content_block: { type: 'tool_use', id, name, input: {} },
-          });
-        } else if (activeBlock?.kind !== 'tool_use' || activeBlock.blockIndex !== toolState.blockIndex) {
-          // 防止非活跃块在未重新开始时收到 delta
-          continue;
-        }
-
-        if (typeof fn.arguments === 'string' && fn.arguments.length > 0) {
-          toolBlocksWithArgs.add(toolState.blockIndex);
-          writeSseEvent(res, 'content_block_delta', {
-            type: 'content_block_delta',
-            index: toolState.blockIndex,
-            delta: { type: 'input_json_delta', partial_json: fn.arguments },
-          });
-        }
+        const argsChunk =
+          typeof fn.arguments === 'string'
+            ? fn.arguments
+            : fn.arguments && typeof fn.arguments === 'object'
+              ? JSON.stringify(fn.arguments)
+              : '';
+        const key =
+          typeof tc.index === 'number'
+            ? `tc:${tc.index}`
+            : incomingId
+              ? `tc:${arrIdx}`
+              : (lastToolKey ?? `tc:${arrIdx}`);
+        recordToolDelta({
+          key,
+          ...(incomingId ? { id: incomingId } : {}),
+          ...(incomingName ? { name: incomingName } : {}),
+          ...(argsChunk ? { argsChunk } : {}),
+        });
       }
+    } else if (delta.function_call && typeof delta.function_call === 'object') {
+      const fc = delta.function_call as Record<string, unknown>;
+      const incomingName = typeof fc.name === 'string' && fc.name ? fc.name : undefined;
+      const argsChunk =
+        typeof fc.arguments === 'string'
+          ? fc.arguments
+          : fc.arguments && typeof fc.arguments === 'object'
+            ? JSON.stringify(fc.arguments)
+            : '';
+      recordToolDelta({
+        key: 'fc:0',
+        ...(incomingName ? { name: incomingName } : {}),
+        ...(argsChunk ? { argsChunk } : {}),
+      });
     }
   };
 
@@ -932,12 +1612,22 @@ export async function pipeOpenAiStreamToAnthropicSse(
     inputTokens,
     outputTokens,
     ...(streamError ? { streamError } : {}),
+    headersSent: res.headersSent,
   });
 
   if (res.destroyed || res.writableEnded) return summary();
 
-  if (streamError && !anyBlockOpened) {
-    closeActiveBlock();
+  // 若在提交 HTTP 200 SSE 响应头前就出错或未收到任何有效输出与结束原因，
+  // 留给上层代理以标准 HTTP 502 JSON 错误返回，避免向 Claude Code 发送空 SSE 导致 [ede_diagnostic]
+  if (streamError && !res.headersSent) {
+    return summary();
+  }
+  if (!hasRealOutput && !finishReason && !res.headersSent) {
+    return summary();
+  }
+
+  if (streamError && res.headersSent) {
+    flushPendingToolCalls();
     writeSseEvent(res, 'error', {
       type: 'error',
       error: { type: 'api_error', message: streamError },
@@ -949,10 +1639,11 @@ export async function pipeOpenAiStreamToAnthropicSse(
   }
 
   ensureMessageStart();
+  flushPendingToolCalls();
   if (!anyBlockOpened) {
     openTextBlock();
+    closeActiveBlock();
   }
-  closeActiveBlock();
 
   writeSseEvent(res, 'message_delta', {
     type: 'message_delta',

@@ -176,6 +176,7 @@ export function ChatCommandSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.commands.form.name')}</span>
                       <Input
+                        size="sm"
                         data-testid="chat-command-form-name"
                         className="font-mono text-[12px]"
                         value={form.name}
@@ -187,6 +188,7 @@ export function ChatCommandSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.commands.form.desc')}</span>
                       <Input
+                        size="sm"
                         data-testid="chat-command-form-desc"
                         className="text-[12px]"
                         value={form.description}

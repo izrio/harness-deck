@@ -152,4 +152,49 @@ describe.skipIf(process.platform === 'win32')('RuntimeManager', () => {
     expect(statuses.map((s) => s.kind)).toEqual(['starting', 'connected']);
     expect(resolvedCache).toMatchObject({ command, version: '0.2.1-rc.5' });
   });
+
+  it('WSL 环境下自动忽略并清除指向 Windows 宿主机挂载目录的缓存 dsh，回退到 WSL 中的 dsh', async () => {
+    const winDir = await mkdtemp(join(tmpdir(), 'fake-win-dsh-'));
+    const wslDir = await mkdtemp(join(tmpdir(), 'fake-wsl-dsh-'));
+    dirs.push(winDir, wslDir);
+
+    const winDsh = join(winDir, 'dsh');
+    await writeFile(winDsh, '#!/bin/sh\necho "win addon missing" >&2\nexit 1\n');
+    await chmod(winDsh, 0o755);
+
+    const wslDsh = join(wslDir, 'dsh');
+    await writeFile(wslDsh, FAKE_DSH);
+    await chmod(wslDsh, 0o755);
+
+    const { verifyExecutableFile } = await import('../src/runtime/locate.ts');
+    const winStat = await verifyExecutableFile(winDsh, process.platform);
+    const cacheUpdates: unknown[] = [];
+
+    const manager = new RuntimeManager({
+      getConfig: () => ({
+        profile: 'web',
+        cwd: wslDir,
+        env: { ...process.env, PATH: `${winDir}:${wslDir}:${process.env.PATH ?? ''}`, FAKE_DSH_MODE: 'ok' },
+        readyTimeoutMs: 5_000,
+        isWsl: true,
+        wslMountRoots: [winDir],
+        cachedExecutable: {
+          command: winDsh,
+          version: '0.2.1-rc.5',
+          mtimeMs: winStat?.mtimeMs,
+          size: winStat?.size,
+        },
+        onResolvedExecutable: (info) => {
+          cacheUpdates.push(info);
+        },
+      }),
+      log: () => undefined,
+    });
+    managers.push(manager);
+
+    const endpoint = await manager.start();
+    expect(endpoint?.version).toBe('0.2.1-rc.5');
+    expect(cacheUpdates[0]).toBeUndefined();
+    expect(cacheUpdates.at(-1)).toMatchObject({ command: wslDsh, version: '0.2.1-rc.5' });
+  });
 });

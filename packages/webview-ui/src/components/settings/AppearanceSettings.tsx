@@ -281,6 +281,7 @@ export function AppearanceSettings() {
           <label className="flex flex-col gap-1">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalFont')}</span>
             <Input
+              size="sm"
               data-testid="terminal-font-family"
               className="font-mono text-[12px]"
               value={codeFamily}

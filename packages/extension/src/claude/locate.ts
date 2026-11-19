@@ -11,6 +11,8 @@ export interface LocateClaudeOptions {
   readonly configuredPath?: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly platform: NodeJS.Platform;
+  readonly isWsl?: boolean;
+  readonly wslMountRoots?: readonly string[];
 }
 
 export type LocateClaudeResult =
@@ -25,7 +27,7 @@ function augmentedEnvWithClaudeDirs(
   env: LocateClaudeOptions['env'],
   platform: NodeJS.Platform,
 ): Record<string, string | undefined> {
-  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  const home = platform === 'win32' ? (env.HOME ?? env.USERPROFILE ?? homedir()) : (env.HOME ?? homedir());
   const extraDirs =
     platform === 'win32'
       ? [
@@ -67,7 +69,12 @@ export async function locateClaude(options: LocateClaudeOptions): Promise<Locate
   }
 
   const searchEnv = augmentedEnvWithClaudeDirs(options.env, options.platform);
-  const onPath = await locateExecutable('claude', { env: searchEnv, platform: options.platform });
+  const onPath = await locateExecutable('claude', {
+    env: searchEnv,
+    platform: options.platform,
+    ...(options.isWsl !== undefined ? { isWsl: options.isWsl } : {}),
+    ...(options.wslMountRoots !== undefined ? { wslMountRoots: options.wslMountRoots } : {}),
+  });
   if (onPath.kind === 'found') {
     return { kind: 'found', command: onPath.command, source: 'path' };
   }

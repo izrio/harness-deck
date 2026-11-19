@@ -39,6 +39,7 @@ import { createDshBackend } from '../backend/dsh.ts';
 import {
   BACKEND_ENV_CACHE_KEY,
   commandSpecForProfile,
+  isAutoDetectedCommandSpec,
   isBackendEnvCacheComplete,
   parseBackendEnvCache,
   type CachedExecutableRecord,
@@ -115,6 +116,7 @@ import {
 } from '../providers/ProviderStore.ts';
 import { safeProfile } from '../runtime/launch.ts';
 import { locateDsh, locateExecutable, verifyExecutableFile } from '../runtime/locate.ts';
+import { isWslEnvironment, isWslWindowsPath } from '../runtime/wsl.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { locateZcode, verifyZcodeTarget } from '../zcode/locate.ts';
 import type { HostCommandId, HostPlatform } from './HostPlatform.ts';
@@ -240,9 +242,11 @@ export function createHarnessHostRuntime(
   const profiles = (): BackendProfile[] =>
     parseProfiles(platform.settings.get<unknown>('backends', []), log, builtins());
 
+  const inWsl = process.platform === 'linux' && isWslEnvironment();
   const restoredEnvCache = parseBackendEnvCache(
     platform.globalState.get<unknown>(BACKEND_ENV_CACHE_KEY),
     process.platform,
+    { isWsl: inWsl },
   );
   const availability = new Map<string, boolean>(Object.entries(restoredEnvCache?.availability ?? {}));
   const installedVersions = new Map<string, string>(Object.entries(restoredEnvCache?.installedVersions ?? {}));
@@ -264,6 +268,7 @@ export function createHarnessHostRuntime(
     const snapshot: PersistedBackendEnvCache = {
       schemaVersion: 1,
       platform: process.platform,
+      ...(inWsl ? { wslIsolated: true } : {}),
       updatedAt: Date.now(),
       nodeEnv,
       ...(npmCommand ? { npmCommand } : {}),
@@ -558,6 +563,7 @@ export function createHarnessHostRuntime(
     },
     getSelectedModel: (id) => selectedProviderModels.get(id),
     isProtocolGatewayEnabled: readProtocolGatewayEnabled,
+    getHttpProxy: () => platform.settings.getHttpProxy(),
     log,
     onLogChange: () => scheduleGatewayLogPush(),
   });
@@ -1071,6 +1077,11 @@ export function createHarnessHostRuntime(
     getCachedExecutable: (profileId, commandSpec) => {
       const entry = cachedExecutables.get(profileId);
       if (!entry || entry.commandSpec !== commandSpec) return undefined;
+      if (inWsl && isAutoDetectedCommandSpec(entry.commandSpec) && isWslWindowsPath(entry.command)) {
+        cachedExecutables.delete(profileId);
+        persistEnvCache();
+        return undefined;
+      }
       return {
         command: entry.command,
         ...(entry.version ? { version: entry.version } : {}),

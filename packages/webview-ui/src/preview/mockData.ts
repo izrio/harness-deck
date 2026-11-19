@@ -22,6 +22,7 @@ export interface PreviewSessionData {
   readonly header: SessionHeader;
   readonly items: readonly Item[];
   readonly interactions: readonly PendingInteraction[];
+  readonly olderPages?: readonly (readonly Item[])[];
 }
 
 const now = Date.now();

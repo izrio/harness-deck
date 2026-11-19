@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup, ButtonGroupText } from '@/components/ui/button-group';
+import { cn } from '../lib/utils.ts';
 
-/** 「− 数值 +」步进器：只组合 shadcn-ui 的 Button / ButtonGroup。 */
+/** 「− 数值 +」步进器：只组合 shadcn-ui 的 Button / ButtonGroup，支持统一 xs / sm 高度档位。 */
 export function NumberStepper({
+  size = 'xs',
   decLabel,
   incLabel,
   decDisabled,
@@ -13,6 +15,7 @@ export function NumberStepper({
   valueTestId,
   children,
 }: {
+  size?: 'xs' | 'sm';
   decLabel: string;
   incLabel: string;
   decDisabled?: boolean;
@@ -22,15 +25,22 @@ export function NumberStepper({
   valueTestId?: string;
   children: ReactNode;
 }) {
+  const buttonSize = size === 'sm' ? 'icon-sm' : 'icon-xs';
   return (
-    <ButtonGroup>
-      <Button type="button" variant="outline" size="icon-xs" aria-label={decLabel} disabled={decDisabled} onClick={onDec}>
+    <ButtonGroup data-size={size}>
+      <Button type="button" variant="outline" size={buttonSize} aria-label={decLabel} disabled={decDisabled} onClick={onDec}>
         −
       </Button>
-      <ButtonGroupText className="min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums" data-testid={valueTestId}>
+      <ButtonGroupText
+        className={cn(
+          'min-w-13 justify-center px-2 font-mono text-[12px] tabular-nums',
+          size === 'sm' ? 'h-8' : 'h-6',
+        )}
+        data-testid={valueTestId}
+      >
         {children}
       </ButtonGroupText>
-      <Button type="button" variant="outline" size="icon-xs" aria-label={incLabel} disabled={incDisabled} onClick={onInc}>
+      <Button type="button" variant="outline" size={buttonSize} aria-label={incLabel} disabled={incDisabled} onClick={onInc}>
         +
       </Button>
     </ButtonGroup>

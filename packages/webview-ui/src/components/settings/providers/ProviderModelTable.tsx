@@ -44,7 +44,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
       ) : null}
 
       {/* 表头（桌面宽屏展示） */}
-      <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_1.75rem] items-center gap-1.5 text-[11.5px] text-ink-3 sm:grid">
+      <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_2rem] items-center gap-1.5 text-[11.5px] text-ink-3 sm:grid">
         <span>{t('settings.providers.colModelId')}</span>
         <span>{t('settings.providers.colDisplayName')}</span>
         <span>{t('settings.providers.colContext')}</span>
@@ -59,44 +59,49 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
           <div
             key={row.rowKey}
             data-testid={`provider-model-row-${index}`}
-            className="grid grid-cols-1 items-center gap-1.5 rounded-control bg-field/40 p-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_1.75rem] sm:bg-transparent sm:p-0"
+            className="grid grid-cols-1 items-center gap-1.5 rounded-control bg-field/40 p-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_2rem] sm:bg-transparent sm:p-0"
           >
             <Input
+              size="sm"
               data-testid={`provider-model-id-${index}`}
               aria-label={t('settings.providers.colModelId')}
-              className="h-8 font-mono text-[12px]"
+              className="font-mono text-[12px]"
               placeholder="model-id"
               value={row.id}
               onChange={(e) => updateModelRow(row.rowKey, { id: e.target.value })}
             />
             <Input
+              size="sm"
               data-testid={`provider-model-name-${index}`}
               aria-label={t('settings.providers.colDisplayName')}
-              className="h-8 text-[12px]"
+              className="text-[12px]"
               placeholder={t('settings.providers.colDisplayName')}
               value={row.name}
               onChange={(e) => updateModelRow(row.rowKey, { name: e.target.value })}
             />
             <Input
+              size="sm"
               data-testid={`provider-model-ctx-${index}`}
               aria-label={t('settings.providers.colContext')}
-              className="h-8 font-mono text-[12px]"
+              className="font-mono text-[12px]"
               placeholder={t('settings.providers.unknownPlaceholder')}
               value={row.contextWindow}
               onChange={(e) => updateModelRow(row.rowKey, { contextWindow: e.target.value })}
             />
             <Input
+              size="sm"
               data-testid={`provider-model-maxout-${index}`}
               aria-label={t('settings.providers.colMaxOutput')}
-              className="h-8 font-mono text-[12px]"
+              className="font-mono text-[12px]"
               placeholder={t('settings.providers.unknownPlaceholder')}
               value={row.maxOutputTokens}
               onChange={(e) => updateModelRow(row.rowKey, { maxOutputTokens: e.target.value })}
             />
             <Input
+              size="sm"
               data-testid={`provider-model-efforts-${index}`}
               aria-label={t('settings.providers.colEfforts')}
-              className="h-8 font-mono text-[12px]"
+              className="font-mono text-[12px]"
               placeholder="low, high"
               value={row.effortsText}
               onChange={(e) => updateModelRow(row.rowKey, { effortsText: e.target.value })}
@@ -115,12 +120,12 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
               aria-label={t('settings.providers.removeModel')}
               data-testid={`provider-model-remove-${index}`}
               onClick={() => removeModelRow(row.rowKey)}
             >
-              <CloseIcon className="size-3 text-ink-3" />
+              <CloseIcon className="size-3.5 text-ink-3" />
             </Button>
           </div>
         ))}

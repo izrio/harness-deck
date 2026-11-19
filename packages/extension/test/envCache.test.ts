@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   commandSpecForProfile,
+  isAutoDetectedCommandSpec,
   isBackendEnvCacheComplete,
   parseBackendEnvCache,
   type CachedExecutableRecord,
@@ -128,5 +129,58 @@ describe('BackendEnvCache 与可执行文件缓存校验', () => {
 
     await rm(bin);
     expect(await verifyExecutableFile(bin, process.platform)).toBeUndefined();
+  });
+
+  it('WSL 环境下自动丢弃旧版未隔离缓存及指向 Windows 挂载路径的缓存项', () => {
+    expect(isAutoDetectedCommandSpec('dsh::')).toBe(true);
+    expect(isAutoDetectedCommandSpec('dsh::/mnt/c/custom/dsh')).toBe(false);
+    expect(isAutoDetectedCommandSpec('acp::codebuddy')).toBe(true);
+    expect(isAutoDetectedCommandSpec('acp::/usr/local/bin/codebuddy')).toBe(false);
+    expect(isAutoDetectedCommandSpec('claude::')).toBe(true);
+
+    const legacyWsl: PersistedBackendEnvCache = {
+      schemaVersion: 1,
+      platform: 'linux',
+      updatedAt: 123456,
+      nodeEnv: { checked: true, hasNode: true, hasNpm: true },
+      npmCommand: '/usr/bin/npm',
+      npmGlobalBin: '/usr/local/bin',
+      availability: { dsh: true },
+      installedVersions: {},
+      availableVersions: {},
+      executables: {
+        dsh: { commandSpec: 'dsh::', command: '/usr/local/bin/dsh' },
+      },
+    };
+    // 缺少 wslIsolated 标记的旧缓存在 WSL 中失效，触发重新检测
+    expect(parseBackendEnvCache(legacyWsl, 'linux', { isWsl: true })).toBeUndefined();
+
+    // 带 wslIsolated 且全部为 WSL 路径时保留
+    const cleanWsl: PersistedBackendEnvCache = { ...legacyWsl, wslIsolated: true };
+    expect(parseBackendEnvCache(cleanWsl, 'linux', { isWsl: true })).toEqual(cleanWsl);
+
+    // 即使带 wslIsolated，只要包含自动探测到的 /mnt/c/... 可执行文件或 Windows npm 路径即失效
+    const pollutedDsh: PersistedBackendEnvCache = {
+      ...cleanWsl,
+      executables: {
+        dsh: { commandSpec: 'dsh::', command: '/mnt/c/Users/longc/nvm/nodejs/dsh' },
+      },
+    };
+    expect(parseBackendEnvCache(pollutedDsh, 'linux', { isWsl: true })).toBeUndefined();
+
+    const pollutedNpm: PersistedBackendEnvCache = {
+      ...cleanWsl,
+      npmCommand: '/mnt/c/Users/longc/nvm/nodejs/npm',
+    };
+    expect(parseBackendEnvCache(pollutedNpm, 'linux', { isWsl: true })).toBeUndefined();
+
+    // 用户显式配置的绝对路径不受自动探测路径过滤影响
+    const explicitPath: PersistedBackendEnvCache = {
+      ...cleanWsl,
+      executables: {
+        dsh: { commandSpec: 'dsh::/mnt/c/custom/dsh', command: '/mnt/c/custom/dsh' },
+      },
+    };
+    expect(parseBackendEnvCache(explicitPath, 'linux', { isWsl: true })).toEqual(explicitPath);
   });
 });

@@ -170,6 +170,7 @@ export function AgentsView() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldName')}</span>
                   <Input
+                    size="sm"
                     data-testid="agent-input-name"
                     value={name}
                     placeholder={t('wb.agents.fieldNamePlaceholder')}
@@ -179,6 +180,7 @@ export function AgentsView() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldSpecialty')}</span>
                   <Input
+                    size="sm"
                     data-testid="agent-input-specialty"
                     value={specialty}
                     placeholder={t('wb.agents.fieldSpecialtyPlaceholder')}
@@ -427,7 +429,7 @@ export function AgentsView() {
                         ) : <span />}
                         <Button
                           type="button"
-                          size="xs"
+                          size="sm"
                           data-testid={`agent-delegate-submit-${agent.id}`}
                           disabled={!delegatePrompt.trim()}
                           onClick={() => submitDelegate(agent.id)}
