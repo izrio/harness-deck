@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { NodeEnvBanner } from './agents/NodeEnvBanner.tsx';
 import { BackendCard } from './agents/BackendCard.tsx';
+import { SettingsSection } from './SettingsSection.tsx';
 
 interface AgentFormState {
   readonly isNew: boolean;
@@ -154,23 +155,21 @@ export function AgentSettings() {
   };
 
   return (
-    <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card" data-testid="settings-backends">
-      <div className="primitive-card-bar flex items-center justify-between gap-2 border-b border-line bg-inset/50">
-        <div className="min-w-0">
-          <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.backends')}</h3>
-          <p className="mt-0.5 mb-0 text-[11.5px] text-ink-3">{t('settings.backendsHint')}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button type="button" variant="outline" size="xs" data-testid="agent-add-btn" onClick={openAdd}>
+    <SettingsSection
+      title={t('settings.backends')}
+      testId="settings-backends"
+      actions={
+        <>
+          <Button type="button" variant="outline" size="default" data-testid="agent-add-btn" onClick={openAdd}>
             <PlusIcon className="size-3" />
             <span>{t('settings.agents.add')}</span>
           </Button>
-          <Button type="button" variant="ghost" size="icon-xs" data-testid="settings-refresh-env" title={t('settings.refresh')} aria-label={t('settings.refresh')} onClick={refreshAll}>
+          <Button type="button" variant="ghost" size="icon" data-testid="settings-refresh-env" title={t('settings.refresh')} aria-label={t('settings.refresh')} onClick={refreshAll}>
             <RefreshIcon className="size-3.5 text-ink-2" />
           </Button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       <div className="primitive-card-pad flex flex-col gap-2.5">
         <NodeEnvBanner nodeEnv={nodeEnv} />
 
@@ -194,7 +193,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.name')}</span>
                     <Input
-                      size="sm"
+                      size="default"
                       data-testid="agent-form-name"
                       value={form.name}
                       placeholder={t('settings.agents.form.namePlaceholder')}
@@ -205,7 +204,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.id')}</span>
                     <Input
-                      size="sm"
+                      size="default"
                       data-testid="agent-form-id"
                       disabled={!form.isNew}
                       className="font-mono text-[12px]"
@@ -220,7 +219,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.command')}</span>
                     <Input
-                      size="sm"
+                      size="default"
                       data-testid="agent-form-command"
                       className="font-mono text-[12px]"
                       value={form.command}
@@ -232,7 +231,7 @@ export function AgentSettings() {
                   <label className="flex flex-col gap-1">
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.args')}</span>
                     <Input
-                      size="sm"
+                      size="default"
                       data-testid="agent-form-args"
                       className="font-mono text-[12px]"
                       value={form.argsText}
@@ -257,7 +256,7 @@ export function AgentSettings() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.installHint')}</span>
                   <Input
-                    size="sm"
+                    size="default"
                     data-testid="agent-form-install-hint"
                     className="text-[12px]"
                     value={form.installHint}
@@ -287,10 +286,10 @@ export function AgentSettings() {
               </div>
 
               <DialogFooter>
-                <Button type="button" variant="outline" size="sm" data-testid="agent-form-cancel" onClick={closeForm}>
+                <Button type="button" variant="outline" size="default" data-testid="agent-form-cancel" onClick={closeForm}>
                   {t('common.cancel')}
                 </Button>
-                <Button type="button" size="sm" data-testid="agent-form-save" onClick={submitForm}>
+                <Button type="button" size="default" data-testid="agent-form-save" onClick={submitForm}>
                   {t('settings.agents.form.save')}
                 </Button>
               </DialogFooter>
@@ -316,6 +315,6 @@ export function AgentSettings() {
           ))}
         </div>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

@@ -4,6 +4,7 @@
  */
 import { useState } from 'react';
 import type { ChatCommand } from '@harness-deck/shared';
+import { SettingsSection } from './SettingsSection.tsx';
 import { useT } from '../../i18n.ts';
 import { closeSettingsPage, requestPrefill, setPreferencesLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
@@ -133,28 +134,22 @@ export function ChatCommandSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-chat-commands">
-      <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card">
-        <div className="primitive-card-bar flex flex-wrap items-start justify-between gap-2 border-b border-line bg-inset/50">
-          <div className="flex min-w-0 items-start gap-2">
-            <SlashIcon className="mt-0.5 size-3.5 shrink-0 text-accent-ink" />
-            <div className="min-w-0">
-              <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.commands.title')}</h3>
-              <p className="mt-0.5 mb-0 text-[11.5px] leading-relaxed text-ink-3">{t('settings.commands.desc')}</p>
-            </div>
-          </div>
+    <div className="flex flex-col gap-5" data-testid="settings-chat-commands">
+      <SettingsSection
+        title={t('settings.commands.title')}
+        actions={
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="default"
             data-testid="chat-command-add-btn"
             onClick={openAdd}
           >
             <PlusIcon className="size-3" />
             <span>{t('settings.commands.add')}</span>
           </Button>
-        </div>
-
+        }
+      >
         <div className="primitive-card-pad flex flex-col gap-2.5">
           <Dialog open={Boolean(form)} onOpenChange={(open) => !open && closeForm()}>
             {form ? (
@@ -176,7 +171,7 @@ export function ChatCommandSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.commands.form.name')}</span>
                       <Input
-                        size="sm"
+                        size="default"
                         data-testid="chat-command-form-name"
                         className="font-mono text-[12px]"
                         value={form.name}
@@ -188,7 +183,7 @@ export function ChatCommandSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.commands.form.desc')}</span>
                       <Input
-                        size="sm"
+                        size="default"
                         data-testid="chat-command-form-desc"
                         className="text-[12px]"
                         value={form.description}
@@ -218,12 +213,12 @@ export function ChatCommandSettings() {
                 </div>
 
                 <DialogFooter>
-                  <Button type="button" variant="outline" size="sm" data-testid="chat-command-form-cancel" onClick={closeForm}>
+                  <Button type="button" variant="outline" size="default" data-testid="chat-command-form-cancel" onClick={closeForm}>
                     {t('common.cancel')}
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
+                    size="default"
                     data-testid="chat-command-form-save"
                     onClick={submitForm}
                   >
@@ -268,7 +263,7 @@ export function ChatCommandSettings() {
                       <Button
                         type="button"
                         variant="outline"
-                        size="xs"
+                        size="default"
                         data-testid={`use-chat-command-${cmd.name}`}
                         onClick={() => fillIntoComposer(cmd.prompt)}
                       >
@@ -278,7 +273,7 @@ export function ChatCommandSettings() {
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon"
                         aria-label={t('common.edit')}
                         data-testid={`edit-chat-command-${cmd.name}`}
                         onClick={() => openEdit(cmd)}
@@ -288,7 +283,7 @@ export function ChatCommandSettings() {
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon"
                         className="text-red hover:bg-red-tint hover:text-red"
                         aria-label={t('common.delete')}
                         data-testid={`delete-chat-command-${cmd.name}`}
@@ -307,7 +302,7 @@ export function ChatCommandSettings() {
             </div>
           )}
         </div>
-      </section>
+      </SettingsSection>
     </div>
   );
 }

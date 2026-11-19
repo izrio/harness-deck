@@ -6,7 +6,7 @@
  * - 贴底状态下跟随新消息与高度增长；上翻阅读时保持视口稳定并提示未读新内容。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Item } from '@harness-deck/shared';
+import type { ThreadRow } from '../threadRows.ts';
 import {
   BUTTON_THRESHOLD,
   DEFAULT_VIEWPORT_HEIGHT,
@@ -31,13 +31,14 @@ const SMOOTH_SCROLL_SETTLE_MS = 650;
 
 interface CommittedSnapshot {
   readonly sessionKey: string;
-  readonly items: readonly Item[];
+  readonly rows: readonly ThreadRow[];
   readonly layout: VirtualLayout;
   readonly listOffsetTop: number;
 }
 
 export interface UseVirtualThreadOptions {
-  readonly items: readonly Item[];
+  readonly rows: readonly ThreadRow[];
+  readonly expandedRowIds: ReadonlySet<string>;
   readonly sessionKey: string;
   readonly hasOlder: boolean;
   readonly loadingOlder: boolean;
@@ -79,7 +80,8 @@ function getOrCreateHeightMap(cache: Map<string, Map<string, number>>, sessionKe
 }
 
 export function useVirtualThread({
-  items,
+  rows,
+  expandedRowIds,
   sessionKey,
   hasOlder,
   loadingOlder,
@@ -120,10 +122,14 @@ export function useVirtualThread({
 
   const prevCommitRef = useRef<CommittedSnapshot | undefined>(undefined);
   const prevAppearanceKeyRef = useRef(appearanceKey);
+  const prevRowShapeRef = useRef<{ sessionKey: string; shapes: Map<string, string> }>({
+    sessionKey,
+    shapes: new Map(),
+  });
 
   // 最新 props/状态镜像给事件回调与 ResizeObserver 使用
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   const sessionKeyRef = useRef(sessionKey);
   sessionKeyRef.current = sessionKey;
   const hasOlderRef = useRef(hasOlder);
@@ -135,8 +141,8 @@ export function useVirtualThread({
 
   const heightMap = getOrCreateHeightMap(heightCacheRef.current, sessionKey);
   const layout = useMemo(
-    () => computeVirtualLayout(items, heightMap, THREAD_GAP),
-    [items, heightMap, measureVersion],
+    () => computeVirtualLayout(rows, heightMap, THREAD_GAP, expandedRowIds),
+    [rows, heightMap, measureVersion, expandedRowIds],
   );
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -147,8 +153,8 @@ export function useVirtualThread({
   const effectiveStick = isSessionSwitch ? true : stickToBottom;
 
   let pendingPrependDelta = 0;
-  if (!isSessionSwitch && prevCommit && prevCommit.items !== items) {
-    const anchor = detectPrependAnchor(prevCommit.items, items);
+  if (!isSessionSwitch && prevCommit && prevCommit.rows !== rows) {
+    const anchor = detectPrependAnchor(prevCommit.rows, rows);
     if (anchor) {
       pendingPrependDelta = Math.max(0, layout.offsets[anchor.nextIndex]! - prevCommit.layout.offsets[anchor.prevIndex]!);
     }
@@ -197,7 +203,7 @@ export function useVirtualThread({
     if (Date.now() < loadOlderCooldownUntilRef.current) return;
 
     loadOlderPendingRef.current = true;
-    requestedOldestIdRef.current = itemsRef.current[0]?.id;
+    requestedOldestIdRef.current = rowsRef.current[0]?.id;
     setLocalLoadingOlder(true);
     clearLoadOlderTimer();
     // 兜底：若 Host 未响应或未翻回 loadingOlder，超时后解除锁定
@@ -234,16 +240,16 @@ export function useVirtualThread({
     const scroller = scrollerRef.current;
     if (!scroller || scroller.clientHeight <= 0) return;
 
-    const currentItems = itemsRef.current;
+    const currentRows = rowsRef.current;
     const currentLayout = layoutRef.current;
     const currentRange = rangeRef.current;
-    if (currentItems.length === 0 || currentRange.endIndex < currentRange.startIndex) return;
+    if (currentRows.length === 0 || currentRange.endIndex < currentRange.startIndex) return;
 
     const currentHeightMap = getOrCreateHeightMap(heightCacheRef.current, sessionKeyRef.current);
     const idToIndex = new Map<string, number>();
     for (let i = currentRange.startIndex; i <= currentRange.endIndex; i++) {
-      const item = currentItems[i];
-      if (item) idToIndex.set(item.id, i);
+      const row = currentRows[i];
+      if (row) idToIndex.set(row.id, i);
     }
 
     const listEl = listRef.current;
@@ -369,16 +375,34 @@ export function useVirtualThread({
 
     prevCommitRef.current = {
       sessionKey,
-      items,
+      rows,
       layout,
       listOffsetTop: nextListOffsetTop,
     };
+
+    // 若未挂载行的分组/展开形态发生变化，清除其过期高度缓存，避免滚回时按旧形态高度产生跳动
+    const prevShapes = prevRowShapeRef.current;
+    const nextShapes = new Map<string, string>();
+    const sameShapeSession = prevShapes.sessionKey === sessionKey;
+    let shapeInvalidated = false;
+    for (const row of rows) {
+      const shape = row.grouped ? (expandedRowIds.has(row.id) ? 'g1' : 'g0') : 's';
+      nextShapes.set(row.id, shape);
+      if (sameShapeSession) {
+        const prevShape = prevShapes.shapes.get(row.id);
+        if (prevShape !== undefined && prevShape !== shape && !rowElementsRef.current.has(row.id)) {
+          if (heightMap.delete(row.id)) shapeInvalidated = true;
+        }
+      }
+    }
+    prevRowShapeRef.current = { sessionKey, shapes: nextShapes };
+    if (shapeInvalidated) setMeasureVersion((v) => v + 1);
 
     // 同步测量本轮新挂载的条目，避免向上滚入未测量条目时出现单帧跳动
     measureRows();
   });
 
-  // 监听 hasOlder / loadingOlder / items[0] 变化，管理无限加载状态机与首屏不满时的自动补齐
+  // 监听 hasOlder / loadingOlder / 首行 变化，管理无限加载状态机与首屏不满时的自动补齐
   useEffect(() => {
     const prevLoading = prevLoadingOlderRef.current;
     prevLoadingOlderRef.current = loadingOlder;
@@ -388,7 +412,7 @@ export function useVirtualThread({
       return;
     }
 
-    const currentFirstId = items[0]?.id;
+    const currentFirstId = rows[0]?.id;
     if (loadOlderPendingRef.current && requestedOldestIdRef.current !== undefined && currentFirstId !== requestedOldestIdRef.current) {
       resetLoadOlderState();
     } else if (prevLoading && !loadingOlder && loadOlderPendingRef.current) {
@@ -405,7 +429,7 @@ export function useVirtualThread({
     }
 
     maybeLoadOlder();
-  }, [hasOlder, loadingOlder, items, sessionKey, viewportHeight, measureVersion, maybeLoadOlder, resetLoadOlderState, clearLoadOlderTimer]);
+  }, [hasOlder, loadingOlder, rows, sessionKey, viewportHeight, measureVersion, maybeLoadOlder, resetLoadOlderState, clearLoadOlderTimer]);
 
   // 组件卸载时清理定时器
   useEffect(() => {
@@ -416,7 +440,7 @@ export function useVirtualThread({
   }, [clearLoadOlderTimer, clearSmoothScroll]);
 
   // 未读新内容提示（仅在尾部新增消息或交互卡片、且用户未贴底时亮起）
-  const lastId = items.at(-1)?.id;
+  const lastId = rows.at(-1)?.items.at(-1)?.id;
   const seenRef = useRef({ sessionKey, lastId, interactions: interactionsCount });
   useEffect(() => {
     const before = seenRef.current;

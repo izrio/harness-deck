@@ -200,6 +200,7 @@ packages/
 | v0.4.0 | 全面审查后的修复：底层启动与切换、ACP 审批保护与 dsh 对齐、发送失败不丢输入；输入框上方合并成一行状态栏；对比度、点击区域、读屏；两种底层共用标签和上下文模块，ESLint 和多平台单测 |
 | v0.5.0 | JetBrains IDE 插件与独立 Sidecar、Claude/Pi/ZCode 原生底层、工作台（总览/定时任务/智能体/看板/跨项目会话）、服务商代理与 MCP/Skill 管理、shadcn-ui 界面重构与稳定性打磨 |
 | v0.5.1 | 对话虚拟列表、统一控件尺寸与离线 Iconify 图标规范、WSL 运行时发现、浏览器桥接与 OpenAI 转 Anthropic 代理增强 |
+| v0.5.2 | 对话思考轨迹折叠（`ThinkingTrace`）、首页智能体快捷下拉切换、设置页统一分区布局与控件尺寸对齐、状态栏与会话列表视觉打磨 |
 
 里程碑细节见 [DESIGN.md 第 12 节](./docs/DESIGN.md#12-里程碑与任务拆解)，每个版本的改动见 [CHANGELOG](./packages/extension/CHANGELOG.md)。
 

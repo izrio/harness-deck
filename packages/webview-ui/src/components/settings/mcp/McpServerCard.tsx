@@ -45,7 +45,7 @@ export function McpServerCard({ agents, openEdit, toggleServerEnabled, toggleSer
 
         <div className="flex shrink-0 items-center gap-1.5">
           <Switch
-            size="sm"
+            size="default"
             checked={server.enabled}
             aria-label={server.name}
             data-testid={`toggle-mcp-${server.id}`}
@@ -54,7 +54,7 @@ export function McpServerCard({ agents, openEdit, toggleServerEnabled, toggleSer
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon"
             aria-label={t('common.edit')}
             data-testid={`edit-mcp-${server.id}`}
             onClick={() => openEdit(server)}
@@ -64,7 +64,7 @@ export function McpServerCard({ agents, openEdit, toggleServerEnabled, toggleSer
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon"
             className="text-red hover:bg-red-tint hover:text-red"
             aria-label={t('common.delete')}
             data-testid={`delete-mcp-${server.id}`}

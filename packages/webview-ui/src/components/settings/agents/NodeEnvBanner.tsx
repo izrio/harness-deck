@@ -33,7 +33,7 @@ export function NodeEnvBanner({ nodeEnv }: { readonly nodeEnv?: NodeEnvState }) 
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
-            size="xs"
+            size="default"
             data-testid="install-node-btn"
             onClick={() => postToHost({ type: 'openExternal', payload: { url: NODE_DOWNLOAD_URL } })}
           >
@@ -43,7 +43,7 @@ export function NodeEnvBanner({ nodeEnv }: { readonly nodeEnv?: NodeEnvState }) 
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="default"
             onClick={() => postToHost({ type: 'checkBackendEnv', payload: {} })}
           >
             <RefreshIcon className="size-3" />

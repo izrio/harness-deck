@@ -28,9 +28,7 @@ import { cn } from '../../lib/utils.ts';
 import { useView } from '../../store.ts';
 import { loadState, postToHost, saveState } from '../../vscode.ts';
 import { BackendLogo } from '../BackendLogo.tsx';
-import { ValuePill } from '../beautifului/index.ts';
 import {
-  ChatIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CloseIcon,
@@ -244,10 +242,10 @@ function ProjectSessionGroupBlock({
 
   return (
     <SidebarGroup className="gap-1 p-0" data-testid={`project-group-${group.projectName}`}>
-      <div className="flex items-center justify-between gap-1 px-0.5">
+      <div className="flex items-center gap-1 rounded-control px-1 py-2 transition-colors duration-100 hover:bg-hover">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-control px-1.5 py-1 text-left transition-colors duration-100 hover:bg-hover"
+          className="flex min-w-0 flex-1 items-center gap-1.5 px-0.5 text-left"
           onClick={onToggle}
           title={group.projectPath}
         >
@@ -256,17 +254,11 @@ function ProjectSessionGroupBlock({
           ) : (
             <ChevronDownIcon className="size-3.5 shrink-0 text-ink-3" />
           )}
-          <FolderIcon className={cn('size-3.5 shrink-0', group.isCurrent ? 'text-accent-ink' : 'text-ink-2')} />
-          <span className="truncate text-[12px] font-semibold text-ink">{group.projectName}</span>
-          {group.isCurrent ? (
-            <ValuePill tone="accent" className="shrink-0 px-1.5 py-0 text-[10.5px]">
-              {t('wb.sessions.currentProject')}
-            </ValuePill>
-          ) : (
-            <span className="shrink-0 rounded-full bg-field px-1.5 py-0.5 text-[10.5px] leading-none font-medium text-ink-3 tabular-nums">
-              {filteredSessions.length}
-            </span>
-          )}
+          <FolderIcon className="size-4 shrink-0 text-ink-2" />
+          <span className="truncate text-[12.5px] font-semibold text-ink">{group.projectName}</span>
+          <span className="shrink-0 rounded-full bg-field px-1.5 py-0.5 text-[10.5px] leading-none font-medium text-ink-3 tabular-nums">
+            {filteredSessions.length}
+          </span>
         </button>
 
         <Button
@@ -276,7 +268,7 @@ function ProjectSessionGroupBlock({
           data-testid={`project-new-session-${group.projectName}`}
           title={t('wb.sessions.newInProject')}
           aria-label={`${group.projectName} · ${t('wb.sessions.newInProject')}`}
-          className="shrink-0 text-ink-2 hover:bg-hover hover:text-ink"
+          className="shrink-0 text-ink-2 hover:bg-hover-2 hover:text-ink"
           onClick={() =>
             postToHost({
               type: 'startProjectSession',
@@ -345,11 +337,6 @@ function SessionListItemRow({
         }
       >
         <div className="flex w-full min-w-0 items-center gap-2">
-          {session.running ? (
-            <SpinnerIcon className="size-3.5 shrink-0 text-accent-ink" />
-          ) : (
-            <ChatIcon className={cn('size-3.5 shrink-0', isCurrent ? 'text-accent-ink' : 'text-ink-3')} />
-          )}
           <span
             className={cn(
               'min-w-0 flex-1 truncate text-[12.5px] leading-snug',
@@ -358,6 +345,7 @@ function SessionListItemRow({
           >
             {session.title}
           </span>
+          {session.running ? <SpinnerIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
           {session.needsAttention ? (
             <span
               className="size-2 shrink-0 rounded-full bg-orange ring-2 ring-orange-tint"
@@ -368,16 +356,13 @@ function SessionListItemRow({
           ) : null}
         </div>
 
-        <div className="flex w-full min-w-0 items-center justify-between gap-2 pl-5.5 text-[11px] leading-4 text-ink-3">
-          <span className="flex min-w-0 items-center gap-1.5">
+        <div className="flex w-full min-w-0 items-center justify-between gap-2 text-[11px] leading-4 text-ink-3">
+          <span
+            className="flex min-w-0 items-center gap-1.5"
+            title={session.agentName ? `${session.backendName} · ${session.agentName}` : session.backendName}
+          >
             <BackendLogo backend={{ id: session.backendId, name: session.backendName }} size="sm" />
-            <span className="truncate">{session.backendName}</span>
-            {session.agentName ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="truncate">{session.agentName}</span>
-              </>
-            ) : null}
+            <span className="sr-only">{session.backendName}</span>
           </span>
           {session.updatedAt > 0 ? (
             <span className="shrink-0 tabular-nums">{relativeTime(session.updatedAt, t)}</span>

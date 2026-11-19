@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import type { InstalledSkillView } from '@harness-deck/shared';
+import { SettingsSection } from './SettingsSection.tsx';
 import { useT } from '../../i18n.ts';
 import { requestMarkdownPreview, setExtensionsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
@@ -199,28 +200,22 @@ export function SkillSettings() {
   const installedNames = new Set(skills.items.map((item) => item.name.toLowerCase()));
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-skills">
-      <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card">
-        <div className="primitive-card-bar flex flex-wrap items-start justify-between gap-2 border-b border-line bg-inset/50">
-          <div className="flex min-w-0 items-start gap-2">
-            <PuzzleIcon className="mt-0.5 size-3.5 shrink-0 text-accent-ink" />
-            <div className="min-w-0">
-              <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.skills.title')}</h3>
-              <p className="mt-0.5 mb-0 text-[11.5px] leading-relaxed text-ink-3">{t('settings.skills.desc')}</p>
-            </div>
-          </div>
+    <div className="flex flex-col gap-5" data-testid="settings-skills">
+      <SettingsSection
+        title={t('settings.skills.title')}
+        actions={
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="default"
             data-testid="skill-install-btn"
             onClick={openInstallDialog}
           >
             <PlusIcon className="size-3" />
             <span>{t('settings.skills.installBtn')}</span>
           </Button>
-        </div>
-
+        }
+      >
         <div className="primitive-card-pad flex flex-col gap-2.5">
           <Dialog open={dialogOpen} onOpenChange={(open) => !open && closeInstallDialog()}>
             {dialogOpen ? (
@@ -240,7 +235,7 @@ export function SkillSettings() {
                     <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.repoUrl')}</span>
                     <div className="flex items-center gap-2">
                       <Input
-                        size="sm"
+                        size="default"
                         data-testid="skill-repo-url"
                         className="flex-1 font-mono text-[12px]"
                         value={repoUrl}
@@ -250,7 +245,7 @@ export function SkillSettings() {
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
+                        size="default"
                         disabled={Boolean(skills.scanning || skills.installing)}
                         data-testid="skill-scan-btn"
                         onClick={handleScan}
@@ -267,7 +262,7 @@ export function SkillSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.ref')}</span>
                       <Input
-                        size="sm"
+                        size="default"
                         data-testid="skill-repo-ref"
                         className="font-mono text-[12px]"
                         value={ref}
@@ -278,7 +273,7 @@ export function SkillSettings() {
                     <label className="flex flex-col gap-1">
                       <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.subpath')}</span>
                       <Input
-                        size="sm"
+                        size="default"
                         data-testid="skill-repo-subpath"
                         className="font-mono text-[12px]"
                         value={subpath}
@@ -405,7 +400,7 @@ export function SkillSettings() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
+                    size="default"
                     disabled={Boolean(skills.installing)}
                     data-testid="skill-install-cancel"
                     onClick={closeInstallDialog}
@@ -414,7 +409,7 @@ export function SkillSettings() {
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
+                    size="default"
                     disabled={Boolean(skills.installing || (hasScannedList && selectedSubpaths.length === 0))}
                     data-testid="skill-install-submit"
                     onClick={handleInstall}
@@ -480,7 +475,7 @@ export function SkillSettings() {
                         <Button
                           type="button"
                           variant="outline"
-                          size="xs"
+                          size="default"
                           data-testid={`preview-skill-${skill.id}`}
                           onClick={() => requestMarkdownPreview(skill.skillMdPath)}
                         >
@@ -490,7 +485,7 @@ export function SkillSettings() {
                         <Button
                           type="button"
                           variant="ghost"
-                          size="xs"
+                          size="default"
                           disabled={busy}
                           data-testid={`sync-skill-${skill.id}`}
                           onClick={() => postToHost({ type: 'syncSkill', payload: { id: skill.id } })}
@@ -505,7 +500,7 @@ export function SkillSettings() {
                           </span>
                         </Button>
                         <Switch
-                          size="sm"
+                          size="default"
                           checked={skill.enabled}
                           disabled={busy}
                           aria-label={skill.name}
@@ -515,7 +510,7 @@ export function SkillSettings() {
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon-xs"
+                          size="icon"
                           disabled={busy}
                           className="text-red hover:bg-red-tint hover:text-red"
                           aria-label={t('settings.skills.delete')}
@@ -572,7 +567,7 @@ export function SkillSettings() {
             </div>
           )}
         </div>
-      </section>
+      </SettingsSection>
     </div>
   );
 }

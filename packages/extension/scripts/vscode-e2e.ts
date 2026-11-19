@@ -152,6 +152,8 @@ try {
   await input.fill('E2E_TOOL 看看 README，再跑一下测试');
   await input.press('Enter');
   await webview.locator('.assistant', { hasText: '测试全部通过' }).waitFor({ timeout: 60_000 });
+  const traceToggles = webview.locator('[data-testid="thinking-toggle"][aria-expanded="false"]');
+  for (let i = 0; i < 20 && (await traceToggles.count()) > 0; i++) await traceToggles.first().click();
   check('工具调用显示为活动行', (await webview.locator('.activity').count()) === 2);
   await webview.locator('.shiki').first().waitFor({ timeout: 15_000 });
   await page.waitForTimeout(1_000);

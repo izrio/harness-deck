@@ -27,7 +27,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
               <Button
                 type="button"
                 variant="ghost"
-                size="xs"
+                size="default"
                 data-testid="mcp-paste-json-toggle"
                 onClick={() => setShowJsonPaste((prev) => !prev)}
               >
@@ -52,7 +52,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                   <Button
                     type="button"
                     variant="secondary"
-                    size="xs"
+                    size="default"
                     data-testid="mcp-paste-json-apply"
                     onClick={applyPastedJson}
                   >
@@ -66,7 +66,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.name')}</span>
                 <Input
-                  size="sm"
+                  size="default"
                   data-testid="mcp-form-name"
                   className="font-mono text-[12px]"
                   value={form.name}
@@ -78,7 +78,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.transport')}</span>
                 <NativeSelect
-                  size="sm"
+                  size="default"
                   data-testid="mcp-form-transport"
                   className="w-full text-[12px]"
                   value={form.transport}
@@ -96,7 +96,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.command')}</span>
                   <Input
-                    size="sm"
+                    size="default"
                     data-testid="mcp-form-command"
                     className="font-mono text-[12px]"
                     value={form.command}
@@ -107,7 +107,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.args')}</span>
                   <Input
-                    size="sm"
+                    size="default"
                     data-testid="mcp-form-args"
                     className="font-mono text-[12px]"
                     value={form.argsText}
@@ -132,7 +132,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.url')}</span>
                   <Input
-                    size="sm"
+                    size="default"
                     data-testid="mcp-form-url"
                     className="font-mono text-[12px]"
                     value={form.url}
@@ -207,10 +207,10 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" size="sm" data-testid="mcp-form-cancel" onClick={closeForm}>
+            <Button type="button" variant="outline" size="default" data-testid="mcp-form-cancel" onClick={closeForm}>
               {t('common.cancel')}
             </Button>
-            <Button type="button" size="sm" data-testid="mcp-form-save" onClick={submitForm}>
+            <Button type="button" size="default" data-testid="mcp-form-save" onClick={submitForm}>
               {t('settings.mcp.form.save')}
             </Button>
           </DialogFooter>

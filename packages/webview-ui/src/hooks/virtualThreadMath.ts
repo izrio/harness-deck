@@ -2,6 +2,7 @@
  * 对话流虚拟滚动纯计算模块：高度估算、前缀和布局、二分查找可见窗口与向前追加锚点检测。
  */
 import type { Item } from '@harness-deck/shared';
+import type { ThreadRow } from '../threadRows.ts';
 
 export const THREAD_GAP = 14;
 export const DEFAULT_VIEWPORT_HEIGHT = 720;
@@ -10,6 +11,9 @@ export const MIN_OVERSCAN_COUNT = 3;
 export const STICK_THRESHOLD = 48;
 export const BUTTON_THRESHOLD = 240;
 export const LOAD_OLDER_THRESHOLD = 320;
+/** 折叠后的思考轨迹卡片高度（头部一行）。 */
+export const GROUP_COLLAPSED_HEIGHT = 38;
+const GROUP_BODY_ITEM_GAP = 4;
 
 export interface VirtualLayout {
   readonly offsets: Float64Array;
@@ -60,13 +64,22 @@ export function estimateItemHeight(item: Item): number {
   }
 }
 
+/** 行的初始高度估算：单行沿用条目估算，思考轨迹按折叠/展开分别估算。 */
+export function estimateRowHeight(row: ThreadRow, expanded = false): number {
+  if (!row.grouped) return estimateItemHeight(row.items[0]!);
+  if (!expanded) return GROUP_COLLAPSED_HEIGHT;
+  const body = row.items.reduce((sum, item) => sum + estimateItemHeight(item) + GROUP_BODY_ITEM_GAP, 0);
+  return GROUP_COLLAPSED_HEIGHT + body;
+}
+
 /** 计算每个条目的高度与顶部偏移（前缀和）。 */
 export function computeVirtualLayout(
-  items: readonly Item[],
+  rows: readonly ThreadRow[],
   measured: ReadonlyMap<string, number>,
   gap = THREAD_GAP,
+  expandedRowIds?: ReadonlySet<string>,
 ): VirtualLayout {
-  const count = items.length;
+  const count = rows.length;
   const offsets = new Float64Array(count);
   const sizes = new Float64Array(count);
   if (count === 0) {
@@ -75,9 +88,12 @@ export function computeVirtualLayout(
 
   let cursor = 0;
   for (let i = 0; i < count; i++) {
-    const item = items[i]!;
-    const cached = measured.get(item.id);
-    const size = cached !== undefined && cached > 0 ? cached : estimateItemHeight(item);
+    const row = rows[i]!;
+    const cached = measured.get(row.id);
+    const size =
+      cached !== undefined && cached > 0
+        ? cached
+        : estimateRowHeight(row, expandedRowIds?.has(row.id) ?? false);
     offsets[i] = cursor;
     sizes[i] = size;
     cursor += size + gap;
@@ -144,14 +160,18 @@ export function computeVisibleRange(
  * 检查前若干条以兼容分页边界处少量条目合并的情况。
  */
 export function detectPrependAnchor(
-  prevItems: readonly Item[],
-  nextItems: readonly Item[],
+  prevRows: readonly ThreadRow[],
+  nextRows: readonly ThreadRow[],
 ): PrependAnchor | undefined {
-  if (prevItems.length === 0 || nextItems.length <= prevItems.length) return undefined;
-  const probeLimit = Math.min(4, prevItems.length);
+  if (prevRows.length === 0 || nextRows.length <= prevRows.length) return undefined;
+  const probeLimit = Math.min(4, prevRows.length);
   for (let prevIndex = 0; prevIndex < probeLimit; prevIndex++) {
-    const anchorId = prevItems[prevIndex]!.id;
-    const nextIndex = nextItems.findIndex((item) => item.id === anchorId);
+    const anchorId = prevRows[prevIndex]!.id;
+    // 先按行 id 找；分页边界可能与新条目合并进同一个思考轨迹，再按组内条目 id 兜底
+    let nextIndex = nextRows.findIndex((row) => row.id === anchorId);
+    if (nextIndex < 0) {
+      nextIndex = nextRows.findIndex((row) => row.items.some((item) => item.id === anchorId));
+    }
     if (nextIndex > prevIndex) {
       return { anchorId, prevIndex, nextIndex };
     }

@@ -91,10 +91,11 @@ describe('组件尺寸统一规范（AGENTS.md）', () => {
     });
   }
 
-  it('NumberStepper 的按钮与中间数值区在 xs 与 sm 档位下保持严格等高', () => {
+  it('NumberStepper 的按钮与中间数值区在 xs / sm / default 档位下保持严格等高', () => {
     for (const [size, btnSize, expectedHeight] of [
       ['xs', 'icon-xs', 'h-6'],
       ['sm', 'icon-sm', 'h-8'],
+      ['default', 'icon', 'h-9'],
     ] as const) {
       const { container, unmount } = render(
         <NumberStepper

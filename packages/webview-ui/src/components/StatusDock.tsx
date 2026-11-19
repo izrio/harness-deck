@@ -100,11 +100,11 @@ export function StatusDock() {
       ) : null}
 
       {hasTodos || shownChanges || dirtyFiles > 0 ? (
-        <div className="dock__bar flex flex-wrap items-center gap-1 p-1">
+        <div className="dock__bar flex flex-col items-stretch gap-1 p-1">
           {todos?.length ? (
             <button
               type="button"
-              className="dock__seg dock__seg--todos todo-card__header inline-flex h-7 min-w-0 flex-[1_1_14em] items-center gap-1.5 rounded-[7px] px-2 text-left text-ink transition-colors duration-100 hover:bg-hover"
+              className="dock__seg dock__seg--todos todo-card__header flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[7px] px-2 text-left text-ink transition-colors duration-100 hover:bg-hover"
               aria-expanded={panel === 'todos'}
               {...(panel === 'todos' ? { 'aria-controls': 'dock-panel' } : {})}
               onClick={() => toggle('todos')}
@@ -131,10 +131,13 @@ export function StatusDock() {
           ) : null}
 
           {shownChanges ? (
-            <span className="dock__group inline-flex shrink-0 items-center gap-0.5" data-testid="session-changes">
+            <span
+              className="dock__group flex h-7 w-full min-w-0 items-center gap-0.5 rounded-[7px] pr-0.5 transition-colors duration-100 hover:bg-hover"
+              data-testid="session-changes"
+            >
               <button
                 type="button"
-                className="dock__seg session-changes__toggle inline-flex h-7 items-center gap-1.5 rounded-[7px] px-2 text-left text-ink transition-colors duration-100 hover:bg-hover"
+                className="dock__seg session-changes__toggle flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left text-ink"
                 aria-expanded={panel === 'changes'}
                 {...(panel === 'changes' ? { 'aria-controls': 'dock-panel' } : {})}
                 onClick={() => toggle('changes')}
@@ -147,7 +150,7 @@ export function StatusDock() {
               </button>
               <button
                 type="button"
-                className="inline-flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-ink-3 transition-colors duration-100 hover:text-ink"
                 onClick={dismissChanges}
                 aria-label={t('sessionChanges.hide')}
                 title={t('sessionChanges.hide')}
@@ -158,7 +161,7 @@ export function StatusDock() {
           ) : null}
 
           {dirtyFiles > 0 ? (
-            <span className="dock__group dock__group--dirty ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] bg-orange-tint px-2 text-orange" title={t('dock.dirtyTitle', dirtyFiles)} data-testid="dirty-strip">
+            <span className="dock__group dock__group--dirty inline-flex h-7 shrink-0 items-center gap-1.5 self-end rounded-[7px] bg-orange-tint px-2 text-orange" title={t('dock.dirtyTitle', dirtyFiles)} data-testid="dirty-strip">
               <SaveIcon className="dirty-strip__icon size-3.5 shrink-0" />
               <span className="dock__seg-label whitespace-nowrap">{t('dock.dirty', dirtyFiles)}</span>
               <span className="sr-only">{t('dock.dirtyTitle', dirtyFiles)}</span>

@@ -138,8 +138,8 @@ export const TurnDone = memo(function TurnDone({
       {hasActions ? <AssistantActions text={copyText} inline /> : null}
       <span className="flex items-center gap-1.5">
         {item.completed ? (
-          <span className="inline-flex size-3.5 items-center justify-center rounded-full bg-green-tint text-green">
-            <CheckIcon className="size-2.5" strokeWidth={2.5} />
+          <span className="inline-flex size-3.5 items-center justify-center text-green">
+            <CheckIcon className="size-3.5" strokeWidth={2.5} />
           </span>
         ) : null}
         <span>{item.completed ? t('run.done', formatDuration(item.durationMs, t)) : t('run.took', formatDuration(item.durationMs, t))}</span>

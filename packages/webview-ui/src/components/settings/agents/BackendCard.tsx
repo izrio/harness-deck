@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import type { BackendView, NodeEnvState, ProviderView } from '@harness-deck/shared';
 import type { MessageKey } from '../../../i18n.ts';
 import { useT } from '../../../i18n.ts';
-import { cn } from '../../../lib/utils.ts';
 import { setSettingsTab } from '../../../store.ts';
 import { postToHost } from '../../../vscode.ts';
 import { BackendLogo } from '../../BackendLogo.tsx';
@@ -60,12 +59,7 @@ export function BackendCard({
 
   return (
     <div
-      className={cn(
-        'flex flex-col gap-2 rounded-card p-3 transition-colors duration-150',
-        active
-          ? 'bg-inset shadow-[inset_0_0_0_1.5px_var(--accent)]'
-          : 'bg-field shadow-hairline',
-      )}
+      className="flex flex-col gap-2 rounded-card bg-field p-3 shadow-hairline"
       data-testid={`settings-backend-${backend.id}`}
     >
       <div className="flex items-start gap-2.5">
@@ -76,9 +70,8 @@ export function BackendCard({
             {backend.kind === 'acp' ? <ValuePill className="text-[10.5px]">ACP</ValuePill> : null}
             {backend.custom ? <ValuePill className="text-[10.5px]">{t('settings.agents.customBadge')}</ValuePill> : null}
             {backend.overridden ? <ValuePill className="text-[10.5px]">{t('settings.agents.overriddenBadge')}</ValuePill> : null}
-            {active ? <ValuePill tone="accent" className="text-[10.5px]">{t('settings.backend.active')}</ValuePill> : null}
             {isDefault ? (
-              <ValuePill tone={active ? 'neutral' : 'accent'} className="text-[10.5px]" data-testid={`backend-default-badge-${backend.id}`}>
+              <ValuePill className="text-[10.5px]" data-testid={`backend-default-badge-${backend.id}`}>
                 {t('settings.backend.default')}
               </ValuePill>
             ) : null}
@@ -113,7 +106,7 @@ export function BackendCard({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {backend.kind === 'acp' ? (
-            <Button type="button" variant="ghost" size="xs" data-testid={`edit-backend-${backend.id}`} onClick={onEdit}>
+            <Button type="button" variant="ghost" size="default" data-testid={`edit-backend-${backend.id}`} onClick={onEdit}>
               <PencilIcon className="size-3" />
               <span>{t('settings.agents.edit')}</span>
             </Button>
@@ -122,7 +115,7 @@ export function BackendCard({
             <Button
               type="button"
               variant="ghost"
-              size="xs"
+              size="default"
               className="text-red hover:bg-red-tint hover:text-red"
               data-testid={`delete-backend-${backend.id}`}
               onClick={() => postToHost({ type: 'deleteBackendProfile', payload: { id: backend.id } })}
@@ -134,27 +127,18 @@ export function BackendCard({
             <Button
               type="button"
               variant="ghost"
-              size="xs"
+              size="default"
               data-testid={`reset-backend-${backend.id}`}
               onClick={() => postToHost({ type: 'deleteBackendProfile', payload: { id: backend.id } })}
             >
               <span>{t('settings.agents.resetOverride')}</span>
             </Button>
           ) : null}
-          {!active ? (
-            <Button
-              type="button"
-              size="xs"
-              data-testid={`select-backend-${backend.id}`}
-              onClick={() => postToHost({ type: 'selectBackend', payload: { id: backend.id } })}
-            >
-              {t('settings.backend.use')}
-            </Button>
-          ) : !isDefault ? (
+          {!isDefault ? (
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="default"
               data-testid={`default-backend-${backend.id}`}
               onClick={() => postToHost({ type: 'selectBackend', payload: { id: backend.id } })}
             >
@@ -190,11 +174,11 @@ export function BackendCard({
 
         {active && backend.kind === 'dsh' ? (
           <div className="ml-auto flex flex-wrap items-center gap-1">
-            <Button type="button" variant="outline" size="xs" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
+            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
               <KeyIcon className="size-3 text-ink-3" />
               <span>{t('apiKey.configure')}</span>
             </Button>
-            <Button type="button" variant="outline" size="xs" onClick={() => postToHost({ type: 'openWebUI', payload: {} })}>
+            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'openWebUI', payload: {} })}>
               <GlobeIcon className="size-3 text-ink-3" />
               <span>{t('header.openWebUI')}</span>
             </Button>
@@ -207,7 +191,7 @@ export function BackendCard({
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="min-w-32 flex-1 [&_[data-slot=native-select-wrapper]]:w-full">
               <NativeSelect
-                size="sm"
+                size="default"
                 className="bg-surface text-[12px]"
                 aria-label={t('settings.backend.versionSelect', backend.name)}
                 data-testid={`version-select-${backend.id}`}
@@ -231,7 +215,7 @@ export function BackendCard({
                 <Button
                   type="button"
                   variant="outline"
-                  size="xs"
+                  size="default"
                   data-testid={`switch-version-${backend.id}`}
                   disabled={!canSwitchVersion}
                   onClick={() => postToHost({ type: 'installBackend', payload: { id: backend.id, version: pickedVersion } })}
@@ -241,7 +225,7 @@ export function BackendCard({
                 <Button
                   type="button"
                   variant="destructive"
-                  size="xs"
+                  size="default"
                   data-testid={`uninstall-backend-${backend.id}`}
                   disabled={!npmReady || isBusy}
                   onClick={() => postToHost({ type: 'uninstallBackend', payload: { id: backend.id } })}
@@ -253,7 +237,7 @@ export function BackendCard({
             ) : (
               <Button
                 type="button"
-                size="xs"
+                size="default"
                 data-testid={`install-backend-${backend.id}`}
                 disabled={!npmReady || isBusy}
                 onClick={() =>

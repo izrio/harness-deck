@@ -38,7 +38,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
                 <Button
                   type="button"
                   variant="outline"
-                  size="xs"
+                  size="default"
                   disabled={Boolean(mcp.scanningImport)}
                   data-testid="mcp-import-rescan"
                   onClick={() => postToHost({ type: 'scanAgentMcpConfigs', payload: {} })}
@@ -49,7 +49,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
                 <Button
                   type="button"
                   variant="outline"
-                  size="xs"
+                  size="default"
                   data-testid="mcp-import-pick-file"
                   onClick={() => postToHost({ type: 'pickMcpConfigFile', payload: {} })}
                 >
@@ -166,7 +166,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
             <Button
               type="button"
               variant="outline"
-              size="sm"
+              size="default"
               data-testid="mcp-import-cancel"
               onClick={() => setImportOpen(false)}
             >
@@ -174,7 +174,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
             </Button>
             <Button
               type="button"
-              size="sm"
+              size="default"
               disabled={selectedCandidates.length === 0}
               data-testid="mcp-import-submit"
               onClick={submitImport}

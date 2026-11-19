@@ -11,6 +11,7 @@ import {
   detectPrependAnchor,
 } from '../src/hooks/virtualThreadMath.ts';
 import { applyHostMessage, resetStoreForTests } from '../src/store.ts';
+import { buildThreadRows } from '../src/threadRows.ts';
 import { makeSnapshot, mockVsCodeApi } from './setup.ts';
 
 const vscode = mockVsCodeApi();
@@ -85,7 +86,7 @@ describe('virtualThreadMath 纯计算', () => {
       ['msg-0', 60],
       ['msg-2', 120],
     ]);
-    const layout = computeVirtualLayout(items, measured, THREAD_GAP);
+    const layout = computeVirtualLayout(buildThreadRows(items), measured, THREAD_GAP);
 
     expect(layout.sizes[0]).toBe(60);
     expect(layout.sizes[2]).toBe(120);
@@ -98,7 +99,7 @@ describe('virtualThreadMath 纯计算', () => {
   it('computeVisibleRange 在大规模列表中通过二分查找返回紧凑可视区间', () => {
     const items = makeItems(2000);
     const measured = new Map(items.map((item) => [item.id, 80]));
-    const layout = computeVirtualLayout(items, measured, THREAD_GAP);
+    const layout = computeVirtualLayout(buildThreadRows(items), measured, THREAD_GAP);
 
     const topRange = computeVisibleRange(layout, 0, 600, 300, 2);
     expect(topRange.startIndex).toBe(0);
@@ -118,17 +119,17 @@ describe('virtualThreadMath 纯计算', () => {
   it('detectPrependAnchor 准确识别前插消息并兼容边界合并，不在尾部追加时误报', () => {
     const base = makeItems(5, 'm', 10);
     const prepended = [...makeItems(3, 'm', 7), ...base];
-    const anchor = detectPrependAnchor(base, prepended);
+    const anchor = detectPrependAnchor(buildThreadRows(base), buildThreadRows(prepended));
     expect(anchor).toEqual({ anchorId: 'm-10', prevIndex: 0, nextIndex: 3 });
 
     // 首条在边界合并，次条 m-11 仍能作为锚点
     const boundaryMerged = [...makeItems(3, 'm', 7), { kind: 'user' as const, id: 'm-merged', text: 'merged' }, ...base.slice(1)];
-    const mergedAnchor = detectPrependAnchor(base, boundaryMerged);
+    const mergedAnchor = detectPrependAnchor(buildThreadRows(base), buildThreadRows(boundaryMerged));
     expect(mergedAnchor).toEqual({ anchorId: 'm-11', prevIndex: 1, nextIndex: 4 });
 
     // 尾部追加不触发前插锚点
     const appended = [...base, ...makeItems(3, 'm', 15)];
-    expect(detectPrependAnchor(base, appended)).toBeUndefined();
+    expect(detectPrependAnchor(buildThreadRows(base), buildThreadRows(appended))).toBeUndefined();
   });
 });
 
@@ -158,7 +159,7 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
     expect(container.querySelector('[data-virtual-id="msg-0"]')).toBeNull();
 
     // 模拟滚回顶部
-    const layout = computeVirtualLayout(items, new Map(), THREAD_GAP);
+    const layout = computeVirtualLayout(buildThreadRows(items), new Map(), THREAD_GAP);
     mockScrollMetrics(scroller, {
       scrollHeight: layout.totalHeight + 40,
       clientHeight: 600,
@@ -203,7 +204,7 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
     // 确认不存在需要点击的「加载更早的消息」按钮
     expect(screen.queryByRole('button', { name: /加载更早的消息|Load earlier/i })).toBeNull();
 
-    const layout3 = computeVirtualLayout(page3, new Map(), THREAD_GAP);
+    const layout3 = computeVirtualLayout(buildThreadRows(page3), new Map(), THREAD_GAP);
     const metrics = mockScrollMetrics(scroller, {
       scrollHeight: layout3.totalHeight + 40,
       clientHeight: 600,
@@ -233,7 +234,7 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
 
     // Host 推送 loadingOlder: true -> 然后返回 page2（仍有更早历史 hasOlder: true）
     const combined23 = [...page2, ...page3];
-    const layout23 = computeVirtualLayout(combined23, new Map(), THREAD_GAP);
+    const layout23 = computeVirtualLayout(buildThreadRows(combined23), new Map(), THREAD_GAP);
     const scrollBeforePrepend = metrics.getScrollTop();
     const expectedDelta2 = layout23.offsets[page2.length]!;
 
@@ -276,7 +277,7 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
 
     // Host 返回最后一页 page1，hasOlder 变为 false
     const combined123 = [...page1, ...combined23];
-    const layout123 = computeVirtualLayout(combined123, new Map(), THREAD_GAP);
+    const layout123 = computeVirtualLayout(buildThreadRows(combined123), new Map(), THREAD_GAP);
     act(() => {
       metrics.setScrollHeight(layout123.totalHeight + 40);
       applyHostMessage({
@@ -347,7 +348,7 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
 
     const { container } = render(<Thread />);
     const scroller = container.querySelector('.thread') as HTMLDivElement;
-    const layout = computeVirtualLayout(items, new Map(), THREAD_GAP);
+    const layout = computeVirtualLayout(buildThreadRows(items), new Map(), THREAD_GAP);
     mockScrollMetrics(scroller, {
       scrollHeight: layout.totalHeight + 40,
       clientHeight: 600,
@@ -399,7 +400,7 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
 
     const { container } = render(<Thread />);
     const scroller = container.querySelector('.thread') as HTMLDivElement;
-    const layout = computeVirtualLayout(items, new Map(), THREAD_GAP);
+    const layout = computeVirtualLayout(buildThreadRows(items), new Map(), THREAD_GAP);
 
     // 滚动到第 25 条附近（上方 overscan 里包含更早的条目）
     const targetScrollTop = layout.offsets[25]!;
@@ -460,7 +461,7 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
 
     const { container } = render(<Thread />);
     const scroller = container.querySelector('.thread') as HTMLDivElement;
-    const layoutA = computeVirtualLayout(sessA, new Map(), THREAD_GAP);
+    const layoutA = computeVirtualLayout(buildThreadRows(sessA), new Map(), THREAD_GAP);
     mockScrollMetrics(scroller, {
       scrollHeight: layoutA.totalHeight + 40,
       clientHeight: 600,

@@ -1,10 +1,16 @@
 import { useEffect } from 'react';
 import type { HostToWebview } from '@harness-deck/shared';
-import { applyHostMessage, openSettingsPage, requestPrefill, useView } from './store.ts';
+import { applyHostMessage, requestPrefill, useView } from './store.ts';
 import { cn } from './lib/utils.ts';
 import { applyColorScheme, applyThemeMode } from './theme.ts';
 import { postToHost } from './vscode.ts';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { LoaderGrid, Shimmer } from './components/beautifului/index.ts';
 import { BackendLogo } from './components/BackendLogo.tsx';
 import { HarnessDeckLogo } from './components/HarnessDeckLogo.tsx';
@@ -22,7 +28,7 @@ import { OverviewView } from './components/workbench/OverviewView.tsx';
 import { SchedulesView } from './components/workbench/SchedulesView.tsx';
 import { SessionsView } from './components/workbench/SessionsView.tsx';
 import { TasksView } from './components/workbench/TasksView.tsx';
-import { BeakerIcon, BookIcon, BugIcon, ChevronDownIcon, DiffIcon, FolderIcon, GlobeIcon, KeyIcon } from './components/icons.tsx';
+import { BeakerIcon, BookIcon, BugIcon, CheckIcon, ChevronDownIcon, DiffIcon, FolderIcon, GlobeIcon, KeyIcon } from './components/icons.tsx';
 import type { MessageKey } from './i18n.ts';
 import { useT } from './i18n.ts';
 
@@ -141,6 +147,10 @@ function Home() {
   const backends = useView((s) => s.backends);
   const folder = backends.workspace;
   const current = backends.items.find((b) => b.id === backends.active);
+  // 只允许切换到已安装的智能体
+  const installed = backends.items.filter((b) => b.available !== false);
+  const chipClass =
+    'home__chip inline-flex max-w-full items-center gap-1.5 rounded-chip bg-surface px-2.5 py-1 text-[12px] font-medium text-ink shadow-card transition-colors duration-150';
   return (
     <div className="empty flex min-h-0 flex-1 flex-col justify-center overflow-y-auto px-5 py-6 text-center">
       <div className="flex flex-col items-center">
@@ -150,22 +160,42 @@ function Home() {
         <p className="mt-0 mb-1.5 text-[17px] font-semibold tracking-tight text-ink">{t('empty.title')}</p>
         <p className="mx-auto my-0 max-w-76 text-[13px] leading-relaxed text-ink-2">{t('empty.hint')}</p>
         <div className="mt-3.5 flex flex-wrap justify-center gap-1.5">
-          {current && backends.items.length > 1 ? (
-            <button
-              type="button"
-              className="inline-flex max-w-full items-center gap-1.5 rounded-chip bg-surface px-2.5 py-1 text-[12px] font-medium text-ink shadow-card transition-colors duration-150 hover:bg-hover"
-              data-testid="home-backend"
-              title={t('home.switchBackend')}
-              onClick={() => openSettingsPage('agents')}
-            >
+          {current && installed.length > 0 ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className={cn(chipClass, 'hover:bg-hover')} data-testid="home-backend" title={t('home.switchBackend')}>
+                  <BackendLogo backend={current} size="sm" />
+                  <span>{current.name}</span>
+                  {current.available === false ? <span className="size-1.5 rounded-full bg-orange" title={t('backend.missing')} /> : null}
+                  <ChevronDownIcon className="size-3 text-ink-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="center" className="min-w-44">
+                {installed.map((backend) => (
+                  <DropdownMenuItem
+                    key={backend.id}
+                    data-testid={`home-backend-${backend.id}`}
+                    className="gap-2 text-[12px]"
+                    onSelect={() => {
+                      if (backend.id !== backends.active) postToHost({ type: 'selectBackend', payload: { id: backend.id } });
+                    }}
+                  >
+                    <BackendLogo backend={backend} size="sm" />
+                    <span className="truncate">{backend.name}</span>
+                    {backend.id === backends.active ? <CheckIcon className="ml-auto size-3.5 text-accent-ink" /> : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : current ? (
+            <span className={chipClass} data-testid="home-backend">
               <BackendLogo backend={current} size="sm" />
               <span>{current.name}</span>
               {current.available === false ? <span className="size-1.5 rounded-full bg-orange" title={t('backend.missing')} /> : null}
-              <ChevronDownIcon className="size-3 text-ink-3" />
-            </button>
+            </span>
           ) : null}
           {folder ? (
-            <span className="inline-flex max-w-full items-center gap-1.5 rounded-chip bg-field px-2.5 py-1 text-[12px] text-ink-2 shadow-hairline" title={folder}>
+            <span className="home__chip inline-flex max-w-full items-center gap-1.5 rounded-chip bg-field px-2.5 py-1 text-[12px] text-ink-2 shadow-hairline" title={folder}>
               <FolderIcon className="size-3.5 shrink-0 text-ink-3" />
               <span className="truncate">{folder}</span>
             </span>

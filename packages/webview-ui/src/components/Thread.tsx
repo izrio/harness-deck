@@ -4,16 +4,17 @@
  * - 无限滚动：向上滚动接近顶部（或内容不足一屏）时自动加载更早历史，无需手动点击按钮，并精确锚定当前阅读位置；
  * - 贴底跟随：用户停在底部时跟随新内容，往上翻时不打扰并在有新消息时提示回底。
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import { Button } from '@/components/ui/button';
 import { useVirtualThread } from '../hooks/useVirtualThread.ts';
-import { LoaderGrid, Shimmer } from './beautifului/index.ts';
+import { buildThreadRows, rowIsRunning, rowToolCount, type ThreadRow } from '../threadRows.ts';
+import { LoaderGrid, Shimmer, ThinkingTrace } from './beautifului/index.ts';
 import { InteractionCard } from './Interactions.tsx';
 import { ItemView } from './Items.tsx';
-import { RunStatus } from './RunStatus.tsx';
+import { RunStatus, formatDuration } from './RunStatus.tsx';
 import { ArrowDownIcon, SpinnerIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
@@ -82,6 +83,35 @@ export function Thread() {
     appearance.contentWidth ?? '',
   ].join('|');
 
+  // 连续的工具操作收成一条思考轨迹行；单条操作仍是独立一行
+  const rows = useMemo(() => buildThreadRows(items), [items]);
+  // 按 sessionKey 隔离手动展开状态，切换会话时在首次 render 即刻清空，避免不同会话的轨迹行 id 冲突或闪烁
+  const [openOverrides, setOpenOverrides] = useState<{
+    readonly sessionKey: string;
+    readonly map: ReadonlyMap<string, boolean>;
+  }>(() => ({ sessionKey, map: new Map() }));
+
+  const expandedRowIds = useMemo(() => {
+    const activeOverrides = openOverrides.sessionKey === sessionKey ? openOverrides.map : undefined;
+    const expanded = new Set<string>();
+    for (const row of rows) {
+      if (row.grouped && (activeOverrides?.get(row.id) ?? rowIsRunning(row))) expanded.add(row.id);
+    }
+    return expanded;
+  }, [rows, openOverrides, sessionKey]);
+
+  const toggleRow = useCallback(
+    (row: ThreadRow) => {
+      setOpenOverrides((prev) => {
+        const base = prev.sessionKey === sessionKey ? prev.map : new Map<string, boolean>();
+        const next = new Map(base);
+        next.set(row.id, !(base.get(row.id) ?? rowIsRunning(row)));
+        return { sessionKey, map: next };
+      });
+    },
+    [sessionKey],
+  );
+
   const onLoadOlder = useCallback(() => {
     postToHost({ type: 'loadOlder', payload: {} });
   }, []);
@@ -99,7 +129,8 @@ export function Thread() {
     registerRow,
     toBottom,
   } = useVirtualThread({
-    items,
+    rows,
+    expandedRowIds,
     sessionKey,
     hasOlder: session.hasOlder,
     loadingOlder: session.loadingOlder,
@@ -111,22 +142,40 @@ export function Thread() {
   const visibleSlice: ReactNode[] = [];
   if (range.endIndex >= range.startIndex) {
     for (let index = range.startIndex; index <= range.endIndex; index++) {
-      const item = items[index];
-      if (!item) continue;
-      const prev = index > 0 ? items[index - 1] : undefined;
-      const next = items[index + 1];
-      const mergeTurnDone = next?.kind === 'turnDone' && item.kind === 'assistant' && !item.streaming && Boolean(item.markdown);
+      const row = rows[index];
+      if (!row) continue;
+      const prevRow = index > 0 ? rows[index - 1] : undefined;
+      const nextRow = rows[index + 1];
+      const current = row.grouped ? undefined : row.items[0];
+      const prev = prevRow && !prevRow.grouped ? prevRow.items[0] : undefined;
+      const running = row.grouped ? rowIsRunning(row) : false;
+      const mergeTurnDone =
+        nextRow?.items[0]?.kind === 'turnDone' && current?.kind === 'assistant' && !current.streaming && Boolean(current.markdown);
       const turnDoneCopyText =
-        item.kind === 'turnDone' && prev?.kind === 'assistant' && !prev.streaming && prev.markdown
+        current?.kind === 'turnDone' && prev?.kind === 'assistant' && !prev.streaming && prev.markdown
           ? prev.markdown
           : undefined;
       visibleSlice.push(
-        <VirtualRow key={item.id} id={item.id} index={index} registerRow={registerRow}>
-          <ItemView
-            item={item}
-            hideAssistantActions={mergeTurnDone}
-            {...(turnDoneCopyText !== undefined ? { turnDoneCopyText } : {})}
-          />
+        <VirtualRow key={row.id} id={row.id} index={index} registerRow={registerRow}>
+          {row.grouped ? (
+            <ThinkingTrace
+              active={running}
+              open={expandedRowIds.has(row.id)}
+              label={running ? t('trace.running') : t('trace.count', rowToolCount(row))}
+              formatDuration={(ms) => formatDuration(ms, t)}
+              onToggle={() => toggleRow(row)}
+            >
+              {row.items.map((item) => (
+                <ItemView key={item.id} item={item} />
+              ))}
+            </ThinkingTrace>
+          ) : (
+            <ItemView
+              item={row.items[0]!}
+              hideAssistantActions={mergeTurnDone}
+              {...(turnDoneCopyText !== undefined ? { turnDoneCopyText } : {})}
+            />
+          )}
         </VirtualRow>,
       );
     }

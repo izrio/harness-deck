@@ -86,7 +86,7 @@ export function SavedProviderCard({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="default"
             data-testid={`edit-provider-${provider.id}`}
             onClick={onEdit}
           >
@@ -96,7 +96,7 @@ export function SavedProviderCard({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="default"
             className="text-destructive hover:text-destructive"
             data-testid={`delete-provider-${provider.id}`}
             onClick={onDelete}

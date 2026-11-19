@@ -8,7 +8,7 @@ import type { McpImportCandidate, McpServerConfig } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
 import { setExtensionsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { DownloadIcon, PlugIcon, PlusIcon } from '../icons.tsx';
+import { DownloadIcon, PlusIcon } from '../icons.tsx';
 import { FALLBACK_BACKENDS } from '@/lib/workbenchOptions';
 import { Button } from '@/components/ui/button';
 import { emptyMcpForm, formFromServer, parseKeyValueLines, parsePastedMcpSnippet, splitCommandArgs } from './mcp/mcpParsers.ts';
@@ -16,6 +16,7 @@ import type { McpFormState } from './mcp/mcpParsers.ts';
 import { McpServerCard } from './mcp/McpServerCard.tsx';
 import { McpImportDialog } from './mcp/McpImportDialog.tsx';
 import { McpFormDialog } from './mcp/McpFormDialog.tsx';
+import { SettingsSection } from './SettingsSection.tsx';
 
 export function McpSettings() {
   const t = useT();
@@ -238,22 +239,15 @@ export function McpSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-mcp">
-      <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card">
-        <div className="primitive-card-bar flex flex-wrap items-start justify-between gap-2 border-b border-line bg-inset/50">
-          <div className="flex min-w-0 items-start gap-2">
-            <PlugIcon className="mt-0.5 size-3.5 shrink-0 text-accent-ink" />
-            <div className="min-w-0">
-              <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.mcp.title')}</h3>
-              <p className="mt-0.5 mb-0 text-[11.5px] leading-relaxed text-ink-3">{t('settings.mcp.desc')}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-col gap-5" data-testid="settings-mcp">
+      <SettingsSection
+        title={t('settings.mcp.title')}
+        actions={
+          <>
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="default"
               data-testid="mcp-import-btn"
               onClick={openImportDialog}
             >
@@ -263,16 +257,16 @@ export function McpSettings() {
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="default"
               data-testid="mcp-add-btn"
               onClick={openAdd}
             >
               <PlusIcon className="size-3" />
               <span>{t('settings.mcp.addBtn')}</span>
             </Button>
-          </div>
-        </div>
-
+          </>
+        }
+      >
         <div className="primitive-card-pad flex flex-col gap-2.5">
           {/* 新增 / 编辑 MCP 服务器弹窗 */}
           <McpFormDialog agents={agents} form={form} setForm={setForm} formError={formError} showJsonPaste={showJsonPaste} setShowJsonPaste={setShowJsonPaste} jsonText={jsonText} setJsonText={setJsonText} closeForm={closeForm} applyPastedJson={applyPastedJson} toggleFormAgent={toggleFormAgent} submitForm={submitForm} />
@@ -295,7 +289,7 @@ export function McpSettings() {
             </div>
           )}
         </div>
-      </section>
+      </SettingsSection>
     </div>
   );
 }

@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { WorktreeProjectConfig } from '@harness-deck/shared';
+import { SettingsSection } from './SettingsSection.tsx';
 import { useT } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
 import { setProjectsLocal, useView } from '../../store.ts';
@@ -57,8 +58,6 @@ export function ProjectSettings() {
     setJustSaved(false);
   }, [activePath, projects.configs]);
 
-  const activeProject = projects.recent.find((r) => r.path === activePath);
-
   const saveConfig = () => {
     if (!activePath) return;
     const copyFiles = fromLines(copyFilesText);
@@ -79,19 +78,16 @@ export function ProjectSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-projects">
-      <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card">
-        <div className="primitive-card-bar flex flex-wrap items-center justify-between gap-2 border-b border-line bg-inset/50">
-          <div className="min-w-0">
-            <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.projects.recent')}</h3>
-            <p className="mt-0.5 mb-0 text-[11.5px] text-ink-3">{t('settings.projects.recentHint')}</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+    <div className="flex flex-col gap-5" data-testid="settings-projects">
+      <SettingsSection
+        title={t('settings.projects.recent')}
+        actions={
+          <>
             {folder ? (
               <Button
                 type="button"
                 variant="outline"
-                size="xs"
+                size="default"
                 data-testid="project-switch-folder-btn"
                 onClick={() => postToHost({ type: 'selectFolder', payload: {} })}
               >
@@ -103,16 +99,16 @@ export function ProjectSettings() {
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="default"
               data-testid="project-add-btn"
               onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
             >
               <PlusIcon className="size-3" />
               <span>{t('settings.projects.add')}</span>
             </Button>
-          </div>
-        </div>
-
+          </>
+        }
+      >
         <div className="primitive-card-pad flex flex-col gap-1.5">
           {projects.recent.length === 0 ? (
             <div className="rounded-control bg-field px-3 py-4 text-center text-[12px] text-ink-3 shadow-hairline" data-testid="projects-empty">
@@ -149,7 +145,7 @@ export function ProjectSettings() {
                       <Button
                         type="button"
                         variant="outline"
-                        size="xs"
+                        size="default"
                         data-testid={`project-open-${index}`}
                         onClick={() => postToHost({ type: 'openProject', payload: { path: project.path } })}
                       >
@@ -159,7 +155,7 @@ export function ProjectSettings() {
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon-xs"
+                      size="icon"
                       aria-label={t('settings.projects.remove')}
                       title={t('settings.projects.remove')}
                       data-testid={`project-remove-${index}`}
@@ -173,22 +169,18 @@ export function ProjectSettings() {
             })
           )}
         </div>
-      </section>
+      </SettingsSection>
 
       {activePath ? (
-        <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card" data-testid="project-worktree-editor">
-          <div className="primitive-card-bar flex flex-wrap items-center justify-between gap-2 border-b border-line bg-inset/50">
-            <div className="min-w-0">
-              <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.projects.worktreeTitle')}</h3>
-              <p className="mt-0.5 mb-0 text-[11.5px] text-ink-3">
-                {t('settings.projects.worktreeHint', activeProject?.name ?? activePath)}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
+        <SettingsSection
+          title={t('settings.projects.worktreeTitle')}
+          testId="project-worktree-editor"
+          actions={
+            <>
               <Button
                 type="button"
                 variant="outline"
-                size="xs"
+                size="default"
                 data-testid="project-create-wt-btn"
                 onClick={() => postToHost({ type: 'createWorktree', payload: { path: activePath } })}
               >
@@ -198,16 +190,16 @@ export function ProjectSettings() {
               <Button
                 type="button"
                 variant="outline"
-                size="xs"
+                size="default"
                 data-testid="project-run-verify-btn"
                 onClick={() => postToHost({ type: 'runProjectVerify', payload: { path: activePath } })}
               >
                 <TerminalIcon className="size-3" />
                 <span>{t('settings.projects.runVerify')}</span>
               </Button>
-            </div>
-          </div>
-
+            </>
+          }
+        >
           <div className="primitive-card-pad flex flex-col gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.copyFiles')}</span>
@@ -250,12 +242,12 @@ export function ProjectSettings() {
 
             <div className="flex items-center justify-end gap-2">
               {justSaved ? <span className="text-[11.5px] text-green">{t('settings.projects.saved')}</span> : null}
-              <Button type="button" size="xs" data-testid="project-save-btn" onClick={saveConfig}>
+              <Button type="button" size="default" data-testid="project-save-btn" onClick={saveConfig}>
                 {t('settings.projects.saveConfig')}
               </Button>
             </div>
           </div>
-        </section>
+        </SettingsSection>
       ) : null}
     </div>
   );

@@ -246,6 +246,11 @@ try {
   await page.goto(base);
   const shot = (name: string) => page!.screenshot({ path: join(outDir, `${name}.png`) });
   const composer = page.getByRole('textbox', { name: '消息' });
+  /** 展开折叠中的思考轨迹卡片，让内部活动行可被定位。 */
+  const expandTraces = async () => {
+    const toggles = page!.locator('[data-testid="thinking-toggle"][aria-expanded="false"]');
+    for (let i = 0; i < 20 && (await toggles.count()) > 0; i++) await toggles.first().click();
+  };
   const send = async (text: string) => {
     await composer.fill(text);
     await composer.press('Enter');
@@ -258,8 +263,8 @@ try {
   // CodeBuddy 的 initialize 没有 agentInfo，有登录方式
   else check('CodeBuddy 启动，initialize 返回登录方式', (init.authMethods?.length ?? 0) > 1, JSON.stringify(init.authMethods));
 
-  // 1b. 首次使用直接显示首页；点智能体标签进入设置页
-  await page.locator('.home').waitFor({ timeout: 10_000 }).then(
+  // 1b. 首次使用直接显示首页；点智能体标签展开已安装智能体下拉
+  await page.locator('.empty').waitFor({ timeout: 10_000 }).then(
     () => check('首次打开不展示选择智能体，直接显示首页', true),
     () => check('首次打开不展示选择智能体，直接显示首页', false),
   );
@@ -267,15 +272,24 @@ try {
   check('首页显示当前智能体和工作区', (await homeBackend.innerText()).includes({ omp: 'Pi', codebuddy: 'CodeBuddy', claude: 'Claude Code' }[agent]) && (await page.locator('.home__chip', { hasText: basename(workspace) }).count()) === 1);
   check('首页用各个智能体的官方图标', (await page.locator('.home__chip [data-logo]').count()) === 1);
   await homeBackend.click();
+  const agentMenu = page.getByRole('menu');
+  const menuItems = agentMenu.getByRole('menuitem');
+  await agentMenu.waitFor({ timeout: 5_000 }).then(
+    async () => check('点智能体标签展开下拉，只列出已安装的智能体', (await menuItems.count()) >= 1 && (await menuItems.allInnerTexts()).every((text) => text.trim().length > 0)),
+    () => check('点智能体标签展开下拉，只列出已安装的智能体', false),
+  );
+  await page.keyboard.press('Escape');
+  await page.getByTestId('settings-button').click();
   const settingsPage = page.getByTestId('settings-page');
   await settingsPage.waitFor({ timeout: 5_000 });
-  check('设置页列出 dsh、Pi、CodeBuddy、Claude Code', (await settingsPage.locator('.settings-backend').count()) === 4);
+  await settingsPage.locator('[data-testid="settings-tab-agents"]').click();
+  check('设置页列出 dsh、Pi、CodeBuddy、Claude Code', (await settingsPage.locator('[data-testid^="settings-backend-"]').count()) === 4);
   const current = settingsPage.locator(`[data-testid="settings-backend-${activeBackend}"]`);
-  check('当前智能体标为「当前使用」并显示已安装', (await current.innerText()).includes('当前使用') && (await current.innerText()).includes('已安装'), await current.innerText());
+  check('智能体标为「默认」并显示已安装', (await current.innerText()).includes('默认') && (await current.innerText()).includes('已安装'), await current.innerText());
   check('没装的智能体显示安装按钮', (await settingsPage.locator('[data-testid="install-backend-dsh"]').count()) === 1);
   await shot('00-settings');
   await page.getByTestId('settings-back').click();
-  await page.locator('.home').waitFor({ timeout: 5_000 });
+  await page.locator('.empty').waitFor({ timeout: 5_000 });
 
   // 2. 草稿会话：发消息前模型和模式就能用
   await page.getByTestId('model-picker').locator('.toolbar-button__text', { hasText: modelLabel }).waitFor({ timeout: 60_000 }).then(
@@ -322,6 +336,7 @@ try {
   await shot('02-approval');
   await approval.getByRole('button', { name: /允许本次/u }).click();
   await page.locator('.assistant', { hasText: '写好了笔记' }).waitFor({ timeout: 30_000 });
+  await expandTraces();
   const explore = page.locator('.activity', { hasText: '已浏览' });
   check('读文件显示成「浏览」行', (await explore.count()) === 1 && (await explore.innerText()).includes('读取 1 个文件'), await explore.first().innerText().catch(() => ''));
   const edit = page.locator('.activity--edit', { hasText: 'notes.md' });
@@ -349,6 +364,7 @@ try {
       async () => check('待办显示在输入框上方的状态条', (await todo.innerText()).includes('改代码') && (await todo.innerText()).includes('1/2'), await todo.innerText()),
       () => check('待办显示在输入框上方的状态条', false),
     );
+    await expandTraces();
     check('待办工具不显示成对话里的工具行', (await page.locator('.activity', { hasText: 'TaskCreate' }).count()) + (await page.locator('.activity', { hasText: 'TodoWrite' }).count()) === 0);
     await shot('03b-todos');
   }
@@ -379,6 +395,7 @@ try {
     () => check('重新打开会话：历史从代理回放', true),
     () => check('重新打开会话：历史从代理回放', false),
   );
+  await expandTraces();
   check('回放的历史里有工具行', (await page.locator('.activity--command', { hasText: bashCommand }).count()) === 1);
   check('从会话列表打开已在标签里的会话：切到那个标签，不重复打开', (await tabs.count()) === 2 && (await tabs.nth(0).getAttribute('aria-selected')) === 'true');
 

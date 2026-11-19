@@ -9,34 +9,29 @@ import { ProviderModelTable } from './ProviderModelTable.tsx';
 import type { Dispatch, SetStateAction } from 'react';
 import type { EditableModelRow, ProviderEditorState } from './providerEditor.ts';
 import { useT } from '../../../i18n.ts';
+import { SettingsSection } from '../SettingsSection.tsx';
 
 export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, backends, workbenchAgents, editor, setEditor, detailsOpen, setDetailsOpen, batchOpen, setBatchOpen, batchText, setBatchText, formError, pendingFetchId, fetchError, boundOwnerByBackend, boundOwnerByWbAgent, closeEditor, selectPreset, updateModelRow, addModelRow, removeModelRow, applyBatchPaste, triggerFetchModels, toggleBackendBind, toggleWbAgentBind, saveProvider, validModelOptions, compatibilitySummary, hasAnyUrl }: { locale: 'zh' | 'en'; providers: readonly ProviderView[]; protocolGatewayEnabled: boolean; backends: readonly BackendView[]; workbenchAgents: readonly AgentProfile[]; editor: ProviderEditorState; setEditor: Dispatch<SetStateAction<ProviderEditorState | undefined>>; detailsOpen: boolean; setDetailsOpen: Dispatch<SetStateAction<boolean>>; batchOpen: boolean; setBatchOpen: Dispatch<SetStateAction<boolean>>; batchText: string; setBatchText: (text: string) => void; formError: string | undefined; pendingFetchId: number | undefined; fetchError: string | undefined; boundOwnerByBackend: ReadonlyMap<string, ProviderView>; boundOwnerByWbAgent: ReadonlyMap<string, ProviderView>; closeEditor: () => void; selectPreset: (preset: ProviderPreset) => void; updateModelRow: (rowKey: number, patch: Partial<EditableModelRow>) => void; addModelRow: () => void; removeModelRow: (rowKey: number) => void; applyBatchPaste: () => void; triggerFetchModels: () => void; toggleBackendBind: (backendId: string, checked: boolean) => void; toggleWbAgentBind: (agentId: string, checked: boolean) => void; saveProvider: () => void; validModelOptions: readonly { readonly id: string; readonly label: string }[]; compatibilitySummary: { readonly missingHints: readonly string[]; readonly accountOnlyNames: readonly string[] }; hasAnyUrl: boolean }) {
   const t = useT();
   return (
-    <section
-      className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card"
-      data-testid="provider-editor"
-    >
-      <div className="primitive-card-bar flex items-center justify-between gap-2 border-b border-line bg-inset/50">
-        <h3 className="m-0 text-[13px] font-semibold text-ink">
-          {editor.editingId
-            ? t('settings.providers.editTitle', editor.name || editor.editingId)
-            : t('settings.providers.addTitle')}
-        </h3>
-        {providers.length > 0 ? (
+    <SettingsSection
+      testId="provider-editor"
+      title={editor.editingId ? t('settings.providers.editTitle', editor.name || editor.editingId) : t('settings.providers.addTitle')}
+      actions={
+        providers.length > 0 ? (
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon"
             aria-label={t('common.close')}
             data-testid="provider-editor-close"
             onClick={closeEditor}
           >
             <CloseIcon className="size-3.5 text-ink-3" />
           </Button>
-        ) : null}
-      </div>
-
+        ) : undefined
+      }
+    >
       <div className="primitive-card-pad flex flex-col gap-3.5">
         {/* 预设卡片网格 */}
         <div className="flex flex-col gap-1.5">
@@ -81,7 +76,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
         <label className="flex flex-col gap-1">
           <span className="text-[12px] font-medium text-ink-2">{t('settings.providers.name')}</span>
           <Input
-            size="sm"
+            size="default"
             data-testid="provider-form-name"
             value={editor.name}
             placeholder={t('settings.providers.namePlaceholder')}
@@ -98,7 +93,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <Button
                   type="button"
                   variant="link"
-                  size="xs"
+                  size="default"
                   className="h-auto p-0 text-[11.5px]"
                   data-testid="provider-restore-apikey"
                   onClick={() => setEditor({ ...editor, clearApiKey: false })}
@@ -109,7 +104,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <Button
                   type="button"
                   variant="link"
-                  size="xs"
+                  size="default"
                   className="h-auto p-0 text-[11.5px] text-destructive"
                   data-testid="provider-clear-apikey"
                   onClick={() => setEditor({ ...editor, clearApiKey: true, apiKey: '' })}
@@ -120,7 +115,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
             ) : null}
           </div>
           <Input
-            size="sm"
+            size="default"
             type="password"
             autoComplete="off"
             data-testid="provider-form-apikey"
@@ -157,7 +152,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlAnthropic')}</span>
                   <Input
-                    size="sm"
+                    size="default"
                     data-testid="provider-url-anthropic"
                     className="font-mono text-[12px]"
                     placeholder="https://api.anthropic.com"
@@ -168,7 +163,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlOpenaiChat')}</span>
                   <Input
-                    size="sm"
+                    size="default"
                     data-testid="provider-url-openai-chat"
                     className="font-mono text-[12px]"
                     placeholder="https://api.openai.com/v1"
@@ -181,7 +176,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                     {t('settings.providers.urlOpenaiResponses')}
                   </span>
                   <Input
-                    size="sm"
+                    size="default"
                     data-testid="provider-url-openai-responses"
                     className="font-mono text-[12px]"
                     placeholder="https://api.openai.com/v1"
@@ -215,7 +210,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                     {t('settings.providers.defaultModel')}
                   </span>
                   <NativeSelect
-                    size="sm"
+                    size="default"
                     className="w-full"
                     data-testid="provider-default-model"
                     value={editor.defaultModel}
@@ -235,7 +230,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                     {t('settings.providers.smallModel')}
                   </span>
                   <NativeSelect
-                    size="sm"
+                    size="default"
                     className="w-full"
                     data-testid="provider-small-model"
                     value={editor.smallModel}
@@ -359,18 +354,18 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
             <Button
               type="button"
               variant="outline"
-              size="sm"
+              size="default"
               data-testid="provider-cancel-btn"
               onClick={closeEditor}
             >
               {t('common.cancel')}
             </Button>
           ) : null}
-          <Button type="button" size="sm" data-testid="provider-save-btn" onClick={saveProvider}>
+          <Button type="button" size="default" data-testid="provider-save-btn" onClick={saveProvider}>
             {t('settings.providers.save')}
           </Button>
         </div>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

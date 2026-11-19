@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.5.2
+
+**思考轨迹折叠、首页智能体快捷切换、设置页视觉与布局打磨**：将连续工具操作与推理折叠为「思考轨迹」行，支持首页下拉直接切换已安装智能体，统一设置页分区标题样式与控件尺寸，优化状态栏与侧边栏会话列表布局。
+
+**Collapsible thinking trace, quick home agent switcher, and settings UI polish**: Grouped consecutive tool activities and reasoning into collapsible thinking trace rows, added a Home dropdown switcher for installed agents, unified settings section headings and control sizing, and refined StatusDock and session list layouts.
+
+- **对话流思考轨迹（`ThinkingTrace` / `threadRows`）**：将连续的工具调用、只读探索与推理合并为可折叠的思考轨迹行，运行中自动展开并显示流光与计时、完成后自动收起，同时适配虚拟滚动高度估算、缓存失效与会话切换重置。
+  **Thinking trace in threads (`ThinkingTrace` / `threadRows`)**: Grouped consecutive tool calls, explore summaries, and reasoning into collapsible trace rows that auto-expand with shimmer and timer while running and auto-collapse when done, integrated with virtual scroll layout estimation, stale height invalidation, and session-switch resets.
+- **首页与工作台交互优化**：首页智能体芯片改为下拉菜单直接切换已安装的智能体；精简侧边栏项目会话分组与单条会话排版；状态栏（`StatusDock`）改为纵向堆叠行以改善窄面板可读性。
+  **Home & workbench UX refinements**: Replaced the Home backend chip click with a dropdown switcher for installed agents, simplified project session groups and session row chrome, and stacked `StatusDock` segments vertically for better narrow-panel readability.
+- **设置页重构与细节修复**：抽离统一的 `SettingsSection` 分区布局，统一设置页控件尺寸（含 `NumberStepper` 与模型表格列宽对齐），简化智能体默认标记；更新 E2E 脚手架与单元测试并清理已完成规划文档。
+  **Settings polish & fixes**: Extracted a shared `SettingsSection` layout, aligned settings control sizing (including `NumberStepper` and provider model table columns), streamlined default agent badges, updated E2E scripts and unit tests, and removed completed plan docs.
+
 ## 0.5.1
 
 **对话虚拟列表、统一控件尺寸与离线图标规范、WSL 与服务商代理增强**：优化长对话渲染性能，统一表单控件高度体系与离线图标打包，增强 WSL 环境运行时发现、浏览器桥接及 OpenAI 转 Anthropic 代理兼容性。

@@ -150,7 +150,7 @@ export function AppearancePanel() {
           </div>
         </div>
         <Input
-          size="sm"
+          size="default"
           data-testid="prose-font-family"
           value={family}
           placeholder={t('appearance.familyPlaceholder')}
@@ -167,16 +167,17 @@ export function AppearancePanel() {
         <div className="flex items-center gap-2">
           {appearance.fontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
           <NumberStepper
- decLabel={t('appearance.smaller')}
- incLabel={t('appearance.larger')}
- decDisabled={size <= MIN_SIZE}
- incDisabled={size >= MAX_SIZE}
- onDec={() => setSize(size - 1)}
- onInc={() => setSize(size + 1)}
- valueTestId="appearance-size"
->
- {size}px
-</NumberStepper>
+            size="default"
+            decLabel={t('appearance.smaller')}
+            incLabel={t('appearance.larger')}
+            decDisabled={size <= MIN_SIZE}
+            incDisabled={size >= MAX_SIZE}
+            onDec={() => setSize(size - 1)}
+            onInc={() => setSize(size + 1)}
+            valueTestId="appearance-size"
+          >
+            {size}px
+          </NumberStepper>
         </div>
       </div>
 
@@ -186,16 +187,17 @@ export function AppearancePanel() {
         <div className="flex items-center gap-2">
           {appearance.lineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
           <NumberStepper
- decLabel={t('settings.appearance.lineHeightSmaller')}
- incLabel={t('settings.appearance.lineHeightLarger')}
- decDisabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
- incDisabled={lineHeight >= MAX_LINE_HEIGHT - 0.01}
- onDec={() => setLineHeight(lineHeight - 0.1)}
- onInc={() => setLineHeight(lineHeight + 0.1)}
- valueTestId="prose-line-height"
->
- {lineHeight.toFixed(1)}
-</NumberStepper>
+            size="default"
+            decLabel={t('settings.appearance.lineHeightSmaller')}
+            incLabel={t('settings.appearance.lineHeightLarger')}
+            decDisabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
+            incDisabled={lineHeight >= MAX_LINE_HEIGHT - 0.01}
+            onDec={() => setLineHeight(lineHeight - 0.1)}
+            onInc={() => setLineHeight(lineHeight + 0.1)}
+            valueTestId="prose-line-height"
+          >
+            {lineHeight.toFixed(1)}
+          </NumberStepper>
         </div>
       </div>
 
@@ -205,16 +207,17 @@ export function AppearancePanel() {
         <div className="flex items-center gap-2">
           {appearance.paragraphSpacing === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
           <NumberStepper
- decLabel={t('settings.appearance.paragraphSpacingSmaller')}
- incLabel={t('settings.appearance.paragraphSpacingLarger')}
- decDisabled={paragraphSpacing <= MIN_SPACING}
- incDisabled={paragraphSpacing >= MAX_SPACING}
- onDec={() => setParagraphSpacing(paragraphSpacing - 2)}
- onInc={() => setParagraphSpacing(paragraphSpacing + 2)}
- valueTestId="prose-paragraph-spacing"
->
- {paragraphSpacing}px
-</NumberStepper>
+            size="default"
+            decLabel={t('settings.appearance.paragraphSpacingSmaller')}
+            incLabel={t('settings.appearance.paragraphSpacingLarger')}
+            decDisabled={paragraphSpacing <= MIN_SPACING}
+            incDisabled={paragraphSpacing >= MAX_SPACING}
+            onDec={() => setParagraphSpacing(paragraphSpacing - 2)}
+            onInc={() => setParagraphSpacing(paragraphSpacing + 2)}
+            valueTestId="prose-paragraph-spacing"
+          >
+            {paragraphSpacing}px
+          </NumberStepper>
         </div>
       </div>
 
@@ -230,7 +233,7 @@ export function AppearancePanel() {
                   key={preset.width}
                   type="button"
                   variant={selected ? 'secondary' : 'ghost'}
-                  size="xs"
+                  size="default"
                   data-testid={`width-preset-${preset.width}`}
                   onClick={() => setContentWidth(preset.width)}
                   className={cn(
@@ -244,16 +247,17 @@ export function AppearancePanel() {
             })}
           </div>
           <NumberStepper
- decLabel={t('settings.appearance.contentWidthSmaller')}
- incLabel={t('settings.appearance.contentWidthLarger')}
- decDisabled={contentWidth <= MIN_WIDTH}
- incDisabled={contentWidth >= MAX_WIDTH}
- onDec={() => setContentWidth(contentWidth - 40)}
- onInc={() => setContentWidth(contentWidth + 40)}
- valueTestId="prose-content-width"
->
- {contentWidth}px
-</NumberStepper>
+            size="default"
+            decLabel={t('settings.appearance.contentWidthSmaller')}
+            incLabel={t('settings.appearance.contentWidthLarger')}
+            decDisabled={contentWidth <= MIN_WIDTH}
+            incDisabled={contentWidth >= MAX_WIDTH}
+            onDec={() => setContentWidth(contentWidth - 40)}
+            onInc={() => setContentWidth(contentWidth + 40)}
+            valueTestId="prose-content-width"
+          >
+            {contentWidth}px
+          </NumberStepper>
         </div>
       </div>
 
@@ -264,7 +268,7 @@ export function AppearancePanel() {
       </div>
 
       <div className="flex items-center justify-end">
-        <Button type="button" variant="ghost" size="xs" data-testid="prose-reset" onClick={resetProse}>
+        <Button type="button" variant="ghost" size="default" data-testid="prose-reset" onClick={resetProse}>
           {t('appearance.reset')}
         </Button>
       </div>

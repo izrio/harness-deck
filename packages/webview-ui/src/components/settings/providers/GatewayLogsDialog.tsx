@@ -99,7 +99,7 @@ export function GatewayLogsDialog({
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="default"
             disabled={logs.length === 0}
             data-testid="provider-gateway-clear-logs-btn"
             onClick={() => postToHost({ type: 'clearProtocolGatewayLogs', payload: {} })}
@@ -111,14 +111,14 @@ export function GatewayLogsDialog({
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="default"
               data-testid="provider-gateway-open-output-btn"
               onClick={() => postToHost({ type: 'showLogs', payload: {} })}
             >
               <LogIcon className="size-3" />
               <span>{t('settings.providers.gatewayOpenOutputBtn')}</span>
             </Button>
-            <Button type="button" size="xs" onClick={() => onOpenChange(false)}>
+            <Button type="button" size="default" onClick={() => onOpenChange(false)}>
               {t('common.close')}
             </Button>
           </div>

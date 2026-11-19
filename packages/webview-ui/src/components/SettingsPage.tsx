@@ -183,7 +183,7 @@ export function SettingsPage() {
             aria-label={t('settings.title')}
             data-testid="settings-tabs"
             onKeyDown={onKeyDown}
-            className="gap-1 p-1.5"
+            className="gap-2 p-1.5"
           >
             {groups.map((group) => (
               <SidebarGroup key={group.id} className="p-1" data-testid={`sidebar-group-${group.id}`}>

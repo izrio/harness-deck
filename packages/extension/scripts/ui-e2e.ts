@@ -295,6 +295,22 @@ try {
 
   const shot = (name: string) => page!.screenshot({ path: join(outDir, `${name}.png`) });
   const composer = page.getByRole('textbox', { name: '消息' });
+  /** 展开折叠中的思考轨迹卡片，让内部活动行可被定位。 */
+  const expandTraces = async () => {
+    const toggles = page!.locator('[data-testid="thinking-toggle"][aria-expanded="false"]');
+    for (let i = 0; i < 20 && (await toggles.count()) > 0; i++) await toggles.first().click();
+  };
+  /** 新操作可能还在形成新的轨迹卡片：边等待边展开，直到目标活动行出现。 */
+  const waitForActivity = async (text: string, timeout = 30_000) => {
+    const activity = page!.locator('.activity', { hasText: text });
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if ((await activity.count()) > 0) return;
+      await expandTraces();
+      await page!.waitForTimeout(150);
+    }
+    await activity.first().waitFor({ timeout: 1_000 });
+  };
   const send = async (text: string) => {
     await composer.fill(text);
     await composer.press('Enter');
@@ -350,6 +366,7 @@ try {
   // 2. 工具调用
   await send('E2E_TOOL 看看 README，再跑一下测试');
   await page.locator('.assistant', { hasText: '测试全部通过' }).waitFor({ timeout: 30_000 });
+  await expandTraces();
   const activities = page.locator('.activity');
   check('读文件和搜索合并成一行「浏览」，命令单独一行', (await activities.count()) === 2, String(await activities.count()));
   check('浏览行显示摘要', (await page.locator('.activity', { hasText: '已浏览' }).locator('.activity__detail', { hasText: '读取 1 个文件，搜索 1 次' }).count()) === 1);
@@ -364,6 +381,7 @@ try {
   // 2b. 文件修改：增删行数、Diff、本轮改动汇总
   await send('E2E_EDIT 给 README 补充用法，再记一份笔记');
   await page.locator('.assistant', { hasText: '改好了' }).waitFor({ timeout: 30_000 });
+  await expandTraces();
   const editRow = page.locator('.activity--edit', { hasText: 'README.md' });
   check('修改行显示「已编辑」和增删行数', (await editRow.locator('.activity__name').innerText()) === '已编辑' && (await editRow.locator('.stats').innerText()).replace(/\s+/gu, ' ') === '+5 −1', await editRow.innerText());
   check('新建文件显示「已新建」', (await page.locator('.activity--edit', { hasText: 'docs/notes.md' }).locator('.activity__name').innerText()) === '已新建');
@@ -511,6 +529,7 @@ try {
   await shot('14-approval');
   await approval.getByRole('button', { name: '允许本次' }).click();
   await page.locator('.assistant', { hasText: '依赖装好了' }).waitFor({ timeout: 30_000 });
+  await expandTraces();
   check('允许后卡片消失，命令执行成功', (await approval.count()) === 0 && (await page.locator('.activity--ok', { hasText: 'echo installed' }).count()) === 1);
 
   // 2d. 审批：拒绝
@@ -518,6 +537,7 @@ try {
   await approval.waitFor({ timeout: 30_000 });
   await approval.getByRole('button', { name: '拒绝' }).click();
   await page.locator('.assistant', { hasText: '不清理了' }).waitFor({ timeout: 30_000 });
+  await expandTraces();
   check('拒绝后命令标记为失败', (await page.locator('.activity--error', { hasText: 'should-not-run' }).count()) === 1);
 
   // 2e. 提问
@@ -636,6 +656,7 @@ try {
   await composer.press('Enter');
   check('确认后插入 /compact', (await composer.inputValue()) === '/compact ');
   await composer.press('Enter');
+  await waitForActivity('/compact');
   await page.locator('.activity', { hasText: '/compact' }).locator('.activity__detail', { hasText: 'Compacted' }).waitFor({ timeout: 30_000 }).then(
     () => check('/compact 交给 dsh 执行，结果显示在对话里', true),
     () => check('/compact 交给 dsh 执行，结果显示在对话里', false),
@@ -718,6 +739,7 @@ try {
   await page.locator('.assistant', { hasText: '待办列好了' }).waitFor({ timeout: 30_000 });
   const strip = page.getByTestId('status-strip');
   check('待办显示在输入框上方（1/3，正在做的事）', (await strip.innerText()).includes('待办') && (await strip.innerText()).includes('1/3') && (await strip.innerText()).includes('修改启动逻辑'));
+  await expandTraces();
   check('待办不在对话流里重复出现', (await page.locator('.activity', { hasText: 'todo_write' }).count()) === 0);
   await strip.click();
   check('点开待办看到全部条目', (await page.getByTestId('dock').locator('.todo').count()) === 3);
@@ -734,16 +756,14 @@ try {
   await planCard.getByRole('button', { name: '继续完善' }).click();
   await planCard.getByRole('textbox', { name: '对计划的反馈' }).fill('先补测试再拆分');
   await planCard.getByRole('button', { name: '发送反馈' }).click();
-  await page.locator('.activity', { hasText: '继续完善' }).waitFor({ timeout: 30_000 });
+  await waitForActivity('继续完善');
   await page.waitForFunction(() => !document.querySelector('[aria-label="停止生成"]'), undefined, { timeout: 30_000 });
   check('继续完善：反馈交给模型，仍在计划模式', env.model.requests.some((r) => r.marker === 'E2E_PLAN') && (await page.getByTestId('plan-badge').count()) === 1);
   await send('E2E_PLAN 改好了再看看');
   await planCard.waitFor({ timeout: 30_000 });
   await planCard.getByRole('button', { name: '批准并开始执行' }).click();
-  await page.locator('.activity', { hasText: '已批准' }).waitFor({ timeout: 30_000 }).then(
-    () => check('批准计划后显示"已批准"', true),
-    () => check('批准计划后显示"已批准"', false),
-  );
+  await waitForActivity('已批准');
+  check('批准计划后显示"已批准"', (await page.locator('.activity', { hasText: '已批准' }).count()) === 1);
   await page.getByTestId('plan-badge').waitFor({ state: 'detached', timeout: 30_000 }).then(
     () => check('批准后退出计划模式', true),
     () => check('批准后退出计划模式', false),
@@ -788,6 +808,7 @@ try {
   );
   await shot('08-stopped');
   const firstSession = activeSessionId;
+  await expandTraces();
   const firstSessionActivities = await page.locator('.activity').count();
 
   // 4. 新对话与切换会话
@@ -811,6 +832,7 @@ try {
   await shot('09-sessions');
   await page.locator('[data-testid="session-history-page"] .history-session-item', { hasNotText: '你好' }).first().click();
   await page.locator('.assistant', { hasText: '需要我继续展开' }).waitFor({ timeout: 20_000 });
+  await expandTraces();
   check('切换回第一个会话，历史完整恢复', activeSessionId === firstSession && (await page.locator('.changes').count()) === 1 && (await page.locator('.activity').count()) === firstSessionActivities, (await page.locator('.activity').allInnerTexts()).join(' | '));
 
   // 4b. 多开会话：加号新开标签，不覆盖当前会话

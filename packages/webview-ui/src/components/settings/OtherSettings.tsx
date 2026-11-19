@@ -8,11 +8,12 @@ import type { AdvancedPreferences, PreferencesState } from '@harness-deck/shared
 import { useT } from '../../i18n.ts';
 import { setPreferencesLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { LogIcon, PencilIcon, RefreshIcon, SlidersIcon } from '../icons.tsx';
+import { LogIcon, PencilIcon, RefreshIcon } from '../icons.tsx';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
+import { SettingsSection } from './SettingsSection.tsx';
 
 const DEFAULT_ADVANCED: AdvancedPreferences = {
   dshPath: '',
@@ -34,23 +35,18 @@ export function GeneralSettings() {
   };
 
   return (
-    <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card" data-testid="settings-preferences">
-      <div className="primitive-card-bar flex items-start justify-between gap-2 border-b border-line bg-inset/50">
-        <div className="flex min-w-0 items-start gap-2">
-          <SlidersIcon className="mt-0.5 size-3.5 shrink-0 text-accent-ink" />
-          <div className="min-w-0">
-            <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.session.title')}</h3>
-            <p className="mt-0.5 mb-0 text-[11.5px] text-ink-3">{t('settings.session.desc')}</p>
-          </div>
-        </div>
-        {session.id ? (
-          <Button type="button" variant="outline" size="xs" onClick={() => postToHost({ type: 'renameSession', payload: {} })}>
+    <SettingsSection
+      title={t('settings.session.title')}
+      testId="settings-preferences"
+      actions={
+        session.id ? (
+          <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'renameSession', payload: {} })}>
             <PencilIcon className="size-3 text-ink-3" />
             <span>{t('header.rename')}</span>
           </Button>
-        ) : null}
-      </div>
-
+        ) : undefined
+      }
+    >
       <div className="primitive-card-pad flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
@@ -78,7 +74,7 @@ export function GeneralSettings() {
           />
         </div>
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -113,16 +109,13 @@ export function AdvancedSettings() {
   };
 
   return (
-    <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card" data-testid="settings-advanced">
-      <div className="primitive-card-bar border-b border-line bg-inset/50">
-        <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.advanced.title')}</h3>
-      </div>
+    <SettingsSection title={t('settings.advanced.title')} testId="settings-advanced">
       <div className="primitive-card-pad flex flex-col gap-3">
         <div className="flex flex-col gap-1 [&_[data-slot=native-select-wrapper]]:mt-1 [&_[data-slot=native-select-wrapper]]:w-full">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.schedules.title')}</span>
           <span className="text-[11.5px] text-ink-3">{t('settings.schedules.hint')}</span>
           <NativeSelect
-            size="sm"
+            size="default"
             data-testid="pref-schedule-permission"
             aria-label={t('settings.schedules.title')}
             value={preferences.schedulePermission ?? 'danger-full-access'}
@@ -139,7 +132,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1 border-t border-line pt-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshPath')}</span>
           <Input
-            size="sm"
+            size="default"
             data-testid="adv-dsh-path"
             className="font-mono text-[12px]"
             value={dshPath}
@@ -153,7 +146,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshProfile')}</span>
           <Input
-            size="sm"
+            size="default"
             data-testid="adv-dsh-profile"
             className="font-mono text-[12px]"
             value={dshProfile}
@@ -167,7 +160,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1 border-t border-line pt-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.zcodePath')}</span>
           <Input
-            size="sm"
+            size="default"
             data-testid="adv-zcode-path"
             className="font-mono text-[12px]"
             value={zcodePath}
@@ -181,7 +174,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.claudePath')}</span>
           <Input
-            size="sm"
+            size="default"
             data-testid="adv-claude-path"
             className="font-mono text-[12px]"
             value={claudePath}
@@ -195,7 +188,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.piPath')}</span>
           <Input
-            size="sm"
+            size="default"
             data-testid="adv-pi-path"
             className="font-mono text-[12px]"
             value={piPath}
@@ -220,18 +213,18 @@ export function AdvancedSettings() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-          <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
+          <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
             <RefreshIcon className="size-3.5 text-ink-3" />
             <span>{t('header.restart')}</span>
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
+          <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
             <LogIcon className="size-3.5 text-ink-3" />
             <span>{t('header.logs')}</span>
           </Button>
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="default"
             className="ml-auto text-ink-2 hover:text-ink"
             data-testid="open-vscode-settings"
             onClick={() => postToHost({ type: 'openSettings', payload: {} })}
@@ -240,6 +233,6 @@ export function AdvancedSettings() {
           </Button>
         </div>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

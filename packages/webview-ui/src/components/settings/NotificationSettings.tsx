@@ -8,6 +8,7 @@ import { postToHost } from '../../vscode.ts';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { BellIcon } from '../icons.tsx';
+import { SettingsSection } from './SettingsSection.tsx';
 
 const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
   enabled: true,
@@ -30,25 +31,22 @@ export function NotificationSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-notifications">
-      <section className="settings-section flex flex-col overflow-hidden rounded-card bg-surface shadow-card">
-        <div className="primitive-card-bar flex items-start justify-between gap-2 border-b border-line bg-inset/50">
-          <div className="min-w-0">
-            <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.notifications.title')}</h3>
-            <p className="mt-0.5 mb-0 text-[11.5px] text-ink-3">{t('settings.notifications.desc')}</p>
-          </div>
+    <div className="flex flex-col gap-5" data-testid="settings-notifications">
+      <SettingsSection
+        title={t('settings.notifications.title')}
+        actions={
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="default"
             data-testid="notif-test-btn"
             onClick={() => postToHost({ type: 'testNotification', payload: {} })}
           >
             <BellIcon className="size-3" />
             <span>{t('settings.notifications.test')}</span>
           </Button>
-        </div>
-
+        }
+      >
         <div className="primitive-card-pad flex flex-col gap-3">
           <SwitchRow
             testId="notif-enabled"
@@ -109,7 +107,7 @@ export function NotificationSettings() {
             {t('settings.notifications.testHint')}
           </div>
         </div>
-      </section>
+      </SettingsSection>
     </div>
   );
 }

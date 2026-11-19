@@ -350,3 +350,18 @@ body.resizing {
   box-shadow: var(--shadow-overlay);
   object-fit: contain;
 }
+
+/* ---------- Thinking trace (beautifului ThinkingTrace) ---------- */
+
+.thinking__body .activity {
+  margin-block: 0;
+}
+
+.thinking__body .activity__row {
+  padding-inline: 6px;
+  border-radius: 6px;
+}
+
+.thinking__body .activity__row:not(:disabled):hover {
+  background: var(--hover);
+}

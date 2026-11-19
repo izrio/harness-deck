@@ -8,11 +8,12 @@ import { PROVIDER_PRESETS, backendProtocolCapability, isProviderReadyForBackend,
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import type { MessageKey } from '../../i18n.ts';
+import { SettingsSection } from './SettingsSection.tsx';
 import { useT } from '../../i18n.ts';
 import { setProtocolGatewayLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { ValuePill } from '../beautifului/index.ts';
-import { KeyIcon, LogIcon, PlusIcon, ServerIcon } from '../icons.tsx';
+import { LogIcon, PlusIcon, ServerIcon } from '../icons.tsx';
 import { editorFromPreset, editorFromProvider, emptyModelRow, nextRowKey, toEditableRow } from './providers/providerEditor.ts';
 import type { EditableModelRow, ProviderEditorState } from './providers/providerEditor.ts';
 import { GatewayLogsDialog } from './providers/GatewayLogsDialog.tsx';
@@ -369,7 +370,7 @@ export function ProviderSettings() {
   );
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-providers">
+    <div className="flex flex-col gap-5" data-testid="settings-providers">
       {/* 本地协议转换网关（OpenAI 兼容 -> Claude Anthropic，默认关闭） */}
       <section
         className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card"
@@ -400,7 +401,7 @@ export function ProviderSettings() {
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="default"
               data-testid="provider-gateway-logs-btn"
               onClick={() => setLogsOpen(true)}
             >
@@ -426,21 +427,15 @@ export function ProviderSettings() {
       </section>
 
       {/* 已保存的服务商列表 */}
-      <section className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card">
-        <div className="primitive-card-bar flex flex-wrap items-start justify-between gap-2 border-b border-line bg-inset/50">
-          <div className="flex min-w-0 items-start gap-2">
-            <KeyIcon className="mt-0.5 size-3.5 shrink-0 text-accent-ink" />
-            <div className="min-w-0">
-              <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.providers.title')}</h3>
-              <p className="mt-0.5 mb-0 text-[11.5px] leading-relaxed text-ink-3">{t('settings.providers.desc')}</p>
-            </div>
-          </div>
-          <Button type="button" variant="outline" size="xs" data-testid="provider-add-btn" onClick={() => openAdd()}>
+      <SettingsSection
+        title={t('settings.providers.title')}
+        actions={
+          <Button type="button" variant="outline" size="default" data-testid="provider-add-btn" onClick={() => openAdd()}>
             <PlusIcon className="size-3" />
             <span>{t('settings.providers.add')}</span>
           </Button>
-        </div>
-
+        }
+      >
         <div className="primitive-card-pad flex flex-col gap-2">
           {providers.length === 0 ? (
             <div
@@ -464,7 +459,7 @@ export function ProviderSettings() {
             ))
           )}
         </div>
-      </section>
+      </SettingsSection>
 
       {/* 服务商新增 / 编辑表单 */}
       {editor ? (
