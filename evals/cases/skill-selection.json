@@ -1,0 +1,7 @@
+{
+  "id": "skill-selection",
+  "kind": "choice",
+  "title": "内置智能体角色路由",
+  "prompt": "用户说：\"帮我审查这个 PR 里的并发问题，重点看锁的粒度\"。当前产品内置智能体有：{{BUILTIN_AGENTS}}。只回答 JSON：{\"choice\":\"<agent id>\"}",
+  "expected": "builtin-reviewer"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "thread-title",
+  "kind": "title",
+  "title": "会话标题生成",
+  "prompt": "为下面这段对话生成一个不超过 20 个字的会话标题，只输出标题本身，不要引号：\n用户：WSL 里 npm 全局安装的 dsh 找不到，帮我修一下 PATH。\n助手：定位到 WSL 的 npm prefix 指向了 Windows 挂载目录，已改为 Linux 内的全局目录。",
+  "mustInclude": ["WSL", "npm"],
+  "maxLength": 40
+}

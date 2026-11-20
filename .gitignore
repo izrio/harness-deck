@@ -7,6 +7,7 @@ coverage/
 *.log
 .DS_Store
 .e2e-screenshots/
+evals/runs/
 .gradle/
 .intellijPlatform/
 .kotlin/

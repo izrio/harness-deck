@@ -3,6 +3,7 @@ import js from '@eslint/js';
 import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import testDiscipline from './eslint-rules/test-discipline.mjs';
 
 const WEBVIEW_RESTRICTED_PATHS = [
   {
@@ -109,7 +110,17 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/extension/**/*.ts', '*.{ts,mjs}', 'packages/*/vite.config.ts', 'packages/extension/scripts/*.mjs'],
+    // 测试纪律：先以 warn 上线，清理存量里的真实时间等待后再改 error（见 AGENTS.md）
+    files: ['packages/*/test/**/*.{ts,tsx}', 'packages/*/src/**/*.test.{ts,tsx}'],
+    plugins: { 'test-discipline': testDiscipline },
+    rules: {
+      'test-discipline/no-sleep-in-tests': 'warn',
+      'test-discipline/no-wall-clock-in-tests': 'warn',
+      'test-discipline/quarantine-needs-issue': 'error',
+    },
+  },
+  {
+    files: ['packages/extension/**/*.ts', '*.{ts,mjs}', 'scripts/**/*.mjs', 'evals/**/*.mjs', 'packages/*/vite.config.ts', 'packages/extension/scripts/*.mjs'],
     languageOptions: { globals: globals.node },
   },
   {

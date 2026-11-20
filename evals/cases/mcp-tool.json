@@ -1,0 +1,7 @@
+{
+  "id": "mcp-tool",
+  "kind": "choice",
+  "title": "斜杠模板命令选择",
+  "prompt": "用户选中了一段有类型报错的代码并说：\"帮我查出这段代码的问题并修掉\"。当前产品内置命令有：{{PLUGIN_COMMANDS}}。只回答 JSON：{\"choice\":\"<command name>\"}",
+  "expected": "/fix"
+}
