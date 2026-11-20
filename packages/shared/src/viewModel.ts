@@ -349,6 +349,21 @@ export interface QuotaView {
   readonly queriedAt: number;
 }
 
+/** 一轮对话：从用户消息开始，到 `turnDone`（或下一条用户消息）结束。 */
+export interface TurnView {
+  /** 这一轮的用户消息 id。 */
+  readonly id: string;
+  /** 从 1 开始的轮次。 */
+  readonly seq: number;
+  readonly status: 'running' | 'completed' | 'interrupted' | 'failed';
+  /** 本轮用时（底层提供时）。 */
+  readonly durationMs?: number;
+  /** 本轮 token 用量（底层提供时；目前保留字段，尚未填充）。 */
+  readonly usage?: TokenBreakdown;
+  /** 本轮真正改过的文件（编辑活动与每轮改动汇总，去重）。 */
+  readonly authoredPaths: readonly string[];
+}
+
 /** 当前会话（或尚未创建的新对话）的元信息。 */
 export interface SessionHeader {
   /** undefined 表示新对话：第一条消息发送时才在 dsh 里创建会话。 */
@@ -357,6 +372,8 @@ export interface SessionHeader {
   readonly running: boolean;
   readonly hasOlder: boolean;
   readonly loadingOlder: boolean;
+  /** 从条目推导出的回合：每轮的用户消息、状态、用时和改过的文件（见 `turns.ts`）。 */
+  readonly turns?: readonly TurnView[];
   /** 与 dsh 的同步状态。 */
   readonly sync: 'idle' | 'opening' | 'live' | 'disconnected' | 'failed';
   readonly failure?: string;
@@ -410,6 +427,47 @@ export interface TabsState {
   readonly active: string;
 }
 
+/** 第三方服务商协议能力：底层支持哪些协议，或只能用账号登录（无法绑定第三方服务商）。 */
+export type BackendProtocolCapability =
+  | { readonly kind: 'supported'; readonly protocols: readonly ProviderProtocol[] }
+  | { readonly kind: 'account-only' };
+
+/** 能查询订阅额度的服务商。 */
+export type QuotaProviderId = 'claude' | 'antigravity' | 'codebuddy';
+
+/**
+ * 底层能做什么：由底层的描述符声明，界面只读这里，不再按 id / kind 判断功能是否可用。
+ * 权限档位不在这里：它随会话由底层下发（`PermissionState.options`），每个底层可能不同。
+ */
+export interface BackendCapabilities {
+  /** 可绑定的第三方服务商协议。 */
+  readonly protocols: BackendProtocolCapability;
+  /** 可查询订阅额度时对应的服务商；不填表示不支持。 */
+  readonly quota?: QuotaProviderId;
+  /** 能在浏览器打开底层自带的 Web UI（dsh 网页）。 */
+  readonly webUi: boolean;
+  /** 支持在插件里配置 API Key（dsh）。 */
+  readonly apiKeySetup: boolean;
+  /** 审批卡片显示底层的审批说明。 */
+  readonly approvalHint: boolean;
+  /** 回复过程中发送的消息可以插队到当前轮。 */
+  readonly steer: boolean;
+  /** 每轮结束汇总改动，包含命令造成的改动。 */
+  readonly turnChanges: boolean;
+  /** 子代理卡片。 */
+  readonly subagents: boolean;
+  /** 提问卡片（底层向用户提问）。 */
+  readonly questions: boolean;
+  /** `/goal` 持续目标。 */
+  readonly goal: boolean;
+  /** 支持随消息发送图片。 */
+  readonly images: boolean;
+  /** 回合级回滚能力：native 为底层原生；files 为按记录的工具片段恢复文件（对话不回退）；none 不支持。 */
+  readonly rollback: 'native' | 'files' | 'none';
+  /** 可以在独立的 git worktree 里运行会话。 */
+  readonly worktree: boolean;
+}
+
 /**
  * 底层：内置原生接入的 DeepSeek (dsh)、Claude Code (`claude -p`)、Pi (`pi --mode rpc`)、ZCode (`zcode app-server --stdio`)，
  * 或通过 ACP（Agent Client Protocol）接入的编程代理（如 CodeBuddy、OpenCode）。
@@ -419,6 +477,12 @@ export interface BackendView {
   readonly id: string;
   readonly name: string;
   readonly kind: 'dsh' | 'zcode' | 'claude' | 'pi' | 'acp';
+  /** 接入协议；与 kind 相同，独出来为后续多账号实例做准备。 */
+  readonly driver?: string;
+  /** 账号实例标识；旧数据没有时回退到 id。 */
+  readonly instanceId?: string;
+  /** 这个底层支持的功能；界面只读这里判断是否显示或置灰。宿主总会下发，旧快照或测试可省略，界面用 `backendCapabilities` 兜底。 */
+  readonly capabilities?: BackendCapabilities;
   /** ACP 代理的启动命令（完整命令行，用于展示）。 */
   readonly command?: string;
   /** ACP 代理的可执行文件名/路径（用于表单编辑）。 */
@@ -441,6 +505,8 @@ export interface BackendView {
   readonly version?: string;
   /** 支持通过 npm 安装/卸载/切换版本的包名（内置底层）。 */
   readonly npmPackage?: string;
+  /** 本机已找到的底层是否归当前 npm 管理；false 表示由 Homebrew/mise 等外部方式安装，界面只提供手动命令。 */
+  readonly npmOwned?: boolean;
   /** 可用的版本列表（从新到旧）；undefined 表示尚未拉取。 */
   readonly versions?: readonly string[];
   /** 正在拉取版本列表。 */
@@ -470,6 +536,26 @@ export interface NodeEnvState {
   readonly npmVersion?: string;
 }
 
+/** 从用户配置的 ACP 注册表读取到的一条底层。 */
+export interface AcpRegistryEntry {
+  readonly id: string;
+  readonly name: string;
+  /** 可执行文件名（不含参数）。 */
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly description?: string;
+  readonly install?: string;
+  readonly docs?: string;
+}
+
+export interface AcpRegistryState {
+  readonly entries: readonly AcpRegistryEntry[];
+  /** 注册表地址。 */
+  readonly source?: string;
+  readonly error?: string;
+  readonly fetchedAt?: number;
+}
+
 export interface BackendsState {
   readonly items: readonly BackendView[];
   readonly active: string;
@@ -479,6 +565,10 @@ export interface BackendsState {
   readonly workspace?: string;
   /** 系统 Node.js 与 npm 状态。 */
   readonly nodeEnv?: NodeEnvState;
+  /** 用户配置的 ACP 注册表地址（可为空）。 */
+  readonly registryUrl?: string;
+  /** 最近一次拉取的注册表内容。 */
+  readonly registry?: AcpRegistryState;
 }
 
 /** 系统通知偏好（对应 harnessDeck.notifications.*）。 */
@@ -852,12 +942,67 @@ export interface WorkbenchOverview {
   readonly unread: readonly OverviewUnreadItem[];
 }
 
+export type SourceControlFileStatus =
+  | 'modified'
+  | 'added'
+  | 'deleted'
+  | 'renamed'
+  | 'untracked'
+  | 'conflicted';
+
+/** 工作台「改动」里的一行：一个文件的 Git 状态与增删行数。 */
+export interface SourceControlFileView {
+  readonly path: string;
+  readonly status: SourceControlFileStatus;
+  /** 是否已暂存（index 有改动）。 */
+  readonly staged: boolean;
+  readonly additions?: number;
+  readonly deletions?: number;
+}
+
+export interface SourceControlGhStatus {
+  readonly installed: boolean;
+  readonly authenticated: boolean;
+  readonly detail?: string;
+}
+
+export interface SourceControlActionResult {
+  readonly kind: 'commit' | 'push' | 'pr';
+  readonly ok: boolean;
+  readonly at: number;
+  readonly message?: string;
+}
+
+/** 源码控制只读状态：当前工作区的分支、远程与未提交改动。 */
+export interface SourceControlState {
+  /** 当前工作区是否是 Git 仓库。 */
+  readonly available: boolean;
+  /** 仓库根目录（绝对路径）。 */
+  readonly root?: string;
+  readonly branch?: string;
+  readonly remote?: string;
+  readonly files: readonly SourceControlFileView[];
+  readonly additions: number;
+  readonly deletions: number;
+  /** 文件太多时只返回前 N 个。 */
+  readonly truncated?: boolean;
+  /** 读取失败的原因。 */
+  readonly error?: string;
+  /** GitHub CLI（gh）可用性与登录状态。 */
+  readonly gh?: SourceControlGhStatus;
+  /** 最近一次显式写操作（commit / push / pr）的结果，供界面清理草稿或保留失败输入。 */
+  readonly lastAction?: SourceControlActionResult;
+  readonly updatedAt: number;
+}
+
 export interface WorkbenchState {
   readonly overview: WorkbenchOverview;
   readonly schedules: readonly ScheduleRule[];
   readonly agents: readonly AgentProfile[];
   readonly tasks: TaskBoardState;
   readonly sessionGroups: readonly ProjectSessionGroup[];
+  /** 源码控制只读状态（工作台「改动」模块）；读取前或非 Git 仓库时为空。 */
+  readonly sourceControl?: SourceControlState;
 }
 
 // ────────────────────────────────────────────────────────────

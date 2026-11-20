@@ -2,7 +2,10 @@
  * 第三方模型服务商（Coding Plan 编程套餐与自定义网关）预设、协议能力矩阵与参数解析。
  * 纯数据与纯函数，供 Extension Host 与 Webview 共用。
  */
-import type { ProviderModelItem, ProviderProtocol } from './viewModel.ts';
+import { backendCapabilities } from './capabilities.ts';
+import type { BackendProtocolCapability, ProviderModelItem, ProviderProtocol } from './viewModel.ts';
+
+export type { BackendProtocolCapability } from './viewModel.ts';
 
 export interface ProviderPreset {
   readonly id: string;
@@ -290,12 +293,9 @@ export function parseEffortsInput(raw: string): string[] {
   return out;
 }
 
-export type BackendProtocolCapability =
-  | { readonly kind: 'supported'; readonly protocols: readonly ProviderProtocol[] }
-  | { readonly kind: 'account-only' };
-
 /**
  * 判断某个底层智能体支持哪些第三方服务商协议。
+ * 具体规则集中在 `capabilities.ts` 的描述符里，这里保留旧入口供已有调用方使用。
  */
 export function backendProtocolCapability(backend: {
   readonly id: string;
@@ -304,40 +304,7 @@ export function backendProtocolCapability(backend: {
   readonly command?: string;
   readonly executable?: string;
 }): BackendProtocolCapability {
-  const id = backend.id.toLowerCase();
-  if (backend.kind === 'dsh' || id === 'dsh') {
-    return { kind: 'supported', protocols: ['openai-chat', 'openai-responses', 'anthropic'] };
-  }
-  if (backend.kind === 'zcode' || id === 'zcode') {
-    return { kind: 'supported', protocols: ['anthropic', 'openai-chat', 'openai-responses'] };
-  }
-  if (backend.kind === 'claude' || id === 'claude') {
-    return { kind: 'supported', protocols: ['anthropic'] };
-  }
-  if (backend.kind === 'pi' || id === 'pi' || id === 'oh-my-pi') {
-    return { kind: 'supported', protocols: ['openai-chat', 'openai-responses', 'anthropic'] };
-  }
-  if (id === 'opencode') {
-    return { kind: 'supported', protocols: ['openai-chat', 'openai-responses', 'anthropic'] };
-  }
-  if (id === 'codebuddy') {
-    return { kind: 'supported', protocols: ['openai-chat'] };
-  }
-  if (id === 'antigravity') {
-    return { kind: 'account-only' };
-  }
-
-  const hint = `${id} ${backend.name ?? ''} ${backend.executable ?? ''} ${backend.command ?? ''}`.toLowerCase();
-  if (/\b(cursor|antigravity|agy|gemini|kimi[-_\s]?code|kimi[-_\s]?cli)\b/iu.test(hint)) {
-    return { kind: 'account-only' };
-  }
-  if (/\bcodex\b/iu.test(hint)) {
-    return { kind: 'supported', protocols: ['openai-responses', 'openai-chat'] };
-  }
-  if (/\bclaude\b/iu.test(hint)) {
-    return { kind: 'supported', protocols: ['anthropic'] };
-  }
-  return { kind: 'supported', protocols: ['openai-chat', 'openai-responses', 'anthropic'] };
+  return backendCapabilities(backend).protocols;
 }
 
 export interface ProtocolReadinessOptions {

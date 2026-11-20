@@ -13,6 +13,34 @@ describe('parseWebviewMessage', () => {
       type: 'uninstallBackend',
       payload: { id: 'dsh' },
     });
+    expect(parseWebviewMessage({ type: 'newWorktreeSession', payload: {} })).toEqual({
+      type: 'newWorktreeSession',
+      payload: {},
+    });
+    expect(parseWebviewMessage({ type: 'sourceControlCommit', payload: { message: 'fix: path' } })).toEqual({
+      type: 'sourceControlCommit',
+      payload: { message: 'fix: path' },
+    });
+    expect(parseWebviewMessage({ type: 'sourceControlCreatePr', payload: { title: 'Fix', body: '' } })).toEqual({
+      type: 'sourceControlCreatePr',
+      payload: { title: 'Fix', body: '' },
+    });
+    expect(parseWebviewMessage({ type: 'rollbackLastTurn', payload: {} })).toEqual({
+      type: 'rollbackLastTurn',
+      payload: {},
+    });
+    expect(
+      parseWebviewMessage({ type: 'fetchAcpRegistry', payload: { url: 'https://example.com/acp.json' } }),
+    ).toEqual({ type: 'fetchAcpRegistry', payload: { url: 'https://example.com/acp.json' } });
+    expect(parseWebviewMessage({ type: 'fetchAcpRegistry', payload: { url: 'http://example.com/acp.json' } })).toBeUndefined();
+    expect(parseWebviewMessage({ type: 'fetchAcpRegistry', payload: { url: 'file:///etc/passwd' } })).toBeUndefined();
+    expect(
+      parseWebviewMessage({ type: 'openSourceControlDiff', payload: { path: 'src/a.ts', staged: true } }),
+    ).toEqual({ type: 'openSourceControlDiff', payload: { path: 'src/a.ts', staged: true } });
+    expect(parseWebviewMessage({ type: 'removeWorktree', payload: { path: '/repo-wt' } })).toEqual({
+      type: 'removeWorktree',
+      payload: { path: '/repo-wt' },
+    });
     expect(parseWebviewMessage({ type: 'setPreferences', payload: { language: 'zh', showTurnChanges: true } })).toEqual({
       type: 'setPreferences',
       payload: { language: 'zh', showTurnChanges: true },

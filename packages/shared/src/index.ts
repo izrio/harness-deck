@@ -3,11 +3,14 @@ export { COLOR_SCHEMES, IMAGE_MEDIA_TYPES, MAX_IMAGES, TASK_COLUMNS, WORKBENCH_M
 export { joinLabel, splitLabel } from './labels.ts';
 export type {
   AdvancedPreferences,
+  AcpRegistryEntry,
+  AcpRegistryState,
   AgentProfile,
   AgentToolConfig,
   AppearanceState,
   AttachmentView,
   BackendsState,
+  BackendCapabilities,
   BackendView,
   ChangedFileView,
   ChatCommand,
@@ -56,6 +59,7 @@ export type {
   QuestionView,
   QuotaView,
   QuotaWindowView,
+  QuotaProviderId,
   RecentProject,
   ScheduleFrequency,
   ScheduleRule,
@@ -64,11 +68,17 @@ export type {
   SessionHeader,
   SessionListItem,
   SkillsState,
+  SourceControlActionResult,
+  SourceControlFileStatus,
+  SourceControlFileView,
+  SourceControlGhStatus,
+  SourceControlState,
   TabsState,
   TabView,
   TaskBoardState,
   TaskColumn,
   TokenBreakdown,
+  TurnView,
   WorkbenchModule,
   WorkbenchOverview,
   WorkbenchState,
@@ -97,3 +107,5 @@ export {
   type ProtocolReadinessOptions,
   type ProviderPreset,
 } from './providers.ts';
+export { backendCapabilities, type BackendCapabilityInput } from './capabilities.ts';
+export { deriveTurns } from './turns.ts';

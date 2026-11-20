@@ -35,6 +35,9 @@ import type {
 
 const empty = z.object({});
 
+/** 幂等回执：Webview 为发送/审批/回答/手动触发定时任务生成一次性 id；宿主短期内忽略重复 id。 */
+const commandMeta = { commandId: z.string().min(1).max(100).optional() };
+
 const imageSchema = z.object({
   /** Webview 生成的标识：发送中的本地回显用它找到图片。 */
   localId: z.string().min(1).max(100),
@@ -95,8 +98,41 @@ const mcpServerPayloadSchema = z.object({
 
 export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready'), payload: empty }),
+  /** 重新读取工作区的 Git 状态（工作台「改动」模块打开时调用）。 */
+  z.object({ type: z.literal('refreshSourceControl'), payload: empty }),
+  /** 打开工作台「改动」里指定文件的 Diff（未跟踪文件直接打开文件）。 */
+  z.object({
+    type: z.literal('openSourceControlDiff'),
+    payload: z.object({ path: z.string().min(1).max(4_096), staged: z.boolean().optional() }),
+  }),
+  /** 新建一个在独立 worktree 中运行的会话；会串行切换到该 worktree（同一时间只有一个工作区活动）。 */
+  z.object({
+    type: z.literal('newWorktreeSession'),
+    payload: z.object({
+      path: z.string().max(4_096).optional(),
+      branch: z.string().max(200).optional(),
+    }),
+  }),
+  /** 清理一个已创建的 git worktree（非 force，有未提交改动时拒绝）。 */
+  z.object({
+    type: z.literal('removeWorktree'),
+    payload: z.object({ path: z.string().min(1).max(4_096) }),
+  }),
+  /** 提交改动（显式动作；stageAll 为 false 时仅提交已暂存文件）。 */
+  z.object({
+    type: z.literal('sourceControlCommit'),
+    payload: z.object({ message: z.string().min(1).max(5_000), stageAll: z.boolean().optional() }),
+  }),
+  /** 推送当前分支（显式动作，不 force）。 */
+  z.object({ type: z.literal('sourceControlPush'), payload: empty }),
+  /** 用 GitHub CLI 创建 PR（显式动作）。 */
+  z.object({
+    type: z.literal('sourceControlCreatePr'),
+    payload: z.object({ title: z.string().min(1).max(500), body: z.string().max(20_000) }),
+  }),
   z.object({
     type: z.literal('sendMessage'),
+    ...commandMeta,
     payload: z
       .object({
         text: z.string().max(200_000),
@@ -148,10 +184,11 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('showLogs'), payload: empty }),
   z.object({ type: z.literal('openWebUI'), payload: empty }),
   /** allowAlways：底层提供「始终允许」时才有（ACP 代理的 allow_always 选项）。 */
-  z.object({ type: z.literal('respondApproval'), payload: z.object({ id: z.string().min(1), decision: z.enum(['allow', 'allowAlways', 'reject']) }) }),
+  z.object({ type: z.literal('respondApproval'), ...commandMeta, payload: z.object({ id: z.string().min(1), decision: z.enum(['allow', 'allowAlways', 'reject']) }) }),
   z.object({ type: z.literal('previewApproval'), payload: z.object({ id: z.string().min(1) }) }),
   z.object({
     type: z.literal('answerQuestion'),
+    ...commandMeta,
     payload: z.union([
       z.object({
         id: z.string().min(1),
@@ -187,6 +224,17 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       env: z.record(z.string().min(1).max(200), z.string().max(4_000)),
       installHint: z.string().max(1_000).optional(),
       singleSession: z.boolean().optional(),
+    }),
+  }),
+  /** 拉取用户配置的 ACP 注册表（只读 HTTPS URL，不会执行安装）。 */
+  z.object({
+    type: z.literal('fetchAcpRegistry'),
+    payload: z.object({
+      url: z
+        .string()
+        .url()
+        .max(2_000)
+        .refine((value) => value.startsWith('https://'), 'only https:// URLs are allowed'),
     }),
   }),
   /** 删除自定义外部智能体，或移除对内置 ACP 智能体的覆盖。 */
@@ -273,6 +321,8 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('selectPermission'), payload: z.object({ preset: z.string().min(1) }) }),
   z.object({ type: z.literal('saveAll'), payload: empty }),
+  /** 把最后一轮改过的文件恢复到本轮开始前（仅 dsh；对话不回退）。 */
+  z.object({ type: z.literal('rollbackLastTurn'), payload: empty }),
   /** 在编辑器标签页中打开全宽工作台面板。 */
   z.object({ type: z.literal('openWorkbenchPanel'), payload: empty }),
   /** 总览未读项已读标记。 */
@@ -295,7 +345,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('toggleSchedule'), payload: z.object({ id: z.string().min(1).max(100), enabled: z.boolean() }) }),
   z.object({ type: z.literal('deleteSchedule'), payload: z.object({ id: z.string().min(1).max(100) }) }),
-  z.object({ type: z.literal('runScheduleNow'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({ type: z.literal('runScheduleNow'), ...commandMeta, payload: z.object({ id: z.string().min(1).max(100) }) }),
   z.object({
     type: z.literal('markScheduleRunRead'),
     payload: z.object({ ruleId: z.string().min(1).max(100), runId: z.string().min(1).max(100) }),

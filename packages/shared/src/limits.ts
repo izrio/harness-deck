@@ -15,8 +15,8 @@ export const MAX_IMAGE_BASE64 = 20_000_000;
 export const COLOR_SCHEMES = ['slate', 'warm', 'forest', 'violet', 'rose'] as const;
 export type ColorSchemeId = (typeof COLOR_SCHEMES)[number];
 
-/** 工作台五大核心模块。 */
-export const WORKBENCH_MODULES = ['overview', 'schedules', 'agents', 'tasks', 'sessions'] as const;
+/** 工作台核心模块：总览 / 改动 / 定时 / 智能体 / 任务 / 会话。 */
+export const WORKBENCH_MODULES = ['overview', 'changes', 'schedules', 'agents', 'tasks', 'sessions'] as const;
 export type WorkbenchModule = (typeof WORKBENCH_MODULES)[number];
 
 /** 任务看板四列状态。 */
