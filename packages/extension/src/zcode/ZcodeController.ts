@@ -612,7 +612,7 @@ export class ZcodeController implements ChatBackendController {
         mcpServersForBackend(this.options.extensions?.().mcp.servers ?? [], 'zcode'),
       );
       const created = await link.request<{ sessionId?: string; id?: string }>('session/create', {
-        workspace: { path: this.workspacePath },
+        workspace: { workspacePath: this.workspacePath, workspaceKey: this.workspacePath },
         ...(mcpServers.length > 0 ? { mcpServers } : {}),
       });
       const sessionId = created?.sessionId ?? created?.id;

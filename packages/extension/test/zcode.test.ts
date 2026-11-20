@@ -116,7 +116,9 @@ rl.on('line', (line) => {
     });
 
     await conn.start();
-    const res = await conn.request<{ sessionId: string }>('session/create', { workspace: { path: dir } });
+    const res = await conn.request<{ sessionId: string }>('session/create', {
+      workspace: { workspacePath: dir, workspaceKey: dir },
+    });
     expect(res.sessionId).toBe('sess_123');
     await new Promise((r) => setTimeout(r, 30));
 
