@@ -1,5 +1,19 @@
 # Harness Deck 项目开发规范
 
+## 术语
+
+- **底层（backend）**：面板背后的编程代理运行时（dsh、Claude、Pi、ZCode、ACP 代理）。
+- **底层 id / kind**：`id` 是配置项标识（可由用户覆盖），`kind` 是接入协议类型（`dsh` / `claude` / `pi` / `zcode` / `acp`）。
+- **宿主（Host）**：运行在 IDE 扩展进程里的公共层（`packages/extension/src/host`），与具体 IDE 解耦。
+- **控制器（Controller）**：把一个底层的数据投影成视图模型、处理 Webview 消息的模块。
+- **能力描述符（capability）**：`packages/shared/src/capabilities.ts` 中声明的底层功能集合；界面只读它，不按 `kind` 判断功能。
+- **会话（session）**：一段持久的对话，按底层分开保存。
+- **回合（turn）**：一轮用户消息到回复结束（含后续检查点），见 `packages/shared/src/turns.ts`。
+- **标签（tab）**：面板里打开的一个会话或新对话。
+- **工作台（workbench）**：总览 / 改动 / 定时 / 智能体 / 任务 / 会话六个模块。
+- **worktree 会话**：在独立 git worktree 中运行的串行化会话（HD-06，同一时间一个活动工作区）。
+- **Sidecar**：JetBrains 插件启动的 Node 宿主进程（`packages/extension/src/sidecar`）。
+
 ## UI 组件库强制规范（严禁新造组件）
 
 本项目前端界面（`packages/webview-ui`）**只允许使用 `shadcn-ui` 和 `beautifului` 两个组件库，严禁自己新造任何通用或基础 UI 组件**。
@@ -78,6 +92,19 @@
   - `packages/webview-ui/src/components/ui/*` 中由 `shadcn` CLI 生成的官方基础控件内部自带的 `lucide-react` 图标导入（构建期同样静态内联离线可用）。
   - 品牌标志与数据可视化/专属动效图形（如 `HarnessDeckLogo.tsx`、`BackendLogo.tsx`、`ContextRing.tsx` 及 `beautifului` 专属环形加载动效）。
 
+## 改动自检清单（每个面都改到）
+
+项目同时运行在 VS Code 与 JetBrains，界面、宿主与底层分属不同进程。改完一处不代表功能完成；提交前逐项确认，不适用的写「不适用」：
+
+1. **入口**：对话、命令面板、设置页、编辑器右键菜单、状态栏。从对话能触发的功能，通常也要能从命令或设置到达。
+2. **客户端**：VS Code Webview、JetBrains JCEF、宿主公共层（`packages/extension/src/host`、`packages/shared`）。至少确认两端都能加载新快照。
+3. **底层**：该功能在 dsh / Claude / Pi / ZCode / ACP 上分别是「支持 / 降级 / 不支持」；把结论写进 `packages/shared/src/capabilities.ts`，不要在组件里按 `kind` 判断。
+4. **契约**：`packages/shared/src/bridge.ts` 的消息与 `viewModel.ts` 的快照类型要同时改；Webview 与宿主不能只改一边。
+5. **反向状态**：新增入口必须同时有退出、撤销或查看方式（例如新增 worktree 会话要有清理入口）。
+6. **语言**：`packages/extension/src/i18n.ts` 与 `packages/webview-ui/src/i18n.ts` 的中英文都要补，占位符保持一致。
+7. **文档**：用户可见行为改 `packages/extension/README.md`；跨组件的约束改 `ROADMAP.md` 或设计文档；只改实现细节不写文档。
+8. **测试**：单测覆盖纯逻辑；协议或底层行为补 `acp-e2e` / `smoke`；界面布局与交互补 Webview 测试。纯视觉调整可用前后截图代替。
+
 ## 常用验证命令
 
 修改代码后请确保以下检查通过：
@@ -87,6 +114,13 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
+```
+
+提交前可以先跑增量检查，只检查受影响的包：
+
+```bash
+pnpm check:changed          # 按改动范围跑 lint / typecheck / test
+pnpm check:changed --dry-run # 只打印将执行的命令
 ```
 
 ## 推送与发版规范
