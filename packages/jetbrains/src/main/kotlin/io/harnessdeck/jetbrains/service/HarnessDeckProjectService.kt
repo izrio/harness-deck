@@ -143,26 +143,7 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
                 return
             }
 
-            val mgr = SidecarProcessManager(
-                nodeExecutable = nodeExe,
-                sidecarEntry = assets.sidecarEntry,
-                workingDirectory = Paths.get(workbench.projectBasePath()),
-                onIdeRequest = { method, params -> handleIdeRequest(method, params) },
-                onIdeNotification = { method, params -> handleIdeNotification(method, params) },
-                onLog = { channel, line -> logService.append(channel, line) },
-                onUnexpectedExit = { code ->
-                    logService.append("host", "Sidecar process exited unexpectedly with code $code")
-                },
-            )
-            sidecar = mgr
-
-            val sync = EditorStateSync(project, workbench) { patch ->
-                sidecar?.notifyEditorStateChanged(patch)
-            }
-            sync.install()
-            editorSync = sync
-
-            val initParams = SidecarInitParams(
+            fun buildInitParams(): SidecarInitParams = SidecarInitParams(
                 projectPath = workbench.projectBasePath(),
                 workspaceFolders = workbench.workspaceFolders(),
                 ideLanguage = workbench.ideLanguage(),
@@ -173,6 +154,56 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
                 activeEditor = workbench.captureActiveEditor(),
                 dirtyFiles = workbench.captureDirtyFiles(),
             )
+
+            val mgr = SidecarProcessManager(
+                nodeExecutable = nodeExe,
+                sidecarEntry = assets.sidecarEntry,
+                workingDirectory = Paths.get(workbench.projectBasePath()),
+                onIdeRequest = { method, params -> handleIdeRequest(method, params) },
+                onIdeNotification = { method, params -> handleIdeNotification(method, params) },
+                onLog = { channel, line -> logService.append(channel, line) },
+                onUnexpectedExit = { code ->
+                    logService.append("host", "Sidecar process exited unexpectedly with code $code")
+                    val currentMgr = sidecar ?: return@SidecarProcessManager
+                    val delayMs = currentMgr.nextRestartDelayMs()
+                    Thread({
+                        Thread.sleep(delayMs)
+                        val activeMgr = sidecar ?: return@Thread
+                        val future = runCatching { activeMgr.restart(buildInitParams()) }
+                            .onFailure { logService.append("host", "Sidecar restart failed: ${it.message}") }
+                            .getOrNull()
+                        future?.whenComplete { _, err ->
+                            if (err != null) {
+                                logService.append("host", "Sidecar re-init failed: ${err.message}")
+                            } else {
+                                if (chatVisible) {
+                                    activeMgr.notifyWebviewVisibility(true)
+                                }
+                                // 通知新 sidecar 重新向所有已打开的 JCEF Webview 推送完整快照
+                                if (panels.isNotEmpty()) {
+                                    val ready = JsonObject().apply {
+                                        addProperty("type", "ready")
+                                        add("payload", JsonObject())
+                                    }
+                                    activeMgr.sendWebviewMessage(ready)
+                                }
+                            }
+                        }
+                    }, "harness-deck-sidecar-restart").apply {
+                        isDaemon = true
+                        start()
+                    }
+                },
+            )
+            sidecar = mgr
+
+            val sync = EditorStateSync(project, workbench) { patch ->
+                sidecar?.notifyEditorStateChanged(patch)
+            }
+            sync.install()
+            editorSync = sync
+
+            val initParams = buildInitParams()
             mgr.start(initParams).whenComplete { _, err ->
                 if (err != null) {
                     logService.append("host", "Sidecar init failed: ${err.message}")

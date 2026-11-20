@@ -29,6 +29,8 @@ class SidecarProcessManager(
     private var process: Process? = null
     private var transport: JsonRpcTransport? = null
     private val disposed = AtomicBoolean(false)
+    private var restarts = 0
+    private var lastRestartAt = 0L
 
     @Synchronized
     fun start(initParams: SidecarInitParams): CompletableFuture<JsonElement> {
@@ -68,7 +70,16 @@ class SidecarProcessManager(
             onRequest = onIdeRequest,
             onNotification = onIdeNotification,
             onClose = {
-                if (!disposed.get()) {
+                // 仅当关闭的是当前实例时才清空，避免旧进程延迟回调覆盖新重启的连接（ABA 竞态）。
+                var isCurrent = false
+                synchronized(this@SidecarProcessManager) {
+                    if (process === proc) {
+                        transport = null
+                        process = null
+                        isCurrent = true
+                    }
+                }
+                if (isCurrent && !disposed.get()) {
                     val code = runCatching { proc.waitFor() }.getOrDefault(-1)
                     onUnexpectedExit(code)
                 }
@@ -77,6 +88,30 @@ class SidecarProcessManager(
         transport = rpc
 
         return rpc.request("sidecar/init", SidecarGson.instance.toJsonTree(initParams), timeoutMs = 20_000)
+    }
+
+    /**
+     * 异常退出后重启。5 分钟内最多 3 次，避免底层命令一直失败导致崩溃循环。
+     * 返回 `sidecar/init` 的 Future，供调用方感知成功/失败并重新同步 Webview；`disposed` 或超限时返回 null。
+     */
+    @Synchronized
+    fun restart(initParams: SidecarInitParams): CompletableFuture<JsonElement>? {
+        if (disposed.get()) return null
+        val now = System.currentTimeMillis()
+        if (now - lastRestartAt > 5 * 60_000) restarts = 0
+        if (restarts >= 3) return null
+        restarts += 1
+        lastRestartAt = now
+        transport = null
+        process = null
+        return start(initParams)
+    }
+
+    /** 下次重启的指数退避毫秒数（1.5s -> 3s -> 6s）。 */
+    @Synchronized
+    fun nextRestartDelayMs(): Long {
+        val shift = restarts.coerceIn(0, 2)
+        return 1_500L shl shift
     }
 
     fun executeCommand(command: String, statePatch: EditorStateChangedParams? = null): CompletableFuture<JsonElement> {
