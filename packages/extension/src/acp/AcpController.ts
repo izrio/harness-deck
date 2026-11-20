@@ -9,6 +9,7 @@
  *
  * 没有对应能力的功能（每轮改动汇总、子代理、dsh 的队列和插队）在界面上自然不出现。
  */
+import { deriveTurns } from '@harness-deck/shared';
 import type {
   BackendsState,
   CommandView,
@@ -303,7 +304,7 @@ export class AcpController implements ChatBackendController {
       connection: this.connection,
       sessions: view.sessions,
       tabs: view.tabs,
-      session: view.session,
+      session: { ...view.session, turns: deriveTurns(view.items, view.session.running) },
       items: view.items,
       models: view.models,
       interactions: view.interactions,

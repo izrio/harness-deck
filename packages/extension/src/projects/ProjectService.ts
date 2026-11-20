@@ -357,6 +357,31 @@ export async function createProjectWorktree(params: {
   return { worktreePath, branch, copiedFiles, skippedFiles };
 }
 
+/**
+ * 安全移除一个非主仓库的 git worktree（不使用 --force，有未提交改动时会拒绝）。
+ * 返回主仓库路径，便于调用方把工作区切回主仓库。
+ */
+export async function removeProjectWorktree(params: {
+  readonly worktreePath: string;
+  readonly log?: (line: string) => void;
+}): Promise<{ readonly mainRepoPath: string }> {
+  const target = resolve(params.worktreePath);
+  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: target });
+  const worktrees: string[] = [];
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith('worktree ')) worktrees.push(resolve(line.slice(9).trim()));
+  }
+  const mainRepoPath = worktrees[0];
+  if (!mainRepoPath) throw new Error('not a git worktree');
+  const norm = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  if (norm(mainRepoPath) === norm(target)) {
+    throw new Error('cannot remove the main repository worktree');
+  }
+  await execFileAsync('git', ['worktree', 'remove', '--', target], { cwd: mainRepoPath });
+  params.log?.(`已移除 git worktree：${target}`);
+  return { mainRepoPath };
+}
+
 function isInsideDir(root: string, target: string): boolean {
   const normRoot = process.platform === 'win32' ? root.toLowerCase() : root;
   const normTarget = process.platform === 'win32' ? target.toLowerCase() : target;

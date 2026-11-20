@@ -29,12 +29,14 @@ import {
   type ProjectsState,
   type ProvidersState,
   type RuntimeStatus,
+  type AcpRegistryState,
   type TabsState,
   type WebviewToHost,
   type WorkbenchModule,
   type WorkbenchState,
 } from '@harness-deck/shared';
 import { createAcpBackend } from '../backend/acp.ts';
+import { parseAcpRegistry } from '../backend/acpRegistry.ts';
 import { createClaudeBackend } from '../backend/claude.ts';
 import { createDshBackend } from '../backend/dsh.ts';
 import {
@@ -48,6 +50,7 @@ import {
 } from '../backend/envCache.ts';
 import { processEnvWithProxy, setNpmGlobalBin, type BackendHost } from '../backend/host.ts';
 import {
+  checkNpmOwnership,
   detectNodeEnv,
   fetchNpmVersions,
   installNpmPackage,
@@ -102,6 +105,7 @@ import {
   parseProjectConfigs,
   parseRecentProjects,
   recordRecentProject,
+  removeProjectWorktree,
   removeRecentProjectFromList,
   updateProjectConfigsMap,
 } from '../projects/ProjectService.ts';
@@ -123,6 +127,8 @@ import { redactSecrets } from '../util/redact.ts';
 import { locateZcode, verifyZcodeTarget } from '../zcode/locate.ts';
 import { UnifiedTabsModel } from '../vm/UnifiedTabs.ts';
 import type { HostCommandId, HostPlatform } from './HostPlatform.ts';
+import { CommandReceipts } from './receipts.ts';
+import { isSchedulerLockHeld, schedulerLockPath } from '../sidecar/schedulerLock.ts';
 
 const FOLDER_KEY = 'harnessDeck.folder';
 const BACKEND_KEY = 'harnessDeck.backend';
@@ -148,6 +154,11 @@ const BUILTIN_HINTS: Readonly<Record<BuiltinHintId, HostMessageKey>> = {
 
 const WORKBENCH_MESSAGE_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'openWorkbenchPanel',
+  'refreshSourceControl',
+  'openSourceControlDiff',
+  'sourceControlCommit',
+  'sourceControlPush',
+  'sourceControlCreatePr',
   'markUnreadRead',
   'upsertSchedule',
   'toggleSchedule',
@@ -265,6 +276,8 @@ export function createHarnessHostRuntime(
   const versionsLoading = new Set<string>();
   const versionsError = new Map<string, string>();
   const backendBusy = new Map<string, 'installing' | 'uninstalling' | 'switching'>();
+  const npmOwnership = new Map<string, boolean>();
+  let acpRegistry: AcpRegistryState | undefined;
   let nodeEnv: NodeEnvState = restoredEnvCache?.nodeEnv ?? { checked: false, hasNode: false, hasNpm: false };
   let npmCommand: string | undefined = restoredEnvCache?.npmCommand;
   let npmGlobalBin: string | undefined = restoredEnvCache?.npmGlobalBin;
@@ -503,6 +516,7 @@ export function createHarnessHostRuntime(
         return {
           ...profileView(p, {
             ...(availability.has(p.id) ? { available: availability.get(p.id) } : {}),
+            ...(npmOwnership.has(p.id) ? { npmOwned: npmOwnership.get(p.id) } : {}),
             ...(installedVersions.has(p.id) ? { version: installedVersions.get(p.id) } : {}),
             ...(availableVersions.has(p.id) ? { versions: availableVersions.get(p.id) } : {}),
             ...(versionsLoading.has(p.id) ? { versionsLoading: true } : {}),
@@ -520,6 +534,8 @@ export function createHarnessHostRuntime(
       defaultBackend: defaultBackendId,
       workspace: folders().find((f) => (normalizeProjectPath(f.path) || f.path) === workspacePath)?.name ?? basename(workspacePath),
       nodeEnv,
+      registryUrl: platform.settings.get<string>('acpRegistryUrl', ''),
+      ...(acpRegistry ? { registry: acpRegistry } : {}),
     };
   };
 
@@ -926,6 +942,18 @@ export function createHarnessHostRuntime(
 
             availability.set(p.id, isAvailable);
             const pkg = npmPackageFor(p.id);
+            if (isAvailable && pkg) {
+              const owned = await checkNpmOwnership({
+                packageName: pkg,
+                installedPackages: npmPackages,
+                ...(resolvedTarget ? { executable: resolvedTarget } : {}),
+                ...(npmGlobalBin ? { npmGlobalBin } : {}),
+                platform: osPlatform,
+              });
+              npmOwnership.set(p.id, owned);
+            } else {
+              npmOwnership.delete(p.id);
+            }
             let version = pkg
               ? (npmPackages[pkg] ?? (p.id === 'pi' ? npmPackages['@mariozechner/pi-coding-agent'] : undefined))
               : undefined;
@@ -1492,6 +1520,32 @@ export function createHarnessHostRuntime(
       pushUnifiedTabs();
     });
 
+  /**
+   * 串行化切换工作区：同一时间只有一个 cwd 处于活动状态。
+   * worktree 会话靠它实现——切过去后其他工作区的会话保留在标签/历史里，但不再收到实时事件。
+   */
+  const switchWorkspace = async (projectPath: string, options?: { readonly skipControllerSync?: boolean }): Promise<void> => {
+    const nextPath = normalizeProjectPath(projectPath) || projectPath;
+    await saveRecentProjectPath(nextPath);
+    if (nextPath === workspacePath) {
+      pushProjects();
+      return;
+    }
+    workspacePath = nextPath;
+    await platform.workspaceState.update(FOLDER_KEY, workspacePath);
+    unifiedTabsRestored = false;
+    if (!options?.skipControllerSync && active) {
+      active.workspacePath = workspacePath;
+      active.lastObservedSessionId = undefined;
+      notifierFor(active.backend.profile.id).reset();
+      active.backend.controller.setWorkspace(workspacePath);
+      ensureUnifiedTabsRestored(active);
+      active.backend.controller.backendsChanged();
+      pushUnifiedTabs(true);
+    }
+    pushProjects();
+  };
+
   const openSessionInActive = (
     payload: Extract<WebviewToHost, { type: 'switchSession' }>['payload'],
   ): Promise<void> =>
@@ -1654,6 +1708,28 @@ export function createHarnessHostRuntime(
     }
   };
 
+  /**
+   * npm 只管理自己安装的底层：已安装但不是 npm 装的（Homebrew / mise / Volta / 桌面端自带），
+   * 直接 `npm install -g` 只会装第二份，覆盖不到用户现有的那份，所以拒绝并让用户用原方式管理。
+   */
+  const ensureNpmOwned = async (id: string, name: string, pkg: string): Promise<boolean> => {
+    if (!npmCommand) return false;
+    const installed = await listNpmGlobalPackages(npmCommand, processEnv(), process.platform);
+    const executable = cachedExecutables.get(id)?.command;
+    const owned = await checkNpmOwnership({
+      packageName: pkg,
+      installedPackages: installed,
+      ...(executable ? { executable } : {}),
+      ...(npmGlobalBin ? { npmGlobalBin } : {}),
+      platform: process.platform,
+    });
+    if (!owned) {
+      log(`拒绝用 npm 覆盖 ${id}：不是 npm 安装（${executable ?? '未找到可执行文件'}）`);
+      post({ type: 'toast', payload: { level: 'error', text: t('backend.notNpmOwned', name, executable ?? pkg) } });
+    }
+    return owned;
+  };
+
   const installOrSwitchBackend = async (id: string, version?: string): Promise<void> => {
     if (!platform.isWorkspaceTrusted()) {
       post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
@@ -1679,6 +1755,7 @@ export function createHarnessHostRuntime(
     }
 
     const wasInstalled = availability.get(id) === true;
+    if (wasInstalled && !(await ensureNpmOwned(id, name, pkg))) return;
     backendBusy.set(id, wasInstalled && version ? 'switching' : 'installing');
     pushBackends();
 
@@ -1728,6 +1805,7 @@ export function createHarnessHostRuntime(
       return;
     }
 
+    if (availability.get(id) === true && !(await ensureNpmOwned(id, name, pkg))) return;
     backendBusy.set(id, 'uninstalling');
     pushBackends();
 
@@ -1806,6 +1884,11 @@ export function createHarnessHostRuntime(
     locale: getLocale,
     isWorkspaceTrusted: () => platform.isWorkspaceTrusted(),
     isWebviewVisible: () => platform.isWebviewVisible(),
+    isBackgroundSchedulerActive: () =>
+      platform.schedulerLockDir ? isSchedulerLockHeld(schedulerLockPath(platform.schedulerLockDir), process.pid) : false,
+    ...(platform.onSchedulesChanged ? { onSchedulesChanged: platform.onSchedulesChanged } : {}),
+    openFile: (path) => platform.workbench.openFile(path),
+    openDiff: (request) => platform.workbench.openDiff(request),
     workspacePath: () => workspacePath,
     projects: projectsState,
     profiles,
@@ -1817,27 +1900,9 @@ export function createHarnessHostRuntime(
       return entry ? contextForManaged(entry) : undefined;
     },
     switchProjectAndBackend: async (projectPath, backendId) => {
-      const nextPath = normalizeProjectPath(projectPath) || projectPath;
-      await saveRecentProjectPath(nextPath);
       const targetId = backendId ?? active?.backend.profile.id;
       const switchingBackend = Boolean(targetId && targetId !== active?.backend.profile.id);
-      if (nextPath !== workspacePath) {
-        workspacePath = nextPath;
-        await platform.workspaceState.update(FOLDER_KEY, workspacePath);
-        unifiedTabsRestored = false;
-        if (!switchingBackend && active) {
-          active.workspacePath = workspacePath;
-          active.lastObservedSessionId = undefined;
-          notifierFor(active.backend.profile.id).reset();
-          active.backend.controller.setWorkspace(workspacePath);
-          ensureUnifiedTabsRestored(active);
-          active.backend.controller.backendsChanged();
-          pushUnifiedTabs(true);
-        }
-        pushProjects();
-      } else {
-        pushProjects();
-      }
+      await switchWorkspace(projectPath, { skipControllerSync: switchingBackend });
       if (switchingBackend && targetId) {
         await switchBackend(targetId);
       }
@@ -2056,7 +2121,11 @@ export function createHarnessHostRuntime(
     }),
   );
 
+  const commandReceipts = new CommandReceipts();
+
   const handleWebviewMessage = (message: WebviewToHost): void => {
+    const commandId = 'commandId' in message ? message.commandId : undefined;
+    if (commandId && !commandReceipts.accept(`${message.type}:${commandId}`)) return;
     if (WORKBENCH_MESSAGE_TYPES.has(message.type)) {
       void hub?.handleMessage(message);
       return;
@@ -2083,6 +2152,60 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'checkBackendEnv') {
       void checkAvailability();
+      return;
+    }
+    if (message.type === 'fetchAcpRegistry') {
+      void (async () => {
+        const url = message.payload.url.trim();
+        const MAX_REGISTRY_BYTES = 262_144;
+        try {
+          const parsedUrl = new URL(url);
+          if (parsedUrl.protocol !== 'https:') throw new Error('only https:// URLs are allowed');
+          const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+          if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+          const contentLength = Number(response.headers.get('content-length'));
+          if (Number.isFinite(contentLength) && contentLength > MAX_REGISTRY_BYTES) {
+            throw new Error('registry is too large');
+          }
+          let raw: string;
+          if (response.body) {
+            const reader = response.body.getReader();
+            const chunks: Uint8Array[] = [];
+            let total = 0;
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value) {
+                total += value.byteLength;
+                if (total > MAX_REGISTRY_BYTES) {
+                  await reader.cancel().catch(() => undefined);
+                  throw new Error('registry is too large');
+                }
+                chunks.push(value);
+              }
+            }
+            const merged = new Uint8Array(total);
+            let offset = 0;
+            for (const chunk of chunks) {
+              merged.set(chunk, offset);
+              offset += chunk.byteLength;
+            }
+            raw = new TextDecoder().decode(merged);
+          } else {
+            raw = await response.text();
+            if (Buffer.byteLength(raw, 'utf8') > MAX_REGISTRY_BYTES) throw new Error('registry is too large');
+          }
+          const entries = parseAcpRegistry(JSON.parse(raw));
+          await platform.settings.update('acpRegistryUrl', url);
+          acpRegistry = { entries, source: url, fetchedAt: Date.now() };
+          post({ type: 'toast', payload: { level: 'info', text: t('backend.registryLoaded', entries.length) } });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          acpRegistry = { entries: [], source: url, error: detail, fetchedAt: Date.now() };
+          post({ type: 'toast', payload: { level: 'error', text: t('backend.registryFailed', detail) } });
+        }
+        pushBackends();
+      })();
       return;
     }
     if (message.type === 'fetchBackendVersions') {
@@ -2566,6 +2689,74 @@ export function createHarnessHostRuntime(
           pushProjects();
         } else {
           await platform.openProjectWindow(targetPath);
+        }
+      })();
+      return;
+    }
+    if (message.type === 'newWorktreeSession') {
+      void (async () => {
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        const repoPath = normalizeProjectPath(message.payload.path ?? workspacePath) || (message.payload.path ?? workspacePath);
+        const configs = parseProjectConfigs(platform.settings.get<unknown>('projects', {}));
+        const config = configs[repoPath] ?? EMPTY_WORKTREE_CONFIG;
+        const branch =
+          message.payload.branch ??
+          (await platform.workbench.input({
+            title: t('project.worktreeBranchPrompt'),
+            prompt: t('project.worktreeBranchPrompt'),
+            placeHolder: 'feat/my-task',
+            allowEmpty: true,
+          }));
+        if (branch === undefined && !message.payload.branch) return;
+        try {
+          const result = await createProjectWorktree({
+            repoPath,
+            ...(branch ? { branch } : {}),
+            config,
+            log,
+          });
+          // 串行化：整窗切到 worktree，同一时间只有一个工作区活动；其他会话保留在标签与历史里。
+          await switchWorkspace(result.worktreePath);
+          startIfNeeded();
+          await openNewTabInActive();
+          post({ type: 'toast', payload: { level: 'info', text: t('project.worktreeSessionCreated', result.worktreePath) } });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          post({ type: 'toast', payload: { level: 'error', text: t('project.worktreeFailed', msg) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'removeWorktree') {
+      void (async () => {
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        const target = normalizeProjectPath(message.payload.path) || message.payload.path;
+        const confirmed = await platform.workbench.confirm(
+          t('project.worktreeRemoveConfirm'),
+          t('project.worktreeRemoveDetail', target),
+          t('project.worktreeRemoveAction'),
+        );
+        if (!confirmed) return;
+        try {
+          const { mainRepoPath } = await removeProjectWorktree({ worktreePath: target, log });
+          const nextRecent = removeRecentProjectFromList(readRecentProjects(), target);
+          await platform.globalState.update(RECENT_PROJECTS_KEY, nextRecent);
+          hub?.removeProjectSessions(target);
+          if (target === workspacePath) {
+            await switchWorkspace(mainRepoPath);
+          } else {
+            pushProjects();
+          }
+          post({ type: 'toast', payload: { level: 'info', text: t('project.worktreeRemoved', target) } });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          post({ type: 'toast', payload: { level: 'error', text: t('project.worktreeRemoveFailed', msg) } });
         }
       })();
       return;

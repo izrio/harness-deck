@@ -9,6 +9,7 @@
  */
 import { appendFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import { deriveTurns } from '@harness-deck/shared';
 import type {
   BackendsState,
   ChangedFileView,
@@ -253,7 +254,7 @@ export class ClaudeController implements ChatBackendController {
       connection: this.connection,
       sessions: view.sessions,
       tabs: view.tabs,
-      session: view.session,
+      session: { ...view.session, turns: deriveTurns(view.items, view.session.running) },
       items: view.items,
       models: view.models,
       interactions: view.interactions,

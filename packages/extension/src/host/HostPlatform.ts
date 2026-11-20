@@ -8,6 +8,8 @@ import type { Workbench } from '../vm/workbench.ts';
 export interface KeyValueStore {
   get<T>(key: string): T | undefined;
   update(key: string, value: unknown): Promise<void>;
+  /** 磁盘状态被外部进程更新后触发（如无头后台调度写回结果）。 */
+  onDidExternalChange?(listener: () => void): () => void;
 }
 
 export interface SettingsStore {
@@ -78,6 +80,10 @@ export interface HostPlatform {
   readonly hostKind: HostIdeKind;
   readonly extensionVersion: string;
   readonly storageRoot: string;
+  /** 后台无头调度单实例锁目录（仅 Sidecar / 无头宿主提供；VS Code 宿主不启用后台进程）。 */
+  readonly schedulerLockDir?: string;
+  /** 定时规则变更后通知宿主（用于 Sidecar 在启用首条规则时动态拉起后台无头调度）。 */
+  readonly onSchedulesChanged?: (hasEnabled: boolean) => void;
   readonly globalState: KeyValueStore;
   readonly workspaceState: KeyValueStore;
   readonly settings: SettingsStore;

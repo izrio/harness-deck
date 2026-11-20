@@ -37,6 +37,10 @@ export interface Workbench {
   openDiff(request: DiffRequest): Promise<void>;
   /** 读取文件的当前内容（编辑器里未保存的内容不算）；文件不存在时返回 undefined。 */
   readFile(path: string): Promise<string | undefined>;
+  /** 写入磁盘（仅用于回合文件恢复；调用方必须先确认目标文件没有未保存内容）。 */
+  writeFile(path: string, content: string): Promise<void>;
+  /** 删除磁盘文件（仅用于回合文件恢复时移除本轮新建的文件）。 */
+  deleteFile(path: string): Promise<void>;
   /** 打开文件（目录在资源管理器里显示），可以选中一段行。 */
   openFile(path: string, range?: { readonly startLine: number; readonly endLine?: number }): Promise<void>;
   activeEditor(): EditorSnapshot | undefined;
@@ -55,6 +59,8 @@ export interface Workbench {
 export const noWorkbench: Workbench = {
   openDiff: () => Promise.resolve(),
   readFile: () => Promise.resolve(undefined),
+  writeFile: () => Promise.resolve(),
+  deleteFile: () => Promise.resolve(),
   openFile: () => Promise.resolve(),
   activeEditor: () => undefined,
   findFiles: () => Promise.resolve([]),

@@ -2,6 +2,7 @@
  * 把控制器算出的视图推送给 Webview：记住上次推送的内容，只推送变化的部分。
  * 条目按 id 增量推送；同一个对象（来自缓存的持久事件投影）不再序列化比较。
  */
+import { deriveTurns } from '@harness-deck/shared';
 import type {
   CommandView,
   ContextState,
@@ -42,8 +43,14 @@ export class ViewPublisher {
     private readonly onModelChange?: (label: string | undefined) => void,
   ) {}
 
+  /** 保证快照与增量推送中的 session.turns 始终一致。 */
+  private sessionWithTurns(view: ControllerView): SessionHeader {
+    return view.session.turns !== undefined ? view.session : { ...view.session, turns: deriveTurns(view.items, view.session.running) };
+  }
+
   /** Webview 取了完整快照：之后的增量都相对于它。 */
   reset(view: ControllerView): void {
+    const session = this.sessionWithTurns(view);
     this.sentSessionKey = view.sessionKey;
     this.sentItems = new Map(view.items.map((item) => [item.id, JSON.stringify(item)]));
     this.sentObjects = new Map(view.items.map((item) => [item.id, item]));
@@ -51,7 +58,7 @@ export class ViewPublisher {
     this.sentJson = {
       sessions: JSON.stringify(view.sessions),
       tabs: JSON.stringify(view.tabs),
-      session: JSON.stringify(view.session),
+      session: JSON.stringify(session),
       context: JSON.stringify(view.context),
       commands: JSON.stringify(view.commands),
       models: JSON.stringify(view.models),
@@ -81,10 +88,11 @@ export class ViewPublisher {
       const option = view.models.options.find((o) => o.provider === current?.provider && o.model === current?.model);
       this.onModelChange?.(option?.name ?? current?.model);
     }
-    const sessionJson = JSON.stringify(view.session);
+    const session = this.sessionWithTurns(view);
+    const sessionJson = JSON.stringify(session);
     if (sessionJson !== this.sentJson.session) {
       this.sentJson.session = sessionJson;
-      this.post({ type: 'session', payload: view.session });
+      this.post({ type: 'session', payload: session });
     }
     this.postItems(view.sessionKey, view.items);
     // 卡片放在条目之后推送：Webview 先有条目，再显示末尾的审批

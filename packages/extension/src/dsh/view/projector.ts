@@ -85,6 +85,8 @@ export interface Projection {
   readonly queuedRequestIds: ReadonlySet<string>;
   /** 绝对路径 → 改动历史。 */
   readonly fileHistory: ReadonlyMap<string, readonly FileStep[]>;
+  /** 最后一轮 `workspace/changes` 的事件序号；若最后一轮没有文件改动则为 undefined。 */
+  readonly lastTurnChangeSeq?: number;
   /** 历史和队列消息里的持久图片附件引用（`attachmentId → ImageAttachmentRef`），用于 dsh 0.2.2-rc.5+ 读取图片。 */
   readonly imageAttachments: ReadonlyMap<string, ImageAttachmentRef>;
   readonly sessionChanges?: SessionChangesView;
@@ -116,6 +118,8 @@ export interface EventsProjection {
   readonly changeSeqs: readonly number[];
   readonly missingCredentialRef?: string;
   readonly fileHistory: ReadonlyMap<string, readonly FileStep[]>;
+  /** 最后一轮 `workspace/changes` 的事件序号；若最后一轮没有文件改动则为 undefined。 */
+  readonly lastTurnChangeSeq?: number;
   readonly imageAttachments: ReadonlyMap<string, ImageAttachmentRef>;
   readonly sessionChanges?: SessionChangesView;
   /** 进行中这一轮的开始时间。 */
@@ -133,6 +137,7 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
   /** callId → 条目位置；只读操作还记录在合并行里的位置。 */
   const itemIndex = new Map<string, { index: number; entry?: number }>();
   const changeSeqs: number[] = [];
+  let lastTurnChangeSeq: number | undefined;
   let turnEdits: TurnEdit[] = [];
   let turnOpen = false;
   let turnStartedAt: number | undefined;
@@ -223,6 +228,7 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
       case 'turn/start':
         turnOpen = true;
         turnStartedAt = event.time;
+        lastTurnChangeSeq = undefined;
         // 上一轮没有 workspace/changes（中断、旧版 dsh）：工具修改单独记一步
         flushEdits(turnEdits);
         turnEdits = [];
@@ -404,6 +410,7 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
       }
       case 'workspace/changes': {
         changeSeqs.push(event.seq);
+        lastTurnChangeSeq = event.seq;
         const summary = input.changes?.(event.seq);
         const card = changesCard(event.seq, summary, turnEdits, input.workspacePath);
         if (card) items.push(card);
@@ -458,6 +465,7 @@ export function projectEvents(input: Pick<ProjectionInput, 'events' | 'workspace
     toolCalls,
     changeSeqs,
     fileHistory,
+    ...(lastTurnChangeSeq !== undefined ? { lastTurnChangeSeq } : {}),
     imageAttachments,
     ...(sessionChanges ? { sessionChanges } : {}),
     ...(missingCredentialRef ? { missingCredentialRef } : {}),
@@ -574,6 +582,7 @@ export function project(input: ProjectionInput, base: EventsProjection = project
     toolCalls: base.toolCalls,
     changeSeqs: base.changeSeqs,
     fileHistory: base.fileHistory,
+    ...(base.lastTurnChangeSeq !== undefined ? { lastTurnChangeSeq: base.lastTurnChangeSeq } : {}),
     imageAttachments,
     ...(base.sessionChanges ? { sessionChanges: base.sessionChanges } : {}),
     ...(base.missingCredentialRef ? { missingCredentialRef: base.missingCredentialRef } : {}),

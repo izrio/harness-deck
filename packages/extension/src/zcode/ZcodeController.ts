@@ -5,6 +5,7 @@
  * 多标签、跨项目会话汇总以及工作台无人值守/编程式会话启动。
  */
 import { isAbsolute, resolve } from 'node:path';
+import { deriveTurns } from '@harness-deck/shared';
 import type {
   BackendsState,
   ChangedFileView,
@@ -236,7 +237,7 @@ export class ZcodeController implements ChatBackendController {
       connection: this.connection,
       sessions: view.sessions,
       tabs: view.tabs,
-      session: view.session,
+      session: { ...view.session, turns: deriveTurns(view.items, view.session.running) },
       items: view.items,
       models: view.models,
       interactions: view.interactions,

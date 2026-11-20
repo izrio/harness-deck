@@ -12,6 +12,7 @@ import {
   type CrossProjectSession,
   type ProgrammaticSessionRequest,
 } from '../../backend/types.ts';
+import { deriveTurns } from '@harness-deck/shared';
 import type {
   CommandView,
   ConnectionState,
@@ -152,6 +153,8 @@ export class ChatController implements ChatBackendController {
   private readonly turnDiffs = new Map<string, Promise<ChangesDiff>>();
   /** 正在打开的 Diff：重复点击不重复请求。 */
   private readonly openingDiffs = new Set<string>();
+  /** 已经恢复过文件的回合（`sessionId:turnId`），防止重复点击二次反推写坏文件。 */
+  private readonly rolledBackTurns = new Set<string>();
   /** 等待读取的改动汇总（新的在前）。 */
   private summaryQueue: { readonly sessionId: string; readonly seq: number }[] = [];
   private summariesInFlight = 0;
@@ -404,7 +407,7 @@ export class ChatController implements ChatBackendController {
       connection: this.connection,
       sessions: view.sessions,
       tabs: view.tabs,
-      session: view.session,
+      session: { ...view.session, turns: deriveTurns(view.items, view.session.running) },
       items: view.items,
       models: view.models,
       interactions: view.interactions,
@@ -635,6 +638,8 @@ export class ChatController implements ChatBackendController {
         return this.selectPermission(message.payload.preset);
       case 'saveAll':
         return this.workbench.saveAll();
+      case 'rollbackLastTurn':
+        return this.rollbackLastTurn();
     }
   }
 
@@ -787,6 +792,79 @@ export class ChatController implements ChatBackendController {
       result = previous;
     }
     return result;
+  }
+
+  /**
+   * 把最后一轮改过的文件写回本轮开始前的内容（新建的文件直接删除）。只恢复文件，不回退对话。
+   * 数据来自投影记录的工具片段；任何文件无法可靠还原、有未保存内容、或最后一轮本身未改文件时整体放弃，不写一半。
+   */
+  private async rollbackLastTurn(): Promise<void> {
+    const sessionId = this.tabs.current?.sessionId;
+    if (!sessionId) return this.toast('error', t('rollback.noTurn'));
+    const running = this.service?.sessions.find((item) => item.sessionId === sessionId)?.running ?? false;
+    if (running) return this.toast('error', t('rollback.running'));
+
+    const built = this.buildView();
+    const lastTurn = built.projection.lastTurnChangeSeq;
+    if (lastTurn === undefined) {
+      return this.toast('error', t('rollback.noTurn'));
+    }
+    const turnKey = `${sessionId}:${lastTurn}`;
+    if (this.rolledBackTurns.has(turnKey)) {
+      return this.toast('error', t('rollback.alreadyDone'));
+    }
+
+    const norm = (p: string): string => {
+      const unified = p.replace(/\\/gu, '/');
+      return process.platform === 'win32' ? unified.toLowerCase() : unified;
+    };
+
+    const dirty = new Set(this.workbench.dirtyFiles().map(norm));
+    const plans: { path: string; before: string; created: boolean; backup: string | undefined }[] = [];
+    for (const [path, steps] of this.fileHistory) {
+      const first = steps.findIndex((step) => step.turnSeq === lastTurn);
+      if (first < 0) continue;
+      if (steps.some((step) => step.flags?.length)) return this.toast('error', t('rollback.unavailable'));
+      if (dirty.has(norm(path))) return this.toast('error', t('rollback.dirty'));
+      const rewound = await this.rewind(sessionId, path, steps, first, 'turn');
+      if (!rewound) return this.toast('error', t('rollback.unavailable'));
+      const backup = await this.workbench.readFile(path);
+      plans.push({ path, before: rewound.before, created: rewound.created, backup });
+    }
+    if (plans.length === 0) return this.toast('error', t('rollback.noTurn'));
+
+    const turnNumber = Math.max(1, deriveTurns(built.view.items, running).length);
+    const confirmed = await this.workbench.confirm(
+      t('rollback.confirm'),
+      t('rollback.confirmDetail', plans.length, turnNumber),
+      t('rollback.action'),
+    );
+    if (!confirmed) return;
+
+    const applied: typeof plans = [];
+    try {
+      for (const plan of plans) {
+        if (plan.created) {
+          await this.workbench.deleteFile(plan.path);
+        } else {
+          await this.workbench.writeFile(plan.path, plan.before);
+        }
+        applied.push(plan);
+      }
+      this.rolledBackTurns.add(turnKey);
+      this.scheduleRender();
+      this.toast('info', t('rollback.ok', plans.length));
+    } catch (error) {
+      // 写盘中途失败时尽力回滚已修改的文件，避免留下半截状态
+      for (const done of applied.reverse()) {
+        if (done.backup === undefined) {
+          await this.workbench.deleteFile(done.path).catch(() => undefined);
+        } else {
+          await this.workbench.writeFile(done.path, done.backup).catch(() => undefined);
+        }
+      }
+      this.toast('error', t('rollback.failed', describe(error)));
+    }
   }
 
   private turnDiff(sessionId: string, seq: number, index: number): Promise<ChangesDiff> {

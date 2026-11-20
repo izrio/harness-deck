@@ -5,7 +5,7 @@
  * - `openDiff()` 先通过 `resolveDiffSpec` 计算好两侧内容或 Unified Patch，再通过 JSON-RPC 发给 IDE 原生 Diff 视图渲染；
  * - 其余交互（打开文件、搜索文件、保存全部、模态确认、输入框）均转发给 IDE 执行。
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import type { FileCandidate } from '@harness-deck/shared';
 import { resolveDiffSpec } from '../vm/diffSpec.ts';
 import type { DiffRequest, EditorSnapshot, Workbench } from '../vm/workbench.ts';
@@ -64,6 +64,16 @@ export class RemoteWorkbench implements Workbench {
     } catch {
       return undefined;
     }
+  }
+
+  async writeFile(path: string, content: string): Promise<void> {
+    await writeFile(path, content, 'utf8');
+  }
+
+  async deleteFile(path: string): Promise<void> {
+    await unlink(path).catch((error: NodeJS.ErrnoException) => {
+      if (error?.code !== 'ENOENT') throw error;
+    });
   }
 
   async openDiff(request: DiffRequest): Promise<void> {

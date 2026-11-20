@@ -180,6 +180,18 @@ export class VscodeWorkbench implements Workbench, vscode.TextDocumentContentPro
     return this.read(vscode.Uri.file(path));
   }
 
+  async writeFile(path: string, content: string): Promise<void> {
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(path), new TextEncoder().encode(content));
+  }
+
+  async deleteFile(path: string): Promise<void> {
+    try {
+      await vscode.workspace.fs.delete(vscode.Uri.file(path), { useTrash: false });
+    } catch {
+      // 文件已不存在时忽略
+    }
+  }
+
   private async read(uri: vscode.Uri): Promise<string | undefined> {
     try {
       return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));

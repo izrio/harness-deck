@@ -6,7 +6,7 @@
  * 用法（需要先 `pnpm build`，本机装有 playwright 和 Chromium）：
  *   pnpm --filter harness-deck run e2e -- --dsh /path/to/dsh [--node-bin <Node 24 bin>] [--out <截图目录>]
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, resolve } from 'node:path';
@@ -180,6 +180,8 @@ const inputAnswers: (string | undefined)[] = [];
 const workbench: Workbench = {
   openDiff: async (request) => void diffRequests.push(request),
   readFile: (path) => readFile(path, 'utf8').catch(() => undefined),
+  writeFile: (path, content) => writeFile(path, content, 'utf8'),
+  deleteFile: (path) => unlink(path).catch(() => undefined),
   openFile: async () => undefined,
   activeEditor: () => editorSnapshot,
   findFiles: async () => [],

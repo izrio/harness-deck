@@ -49,6 +49,7 @@ export class FileKeyValueStore implements KeyValueStore {
   private data: Record<string, unknown>;
   private lastWrittenRaw: string;
   private writeChain: Promise<void> = Promise.resolve();
+  private readonly externalListeners = new Set<() => void>();
   private watcher: FSWatcher | undefined;
   private reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -105,18 +106,26 @@ export class FileKeyValueStore implements KeyValueStore {
     }
   }
 
-  private async reloadFromDisk(): Promise<void> {
+  onDidExternalChange(listener: () => void): () => void {
+    this.externalListeners.add(listener);
+    return () => this.externalListeners.delete(listener);
+  }
+
+  /** 供跨进程监听或测试显式触发磁盘重载。 */
+  async reloadFromDisk(): Promise<void> {
     await this.writeChain;
     const { raw, obj } = await readJsonObject(this.filePath);
     if (!raw || raw === this.lastWrittenRaw) return;
     this.lastWrittenRaw = raw;
     this.data = obj;
+    for (const listener of this.externalListeners) listener();
   }
 
   dispose(): void {
     if (this.reloadTimer) clearTimeout(this.reloadTimer);
     this.watcher?.close();
     this.watcher = undefined;
+    this.externalListeners.clear();
   }
 }
 

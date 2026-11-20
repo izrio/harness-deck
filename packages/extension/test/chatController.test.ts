@@ -602,9 +602,14 @@ describe('ChatController', () => {
     };
 
     /** 一次 edit（a → b c）加上 dsh 的本轮汇总（+2 −1，与片段一致）。 */
-    async function withEditTurn(files: Record<string, string>, summary?: (seq: number) => unknown) {
+    async function withEditTurn(files: Record<string, string>, summary?: (seq: number) => unknown, overrides: Partial<Workbench> = {}) {
       const diffs: DiffRequest[] = [];
-      const workbench: Workbench = { ...noWorkbench, openDiff: async (request) => void diffs.push(request), readFile: async (path) => files[path] };
+      const workbench: Workbench = {
+        ...noWorkbench,
+        openDiff: async (request) => void diffs.push(request),
+        readFile: async (path) => files[path],
+        ...overrides,
+      };
       const ctx = setup(workbench);
       let diffCalls = 0;
       Object.assign(ctx.fake.client, {
@@ -626,8 +631,68 @@ describe('ChatController', () => {
       fake.emit('s1', 'turn/end', { reason: { kind: 'completed' } });
       await flush();
       await flush();
-      return { ...ctx, diffs, diffCalls: () => diffCalls };
+      return { ...ctx, diffs, diffCalls: () => diffCalls, workbench };
     }
+
+    it('恢复本轮文件：确认后写回本轮开始前的内容，重复点击不再重复写盘', async () => {
+      const writes: { path: string; content: string }[] = [];
+      const { controller, posted } = await withEditTurn({ '/w/a.ts': 'b\nc\n' }, undefined, {
+        confirm: async () => true,
+        writeFile: async (path, content) => {
+          writes.push({ path, content });
+        },
+      });
+      await controller.handle({ type: 'rollbackLastTurn', payload: {} });
+      await flush();
+      expect(writes).toEqual([{ path: '/w/a.ts', content: 'a\n' }]);
+      // 第二次点击被拦截，不再重复写入
+      await controller.handle({ type: 'rollbackLastTurn', payload: {} });
+      await flush();
+      expect(writes).toHaveLength(1);
+      expect(posted.at(-1)).toMatchObject({ type: 'toast', payload: { level: 'error' } });
+    });
+
+    it('恢复本轮文件：本轮新建的文件直接删除而非写成空文件；最后一轮未改文件时拒绝回滚上一轮', async () => {
+      const deleted: string[] = [];
+      const writes: { path: string; content: string }[] = [];
+      const { controller, fake, posted } = await withEditTurn(
+        { '/w/created.ts': 'hello\n' },
+        () => ({ turn: 1, files: [{ path: 'created.ts', display: 'created.ts', added: 1, deleted: 0 }], total: 1 }),
+        {
+          confirm: async () => true,
+          writeFile: async (path, content) => void writes.push({ path, content }),
+          deleteFile: async (path) => void deleted.push(path),
+        },
+      );
+      // 模拟新建文件工具记录
+      fake.emit('s1', 'user/message', { content: [{ type: 'text', text: '新建文件' }], source: { kind: 'user' } });
+      fake.emit('s1', 'turn/start', { turn: 2 });
+      fake.emit('s1', 'tool/call', { callId: 'c_new', name: 'write', arguments: JSON.stringify({ file_path: 'created.ts', content: 'hello\n' }) });
+      fake.emit('s1', 'tool/result', { message: { toolCallId: 'c_new', content: [], isError: false }, meta: { path: '/w/created.ts', operation: 'create' } });
+      fake.emit('s1', 'workspace/changes', { turn: 2 });
+      fake.emit('s1', 'turn/end', { reason: { kind: 'completed' } });
+      await flush();
+      await flush();
+
+      await controller.handle({ type: 'rollbackLastTurn', payload: {} });
+      await flush();
+      expect(deleted).toEqual(['/w/created.ts']);
+      expect(writes).toEqual([]);
+
+      // 再来一轮纯问答（未修改任何文件）：回滚必须被拒绝，不能误回滚上一轮
+      fake.emit('s1', 'user/message', { content: [{ type: 'text', text: '只问个问题' }], source: { kind: 'user' } });
+      fake.emit('s1', 'turn/start', { turn: 3 });
+      fake.emit('s1', 'assistant/message', { message: { content: [{ type: 'text', text: '没改文件' }] } });
+      fake.emit('s1', 'turn/end', { reason: { kind: 'completed' } });
+      await flush();
+      const beforeToasts = posted.length;
+      await controller.handle({ type: 'rollbackLastTurn', payload: {} });
+      await flush();
+      expect(posted.slice(beforeToasts).filter((m) => m.type === 'toast').at(-1)).toMatchObject({
+        type: 'toast',
+        payload: { level: 'error' },
+      });
+    });
 
     it('本轮汇总里的文件：工具片段能解释汇总时在本地还原，不请求 dsh', async () => {
       const { controller, diffs, diffCalls, posted } = await withEditTurn({ '/w/a.ts': 'b\nc\n' });

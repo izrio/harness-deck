@@ -269,6 +269,10 @@ describe('ZCode 会话投影与控制器', () => {
         openDiff: async () => undefined,
         openFile: async () => undefined,
         readFile: async () => undefined,
+        writeFile: async (path, content) => {
+          await writeFile(path, content, 'utf8');
+        },
+        deleteFile: async () => undefined,
         dirtyFiles: () => dirtyList,
         saveAll: async () => {
           dirtyList = [];

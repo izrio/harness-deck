@@ -1,6 +1,7 @@
 /**
  * Node.js Sidecar 会话服务：把 stdio NDJSON JSON-RPC 通道、`~/.harness-deck` 文件存储与 `HarnessHostRuntime` 连接起来。
  */
+import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -20,6 +21,25 @@ import { RemoteWorkbench } from './RemoteWorkbench.ts';
 
 export interface SidecarSessionHandle {
   readonly dispose: () => Promise<void>;
+}
+
+const SCHEDULES_STORAGE_KEY = 'harnessDeck.hub.schedules';
+
+/** 以 detached 进程拉起无头调度；IDE 关闭后它继续运行，单实例锁避免重复。 */
+function spawnHeadlessScheduler(configRoot: string, projectPath: string): void {
+  const script = process.argv[1];
+  if (!script) return;
+  try {
+    const child = spawn(process.execPath, [script, '--headless-scheduler', configRoot, projectPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: process.env,
+    });
+    child.unref();
+  } catch {
+    // 后台调度起不来时不影响正常 sidecar；IDE 内的定时器仍会工作。
+  }
 }
 
 export function startSidecarSession(
@@ -93,6 +113,10 @@ export function startSidecarSession(
           hostKind: 'jetbrains',
           extensionVersion: init.extensionVersion,
           storageRoot,
+          schedulerLockDir: configRoot,
+          onSchedulesChanged: (hasEnabled) => {
+            if (hasEnabled) spawnHeadlessScheduler(configRoot, init.projectPath);
+          },
           globalState: openedGlobal,
           workspaceState: openedWorkspace,
           settings: openedSettings,
@@ -170,6 +194,10 @@ export function startSidecarSession(
         };
 
         runtime = createHarnessHostRuntime(platform);
+        const schedules = openedGlobal.get<{ rules?: { enabled?: boolean }[] }>(SCHEDULES_STORAGE_KEY);
+        if (schedules?.rules?.some((rule) => rule.enabled !== false)) {
+          spawnHeadlessScheduler(configRoot, init.projectPath);
+        }
         return { ok: true };
       }
 

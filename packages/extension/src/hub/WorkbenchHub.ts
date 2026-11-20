@@ -21,13 +21,20 @@ import type {
   ProjectsState,
   ProjectSessionGroup,
   ProviderConfig,
+  SourceControlActionResult,
+  SourceControlState,
   TaskBoardState,
   WebviewToHost,
   WorkbenchModule,
   WorkbenchOverview,
   WorkbenchState,
 } from '@harness-deck/shared';
+import { isAbsolute, relative, resolve } from 'node:path';
 import type { BackendProfile, CrossProjectSession, ProgrammaticSessionRequest, SessionObservation } from '../backend/types.ts';
+import type { DiffRequest } from '../vm/workbench.ts';
+import { readGitFileAtRef, readGitStatus } from '../sourceControl/gitStatus.ts';
+import { commitAll, createPullRequest, pushCurrentBranch } from '../sourceControl/gitWrite.ts';
+import { t } from '../i18n.ts';
 import {
   disambiguateProjectNames,
   isPathInsideProject,
@@ -80,6 +87,7 @@ const TICK_INTERVAL_MS = 15_000;
 export interface StateStore {
   get<T>(key: string): T | undefined;
   update(key: string, value: unknown): Thenable<void>;
+  onDidExternalChange?(listener: () => void): () => void;
 }
 
 interface StoredRegistrySession {
@@ -110,6 +118,13 @@ export interface WorkbenchHubHost {
   readonly locale: () => 'zh' | 'en';
   readonly isWorkspaceTrusted: () => boolean;
   readonly isWebviewVisible: () => boolean;
+  /** 后台无头调度进程是否持有单实例锁；持有则 IDE 内的定时器跳过自动触发，避免重复。 */
+  readonly isBackgroundSchedulerActive?: () => boolean;
+  /** 定时规则变更后通知宿主（用于 Sidecar 在启用首条规则时拉起无头调度进程）。 */
+  readonly onSchedulesChanged?: (hasEnabled: boolean) => void;
+  /** 打开工作区文件或 Diff（工作台「改动」模块点击文件时调用）。 */
+  readonly openFile?: (path: string) => Promise<void>;
+  readonly openDiff?: (request: DiffRequest) => Promise<void>;
   readonly workspacePath: () => string;
   readonly projects: () => ProjectsState;
   readonly profiles: () => readonly BackendProfile[];
@@ -145,9 +160,11 @@ export class WorkbenchHub {
   private readonly runningRuleIds = new Set<string>();
   private readonly sessionPrevRunning = new Map<string, boolean>();
   private activeTaskTracker: ActiveTaskTracker | undefined;
+  private sourceControl: SourceControlState | undefined;
   private taskDispatching = false;
   private tickTimer: ReturnType<typeof setInterval> | undefined;
   private pushTimer: ReturnType<typeof setTimeout> | undefined;
+  private unsubscribeExternalState: (() => void) | undefined;
   private readonly abort = new AbortController();
 
   constructor(private readonly host: WorkbenchHubHost) {
@@ -159,6 +176,10 @@ export class WorkbenchHub {
     this.agentData = parseStoredAgentData(host.globalState.get(AGENTS_STORAGE_KEY));
     this.taskBoard = parseTaskBoardState(host.globalState.get(TASKS_STORAGE_KEY));
     this.loadRegistry(host.globalState.get(SESSION_REGISTRY_KEY));
+
+    this.unsubscribeExternalState = host.globalState.onDidExternalChange?.(() => {
+      this.reloadSchedulesFromStore();
+    });
 
     if (host.enableTimer !== false) {
       this.tickTimer = setInterval(() => {
@@ -173,8 +194,28 @@ export class WorkbenchHub {
     }
   }
 
+  /** 外部进程（如后台无头调度或 IDE 另一端）更新了 global-state.json 时重新同步定时规则与历史。 */
+  reloadSchedulesFromStore(): void {
+    const raw = this.host.globalState.get(SCHEDULES_STORAGE_KEY);
+    if (!raw || typeof raw !== 'object') return;
+    const obj = raw as { rules?: unknown; hiddenSessionIds?: unknown };
+    if (!Array.isArray(obj.rules)) return;
+    const incoming = obj as StoredScheduleData;
+    // 保留本进程正在执行中的规则快照，其余以磁盘最新结果为准，避免覆盖后台运行记录
+    const mergedRules = incoming.rules.map((rule) => {
+      if (!this.runningRuleIds.has(rule.id)) return rule;
+      return this.scheduleData.rules.find((r) => r.id === rule.id) ?? rule;
+    });
+    const hiddenSessionIds = [...new Set([...(incoming.hiddenSessionIds ?? []), ...this.scheduleData.hiddenSessionIds])];
+    this.scheduleData = { rules: mergedRules, hiddenSessionIds };
+    this.hiddenSet = new Set(hiddenSessionIds);
+    this.schedulePush();
+  }
+
   dispose(): void {
     this.abort.abort(new Error('Extension deactivated'));
+    this.unsubscribeExternalState?.();
+    this.unsubscribeExternalState = undefined;
     if (this.tickTimer) clearInterval(this.tickTimer);
     if (this.pushTimer) clearTimeout(this.pushTimer);
   }
@@ -251,7 +292,14 @@ export class WorkbenchHub {
       agents,
       tasks: this.taskBoard,
       sessionGroups,
+      ...(this.sourceControl ? { sourceControl: this.sourceControl } : {}),
     };
+  }
+
+  /** 重新读取工作区的 Git 状态（只读），供「改动」模块打开、手动刷新或写操作后同步。 */
+  async refreshSourceControl(lastAction?: SourceControlActionResult): Promise<void> {
+    this.sourceControl = await readGitStatus(this.host.workspacePath(), lastAction ? { lastAction } : undefined);
+    this.schedulePush();
   }
 
   /** 主动合并推送最新 WorkbenchState 给 Webview。 */
@@ -415,6 +463,112 @@ export class WorkbenchHub {
         this.host.openPanel();
         return true;
 
+      case 'refreshSourceControl':
+        await this.refreshSourceControl();
+        return true;
+
+      case 'openSourceControlDiff': {
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const absPath = resolve(root, message.payload.path);
+        const relCheck = relative(root, absPath);
+        if (relCheck.startsWith('..') || isAbsolute(relCheck)) return true;
+        const fileEntry = this.sourceControl?.files.find((f) => f.path === message.payload.path);
+        if (!this.host.openDiff || fileEntry?.status === 'untracked') {
+          await this.host.openFile?.(absPath);
+          return true;
+        }
+        const before = await readGitFileAtRef(root, message.payload.path, 'HEAD');
+        if (before === undefined && fileEntry?.status !== 'added') {
+          await this.host.openFile?.(absPath);
+          return true;
+        }
+        await this.host.openDiff({
+          kind: 'contents',
+          path: absPath,
+          before: before ?? '',
+          created: before === undefined,
+          scope: 'session',
+        });
+        return true;
+      }
+
+      case 'sourceControlCommit': {
+        if (!this.host.isWorkspaceTrusted()) {
+          const action: SourceControlActionResult = { kind: 'commit', ok: false, at: this.now(), message: t('workspace.untrusted') };
+          await this.refreshSourceControl(action);
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const result = await commitAll(
+          this.host.workspacePath(),
+          message.payload.message,
+          message.payload.stageAll !== undefined ? { stageAll: message.payload.stageAll } : undefined,
+        );
+        const action: SourceControlActionResult = {
+          kind: 'commit',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        };
+        await this.refreshSourceControl(action);
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.committed') }
+            : { level: 'error', text: t('sourceControl.commitFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlPush': {
+        if (!this.host.isWorkspaceTrusted()) {
+          const action: SourceControlActionResult = { kind: 'push', ok: false, at: this.now(), message: t('workspace.untrusted') };
+          await this.refreshSourceControl(action);
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const result = await pushCurrentBranch(this.host.workspacePath());
+        const action: SourceControlActionResult = {
+          kind: 'push',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        };
+        await this.refreshSourceControl(action);
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.pushed') }
+            : { level: 'error', text: t('sourceControl.pushFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlCreatePr': {
+        if (!this.host.isWorkspaceTrusted()) {
+          const action: SourceControlActionResult = { kind: 'pr', ok: false, at: this.now(), message: t('workspace.untrusted') };
+          await this.refreshSourceControl(action);
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const result = await createPullRequest(this.host.workspacePath(), message.payload.title, message.payload.body);
+        const action: SourceControlActionResult = {
+          kind: 'pr',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        };
+        // 无论成功或失败都刷新状态并更新 updatedAt，解除前端 busy 并传递 lastAction 供保留/清空草稿
+        await this.refreshSourceControl(action);
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.prCreated') }
+            : { level: 'error', text: t('sourceControl.prFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
       case 'markUnreadRead':
         await this.markUnreadRead(message.payload);
         return true;
@@ -576,6 +730,7 @@ export class WorkbenchHub {
   /** 定时轮询入口（测试也可直接调用）。 */
   async tickSchedules(): Promise<void> {
     if (this.abort.signal.aborted || !this.host.isWorkspaceTrusted()) return;
+    if (this.host.isBackgroundSchedulerActive?.()) return;
     const due = findDueRules(this.scheduleData.rules, this.now(), this.runningRuleIds);
     for (const rule of due) {
       void this.executeScheduleRule(rule.id);
@@ -1371,6 +1526,7 @@ export class WorkbenchHub {
     this.scheduleData = next;
     this.hiddenSet = new Set(next.hiddenSessionIds);
     await this.host.globalState.update(SCHEDULES_STORAGE_KEY, next);
+    this.host.onSchedulesChanged?.(next.rules.some((rule) => rule.enabled));
   }
 
   private async saveTaskBoard(): Promise<void> {
