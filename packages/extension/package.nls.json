@@ -77,5 +77,6 @@
   "config.chatCommands.prompt": "Full prompt text filled into the composer when this command is selected.",
   "config.mcpServers": "Centrally managed MCP servers handed to your selected Agents on startup. Can also be imported from each Agent's local configuration.",
   "config.protocolGateway": "Start the local protocol conversion gateway (off by default). When enabled, converts OpenAI Chat Completions compatible endpoints into the Claude (Anthropic Messages) protocol for Claude Code.",
+  "config.acpRegistryUrl": "Optional HTTPS URL of an ACP agent registry JSON manifest used to discover external ACP agents in Settings (read-only; never installs automatically).",
   "config.providers": "Third-party Coding Plan and custom model provider configurations (such as Volcengine Ark, Zhipu GLM, Alibaba Bailian, MiniMax, Kimi, CLIProxyAPI) and agent bindings. API keys are stored only in OS secret storage and never written to settings."
 }

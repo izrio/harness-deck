@@ -1,14 +1,17 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  checkNpmOwnership,
   detectNodeEnv,
   envWithExtraPath,
   fetchNpmVersions,
   installNpmPackage,
+  isPathInside,
   isValidNpmVersion,
   listNpmGlobalPackages,
+  npmGlobalModulesRoot,
   parseNpmGlobalList,
   parseNpmVersionsOutput,
   uninstallNpmPackage,
@@ -172,5 +175,82 @@ esac
     await expect(fetchNpmVersions(join(dir, 'npm'), '@deepseek-ai/dsh', { PATH: dir }, 'linux')).rejects.toThrow(
       /不是合法 JSON.*npm notice something unrelated/u,
     );
+  });
+});
+
+describe('npm 安装归属', () => {
+  it('识别 npm 全局目录', () => {
+    expect(npmGlobalModulesRoot('/usr/local/bin', 'linux')).toBe('/usr/local/lib/node_modules');
+    expect(npmGlobalModulesRoot('/opt/npm-global/bin/', 'linux')).toBe('/opt/npm-global/lib/node_modules');
+    expect(npmGlobalModulesRoot('C:\\Users\\me\\AppData\\Roaming\\npm', 'win32')).toBe(
+      'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules',
+    );
+  });
+
+  it('判断路径是否在目录内（分隔符与大小写）', () => {
+    expect(isPathInside('/usr/local/lib/node_modules/x/bin.js', '/usr/local/lib/node_modules', 'linux')).toBe(true);
+    expect(isPathInside('/opt/homebrew/Cellar/x/bin', '/usr/local/lib/node_modules', 'linux')).toBe(false);
+    expect(
+      isPathInside('C:\\Users\\Me\\npm\\node_modules\\x\\bin.cmd', 'c:\\users\\me\\npm\\node_modules', 'win32'),
+    ).toBe(true);
+  });
+
+  it('npm list 里有包时视为 npm 安装', async () => {
+    expect(
+      await checkNpmOwnership({
+        packageName: '@deepseek-ai/dsh',
+        installedPackages: { '@deepseek-ai/dsh': '0.2.1' },
+      }),
+    ).toBe(true);
+  });
+
+  it('可执行文件真实路径在 npm node_modules 下时视为 npm 安装', async () => {
+    const prefix = await mkdtemp(join(tmpdir(), 'hd-npm-prefix-'));
+    tempDirs.push(prefix);
+    const exeDir = join(prefix, 'lib', 'node_modules', '@deepseek-ai', 'dsh');
+    await mkdir(exeDir, { recursive: true });
+    const exe = join(exeDir, 'bin.js');
+    await writeFile(exe, '');
+    expect(
+      await checkNpmOwnership({
+        packageName: '@deepseek-ai/dsh',
+        installedPackages: {},
+        executable: exe,
+        npmGlobalBin: join(prefix, 'bin'),
+        platform: 'linux',
+      }),
+    ).toBe(true);
+  });
+
+  it('Homebrew 安装不被当成 npm 所有（即使 npm 全局里存在旧副本）', async () => {
+    const brew = await makeTempBinDir({ claude: '#!/bin/sh\nexit 0\n' });
+    const npmPrefix = await mkdtemp(join(tmpdir(), 'hd-npm-prefix-'));
+    tempDirs.push(npmPrefix);
+    await mkdir(join(npmPrefix, 'bin'), { recursive: true });
+    expect(
+      await checkNpmOwnership({
+        packageName: '@anthropic-ai/claude-code',
+        installedPackages: { '@anthropic-ai/claude-code': '1.0.0' },
+        executable: join(brew, 'claude'),
+        npmGlobalBin: join(npmPrefix, 'bin'),
+        platform: 'linux',
+      }),
+    ).toBe(false);
+  });
+
+  it('Windows 上位于 npm 全局目录的 .cmd shim 视为 npm 所有', async () => {
+    const npmPrefix = await mkdtemp(join(tmpdir(), 'hd-npm-win-'));
+    tempDirs.push(npmPrefix);
+    const shim = join(npmPrefix, 'claude.cmd');
+    await writeFile(shim, '@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n)\r\n', 'utf8');
+    expect(
+      await checkNpmOwnership({
+        packageName: '@anthropic-ai/claude-code',
+        installedPackages: {},
+        executable: shim,
+        npmGlobalBin: npmPrefix,
+        platform: 'win32',
+      }),
+    ).toBe(true);
   });
 });

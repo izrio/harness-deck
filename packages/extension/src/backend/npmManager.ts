@@ -3,8 +3,9 @@
  * 不依赖 vscode API，便于单元测试和跨平台复用（Windows 上自动通过 spawnSpec 调 npm.cmd）。
  */
 import { execFile, spawn } from 'node:child_process';
+import { readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { NodeEnvState } from '@harness-deck/shared';
 import { locateExecutable } from '../runtime/locate.ts';
 import { LineSplitter, spawnSpec, stopRuntime, trackChild } from '../runtime/launch.ts';
@@ -74,6 +75,84 @@ export function envWithExtraPath(
   const exists = parts.some((entry) => (platform === 'win32' ? entry.toLowerCase() === dir.toLowerCase() : entry === dir));
   if (exists) return { ...env };
   return { ...env, [key]: [dir, ...parts].join(sep) };
+}
+
+/** npm 全局包的实际安装目录：POSIX 为 `<prefix>/lib/node_modules`，Windows 为 `<prefix>/node_modules`。 */
+export function npmGlobalModulesRoot(
+  npmGlobalBin: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (!npmGlobalBin) return undefined;
+  const trimmed = npmGlobalBin.replace(/[\\/]+$/u, '');
+  if (platform === 'win32') return `${trimmed}\\node_modules`;
+  const prefix = trimmed.endsWith('/bin') ? trimmed.slice(0, -4) : trimmed;
+  return `${prefix}/lib/node_modules`;
+}
+
+/** 判断 child 是否等于 parent 或位于其目录内（跨平台，Windows 忽略大小写）。 */
+export function isPathInside(
+  child: string,
+  parent: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const normalize = (value: string): string => {
+    const slashed = value.replace(/\\/gu, '/').replace(/\/+$/u, '');
+    return platform === 'win32' ? slashed.toLowerCase() : slashed;
+  };
+  const target = normalize(child);
+  const root = normalize(parent);
+  return target === root || target.startsWith(`${root}/`);
+}
+
+export interface NpmOwnershipInput {
+  /** 当前解析到的可执行文件路径（可能是指向 node_modules 的软链接）。 */
+  readonly executable?: string;
+  /** `npm prefix -g` 对应的 bin 目录。 */
+  readonly npmGlobalBin?: string;
+  readonly packageName: string;
+  /** `npm list -g --depth=0 --json` 的结果。 */
+  readonly installedPackages: Readonly<Record<string, string>>;
+  readonly platform?: NodeJS.Platform;
+}
+
+/**
+ * 解析 Windows npm `.cmd` / `.ps1` shim 指向的脚本路径；若无法解析返回 undefined。
+ */
+async function resolveWindowsShimTarget(executable: string): Promise<string | undefined> {
+  if (!/\.(?:cmd|ps1)$/iu.test(executable)) return undefined;
+  try {
+    const content = await readFile(executable, 'utf8');
+    // npm 生成的 shim 包含类似 `"%dp0%\node_modules\..."` 或 `"$basedir/node_modules/..."`
+    const match = /(?:"|%dp0%|~dp0|\$basedir)[\\/]+(node_modules[\\/][^"'\r\n]+)/iu.exec(content);
+    if (!match?.[1]) return undefined;
+    return resolve(dirname(executable), match[1].replace(/[\\/]+/gu, '/'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 这个底层是否由当前 npm 安装：
+ * - 若已知当前生效的可执行文件路径（`executable`）与 `npmGlobalBin`，优先以实际可执行文件位置为准：
+ *   避免 PATH 中优先命中 Homebrew / mise / Volta 时，仅因 npm 全局里曾装过旧副本就误覆盖。
+ * - Windows 的 `.cmd`/`.ps1` shim 位于 `<prefix>` 下且内部指向 `<prefix>\node_modules`，兼容这两种位置。
+ * - 尚未定位到可执行文件时，退回检查 `npm list -g` 结果。
+ */
+export async function checkNpmOwnership(input: NpmOwnershipInput): Promise<boolean> {
+  const platform = input.platform ?? process.platform;
+  const root = npmGlobalModulesRoot(input.npmGlobalBin, platform);
+  const executable = input.executable;
+  if (executable && root) {
+    const real = await realpath(executable).catch(() => executable);
+    if (isPathInside(real, root, platform)) return true;
+    if (platform === 'win32') {
+      const shimTarget = await resolveWindowsShimTarget(real);
+      if (shimTarget && isPathInside(shimTarget, root, platform)) return true;
+      if (input.npmGlobalBin && isPathInside(real, input.npmGlobalBin, platform)) return true;
+    }
+    return false;
+  }
+  return Object.prototype.hasOwnProperty.call(input.installedPackages, input.packageName);
 }
 
 interface ExecResult {

@@ -507,6 +507,12 @@
           "default": false,
           "markdownDescription": "%config.protocolGateway%"
         },
+        "harnessDeck.acpRegistryUrl": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "markdownDescription": "%config.acpRegistryUrl%"
+        },
         "harnessDeck.providers": {
           "type": "array",
           "scope": "application",

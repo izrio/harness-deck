@@ -77,5 +77,6 @@
   "config.chatCommands.prompt": "选中该命令后填入输入框的完整提示词内容。",
   "config.mcpServers": "统一管理的 MCP 服务器列表，在启动时自动交给勾选的 Agent，也支持从各 Agent 的原生配置导入。",
   "config.protocolGateway": "是否启动本地协议转换网关（默认关闭）。开启后，可将仅提供 OpenAI Chat Completions 兼容接口的服务商自动转换为 Claude (Anthropic Messages) 协议供 Claude Code 使用。",
+  "config.acpRegistryUrl": "可选的 ACP 代理注册表 HTTPS 清单地址，用于在设置页发现外部 ACP 智能体（仅只读展示，不会自动安装）。",
   "config.providers": "第三方编程套餐与自定义模型服务商配置（如火山方舟、智谱 GLM、百炼、MiniMax、Kimi、CLIProxyAPI 等）及智能体绑定关系。API Key 仅加密保存在本机安全凭据存储中，不写入设置文件。"
 }

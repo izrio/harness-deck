@@ -1,7 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { deleteBackendSetting, parseProfiles, profileView, upsertBackendSetting } from '../src/backend/profiles.ts';
+import {
+  DSH_PROFILE,
+  deleteBackendSetting,
+  parseProfiles,
+  profileDriver,
+  profileInstanceId,
+  profileView,
+  upsertBackendSetting,
+} from '../src/backend/profiles.ts';
 
 describe('底层配置', () => {
+  it('driver / instanceId 拆分：旧数据回退，新配置可指定实例 id', () => {
+    expect(profileDriver(DSH_PROFILE)).toBe('dsh');
+    expect(profileInstanceId(DSH_PROFILE)).toBe('dsh');
+    expect(profileView(DSH_PROFILE)).toMatchObject({ driver: 'dsh', instanceId: 'dsh' });
+
+    const [dsh, custom] = parseProfiles([
+      { name: 'Claude Work', instanceId: 'claude-work', command: 'claude', args: ['--acp'] },
+    ]);
+    expect(dsh?.id).toBe('dsh');
+    expect(custom).toMatchObject({
+      id: 'claude-work',
+      instanceId: 'claude-work',
+      driver: 'acp',
+      kind: 'acp',
+      name: 'Claude Work',
+    });
+  });
+
   it('dsh 总在第一位；ACP 项校验后加入，id 默认取名称', () => {
     const logs: string[] = [];
     const profiles = parseProfiles(
@@ -15,8 +41,8 @@ describe('底层配置', () => {
     );
     expect(profiles).toEqual([
       { id: 'dsh', kind: 'dsh', name: 'DeepSeek' },
-      { id: 'oh-my-pi', kind: 'acp', name: 'oh-my-pi', command: 'omp', args: ['acp'], env: { A: '1' }, installHint: 'bun install' },
-      { id: 'gemini-cli', kind: 'acp', name: 'Gemini CLI', command: 'gemini', args: ['--experimental-acp'], env: {} },
+      { id: 'oh-my-pi', driver: 'acp', instanceId: 'oh-my-pi', kind: 'acp', name: 'oh-my-pi', command: 'omp', args: ['acp'], env: { A: '1' }, installHint: 'bun install' },
+      { id: 'gemini-cli', driver: 'acp', instanceId: 'gemini-cli', kind: 'acp', name: 'Gemini CLI', command: 'gemini', args: ['--experimental-acp'], env: {} },
     ]);
     expect(logs).toHaveLength(2);
   });

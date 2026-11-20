@@ -14,6 +14,7 @@ import { VscodeWorkbench } from './workbench/VscodeWorkbench.ts';
 const GLOBAL_ONLY_SETTINGS = new Set([
   'defaultBackend',
   'backends',
+  'acpRegistryUrl',
   'providers',
   'protocolGateway',
   'projects',
@@ -37,6 +38,7 @@ const WATCHED_SETTING_KEYS = [
   'pi',
   'pi.path',
   'backends',
+  'acpRegistryUrl',
   'context',
   'context.includeActiveEditor',
   'ui.theme',

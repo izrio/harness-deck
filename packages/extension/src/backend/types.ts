@@ -151,13 +151,18 @@ export function renderDelay(options: Pick<ControllerHostOptions, 'renderDelayMs'
   return options.renderDelayMs ?? (options.isVisible?.() === false ? 500 : 30);
 }
 
-/** 设置里配置的一个底层。 */
+/** 底层驱动类型：决定用哪个控制器；同一个 driver 可以有多份 instanceId（账号实例）。 */
+export type BackendDriver = 'dsh' | 'claude' | 'pi' | 'zcode' | 'acp';
+
+/** 设置里配置的一个底层。`id` 仍是实例标识（历史会话按它保存），`driver` 描述接入协议。 */
 export type BackendProfile =
-  | { readonly id: 'dsh'; readonly kind: 'dsh'; readonly name: string }
+  | { readonly id: 'dsh'; readonly kind: 'dsh'; readonly name: string; readonly driver?: BackendDriver; readonly instanceId?: string }
   | {
       readonly id: 'zcode';
       readonly kind: 'zcode';
       readonly name: string;
+      readonly driver?: BackendDriver;
+      readonly instanceId?: string;
       readonly installHint?: string;
       readonly signInHint?: string;
     }
@@ -165,6 +170,8 @@ export type BackendProfile =
       readonly id: 'claude';
       readonly kind: 'claude';
       readonly name: string;
+      readonly driver?: BackendDriver;
+      readonly instanceId?: string;
       readonly installHint?: string;
       readonly signInHint?: string;
     }
@@ -172,6 +179,8 @@ export type BackendProfile =
       readonly id: 'pi';
       readonly kind: 'pi';
       readonly name: string;
+      readonly driver?: BackendDriver;
+      readonly instanceId?: string;
       readonly installHint?: string;
       readonly signInHint?: string;
     }
@@ -179,6 +188,8 @@ export type BackendProfile =
       readonly id: string;
       readonly kind: 'acp';
       readonly name: string;
+      readonly driver?: BackendDriver;
+      readonly instanceId?: string;
       /** 启动 ACP 代理的命令和参数，例如 `omp` + `["acp"]`。 */
       readonly command: string;
       readonly args: readonly string[];

@@ -3,7 +3,7 @@
  * 设置里和内置项 id 相同的一项覆盖内置项（例如改成完整路径），其余追加在后面。
  * 纯函数，便于测试；extension.ts 负责读设置。
  */
-import type { BackendView } from '@harness-deck/shared';
+import { backendCapabilities, type BackendView } from '@harness-deck/shared';
 import type { BackendProfile } from './types.ts';
 
 /** 设置里一项 ACP 底层的原始值（用户手写，逐项校验）。 */
@@ -15,6 +15,18 @@ export interface AcpProfileSetting {
   readonly env?: unknown;
   readonly installHint?: unknown;
   readonly singleSession?: unknown;
+  readonly driver?: unknown;
+  readonly instanceId?: unknown;
+}
+
+/** 底层驱动（接入协议）。旧数据没有 driver 时回退到 kind。 */
+export function profileDriver(profile: BackendProfile): import('./types.ts').BackendDriver {
+  return profile.driver ?? profile.kind;
+}
+
+/** 账号实例标识。旧数据没有 instanceId 时回退到 id（历史会话按 id 保存）。 */
+export function profileInstanceId(profile: BackendProfile): string {
+  return profile.instanceId ?? profile.id;
 }
 
 /** 内置底层 DeepSeek（dsh，DeepSeek Harness）。id 保持 dsh：会话、标签等按 id 保存。 */
@@ -103,7 +115,13 @@ function parseSettings(raw: unknown, log: (line: string) => void): AcpProfile[] 
       log(`底层配置缺少 name 或 command，已跳过：${JSON.stringify(item)}`);
       continue;
     }
-    const id = (typeof item.id === 'string' && item.id.trim() ? item.id.trim() : name).toLowerCase().replace(/[^a-z0-9._-]+/gu, '-');
+    const rawId = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : name;
+    const normalizedId = rawId.toLowerCase().replace(/[^a-z0-9._-]+/gu, '-');
+    const requestedInstance =
+      typeof item.instanceId === 'string' && item.instanceId.trim()
+        ? item.instanceId.trim().toLowerCase().replace(/[^a-z0-9._-]+/gu, '-')
+        : undefined;
+    const id = requestedInstance ?? normalizedId;
     if (seen.has(id)) {
       log(`底层配置的 id 重复（${id}），已跳过后面的一项`);
       continue;
@@ -116,6 +134,8 @@ function parseSettings(raw: unknown, log: (line: string) => void): AcpProfile[] 
         : {};
     profiles.push({
       id,
+      driver: 'acp',
+      instanceId: id,
       kind: 'acp',
       name,
       command,
@@ -155,6 +175,7 @@ const INSTALL_COMMANDS: Readonly<Record<string, string>> = {
 
 export interface ProfileViewMeta {
   readonly available?: boolean;
+  readonly npmOwned?: boolean;
   readonly version?: string;
   readonly versions?: readonly string[];
   readonly versionsLoading?: boolean;
@@ -233,6 +254,9 @@ export function profileView(profile: BackendProfile, meta?: ProfileViewMeta | bo
     id: profile.id,
     name: profile.name,
     kind: profile.kind,
+    driver: profileDriver(profile),
+    instanceId: profileInstanceId(profile),
+    capabilities: backendCapabilities(profile),
     ...(isBuiltin ? { builtin: true } : {}),
     ...(isCustom ? { custom: true } : {}),
     ...(isOverridden ? { overridden: true } : {}),
@@ -246,6 +270,7 @@ export function profileView(profile: BackendProfile, meta?: ProfileViewMeta | bo
         }
       : {}),
     ...(info.available !== undefined ? { available: info.available } : {}),
+    ...(info.npmOwned !== undefined ? { npmOwned: info.npmOwned } : {}),
     ...(info.version ? { version: info.version } : {}),
     ...(npmPackage ? { npmPackage } : {}),
     ...(info.versions !== undefined ? { versions: info.versions } : {}),
