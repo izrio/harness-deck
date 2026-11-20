@@ -10,6 +10,8 @@ export interface QuotaServiceOptions {
   /** 环境变量（测试里可注入临时 HOME / 区域 / Cookie）。 */
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly getHttpProxy?: () => string | undefined;
+  /** 已探测到的底层 CLI 版本号（例如 Antigravity 的 `1.5.13`，用于构造合规的 User-Agent）。 */
+  readonly clientVersion?: string;
   /** 注入 fetch 实现（测试用），默认按宿主代理配置创建。 */
   readonly fetchImpl?: FetchLike;
   readonly now?: () => number;

@@ -17,16 +17,24 @@ import { parseEpochMs, rec, roundPercent, type QuotaServiceOptions, type Rec } f
 const PRIMARY_HOST = 'https://daily-cloudcode-pa.googleapis.com';
 const FALLBACK_HOST = 'https://cloudcode-pa.googleapis.com';
 const QUOTA_PATH = '/v1internal:retrieveUserQuotaSummary';
+/** 服务端按 User-Agent 的 CLI 版本做分组门控；缺少版本时只返回 3p 池，漏掉 Gemini 与独立模型池。 */
+const DEFAULT_CLI_VERSION = '1.5.13';
+const GROUP_MODELS_PREFIX = /^Models within this group:\s*/iu;
 /** 与其它提供方一致：成功结果缓存 5 分钟。 */
 export const ANTIGRAVITY_CACHE_MS = 300_000;
 const TIMEOUT_MS = 10_000;
 const CREDENTIAL_FILES = ['antigravity-cli/antigravity-oauth-token', 'jetski-standalone-oauth-token'] as const;
 
-/** 成功结果按 token 缓存（token 只作内存 key）。 */
+/** 成功结果按 token+UA 缓存（token 只作内存 key）。 */
 const cache = new Map<string, { readonly at: number; readonly value: QuotaView }>();
 
 export function clearAntigravityQuotaCache(): void {
   cache.clear();
+}
+
+function userAgent(clientVersion?: string): string {
+  const version = clientVersion?.trim();
+  return `antigravity/cli/${version && /^\d+\.\d+/u.test(version) ? version : DEFAULT_CLI_VERSION}`;
 }
 
 function geminiDir(env: Readonly<Record<string, string | undefined>>): string {
@@ -59,7 +67,11 @@ async function readAccessToken(env: Readonly<Record<string, string | undefined>>
 }
 
 /** 主域失败时重试备用域；任何失败都返回 undefined。 */
-async function requestQuota(fetchFn: ReturnType<typeof createProxyAwareFetch>, token: string): Promise<Rec | undefined> {
+async function requestQuota(
+  fetchFn: ReturnType<typeof createProxyAwareFetch>,
+  token: string,
+  ua: string,
+): Promise<Rec | undefined> {
   for (const host of [PRIMARY_HOST, FALLBACK_HOST]) {
     try {
       const response = await fetchFn(`${host}${QUOTA_PATH}`, {
@@ -68,7 +80,7 @@ async function requestQuota(fetchFn: ReturnType<typeof createProxyAwareFetch>, t
           accept: 'application/json',
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
-          'user-agent': 'antigravity',
+          'user-agent': ua,
         },
         body: '{}',
         signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -86,11 +98,30 @@ async function requestQuota(fetchFn: ReturnType<typeof createProxyAwareFetch>, t
   return undefined;
 }
 
-/** bucketId 前缀 → Webview 侧翻译用的池标识。 */
-function poolLabel(bucketId: string, groupName: string): string {
-  if (bucketId.startsWith('3p')) return '3p';
-  if (bucketId.startsWith('gemini')) return 'gemini';
-  return groupName;
+/**
+ * 标准共享池的 bucketId → Webview 侧翻译键；
+ * 独立模型池（如 `gemini-argon-wtu-weekly` / `Gemini 4 Argon`）保留服务端分组名，避免与主 Gemini 池冲突。
+ */
+function poolLabel(bucketId: string, groupName: string, bucketDisplayName: string): string {
+  if (/^3p-(?:5h|weekly)$/iu.test(bucketId)) return '3p';
+  if (/^gemini-(?:5h|weekly)$/iu.test(bucketId)) return 'gemini';
+  return groupName.trim() || bucketDisplayName.trim() || bucketId;
+}
+
+function readGroupModels(group: Rec | undefined): readonly string[] | undefined {
+  if (Array.isArray(group?.models)) {
+    const models = group.models.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim());
+    if (models.length > 0) return models;
+  }
+  if (typeof group?.description !== 'string') return undefined;
+  const trimmed = group.description.trim();
+  if (!GROUP_MODELS_PREFIX.test(trimmed)) return undefined;
+  const models = trimmed
+    .replace(GROUP_MODELS_PREFIX, '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return models.length > 0 ? models : undefined;
 }
 
 function readWindows(json: Rec): QuotaWindowView[] {
@@ -100,6 +131,7 @@ function readWindows(json: Rec): QuotaWindowView[] {
   for (const rawGroup of groups) {
     const group = rec(rawGroup);
     const groupName = typeof group?.displayName === 'string' ? group.displayName : '';
+    const models = readGroupModels(group);
     const buckets = Array.isArray(group?.buckets) ? group.buckets : [];
     for (const rawBucket of buckets) {
       const bucket = rec(rawBucket);
@@ -109,18 +141,22 @@ function readWindows(json: Rec): QuotaWindowView[] {
       if (typeof fraction !== 'number' || !Number.isFinite(fraction)) continue;
       const remaining = Math.min(1, Math.max(0, fraction));
       const bucketId = typeof bucket?.bucketId === 'string' ? bucket.bucketId : '';
-      const label = poolLabel(bucketId, groupName);
+      const bucketDisplayName = typeof bucket?.displayName === 'string' ? bucket.displayName : '';
+      const label = poolLabel(bucketId, groupName, bucketDisplayName);
       const kind = bucket?.window === 'weekly' ? 'weekly' : 'session';
       const key = `${kind}:${label}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const usedPercent = roundPercent((1 - remaining) * 100);
-      const resetsAt = parseEpochMs(bucket?.resetTime);
+      const remainingPercent = roundPercent(remaining * 100);
+      const usedPercent = roundPercent(100 - remainingPercent);
+      // 未消耗额度（remainingFraction === 1）时服务端返回的是 `now + window` 的滑动占位时间，不展示倒计时。
+      const resetsAt = remaining < 1 ? parseEpochMs(bucket?.resetTime) : undefined;
       windows.push({
         kind,
         label,
+        ...(models ? { models } : {}),
         usedPercent,
-        remainingPercent: roundPercent(100 - usedPercent),
+        remainingPercent,
         ...(resetsAt !== undefined ? { resetsAt } : {}),
       });
     }
@@ -134,16 +170,18 @@ export async function queryAntigravityQuota(options: QuotaServiceOptions = {}): 
   const token = await readAccessToken(options.env ?? process.env, now());
   if (!token) return undefined;
 
-  const cached = cache.get(token);
+  const ua = userAgent(options.clientVersion);
+  const cacheKey = `${token}\0${ua}`;
+  const cached = cache.get(cacheKey);
   if (cached && now() - cached.at < ANTIGRAVITY_CACHE_MS) return cached.value;
 
   const fetchFn = options.fetchImpl ?? createProxyAwareFetch(options.getHttpProxy);
-  const json = await requestQuota(fetchFn, token);
+  const json = await requestQuota(fetchFn, token, ua);
   if (!json) return undefined;
   const windows = readWindows(json);
   if (windows.length === 0) return undefined;
 
   const view: QuotaView = { windows, queriedAt: now() };
-  cache.set(token, { at: now(), value: view });
+  cache.set(cacheKey, { at: now(), value: view });
   return view;
 }

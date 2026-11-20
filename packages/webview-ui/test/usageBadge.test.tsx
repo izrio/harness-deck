@@ -23,8 +23,28 @@ const poolQuota: QuotaView = {
   windows: [
     { kind: 'cycle', label: '', usedPercent: 63, remainingPercent: 37 },
     { kind: 'cycle', label: 'Pro', usedPercent: 20, remainingPercent: 80 },
-    { kind: 'session', label: 'gemini', usedPercent: 12, remainingPercent: 88 },
-    { kind: 'weekly', label: '3p', usedPercent: 92, remainingPercent: 8 },
+    {
+      kind: 'weekly',
+      label: 'gemini',
+      models: ['Gemini 4 Neon', 'Gemini 3.8 Flash'],
+      usedPercent: 4,
+      remainingPercent: 96,
+    },
+    {
+      kind: 'session',
+      label: 'gemini',
+      models: ['Gemini 4 Neon', 'Gemini 3.8 Flash'],
+      usedPercent: 12,
+      remainingPercent: 88,
+    },
+    {
+      kind: 'weekly',
+      label: '3p',
+      models: ['Claude Opus 5.5', 'GPT-OSS 120B'],
+      usedPercent: 92,
+      remainingPercent: 8,
+    },
+    { kind: 'weekly', label: 'Gemini 4 Argon', usedPercent: 0, remainingPercent: 100 },
     { kind: 'weeklyModel', label: 'Fable', usedPercent: 91, remainingPercent: 9 },
   ],
   queriedAt: Date.now(),
@@ -68,13 +88,13 @@ describe('订阅用量标识', () => {
     expect(screen.queryByTestId('usage-badge')).toBeNull();
   });
 
-  it('拿到额度后显示标识，悬浮展开用量与剩余明细', async () => {
+  it('拿到额度后显示最低剩余百分比，悬浮展开只展示剩余与进度条，不展示已用', async () => {
     vi.useFakeTimers();
     const requestId = mount();
     act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId, quota } }));
 
     const badge = screen.getByTestId('usage-badge');
-    expect(badge.textContent).toContain('91%'); // 取最紧的窗口
+    expect(badge.textContent).toContain('9%'); // 取剩余最少的窗口
     expect(screen.queryByTestId('usage-popover')).toBeNull();
 
     fireEvent.pointerEnter(badge);
@@ -85,9 +105,15 @@ describe('订阅用量标识', () => {
     expect(body.textContent).toContain('5 小时');
     expect(body.textContent).toContain('每周');
     expect(body.textContent).toContain('Fable');
-    expect(body.textContent).toContain('已用 91%');
+    expect(body.textContent).not.toContain('已用');
+    expect(body.textContent).toContain('剩余 58%');
+    expect(body.textContent).toContain('剩余 24%');
     expect(body.textContent).toContain('剩余 9%');
     expect(body.textContent).toContain('额外用量');
+    expect(body.textContent).toContain('剩余 82%');
+
+    const fills = screen.getAllByTestId('usage-bar-fill').map((el) => (el as HTMLElement).style.width);
+    expect(fills).toEqual(['58%', '24%', '9%']);
 
     fireEvent.pointerLeave(badge);
     await act(async () => {
@@ -96,7 +122,7 @@ describe('订阅用量标识', () => {
     expect(screen.queryByTestId('usage-popover')).toBeNull();
   });
 
-  it('计费周期与额度池标题按语言包展示', async () => {
+  it('计费周期与多模型额度池按分组和语言包展示', async () => {
     vi.useFakeTimers();
     const requestId = mount();
     act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId, quota: poolQuota } }));
@@ -108,9 +134,17 @@ describe('订阅用量标识', () => {
     const body = screen.getByTestId('usage-popover').textContent ?? '';
     expect(body).toContain('本计费周期');
     expect(body).toContain('本计费周期 · Pro');
-    expect(body).toContain('5 小时 · Gemini 模型');
-    expect(body).toContain('每周 · Claude 与 GPT 模型');
+    expect(body).toContain('Gemini 模型');
+    expect(body).toContain('Gemini 4 Neon · Gemini 3.8 Flash');
+    expect(body).toContain('剩余 96%');
+    expect(body).toContain('剩余 88%');
+    expect(body).toContain('Claude 与 GPT 模型');
+    expect(body).toContain('Claude Opus 5.5 · GPT-OSS 120B');
+    expect(body).toContain('剩余 8%');
+    expect(body).toContain('Gemini 4 Argon');
+    expect(body).toContain('剩余 100%');
     expect(body).toContain('每周 · Fable');
+    expect(body).not.toContain('已用');
   });
 
   it('切换到底层后隐藏标识', () => {

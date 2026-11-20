@@ -55,15 +55,30 @@ const agyToken = (expiry = AGY_EXPIRY, accessToken = AGY_TOKEN) => ({ token: { a
 const agyQuota = {
   groups: [
     {
-      displayName: 'Gemini',
+      displayName: 'Gemini Models',
+      description: 'Models within this group: Gemini 4 Neon, Gemini 4 Hydrogen, Gemini 3.8 Flash',
       buckets: [
         { bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.878, resetTime: '2026-11-19T14:00:00.000Z' },
         { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 0.66, resetTime: '2026-11-22T12:00:00.123456789Z' },
       ],
     },
     {
-      displayName: 'Claude & GPT',
+      displayName: 'Claude and GPT models',
+      description: 'Models within this group: Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B',
       buckets: [{ bucketId: '3p-5h', window: '5h', remainingFraction: 0.2, resetTime: '2026-11-19T13:00:00.000Z' }],
+    },
+    {
+      displayName: 'Gemini 4 Argon',
+      description: 'For paid Pro plans, Argon quota is separate.',
+      buckets: [
+        {
+          bucketId: 'gemini-argon-wtu-weekly',
+          displayName: 'Gemini 4 Argon Weekly Limit',
+          window: 'weekly',
+          remainingFraction: 1,
+          resetTime: '2026-11-26T12:00:00.000Z',
+        },
+      ],
     },
   ],
 };
@@ -75,7 +90,7 @@ async function emptyHome(): Promise<Record<string, string | undefined>> {
 }
 
 describe('Antigravity 订阅额度查询', () => {
-  it('纳秒级 expiry 可用，请求头与窗口映射正确', async () => {
+  it('纳秒级 expiry 可用，携带 CLI 版本 User-Agent，并完整映射多模型池与模型清单', async () => {
     const env = await writeToken(agyToken());
     const calls: { readonly url: string; readonly init?: RequestInit }[] = [];
     const fetchImpl: FetchLike = async (input, init) => {
@@ -83,19 +98,20 @@ describe('Antigravity 订阅额度查询', () => {
       return jsonResponse(agyQuota);
     };
 
-    const quota = await queryAntigravityQuota({ env, fetchImpl, now: () => NOW });
+    const quota = await queryAntigravityQuota({ env, fetchImpl, clientVersion: '1.6.2', now: () => NOW });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(AGY_PRIMARY);
     const headers = calls[0]?.init?.headers as Record<string, string>;
     expect(headers.authorization).toBe(`Bearer ${AGY_TOKEN}`);
-    expect(headers['user-agent']).toBe('antigravity');
+    expect(headers['user-agent']).toBe('antigravity/cli/1.6.2');
     expect(headers['content-type']).toBe('application/json');
     expect(calls[0]?.init?.body).toBe('{}');
     expect(quota?.windows).toEqual([
       {
         kind: 'session',
         label: 'gemini',
+        models: ['Gemini 4 Neon', 'Gemini 4 Hydrogen', 'Gemini 3.8 Flash'],
         usedPercent: 12.2,
         remainingPercent: 87.8,
         resetsAt: Date.parse('2026-11-19T14:00:00.000Z'),
@@ -103,6 +119,7 @@ describe('Antigravity 订阅额度查询', () => {
       {
         kind: 'weekly',
         label: 'gemini',
+        models: ['Gemini 4 Neon', 'Gemini 4 Hydrogen', 'Gemini 3.8 Flash'],
         usedPercent: 34,
         remainingPercent: 66,
         resetsAt: Date.parse('2026-11-22T12:00:00.123Z'),
@@ -110,22 +127,31 @@ describe('Antigravity 订阅额度查询', () => {
       {
         kind: 'session',
         label: '3p',
+        models: ['Claude Opus 5.5', 'Claude Sonnet 5.5', 'GPT-OSS 120B'],
         usedPercent: 80,
         remainingPercent: 20,
         resetsAt: Date.parse('2026-11-19T13:00:00.000Z'),
+      },
+      {
+        kind: 'weekly',
+        label: 'Gemini 4 Argon',
+        usedPercent: 0,
+        remainingPercent: 100,
       },
     ]);
     expect(quota?.queriedAt).toBe(NOW);
     expect(JSON.stringify(quota)).not.toContain(AGY_TOKEN);
   });
 
-  it('凭据缺失、过期或畸形时不发请求，备用凭据文件可用', async () => {
+  it('凭据缺失、过期或畸形时不发请求，备用凭据文件可用，未传版本时回退默认 CLI 版本', async () => {
     const missing = await writeToken({ token: { expiry: AGY_EXPIRY } });
     const expired = await writeToken(agyToken('2026-11-19T11:59:59.000Z', 'expired-token'));
     const malformed = await writeToken('not-json', 'antigravity-cli/antigravity-oauth-token');
     let calls = 0;
-    const fetchImpl: FetchLike = async () => {
+    let lastUa = '';
+    const fetchImpl: FetchLike = async (_input, init) => {
       calls += 1;
+      lastUa = (init?.headers as Record<string, string>)['user-agent'] ?? '';
       return jsonResponse(agyQuota);
     };
     for (const env of [missing, expired, malformed]) {
@@ -135,7 +161,8 @@ describe('Antigravity 订阅额度查询', () => {
 
     const fallback = await writeToken(agyToken(AGY_EXPIRY, 'fallback-token'), 'jetski-standalone-oauth-token');
     const quota = await queryAntigravityQuota({ env: fallback, fetchImpl, now: () => NOW });
-    expect(quota?.windows).toHaveLength(3);
+    expect(quota?.windows).toHaveLength(4);
+    expect(lastUa).toMatch(/^antigravity\/cli\/\d+\.\d+/u);
     expect(calls).toBe(1);
   });
 
@@ -150,10 +177,10 @@ describe('Antigravity 订阅额度查询', () => {
     const quota = await queryAntigravityQuota({ env, fetchImpl, now: () => NOW });
 
     expect(urls).toEqual([AGY_PRIMARY, AGY_FALLBACK]);
-    expect(quota?.windows).toHaveLength(3);
+    expect(quota?.windows).toHaveLength(4);
   });
 
-  it('跳过 disabled 窗口、按比例换算、按 kind+label 去重；响应畸形时返回 undefined', async () => {
+  it('跳过 disabled 窗口、满额时不附带占位重置时间、按 kind+label 去重；响应畸形时返回 undefined', async () => {
     const env = await writeToken(agyToken(AGY_EXPIRY, 'mapping-token'));
     const payload = {
       groups: [
@@ -179,7 +206,7 @@ describe('Antigravity 订阅额度查询', () => {
     });
 
     expect(quota?.windows).toEqual([
-      { kind: 'session', label: 'gemini', usedPercent: 0, remainingPercent: 100, resetsAt: Date.parse('2026-11-19T14:00:00.000Z') },
+      { kind: 'session', label: 'gemini', usedPercent: 0, remainingPercent: 100 },
       { kind: 'weekly', label: 'gemini', usedPercent: 100, remainingPercent: 0, resetsAt: NOW },
       { kind: 'session', label: '融合池', usedPercent: 75, remainingPercent: 25 },
     ]);

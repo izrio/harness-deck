@@ -590,10 +590,42 @@ function installMockHost(): void {
               : backends.active === 'antigravity'
                 ? {
                     windows: [
-                      { kind: 'session', label: 'gemini', usedPercent: 12, remainingPercent: 88, resetsAt: now + 4 * 60 * 60_000 },
-                      { kind: 'weekly', label: 'gemini', usedPercent: 34, remainingPercent: 66, resetsAt: now + 3 * 86_400_000 },
-                      { kind: 'session', label: '3p', usedPercent: 80, remainingPercent: 20, resetsAt: now + 3 * 60 * 60_000 },
-                      { kind: 'weekly', label: '3p', usedPercent: 92, remainingPercent: 8, resetsAt: now + 2 * 86_400_000 },
+                      {
+                        kind: 'weekly',
+                        label: 'gemini',
+                        models: ['Gemini 4 Neon', 'Gemini 4 Hydrogen', 'Gemini 3.8 Flash'],
+                        usedPercent: 8,
+                        remainingPercent: 92,
+                        resetsAt: now + 7 * 86_400_000,
+                      },
+                      {
+                        kind: 'session',
+                        label: 'gemini',
+                        models: ['Gemini 4 Neon', 'Gemini 4 Hydrogen', 'Gemini 3.8 Flash'],
+                        usedPercent: 27,
+                        remainingPercent: 73,
+                        resetsAt: now + 4 * 60 * 60_000,
+                      },
+                      {
+                        kind: 'weekly',
+                        label: '3p',
+                        models: ['Claude Opus 5.5', 'Claude Sonnet 5.5', 'GPT-OSS 120B'],
+                        usedPercent: 0,
+                        remainingPercent: 100,
+                      },
+                      {
+                        kind: 'session',
+                        label: '3p',
+                        models: ['Claude Opus 5.5', 'Claude Sonnet 5.5', 'GPT-OSS 120B'],
+                        usedPercent: 0,
+                        remainingPercent: 100,
+                      },
+                      {
+                        kind: 'weekly',
+                        label: 'Gemini 4 Argon',
+                        usedPercent: 0,
+                        remainingPercent: 100,
+                      },
                     ],
                     queriedAt: now,
                   }

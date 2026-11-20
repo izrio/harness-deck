@@ -328,13 +328,16 @@ export interface ContextDetail {
 export interface QuotaWindowView {
   readonly kind: 'session' | 'weekly' | 'weeklyModel' | 'cycle';
   /**
-   * 窗口附加名：按模型的每周填模型名（如 `Fable`）；Antigravity 的额度池填保留值
-   * `gemini` / `3p`（Webview 翻译成池名）；CodeBuddy 计费周期可留空或用包名。
+   * 窗口附加名：按模型的每周填模型名（如 `Fable`）；Antigravity 的标准额度池填保留值
+   * `gemini` / `3p`（Webview 翻译成池名），独立模型池保留服务端分组名（如 `Gemini 4 Argon`）；
+   * CodeBuddy 计费周期可留空或用包名。
    */
   readonly label: string;
+  /** 该额度分组包含的模型名列表（例如 Antigravity 额度池下的模型清单），底层未提供时为 undefined。 */
+  readonly models?: readonly string[];
   readonly usedPercent: number;
   readonly remainingPercent: number;
-  /** 重置时间（epoch ms），底层没给时为 undefined。 */
+  /** 重置时间（epoch ms），底层没给或尚未消耗时为 undefined。 */
   readonly resetsAt?: number;
   readonly severity?: 'normal' | 'warning' | 'critical';
   readonly isActive?: boolean;

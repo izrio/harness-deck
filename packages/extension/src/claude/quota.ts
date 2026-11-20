@@ -8,7 +8,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { QuotaView, QuotaWindowView } from '@harness-deck/shared';
-import { createProxyAwareFetch, type FetchLike } from '../providers/proxyFetch.ts';
+import { createProxyAwareFetch } from '../providers/proxyFetch.ts';
+import type { QuotaServiceOptions } from '../quota/util.ts';
 import { resolveClaudeConfigDir } from './sessions.ts';
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -18,14 +19,7 @@ const TIMEOUT_MS = 10_000;
 
 type Rec = Record<string, unknown>;
 
-export interface QuotaServiceOptions {
-  /** 环境变量（测试里可注入临时 HOME / CLAUDE_CONFIG_DIR）。 */
-  readonly env?: Readonly<Record<string, string | undefined>>;
-  readonly getHttpProxy?: () => string | undefined;
-  /** 注入 fetch 实现（测试用），默认按宿主代理配置创建。 */
-  readonly fetchImpl?: FetchLike;
-  readonly now?: () => number;
-}
+export type { QuotaServiceOptions };
 
 /** 成功结果按 token 缓存（token 只作内存 key，不出现在返回值里）。 */
 const cache = new Map<string, { readonly at: number; readonly value: QuotaView }>();

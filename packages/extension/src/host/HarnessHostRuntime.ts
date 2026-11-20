@@ -2374,9 +2374,11 @@ export function createHarnessHostRuntime(
         }
         try {
           const query = providerId === 'claude' ? queryClaudeQuota : providerId === 'antigravity' ? queryAntigravityQuota : queryCodebuddyQuota;
+          const clientVersion = installedVersions.get(backendId);
           const quota = await query({
             env: process.env,
             getHttpProxy: () => platform.settings.getHttpProxy(),
+            ...(clientVersion ? { clientVersion } : {}),
           });
           post(
             quota
