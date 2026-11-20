@@ -1,3 +1,4 @@
+import { backendCapabilities } from '@harness-deck/shared';
 import type {
   AgentProfile,
   BackendsState,
@@ -51,13 +52,13 @@ export const PREVIEW_BACKENDS: BackendsState = {
   workspace: 'harness-deck',
   nodeEnv: { checked: true, hasNode: true, hasNpm: true, nodeVersion: 'v22.14.0', npmVersion: '10.9.2' },
   items: [
-    { id: 'dsh', name: 'DeepSeek', kind: 'dsh', builtin: true, available: true, version: '0.9.4', npmPackage: '@deepseek-ai/dsh' },
-    { id: 'claude', name: 'Claude Code', kind: 'claude', builtin: true, available: true, version: '1.0.32', npmPackage: '@anthropic-ai/claude-code' },
-    { id: 'pi', name: 'Pi', kind: 'pi', builtin: true, available: true, version: '0.6.1', npmPackage: '@earendil-works/pi-coding-agent' },
-    { id: 'zcode', name: 'ZCode', kind: 'zcode', builtin: true, available: false, installHint: 'npm install -g zcode-app-cli' },
-    { id: 'codebuddy', name: 'CodeBuddy', kind: 'acp', builtin: true, available: true, version: '2.1.0', command: 'codebuddy --acp' },
-    { id: 'opencode', name: 'OpenCode', kind: 'acp', builtin: true, available: true, version: '0.4.8', command: 'opencode acp' },
-    { id: 'antigravity', name: 'Antigravity', kind: 'acp', builtin: true, available: true, version: '1.5.12', command: 'agy acp' },
+    { id: 'dsh', name: 'DeepSeek', kind: 'dsh', capabilities: backendCapabilities({ id: 'dsh', kind: 'dsh' }), builtin: true, available: true, version: '0.9.4', npmPackage: '@deepseek-ai/dsh' },
+    { id: 'claude', name: 'Claude Code', kind: 'claude', capabilities: backendCapabilities({ id: 'claude', kind: 'claude' }), builtin: true, available: true, version: '1.0.32', npmPackage: '@anthropic-ai/claude-code' },
+    { id: 'pi', name: 'Pi', kind: 'pi', capabilities: backendCapabilities({ id: 'pi', kind: 'pi' }), builtin: true, available: true, version: '0.6.1', npmPackage: '@earendil-works/pi-coding-agent' },
+    { id: 'zcode', name: 'ZCode', kind: 'zcode', capabilities: backendCapabilities({ id: 'zcode', kind: 'zcode' }), builtin: true, available: false, installHint: 'npm install -g zcode-app-cli' },
+    { id: 'codebuddy', name: 'CodeBuddy', kind: 'acp', capabilities: backendCapabilities({ id: 'codebuddy', kind: 'acp', command: 'codebuddy --acp' }), builtin: true, available: true, version: '2.1.0', command: 'codebuddy --acp' },
+    { id: 'opencode', name: 'OpenCode', kind: 'acp', capabilities: backendCapabilities({ id: 'opencode', kind: 'acp', command: 'opencode acp' }), builtin: true, available: true, version: '0.4.8', command: 'opencode acp' },
+    { id: 'antigravity', name: 'Antigravity', kind: 'acp', capabilities: backendCapabilities({ id: 'antigravity', kind: 'acp', command: 'agy acp' }), builtin: true, available: true, version: '1.5.12', command: 'agy acp' },
   ],
 };
 
@@ -527,6 +528,20 @@ export function createInitialWorkbench(): WorkbenchState {
         ],
       },
     ],
+    sourceControl: {
+      available: true,
+      root: PREVIEW_WORKSPACE_PATH,
+      branch: 'feat/preview',
+      remote: 'git@github.com:acme/harness-deck.git',
+      files: [
+        { path: 'packages/webview-ui/src/App.tsx', status: 'modified', staged: false, additions: 12, deletions: 3 },
+        { path: 'packages/shared/src/viewModel.ts', status: 'modified', staged: true, additions: 30, deletions: 2 },
+        { path: 'docs/PLAN.md', status: 'untracked', staged: false },
+      ],
+      additions: 42,
+      deletions: 5,
+      updatedAt: now,
+    },
     overview: {
       waiting: [
         {

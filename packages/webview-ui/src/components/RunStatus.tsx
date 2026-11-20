@@ -8,6 +8,7 @@ import { cn } from '../lib/utils.ts';
 import { LoadingState } from './beautifului/index.ts';
 import { CheckIcon, CopyIcon } from './icons.tsx';
 import { useT, type Translate } from '../i18n.ts';
+import { postToHost } from '../vscode.ts';
 
 /** 「12 秒」「1 分 23 秒」「1 小时 2 分」。 */
 export function formatDuration(ms: number, t: Translate): string {
@@ -133,15 +134,20 @@ export function AssistantActions({ text, inline = false }: { text: string; inlin
 export const TurnDone = memo(function TurnDone({
   item,
   copyText,
+  turnSeq,
+  canRollback = false,
 }: {
   item: Extract<Item, { kind: 'turnDone' }>;
   copyText?: string;
+  turnSeq?: number;
+  canRollback?: boolean;
 }) {
   const t = useT();
   const hasActions = copyText !== undefined;
   return (
     <div className={cn('turn-done flex items-center gap-2 text-[12px] text-ink-3', hasActions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
       {hasActions ? <AssistantActions text={copyText} inline /> : null}
+      {turnSeq !== undefined ? <span className="text-ink-3">{t('run.turn', turnSeq)}</span> : null}
       <span className="flex items-center gap-1.5">
         {item.completed ? (
           <span className="inline-flex size-3.5 items-center justify-center text-green">
@@ -150,6 +156,15 @@ export const TurnDone = memo(function TurnDone({
         ) : null}
         <span>{item.completed ? t('run.done', formatDuration(item.durationMs, t)) : t('run.took', formatDuration(item.durationMs, t))}</span>
       </span>
+      {canRollback ? (
+        <button
+          type="button"
+          className="rounded px-1 text-[11.5px] text-ink-3 underline-offset-2 hover:text-ink hover:underline"
+          onClick={() => postToHost({ type: 'rollbackLastTurn', payload: {} })}
+        >
+          {t('run.rollback')}
+        </button>
+      ) : null}
     </div>
   );
 });

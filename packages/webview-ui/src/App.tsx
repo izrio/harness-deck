@@ -24,6 +24,7 @@ import { TabBar } from './components/TabBar.tsx';
 import { Thread } from './components/Thread.tsx';
 import { Toasts } from './components/Toasts.tsx';
 import { AgentsView } from './components/workbench/AgentsView.tsx';
+import { ChangesView } from './components/workbench/ChangesView.tsx';
 import { OverviewView } from './components/workbench/OverviewView.tsx';
 import { SchedulesView } from './components/workbench/SchedulesView.tsx';
 import { SessionsView } from './components/workbench/SessionsView.tsx';
@@ -82,6 +83,7 @@ export function App() {
       <Header />
       {hasPreview ? <MarkdownPreviewModal /> : settingsOpen ? <SettingsPage /> : historyOpen ? <SessionHistoryPage /> : null}
       {!overlayOpen && activeModule === 'overview' ? <OverviewView /> : null}
+      {!overlayOpen && activeModule === 'changes' ? <ChangesView /> : null}
       {!overlayOpen && activeModule === 'schedules' ? <SchedulesView /> : null}
       {!overlayOpen && activeModule === 'agents' ? <AgentsView /> : null}
       {!overlayOpen && activeModule === 'tasks' ? <TasksView /> : null}

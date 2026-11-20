@@ -7,7 +7,7 @@ import type { BackendView } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
 import { useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { AgentIcon, PlusIcon, RefreshIcon } from '../icons.tsx';
+import { AgentIcon, GlobeIcon, PlusIcon, RefreshIcon } from '../icons.tsx';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -77,6 +77,15 @@ export function AgentSettings() {
   const requestedVersionsRef = useRef(new Set<string>());
   const [form, setForm] = useState<AgentFormState | undefined>();
   const [formError, setFormError] = useState<string | undefined>();
+  const [registryOpen, setRegistryOpen] = useState(false);
+  const [registryUrl, setRegistryUrl] = useState('');
+  const [registryLoading, setRegistryLoading] = useState(false);
+
+  const registry = backends.registry;
+
+  useEffect(() => {
+    if (registryLoading && registry?.fetchedAt) setRegistryLoading(false);
+  }, [registry?.fetchedAt, registryLoading]);
 
   useEffect(() => {
     if (!nodeEnv?.checked) {
@@ -160,6 +169,10 @@ export function AgentSettings() {
       testId="settings-backends"
       actions={
         <>
+          <Button type="button" variant="outline" size="default" data-testid="agent-registry-btn" onClick={() => { setRegistryUrl(backends.registryUrl ?? ''); setRegistryOpen(true); }}>
+            <GlobeIcon className="size-3" />
+            <span>{t('settings.agents.registry')}</span>
+          </Button>
           <Button type="button" variant="outline" size="default" data-testid="agent-add-btn" onClick={openAdd}>
             <PlusIcon className="size-3" />
             <span>{t('settings.agents.add')}</span>
@@ -295,6 +308,96 @@ export function AgentSettings() {
               </DialogFooter>
             </DialogContent>
           ) : null}
+        </Dialog>
+
+        <Dialog open={registryOpen} onOpenChange={setRegistryOpen}>
+          <DialogContent data-testid="agent-registry-dialog" className="sm:max-w-[560px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-[14px]">
+                <GlobeIcon className="size-4 text-accent-ink" />
+                <span>{t('settings.agents.registry')}</span>
+              </DialogTitle>
+              <DialogDescription>{t('settings.agents.registryHint')}</DialogDescription>
+            </DialogHeader>
+
+            <div className="flex items-center gap-1.5">
+              <Input
+                size="sm"
+                value={registryUrl}
+                onChange={(event) => setRegistryUrl(event.target.value)}
+                placeholder="https://example.com/acp-registry.json"
+                aria-label={t('settings.agents.registryUrl')}
+                className="font-mono text-[12px]"
+              />
+              <Button
+                type="button"
+                size="sm"
+                disabled={registryLoading || !/^https:\/\//u.test(registryUrl.trim())}
+                onClick={() => {
+                  setRegistryLoading(true);
+                  postToHost({ type: 'fetchAcpRegistry', payload: { url: registryUrl.trim() } });
+                }}
+              >
+                {t('settings.agents.registryLoad')}
+              </Button>
+            </div>
+
+            {registry?.error ? <div className="text-[11.5px] text-red">{registry.error}</div> : null}
+
+            <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+              {(registry?.entries ?? []).map((entry) => {
+                const exists = backends.items.some((backend) => backend.id === entry.id);
+                return (
+                  <div key={entry.id} className="rounded-control border border-line bg-field/60 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[12.5px] font-medium text-ink">{entry.name}</div>
+                        <div className="truncate font-mono text-[11px] text-ink-3">
+                          {[entry.command, ...(entry.args ?? [])].join(' ')}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={exists}
+                        onClick={() =>
+                          postToHost({
+                            type: 'upsertBackendProfile',
+                            payload: {
+                              id: entry.id,
+                              name: entry.name,
+                              command: entry.command,
+                              args: [...(entry.args ?? [])],
+                              env: {},
+                              ...(entry.install ? { installHint: entry.install } : {}),
+                            },
+                          })
+                        }
+                      >
+                        {exists ? t('settings.agents.registryAdded') : t('settings.agents.registryAdd')}
+                      </Button>
+                    </div>
+                    {entry.description ? <p className="mt-1 mb-0 text-[11.5px] text-ink-3">{entry.description}</p> : null}
+                    {entry.install ? (
+                      <p className="mt-0.5 mb-0 truncate font-mono text-[11px] text-ink-3">
+                        {t('settings.agents.registryInstall', entry.install)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {registry && registry.entries.length === 0 && !registry.error ? (
+                <div className="text-[12px] text-ink-3">{t('settings.agents.registryEmpty')}</div>
+              ) : null}
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" size="sm" onClick={() => setRegistryOpen(false)}>
+                {t('common.close')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
 
         <div className="flex flex-col gap-2">

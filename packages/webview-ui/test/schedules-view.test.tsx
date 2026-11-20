@@ -186,6 +186,7 @@ describe('SchedulesView 执行历史手风琴回归测试', () => {
     fireEvent.click(screen.getByTestId('schedule-run-now-rule-a'));
     expect(vscode.posted).toContainEqual({
       type: 'runScheduleNow',
+      commandId: expect.any(String),
       payload: { id: 'rule-a' },
     });
     expect(getRunToggle('run-latest').getAttribute('aria-expanded')).toBe('true');

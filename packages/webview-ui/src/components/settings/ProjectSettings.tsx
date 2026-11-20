@@ -191,6 +191,16 @@ export function ProjectSettings() {
                 type="button"
                 variant="outline"
                 size="default"
+                data-testid="project-remove-wt-btn"
+                onClick={() => postToHost({ type: 'removeWorktree', payload: { path: activePath } })}
+              >
+                <TrashIcon className="size-3" />
+                <span>{t('settings.projects.removeWorktree')}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="default"
                 data-testid="project-run-verify-btn"
                 onClick={() => postToHost({ type: 'runProjectVerify', payload: { path: activePath } })}
               >

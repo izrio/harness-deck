@@ -438,6 +438,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' });
     expect(posted).toContainEqual({
       type: 'sendMessage',
+      commandId: expect.any(String),
       payload: { text: '请仔细审查以下代码改动：重点关注并发安全', includeActive: true },
     });
 
@@ -504,6 +505,9 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
 
     fireEvent.click(screen.getByTestId('project-create-wt-btn'));
     expect(posted).toContainEqual({ type: 'createWorktree', payload: { path: '/repo/demo' } });
+
+    fireEvent.click(screen.getByTestId('project-remove-wt-btn'));
+    expect(posted).toContainEqual({ type: 'removeWorktree', payload: { path: '/repo/demo' } });
 
     fireEvent.click(screen.getByTestId('project-run-verify-btn'));
     expect(posted).toContainEqual({ type: 'runProjectVerify', payload: { path: '/repo/demo' } });

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import type { BackendView, NodeEnvState, ProviderView } from '@harness-deck/shared';
+import { backendCapabilities, type BackendView, type NodeEnvState, type ProviderView } from '@harness-deck/shared';
 import type { MessageKey } from '../../../i18n.ts';
 import { useT } from '../../../i18n.ts';
 import { setSettingsTab } from '../../../store.ts';
 import { postToHost } from '../../../vscode.ts';
 import { BackendLogo } from '../../BackendLogo.tsx';
-import { DownloadIcon, GlobeIcon, KeyIcon, PencilIcon, SpinnerIcon, TrashIcon } from '../../icons.tsx';
+import { CheckIcon, CopyIcon, DownloadIcon, GlobeIcon, KeyIcon, PencilIcon, SpinnerIcon, TrashIcon } from '../../icons.tsx';
 import { ValuePill } from '../../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -37,9 +37,11 @@ export function BackendCard({
   readonly onEdit: () => void;
 }) {
   const t = useT();
+  const capabilities = backend.capabilities ?? backendCapabilities(backend);
   const description = DESCRIPTIONS[backend.id];
   const [prevInstalled, setPrevInstalled] = useState(backend.version);
   const [pickedVersion, setPickedVersion] = useState(backend.version ?? '');
+  const [copiedManual, setCopiedManual] = useState(false);
 
   if (backend.version !== prevInstalled) {
     setPrevInstalled(backend.version);
@@ -174,13 +176,15 @@ export function BackendCard({
           </ValuePill>
         )}
 
-        {active && backend.kind === 'dsh' ? (
+        {active && (capabilities.apiKeySetup || (capabilities.webUi && backend.webUrl)) ? (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
-              <KeyIcon className="size-3 text-ink-3" />
-              <span>{t('apiKey.configure')}</span>
-            </Button>
-            {backend.webUrl ? (
+            {capabilities.apiKeySetup ? (
+              <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
+                <KeyIcon className="size-3 text-ink-3" />
+                <span>{t('apiKey.configure')}</span>
+              </Button>
+            ) : null}
+            {capabilities.webUi && backend.webUrl ? (
               <Button
                 type="button"
                 variant="link"
@@ -198,7 +202,27 @@ export function BackendCard({
         ) : null}
       </div>
 
-      {backend.npmPackage ? (
+      {backend.npmPackage && backend.available && backend.npmOwned === false ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-line bg-surface/60 px-2.5 py-2 text-[11.5px] text-ink-2">
+          <span>{t('settings.backend.externalInstall')}</span>
+          {backend.installCommand ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              data-testid={`copy-install-${backend.id}`}
+              onClick={() => {
+                void navigator.clipboard?.writeText(backend.installCommand!);
+                setCopiedManual(true);
+                setTimeout(() => setCopiedManual(false), 1_500);
+              }}
+            >
+              {copiedManual ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+              <span>{copiedManual ? t('settings.backend.copied') : t('settings.backend.copyCommand')}</span>
+            </Button>
+          ) : null}
+        </div>
+      ) : backend.npmPackage ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="min-w-32 flex-1 [&_[data-slot=native-select-wrapper]]:w-full">

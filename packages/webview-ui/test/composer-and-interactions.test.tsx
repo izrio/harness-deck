@@ -114,6 +114,7 @@ describe('InteractionCard resilience', () => {
     fireEvent.click(allowBtn);
     expect(vscode.posted.at(-1)).toEqual({
       type: 'respondApproval',
+      commandId: expect.any(String),
       payload: { id: 'app-1', decision: 'allow' },
     });
     expect(allowBtn.disabled).toBe(true);

@@ -59,6 +59,7 @@ describe('提问卡片：逐题回答', () => {
     expect(posted).toEqual([
       {
         type: 'answerQuestion',
+        commandId: expect.any(String),
         payload: {
           id: 'q1',
           answers: [
@@ -84,6 +85,12 @@ describe('提问卡片：逐题回答', () => {
     expect(screen.queryByTestId('question-step')).toBeNull();
     fireEvent.click(screen.getByRole('radio', { name: /^npm$/u }));
     fireEvent.click(screen.getByRole('button', { name: /提交/u }));
-    expect(posted).toEqual([{ type: 'answerQuestion', payload: { id: 'q1', answers: [{ id: 'a', selected: ['npm'] }] } }]);
+    expect(posted).toEqual([
+      {
+        type: 'answerQuestion',
+        commandId: expect.any(String),
+        payload: { id: 'q1', answers: [{ id: 'a', selected: ['npm'] }] },
+      },
+    ]);
   });
 });

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
 import type { HostSnapshot, HostToWebview, WorkbenchState } from '@harness-deck/shared';
+import { backendCapabilities } from '@harness-deck/shared';
 import { App } from '../src/App.tsx';
 import * as store from '../src/store.ts';
 
@@ -260,7 +261,123 @@ afterEach(() => {
   posted.length = 0;
 });
 
-describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 会话）', () => {
+describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 / 会话）', () => {
+  it('改动模块：展示分支与文件，点击打开 Diff，推送二次确认，PR 失败保留草稿并解除忙碌', () => {
+    const snapshot = workbenchSnapshot();
+    const workbench = snapshot.workbench!;
+    const sc = {
+      available: true,
+      root: '/repo/alpha',
+      branch: 'feature/changes',
+      remote: 'git@github.com:acme/alpha.git',
+      files: [
+        { path: 'src/a.ts', status: 'modified' as const, staged: false, additions: 3, deletions: 1 },
+        { path: 'src/b.ts', status: 'added' as const, staged: true, additions: 10, deletions: 0 },
+      ],
+      additions: 13,
+      deletions: 1,
+      gh: { installed: true, authenticated: true },
+      updatedAt: 1_000,
+    };
+    host({
+      type: 'snapshot',
+      payload: {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          turns: [{ id: 'u1', seq: 1, status: 'completed', authoredPaths: ['src/a.ts'] }],
+        },
+        workbench: {
+          ...workbench,
+          sourceControl: sc,
+        },
+      },
+    });
+    render(createElement(App));
+
+    fireEvent.click(screen.getByTestId('workbench-tab-changes'));
+    const view = screen.getByTestId('workbench-changes');
+    expect(view.textContent).toContain('feature/changes');
+    expect(view.textContent).toContain('src/a.ts');
+    expect(view.textContent).toContain('+3');
+    expect(posted).toContainEqual({ type: 'refreshSourceControl', payload: {} });
+
+    // 宿主返回刷新结果后解除初始 busy
+    host({ type: 'workbench', payload: { ...workbench, sourceControl: { ...sc, updatedAt: 1_100 } } });
+
+    // 点击文件发送 openSourceControlDiff（而非 openFile）
+    fireEvent.click(screen.getByText('src/a.ts'));
+    expect(posted).toContainEqual({ type: 'openSourceControlDiff', payload: { path: 'src/a.ts', staged: false } });
+
+    // 勾选「仅看本会话改过的文件」过滤掉 src/b.ts
+    fireEvent.click(screen.getByTestId('changes-session-filter'));
+    expect(view.textContent).toContain('src/a.ts');
+    expect(view.textContent).not.toContain('src/b.ts');
+
+    // 点击推送弹出二次确认，确认后才发送 sourceControlPush
+    fireEvent.click(screen.getByTestId('changes-push-btn'));
+    expect(screen.getByTestId('changes-push-dialog')).toBeTruthy();
+    expect(posted.some((m) => (m as { type?: string }).type === 'sourceControlPush')).toBe(false);
+    fireEvent.click(screen.getByTestId('changes-push-confirm'));
+    expect(posted).toContainEqual({ type: 'sourceControlPush', payload: {} });
+    host({ type: 'workbench', payload: { ...workbench, sourceControl: { ...sc, updatedAt: 1_200, lastAction: { kind: 'push', ok: true, at: 1_200 } } } });
+
+    // 创建 PR 失败时保留草稿、弹窗不关闭，且 updatedAt 更新后解除 busy
+    fireEvent.click(screen.getByTestId('changes-pr-btn'));
+    const titleInput = screen.getByLabelText('标题') as HTMLInputElement;
+    const bodyInput = screen.getByLabelText('说明（可选）') as HTMLTextAreaElement;
+    fireEvent.change(titleInput, { target: { value: 'Fix PR' } });
+    fireEvent.change(bodyInput, { target: { value: 'Keep my draft' } });
+    fireEvent.click(screen.getByTestId('changes-pr-confirm'));
+    expect(posted).toContainEqual({ type: 'sourceControlCreatePr', payload: { title: 'Fix PR', body: 'Keep my draft' } });
+    host({
+      type: 'workbench',
+      payload: {
+        ...workbench,
+        sourceControl: { ...sc, updatedAt: 1_300, lastAction: { kind: 'pr', ok: false, at: 1_300, message: 'gh not logged in' } },
+      },
+    });
+    expect(screen.getByTestId('changes-pr-dialog')).toBeTruthy();
+    expect((screen.getByLabelText('说明（可选）') as HTMLTextAreaElement).value).toBe('Keep my draft');
+    expect((screen.getByTestId('changes-pr-confirm') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('会话模块：最后一轮结束时提供文件恢复入口', () => {
+    const base = workbenchSnapshot();
+    const snapshot: HostSnapshot = {
+      ...base,
+      items: [
+        { kind: 'user', id: 'u1', text: '改一下' },
+        { kind: 'assistant', id: 'a1', markdown: '改好了', streaming: false },
+        { kind: 'turnDone', id: 't1', durationMs: 100, completed: true },
+      ],
+      session: {
+        ...base.session,
+        running: false,
+        turns: [{ id: 'u1', seq: 1, status: 'completed', durationMs: 100, authoredPaths: ['src/a.ts'] }],
+      },
+      backends: {
+        ...base.backends,
+        items: base.backends.items.map((item) =>
+          item.id === 'dsh' ? { ...item, capabilities: backendCapabilities({ id: 'dsh', kind: 'dsh' }) } : item,
+        ),
+      },
+    };
+    render(createElement(App));
+    host({ type: 'snapshot', payload: snapshot });
+
+    fireEvent.click(screen.getByText('恢复本轮文件'));
+    expect(posted).toContainEqual({ type: 'rollbackLastTurn', payload: {} });
+  });
+
+  it('会话模块：worktree 按钮请求串行化的 worktree 会话', () => {
+    render(createElement(App));
+    host({ type: 'snapshot', payload: workbenchSnapshot() });
+
+    fireEvent.click(screen.getByTestId('new-worktree-session'));
+    expect(posted).toContainEqual({ type: 'newWorktreeSession', payload: {} });
+  });
+
   it('总览模块：默认展示等我、待办、在跑、接下来、未读五大区块，支持标为已读并保留会话草稿', () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });

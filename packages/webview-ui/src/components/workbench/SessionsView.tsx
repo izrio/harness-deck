@@ -33,6 +33,7 @@ import {
   ChevronRightIcon,
   CloseIcon,
   FolderIcon,
+  GitBranchIcon,
   PlusIcon,
   SearchIcon,
   SidebarIcon,
@@ -145,6 +146,18 @@ export function SessionsView({
                 {t('wb.sessions.groupsTitle')}
               </span>
               <div className="flex shrink-0 items-center gap-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  data-testid="new-worktree-session"
+                  title={t('wb.sessions.worktreeSession')}
+                  aria-label={t('wb.sessions.worktreeSession')}
+                  className="text-ink-2 hover:bg-hover hover:text-ink"
+                  onClick={() => postToHost({ type: 'newWorktreeSession', payload: {} })}
+                >
+                  <GitBranchIcon className="size-3.5" />
+                </Button>
                 <Button
                   type="button"
                   variant="ghost"

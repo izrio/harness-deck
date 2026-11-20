@@ -2,7 +2,7 @@
  * 交互卡片（严格对齐 Beautiful UI ApprovalCard：`primitive-card-pad` / `primitive-card-footer` / `GlideMenu` / `RollingDigits` / `Button`）。
  */
 import { useEffect, useRef, useState } from 'react';
-import type { PendingInteraction, QuestionView } from '@harness-deck/shared';
+import { backendCapabilities, type PendingInteraction, type QuestionView } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
@@ -125,10 +125,13 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
   const [sent, setSent] = usePendingReply<'allow' | 'allowAlways' | 'reject'>(`${item.id}\0${dirtyKey}`);
   const t = useT();
   const blocked = item.dirtyFiles.length > 0;
-  const isDsh = useView((s) => (s.backends.items.find((b) => b.id === s.backends.active)?.kind ?? 'dsh') === 'dsh');
+  const showApprovalHint = useView((s) => {
+    const backend = s.backends.items.find((b) => b.id === s.backends.active);
+    return backend ? (backend.capabilities ?? backendCapabilities(backend)).approvalHint : false;
+  });
   const respond = (decision: 'allow' | 'allowAlways' | 'reject') => {
     setSent(decision);
-    postToHost({ type: 'respondApproval', payload: { id: item.id, decision } });
+    postToHost({ type: 'respondApproval', commandId: `approval:${item.id}:${decision}`, payload: { id: item.id, decision } });
   };
   const title = item.subjectKind === 'command' ? t('approval.command') : item.subjectKind === 'file' ? t('approval.file') : t('approval.tool', item.toolName);
   return (
@@ -160,7 +163,7 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
           </button>
         ) : null}
         {item.reason && item.reason !== item.subject ? <p className="interaction__reason m-0 text-[13px] text-ink">{item.reason}</p> : null}
-        {isDsh ? <p className="m-0 text-[12px] text-ink-2">{t('approval.hint')}</p> : null}
+        {showApprovalHint ? <p className="m-0 text-[12px] text-ink-2">{t('approval.hint')}</p> : null}
         {blocked ? (
           <div className="flex flex-wrap items-center gap-2 rounded-control bg-orange-tint px-2.5 py-2 text-[12px] text-orange shadow-[0_0_0_1px_color-mix(in_srgb,var(--orange)_28%,transparent)]" role="alert">
             <span>{t('approval.dirty', item.dirtyFiles.join(', '))}</span>
@@ -251,7 +254,7 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
           title={t('plan.replyTitle')}
           onClick={() => {
             setSent('reply');
-            postToHost({ type: 'answerQuestion', payload: { id, cancelled: true } });
+            postToHost({ type: 'answerQuestion', commandId: `question:${id}:cancel`, payload: { id, cancelled: true } });
           }}
         >
           {sent === 'reply' ? <SpinnerIcon className="size-3.5" /> : <ChatIcon className="size-3.5" />}
@@ -326,6 +329,7 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
     setSent('submit');
     postToHost({
       type: 'answerQuestion',
+      commandId: `question:${item.id}:submit`,
       payload: {
         id: item.id,
         answers: questions.map((question) => {
@@ -338,7 +342,7 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
   };
   const skip = () => {
     setSent('skip');
-    postToHost({ type: 'answerQuestion', payload: { id: item.id, cancelled: true } });
+    postToHost({ type: 'answerQuestion', commandId: `question:${item.id}:cancel`, payload: { id: item.id, cancelled: true } });
   };
   const next = () => (last ? submit() : answered(q) ? goTo(index + 1) : undefined);
 

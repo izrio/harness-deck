@@ -27,7 +27,26 @@ const vscodeApi = () => (cached ??= acquireVsCodeApi<PersistedState>());
 
 /** 向 Extension Host 发消息。 */
 export function postToHost(message: WebviewToHost): void {
-  vscodeApi().postMessage(message);
+  const idempotent = IDEMPOTENT_TYPES.has(message.type);
+  if (!idempotent) {
+    vscodeApi().postMessage(message);
+    return;
+  }
+  const existing = 'commandId' in message ? message.commandId : undefined;
+  vscodeApi().postMessage({ ...message, commandId: existing ?? newCommandId() } as WebviewToHost);
+}
+
+/** 这些消息带一次性 commandId；宿主在 5 分钟内忽略重复 id（HD-16）。 */
+const IDEMPOTENT_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
+  'sendMessage',
+  'respondApproval',
+  'answerQuestion',
+  'runScheduleNow',
+]);
+
+function newCommandId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function loadState(): PersistedState {

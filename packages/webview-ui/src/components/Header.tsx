@@ -1,6 +1,6 @@
 /**
  * 工作台顶栏：
- * 五大核心模块导航（总览 / 定时 / 智能体 / 任务 / 会话）+ 新建会话 / 全宽工作台 / 历史会话 / 设置按钮
+ * 六大核心模块导航（总览 / 改动 / 定时 / 智能体 / 任务 / 会话）+ 新建会话 / 全宽工作台 / 历史会话 / 设置按钮
  */
 import { useRef, type KeyboardEvent } from 'react';
 import { WORKBENCH_MODULES, type WorkbenchModule } from '@harness-deck/shared/limits';
@@ -13,6 +13,7 @@ import {
   ClockIcon,
   DashboardIcon,
   ExpandPanelIcon,
+  GitBranchIcon,
   HistoryIcon,
   KanbanIcon,
   PlusIcon,
@@ -55,6 +56,8 @@ export function Header() {
     switch (mod) {
       case 'overview':
         return <DashboardIcon className="size-3.5 shrink-0" />;
+      case 'changes':
+        return <GitBranchIcon className="size-3.5 shrink-0" />;
       case 'schedules':
         return <ClockIcon className="size-3.5 shrink-0" />;
       case 'agents':

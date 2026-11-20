@@ -18,10 +18,14 @@ export const ItemView = memo(function ItemView({
   item,
   hideAssistantActions = false,
   turnDoneCopyText,
+  turnSeq,
+  canRollback = false,
 }: {
   item: Item;
   hideAssistantActions?: boolean;
   turnDoneCopyText?: string;
+  turnSeq?: number;
+  canRollback?: boolean;
 }) {
   switch (item.kind) {
     case 'user':
@@ -38,7 +42,14 @@ export const ItemView = memo(function ItemView({
     case 'notice':
       return <Notice item={item} />;
     case 'turnDone':
-      return <TurnDone item={item} {...(turnDoneCopyText !== undefined ? { copyText: turnDoneCopyText } : {})} />;
+      return (
+        <TurnDone
+          item={item}
+          {...(turnDoneCopyText !== undefined ? { copyText: turnDoneCopyText } : {})}
+          {...(turnSeq !== undefined ? { turnSeq } : {})}
+          {...(canRollback ? { canRollback } : {})}
+        />
+      );
   }
 });
 

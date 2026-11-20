@@ -23,7 +23,8 @@ describe('keyboard navigation, Escape precedence, and sidebar shortcut cleanup',
     render(<Header />);
 
     const overviewTab = screen.getByTestId('workbench-tab-overview');
-    const schedulesTab = screen.getByTestId('workbench-tab-schedules');
+    const secondModule = WORKBENCH_MODULES[1]!;
+    const secondTab = screen.getByTestId(`workbench-tab-${secondModule}`);
     const lastModule = WORKBENCH_MODULES[WORKBENCH_MODULES.length - 1]!;
     const lastTab = screen.getByTestId(`workbench-tab-${lastModule}`);
 
@@ -36,12 +37,12 @@ describe('keyboard navigation, Escape precedence, and sidebar shortcut cleanup',
     expect(document.activeElement).toBe(overviewTab);
 
     fireEvent.keyDown(overviewTab, { key: 'ArrowRight' });
-    expect(store.getState().activeModule).toBe('schedules');
-    expect(document.activeElement).toBe(schedulesTab);
-    expect(schedulesTab.getAttribute('tabindex')).toBe('0');
+    expect(store.getState().activeModule).toBe(secondModule);
+    expect(document.activeElement).toBe(secondTab);
+    expect(secondTab.getAttribute('tabindex')).toBe('0');
     expect(overviewTab.getAttribute('tabindex')).toBe('-1');
 
-    fireEvent.keyDown(schedulesTab, { key: 'ArrowLeft' });
+    fireEvent.keyDown(secondTab, { key: 'ArrowLeft' });
     expect(store.getState().activeModule).toBe('overview');
     expect(document.activeElement).toBe(overviewTab);
 
