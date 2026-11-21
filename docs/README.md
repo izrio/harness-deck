@@ -4,6 +4,7 @@
 | --- | --- |
 | [DESIGN.md](./DESIGN.md) | 整体方案：架构、模块、界面设计原则、运行时管理、安全、测试、里程碑；第 15 节是多底层与各 ACP 代理的适配 |
 | [DSH-INTEGRATION.md](./DSH-INTEGRATION.md) | dsh 调研：启动与认证、线上格式、Remote 方法、会话事件、版本策略 |
+| [MOBILE-INTEROP.md](./MOBILE-INTEROP.md) | 手机端互通调研与实践方案：T3 Code 手机端剖析、PWA+本地桥接架构、安全配对模型与分阶段落地 |
 | [../ROADMAP.md](../ROADMAP.md) | 对标 T3 Code 的改进计划、进度与决策记录 |
 | [../packages/extension/README.md](../packages/extension/README.md) | 使用说明：各底层的准备、功能差别、设置、常见问题 |
 | [../packages/extension/CHANGELOG.md](../packages/extension/CHANGELOG.md) | 更新记录 |

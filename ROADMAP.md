@@ -1,8 +1,8 @@
 # Harness Deck 改进路线图（对标 T3 Code）
 
 > 基线：`v0.6.1`（`ea905bb`）。
-> 目标：借鉴 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 在**适配层能力模型、回合级工作流、源码控制闭环、质量门禁**上的做法，补齐 Harness Deck 的短板；不改变现有「IDE 插件 + 宿主运行时 + 多底层」的产品形态。
-> 用法：每完成一项，把对应 `- [ ]` 改成 `- [x]`，并在「进度记录」写一行日期、版本和验证结果。每完成一个里程碑（M0–M4）对照本文件做一次评审，把新发现的遗漏补进来。
+> 目标：借鉴 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 在**适配层能力模型、回合级工作流、源码控制闭环、质量门禁、手机端远程互通**上的做法，补齐 Harness Deck 的短板；保持「IDE 插件 + 宿主运行时 + 多底层」核心形态，并通过内嵌桥接与 PWA 延伸至手机端。
+> 用法：每完成一项，把对应 `- [ ]` 改成 `- [x]`，并在「进度记录」写一行日期、版本和验证结果。每完成一个里程碑（M0–M5）对照本文件做一次评审，把新发现的遗漏补进来。
 
 状态图例：`待开始` / `进行中` / `已完成` / `搁置`
 
@@ -20,11 +20,11 @@
 
 ### 0.2 不借的
 
-- **Effect + 事件溯源 + outbox + projection**：面向多客户端、可重放、超大规模；我们一个 IDE 插件用不上，迁移成本远大于收益。
-- **web / desktop / mobile 三端 + relay / Tailscale**：产品形态不同。
+- **Effect + 事件溯源 + outbox + projection**：面向超大规模重放；我们沿用现有 `HostSnapshot` + `ItemsPatch` + `CommandReceipts` 即可支撑多客户端同步，迁移成本远大于收益。
+- **自建商业云中继（Clerk + Cloudflare Relay）与独立维护 App Store 原生 RN App**：不背负云账号运营与商店审核成本；手机端互通改走「宿主内嵌 HTTP/WS 桥 + 复用 `webview-ui` 的 PWA + Tailscale / BYO 隧道」（见 M5 与 [docs/MOBILE-INTEROP.md](./docs/MOBILE-INTEROP.md)）。
 - **自研工具链**（vite-plus、oxlint、effect-tsgo）：收益不足以抵消迁移成本。
 - **为 50 万用户做的性能工程**：保留「掉帧当 bug」的态度即可，不复制具体手段。
-- **托管策略（managed policy）、访客链接、多人协作**：面向团队与服务器场景，单机 IDE 插件收益低；有企业需求再评估。
+- **托管策略（managed policy）、访客链接、多人协作**：面向团队与服务器场景，单机/个人多设备插件收益低；有企业需求再评估。
 
 ### 0.3 每项的完成定义（DoD）
 
@@ -65,11 +65,17 @@
 | HD-19 | P2 | 文档体系与术语表 | M3 质量与评测 | 已完成 |
 | HD-20 | P2 | JetBrains 端冒烟测试 | M3 质量与评测 | 已完成 |
 | HD-21 | P3 | ACP 代理注册表导入 | M4 按需 | 已完成 |
+| HD-22 | P1 | 多客户端会话总线与 Webview 传输抽象 | M5 手机端互通 | 待开始 |
+| HD-23 | P1 | 宿主 HTTP/WS 桥接与局域网 QR 配对 | M5 手机端互通 | 待开始 |
+| HD-24 | P1 | 移动端响应式界面与 PWA 适配 | M5 手机端互通 | 待开始 |
+| HD-25 | P1 | 移动端内嵌 Diff 审阅与无 IDE 动作降级 | M5 手机端互通 | 待开始 |
+| HD-26 | P2 | 公网穿透（Tailscale 优先 + BYO 隧道） | M5 手机端互通 | 待开始 |
+| HD-27 | P2 | 移动端推送通知（Web Push + Webhook） | M5 手机端互通 | 待开始 |
+| HD-28 | P3 | 脱离 IDE 的独立守护进程模式 | M5 手机端互通 | 待开始 |
 
-执行顺序建议：**HD-01 → HD-02/03/04/05 → HD-20 → HD-08 → HD-07 → HD-06 → HD-09 → HD-10 → 其余**。
-HD-08 是 HD-07 和 HD-10 的前置；HD-06 可以先做，不依赖回合模型；HD-20 建议提前到 M1 之前，它是 DoD「双端验证」的手段，越晚补越被动。
+执行顺序建议：**M0–M4 已全部完成**；M5 手机端互通按 **HD-22 → HD-23 → HD-25 → HD-24（可与 HD-25 并行）→ HD-26 → HD-27 → HD-28** 推进。详细调研与架构约束见 [docs/MOBILE-INTEROP.md](./docs/MOBILE-INTEROP.md)。
 
-版本映射（非承诺，只作对照锚点）：M0 → `v0.7.0`，M0+M1 → `v0.8.0`，加 M2 → `v0.9.0`，M3 收尾 → `v1.0.0`。
+版本映射（非承诺，只作对照锚点）：M0 → `v0.7.0`，M0+M1 → `v0.8.0`，加 M2 → `v0.9.0`，M3 收尾 → `v1.0.0`，M5 手机端互通 MVP（HD-22–25）→ `v1.1.0`，M5 跨网与推送（HD-26–27）→ `v1.2.0`。
 
 ---
 
@@ -329,7 +335,112 @@ HD-08 是 HD-07 和 HD-10 的前置；HD-06 可以先做，不依赖回合模型
 
 ---
 
-## 7. 进度记录
+## 7. M5 手机端互通（架构详解见 [docs/MOBILE-INTEROP.md](./docs/MOBILE-INTEROP.md)）
+
+### HD-22 多客户端会话总线与 Webview 传输抽象
+
+- **目标**：在不破坏现有 VS Code / JetBrains 体验的前提下，让宿主同时服务本地 IDE Webview 与多个远程客户端，且单播与广播分离。
+- **现状**：
+  - `HarnessHostRuntime` 通过单一 `platform.postToWebview(msg)` 广播；收到 `ready` 会把完整 `snapshot` 发给全部视图。
+  - `packages/webview-ui/src/vscode.ts`（58 行）直接调用 `acquireVsCodeApi()`；`App.tsx` 通过 `window.addEventListener('message')` 收消息。
+- **借鉴**：t3code `packages/client-runtime` 的共享传输抽象与 `EnvironmentSupervisor`（单一重试 owner + 抖动退避 + 切回前台健康探测）。
+- **做法**：
+  1. 在 `packages/extension/src/host/` 新增 `ClientHub`：管理已连接客户端（`id`、`surface: 'ide' | 'mobile-web'`、`scope`、`send()`），支持 `broadcast(msg)` 与 `sendTo(clientId, msg)`。
+  2. 改造 `HarnessHostRuntime.handleWebviewMessage(msg, clientId?)`：`ready` 的 `snapshot` 及请求级响应（`fileCandidates`、`markdownPreview`、`diffContent`、`quotaFetched`、`providerModelsFetched`、`restoreDraft`）按 `clientId` 单播；会话流、审批、工作台状态更新继续广播。
+  3. 改造 `packages/webview-ui/src/vscode.ts` 为双模 `Transport`：存在 `acquireVsCodeApi` 时走 IDE 模式；浏览器环境走 `WebSocketTransport` + `localStorage` 状态持久化 + `ConnectionSupervisor`（心跳 15s、指数抖动退避 1s–30s、`visibilitychange`/`online` 立即重连并重发 `ready`），沿用 HD-16 `commandId` 防重。
+  4. `packages/shared/src/bridge.ts` 增加 `ClientSurface`（`'ide' | 'mobile-web'`）与连接状态字段。
+- **验收**：
+  - 单测覆盖 `ClientHub` 单播/广播隔离与 `ConnectionSupervisor` 断线重连/退避状态机。
+  - 模拟两个客户端并发连接：客户端 B 重连发 `ready` 时，客户端 A 不收到多余 `snapshot`；任一端发消息或审批，双端实时同步。
+- **风险**：旧测试直接 stub `platform.postToWebview`。缓解：`ClientHub` 默认注册一个 `ide` 通道代理到原 `postToWebview`，保持现有测试零改动通过。
+
+### HD-23 宿主 HTTP/WS 桥接与局域网 QR 配对
+
+- **目标**：在 VS Code 与 JetBrains 中一键开启局域网手机互通，扫码即连，且安全边界清晰、随时可吊销。
+- **借鉴**：t3code `docs/internals/environment-auth.md` 的「宿主自主颁证 + 一次性短效配对码 + 作用域最小化 + 已授权设备管理与吊销」。
+- **做法**：
+  1. 新增 `packages/extension/src/remote/`：
+     - `RemoteBridgeServer.ts`：默认关闭；启用后基于 Node `http` + 现有 `ws` 托管 `dist/webview` 静态资源、`/api/pair`、`/ws` 与 `/manifest.webmanifest`。
+     - `PairingManager.ts`：生成 5 分钟单次有效 `pairCode`（放于 URL `#fragment`，不进查询串与访问日志），恒定时间校验，失败 5 次自动作废。
+     - `DeviceAuthStore.ts`：持久化已授权设备（`deviceId`、名称、令牌哈希、`scope: 'read-only' | 'operate'`、创建时间、最后活跃时间），下发 `HttpOnly; SameSite=Strict` Cookie；支持单设备吊销并即时踢断对应 WS。
+     - `ScopeGuard.ts`：`Host`/`Origin` 防 DNS Rebinding 校验；`read-only` 仅允许只读消息；`operate` 默认禁止高危宿主配置写操作（`installBackend` / `uninstallBackend` / `upsertBackendProfile` / `deleteBackendProfile` / `upsertProvider` / `deleteProvider` / `upsertMcpServer` / `deleteMcpServer` / `configureApiKey` / `setPreferences.advanced`）。
+  2. 接入 VS Code（`extension.ts`）与 JetBrains Sidecar（`sidecar/server.ts`），状态与授权设备列表同步进 `HostSnapshot.remote`。
+  3. 设置页新增「远程互通」Tab（仅使用 `shadcn-ui` + `beautifului` + Iconify 离线图标，配对二维码采用轻量本地 SVG 渲染，零外网请求）：总开关、LAN 网卡地址选择、作用域选择、生成配对 QR 码、已授权设备列表与一键吊销、全部断开急停按钮；同步注册命令面板命令与中英文文案。
+- **验收**：
+  - 集成测试起真实 `RemoteBridgeServer`：校验未配对 WS 拒连 → 一次码换 Cookie → 二次复用配对码失败 → WS 建连拿快照 → `read-only` 发 `sendMessage` 被拒 → `operate` 试图 `installBackend` 被拒 → 吊销设备后 WS 立刻关闭且重连失败。
+  - VS Code 与 JetBrains 两端实测局域网手机扫码打开面板并同步对话。
+- **风险**：本机多网卡（Docker/WSL/VPN 虚拟网卡）导致生成的 LAN IP 手机连不上。缓解：过滤常见虚拟网卡前缀并允许用户在设置页下拉切换绑定/广播 IP。
+
+### HD-24 移动端响应式界面与 PWA 适配
+
+- **目标**：把现有 `packages/webview-ui` 在手机竖屏（375–430px）上的对话、审批、切换会话与工作台体验打磨到顺手可用，并支持 PWA 主屏全屏运行。
+- **做法**：
+  1. 利用已有 `useIsMobile()`（`<768px`）与 `clientSurface === 'mobile-web'` 优化移动端布局：
+     - 顶栏紧凑化、标签栏支持横向惯性滚动；会话列表侧栏在窄屏下改为 `shadcn-ui` `Sheet` 抽屉。
+     - 审批卡片、提问卡片与底部输入框适配 `env(safe-area-inset-bottom)` 与 `visualViewport` 软键盘高度，避免按钮被底部手势条或键盘遮挡（t3code 移动端高频痛点）。
+     - 主要可点控件（审批按钮、停止按钮、标签切换）触控热区 ≥ 44px；代码块与 Diff 表格支持横向滚动且不撑破整页。
+     - 顶部增加连接状态胶囊（已连接 / 重连中 / 离线，点击手动重连）。
+  2. 新增 PWA `manifest.webmanifest`、应用图标与最小 Service Worker（缓存静态壳，WS 与 API 走网络），在 Vite 构建（`packages/webview-ui/vite.config.ts`）时一并输出到 `dist/webview`。
+- **验收**：
+  - 在 390×844 视口（含 iOS Safari / Android Chrome 模拟与真机）下无横向溢出、审批卡片与输入框不被键盘遮挡、可添加到主屏幕全屏打开。
+  - 新增组件与图标严格通过 `pnpm lint` 与 UI/Iconify 规范检查。
+- **风险**：iOS Safari 键盘弹出时 `100vh` 错位。缓解：采用 `100dvh` + `visualViewport` 监听动态调整底边距。
+
+### HD-25 移动端内嵌 Diff 审阅与无 IDE 动作降级
+
+- **目标**：解决「手机端没有 IDE Diff 编辑器和原生弹窗」的闭环问题，使手机能独立完成审 diff、批命令、控权限与提交代码。
+- **现状**：`openDiff` / `openSourceControlDiff` / `previewApproval` 依赖 `vscode.diff` 或 IDEA Diff；`workbench.confirm` / `workbench.input` / `pickOpenDialog` 弹在桌面 IDE。
+- **做法**：
+  1. 在 `packages/shared/src/bridge.ts` 新增 `diffContent`（Host → Webview）消息，携带路径、语言、改动前/后文本或 unified hunk 及摘要统计。
+  2. 当 `openDiff` / `openSourceControlDiff` / `previewApproval` 来自 `mobile-web` 客户端时，宿主复用 `vm/diffs.ts` 与 `gitStatus.ts` 计算内容并单播 `diffContent`；Webview 用 `shadcn-ui` `Dialog` / 全屏 `Sheet` + 现有代码高亮与 Diff 渲染能力就地展示（支持 unified / 行号 / 增删统计）。
+  3. 梳理所有依赖 `workbench.confirm` / `workbench.input` / `pickOpenDialog` / `openFile` / `openHostSettings` 的路径：
+     - 危险操作确认（切换 `danger-full-access`、回合回滚、`sourceControlPush`、`sourceControlCreatePr`）与文本输入（`renameSession`、`createWorktree` 分支名）在移动端改为 Webview 内 `Dialog` 完成确认/输入后带参数提交，不触发桌面 IDE 阻塞弹窗。
+     - IDE 专属能力（本地文件选择器 `pickFiles`、在编辑器打开文件 `openFile`、打开 IDE 设置 `openHostSettings`、项目打开新窗口 `openProject`）在移动端优雅隐藏或降级（例如点击文件路径在手机端改为只读内容预览）。
+- **验收**：
+  - 手机端点击工具活动行、本轮改动卡片、审批前预览与工作台「改动」列表，均可弹出内嵌 Diff 视图且内容与 IDE 一致。
+  - 手机端执行回滚、切 `danger-full-access`、重命名会话、commit/push/PR 时，桌面 IDE 不弹出阻塞模态框，全流程在手机端完成。
+- **风险**：超大文件 Diff 卡顿手机浏览器。缓解：超过阈值（如 200KB / 2000 行）按 hunk 截断并提示「文件过大，仅展示变更上下文」。
+
+### HD-26 公网穿透（Tailscale 优先 + BYO 隧道）
+
+- **目标**：在零自建云中继的前提下，让用户在离桌/外出使用 4G/5G 时安全连回开发机，并获得 HTTPS/WSS 环境（解锁完整 PWA 与 Web Push）。
+- **借鉴**：t3code 的多路由（LAN / Tailscale / 隧道）连接思路与 `tailscale serve` 模式。
+- **做法**：
+  1. **Tailscale 集成**（遵循 HD-01 探测无副作用红线）：只读执行 `tailscale status --json` 探测本机 Tailnet 状态与 MagicDNS 域名；提供一键配置/引导 `tailscale serve` 将本机桥接端口反代为 `https://<node>.<tailnet>.ts.net`，在设置页生成对应 HTTPS 二维码。
+  2. **BYO 自带隧道**：设置页支持填写用户自定义外部 HTTPS 入口（如 `cloudflared tunnel` / `frp` / 自有反代域名），自动加入 `Origin`/`Host` 校验白名单并生成外部配对二维码。
+  3. **多路由信息展示与客户端回退**：配对页清晰区分「局域网 / Tailscale / 自定义隧道」三条入口，并允许手机端在保存的多个候选地址间自动回退尝试（LAN 优先，不通切 Tailscale/隧道）。
+- **验收**：
+  - 单测覆盖 `tailscale status --json` 解析（在线/未登录/未安装）与白名单校验。
+  - 实测经 Tailscale HTTPS 扫码连入，WSS 正常、PWA 可安装。
+- **风险**：不同操作系统下 `tailscale` CLI 权限策略不同（部分系统需 `tailscale serve` 授权）。缓解：探测失败或无权限时降级为展示可一键复制的准确命令，不做越权提权操作。
+
+### HD-27 移动端推送通知（Web Push + Webhook）
+
+- **目标**：离开电脑后，当 Agent 等待审批、完成回合、异常退出或定时任务完成时，手机锁屏也能及时收到提醒并点开直达会话。
+- **借鉴**：t3code 移动端的通知触发分类与「桌面活跃时静默抑制」策略。
+- **做法**：
+  1. 扩展 `packages/extension/src/notifications/NotificationService.ts` 支持多目标投递（IDE 原生通知 + 远端推送适配层）。
+  2. **本地 VAPID Web Push（免自建中继）**：宿主首次开启时生成并本地持久化 VAPID 密钥对；手机端在 HTTPS PWA 下注册 Push Subscription 并上报宿主绑定到当前 `deviceId`；事件触发时宿主直接向浏览器的 Push Endpoint 发送加密推送（纯标准 RFC 8291/8292，零中间服务器）。
+  3. **通用 Webhook 兜底（兼容 LAN HTTP）**：设置页支持配置可选 Webhook URL（内置 Bark / ntfy / 通用 JSON 模板），供未走 HTTPS 的纯局域网用户使用；支持「发送测试推送」与单通道开关。
+  4. **桌面活跃静默**：沿用 `platform.isWindowFocused()` 并在存在活跃 IDE 焦点时默认抑制手机推送（可在设置中关闭此抑制）。
+- **验收**：
+  - 单测覆盖通知路由、去重、桌面焦点抑制与退订清理（设备吊销时同步删除关联 Push Subscription）。
+  - 实测锁屏/后台状态下 Agent 触发审批请求时手机收到通知，点击直接跳回对应会话的审批卡片。
+- **风险**：iOS Web Push 要求 iOS 16.4+ 且必须「添加到主屏幕」以 PWA 打开，且依赖 HTTPS。缓解：界面明确提示前置条件，并对 HTTP 局域网用户直接推荐 Webhook / Tailscale 路径。
+
+### HD-28 脱离 IDE 的独立守护进程模式（按需演进）
+
+- **目标**：关闭 VS Code / JetBrains 后，本机常驻无头宿主继续提供手机端远程访问（在 HD-18 后台调度的基础上补齐远程交互能力）。
+- **做法**：
+  1. 在 `packages/extension/src/sidecar/entry.ts` 增加 `--headless-server` 模式，复用 `HarnessHostRuntime` + `RemoteBridgeServer` + `FileKeyValueStore`/`FileSettingsStore` 与单实例锁。
+  2. 解决 IDE 窗口启动/退出与常驻进程之间的端口协调、锁交接与凭据桥接（延续 HD-18 的凭据限制评估）。
+  3. 提供系统托盘或 CLI 启停状态查看（`status` / `stop` / `pair`）。
+- **触发条件**：M5 Phase 2–3（IDE 内嵌模式）稳定上线后，用户高频提出「关掉 IDE 也要用手机连」时再启动。
+- **风险**：多工作区管理与系统密钥链读取复杂度较高；必须先解决 HD-18 遗留的凭据桥后再全面推广。
+
+---
+
+## 8. 进度记录
 | 日期 | 版本 | 完成项 | 验证 | 备注 |
 | --- | --- | --- | --- | --- |
 | 2026-11-20 | 0.6.1+ | HD-01 底层能力描述符 | `pnpm typecheck` / `lint` / `test`（514 通过）/ `build` | 新增 `capabilities.ts`；界面不再按 `kind` 判断功能；`BackendView.capabilities` 可选，旧快照用 resolver 兜底 |
@@ -361,18 +472,19 @@ HD-08 是 HD-07 和 HD-10 的前置；HD-06 可以先做，不依赖回合模型
 
 ---
 
-## 8. 决策记录（随做随记）
+## 9. 决策记录（随做随记）
 - **2026-11-20**：确立「借能力模型与工作流，不借 Effect / 多端 / 自研工具链」的边界。
 - **2026-11-20**：首次评审。新增 HD-18（定时任务后台化）、HD-19（文档体系与术语表）、HD-20（JetBrains 冒烟）、HD-21（ACP 注册表导入）；修正 HD-04 现状描述（两套 i18n 均已有类型强制，缺口在占位符/未使用 key/漂移）；HD-01 增加探测无副作用红线；HD-06/HD-07 补并行与 worktree 交叉风险；DoD 补端到端测试要求与 HD-20 引用。
 - **2026-11-20**：HD-01 实施结论。权限档位已由 `PermissionState.options` 按会话下发，不再进静态描述符；能力表集中在 `packages/shared/src/capabilities.ts`，`BackendView.capabilities` 设为可选以兼容旧快照与测试夹具，界面统一用 `backendCapabilities()` 兜底。
 - **2026-11-20**：HD-07 实施结论。dsh / Claude / Pi / ZCode / ACP 均无会话级原生回滚 API；最终在 dsh 上实现按工具片段恢复最后一轮文件（含删除新建文件与失败回滚保护、不回退对话，`rollback: 'files'`），其他底层标记 `rollback: 'none'`；git checkpoint（hidden ref）留作后续阶段评估。
 - **2026-11-20**：HD-06 实施结论。并行多工作区需改造每会话独立进程架构，本阶段落地串行化版本（会话侧栏创建 worktree 并整窗切换，设置页提供 `git worktree remove` 安全清理入口），其他工作区会话保留在标签与历史里。
 - **2026-11-20**：HD-20 现状修正。`packages/extension/test/sidecarE2e.test.ts` 已有 Node 侧完整冒烟（握手、快照、外观持久化、密钥隔离、选区注入、断流自毁）；缺口只剩 Kotlin/IntelliJ 运行时，优先级下调。
-- **待定**：HD-07 后续是否引入 git checkpoint（hidden ref）；HD-06 后续是否演进为多进程并行 worktree 会话；HD-18 后台无头进程的凭据桥（读取 IDE PasswordSafe）。
+- **2026-11-21**：修订 0.2 边界，正式立项 **M5 手机端互通（HD-22–HD-28）**。深度调研 T3 Code 手机端实现后，确定采用「宿主内嵌 HTTP/WS 桥 + 复用 `webview-ui` 的 PWA 移动 Web + 短效 QR 配对与设备吊销 + Tailscale/BYO 隧道 + 免中继 Web Push/Webhook」路线，不自建商业云中继与商店原生 App；完整技术剖析与安全红线写入 [docs/MOBILE-INTEROP.md](./docs/MOBILE-INTEROP.md)。
+- **待定**：HD-07 后续是否引入 git checkpoint（hidden ref）；HD-06 后续是否演进为多进程并行 worktree 会话；HD-18 / HD-28 后台无头进程的凭据桥（读取 IDE PasswordSafe）；M5 完成后是否按需提供轻量 Capacitor/Expo 外壳以支持 iOS Live Activities。
 
 ---
 
-## 9. 本轮执行总结（2026-11-20）
+## 10. 本轮执行总结（2026-11-20）
 
 **已完成**
 
