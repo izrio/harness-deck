@@ -603,3 +603,78 @@ export async function prepareAcpProviderRuntime(params: {
     env: withLoopbackNoProxy(nextEnv),
   };
 }
+
+/**
+ * 为原生 Codex（`codex app-server`）准备第三方服务商 `-c` 覆盖参数与代理令牌。
+ * 优先使用 OpenAI Responses 接口，其次回退到 OpenAI Chat Completions 接口。
+ */
+export function prepareCodexProviderRuntime(params: {
+  readonly provider: ProviderConfig;
+  readonly proxyOrigin: string;
+  readonly proxyToken: string;
+  readonly baseEnv: Readonly<Record<string, string | undefined>>;
+}): AcpProviderLaunchPatch | undefined {
+  const { provider, proxyOrigin, proxyToken, baseEnv } = params;
+  if (!isProviderReadyForBackend(provider, { id: 'codex', kind: 'codex' })) return undefined;
+
+  let protocol: 'openai-responses' | 'openai-chat' | undefined;
+  let wireApi: 'responses' | 'chat' | undefined;
+  if (provider.openaiResponsesUrl?.trim()) {
+    protocol = 'openai-responses';
+    wireApi = 'responses';
+  } else if (provider.openaiChatUrl?.trim()) {
+    protocol = 'openai-chat';
+    wireApi = 'chat';
+  }
+  if (!protocol || !wireApi) return undefined;
+
+  const safeProviderKey = `hd_${provider.id.replace(/[^a-zA-Z0-9_-]+/gu, '_')}`;
+  const baseUrl = proxyUrl(proxyOrigin, provider.id, protocol);
+  const envKey = 'HARNESS_DECK_CODEX_API_KEY';
+  const defaultModel = provider.defaultModel?.trim() || provider.models[0]?.id;
+
+  const args: string[] = [
+    '-c',
+    `model_provider=${JSON.stringify(safeProviderKey)}`,
+    '-c',
+    `model_providers.${safeProviderKey}.name=${JSON.stringify(provider.name)}`,
+    '-c',
+    `model_providers.${safeProviderKey}.base_url=${JSON.stringify(baseUrl)}`,
+    '-c',
+    `model_providers.${safeProviderKey}.wire_api=${JSON.stringify(wireApi)}`,
+    '-c',
+    `model_providers.${safeProviderKey}.env_key=${JSON.stringify(envKey)}`,
+  ];
+  if (defaultModel) {
+    args.push('-c', `model=${JSON.stringify(defaultModel)}`);
+  }
+
+  return {
+    args,
+    env: withLoopbackNoProxy({
+      ...baseEnv,
+      [envKey]: proxyToken,
+    }),
+  };
+}
+
+/**
+ * 为原生 CodeBuddy（`codebuddy -p`）准备第三方服务商代理环境变量（OpenAI Chat Completions）。
+ */
+export function prepareCodebuddyProviderRuntime(params: {
+  readonly provider: ProviderConfig;
+  readonly proxyOrigin: string;
+  readonly proxyToken: string;
+  readonly baseEnv: Readonly<Record<string, string | undefined>>;
+}): AcpProviderLaunchPatch | undefined {
+  const { provider, proxyOrigin, proxyToken, baseEnv } = params;
+  if (!isProviderReadyForBackend(provider, { id: 'codebuddy', kind: 'codebuddy' })) return undefined;
+  return {
+    args: [],
+    env: withLoopbackNoProxy({
+      ...baseEnv,
+      CODEBUDDY_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'openai-chat'),
+      CODEBUDDY_API_KEY: proxyToken,
+    }),
+  };
+}

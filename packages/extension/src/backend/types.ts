@@ -152,7 +152,7 @@ export function renderDelay(options: Pick<ControllerHostOptions, 'renderDelayMs'
 }
 
 /** 底层驱动类型：决定用哪个控制器；同一个 driver 可以有多份 instanceId（账号实例）。 */
-export type BackendDriver = 'dsh' | 'claude' | 'pi' | 'zcode' | 'acp';
+export type BackendDriver = 'dsh' | 'claude' | 'pi' | 'zcode' | 'codex' | 'codebuddy' | 'acp';
 
 /** 设置里配置的一个底层。`id` 仍是实例标识（历史会话按它保存），`driver` 描述接入协议。 */
 export type BackendProfile =
@@ -178,6 +178,24 @@ export type BackendProfile =
   | {
       readonly id: 'pi';
       readonly kind: 'pi';
+      readonly name: string;
+      readonly driver?: BackendDriver;
+      readonly instanceId?: string;
+      readonly installHint?: string;
+      readonly signInHint?: string;
+    }
+  | {
+      readonly id: 'codex';
+      readonly kind: 'codex';
+      readonly name: string;
+      readonly driver?: BackendDriver;
+      readonly instanceId?: string;
+      readonly installHint?: string;
+      readonly signInHint?: string;
+    }
+  | {
+      readonly id: 'codebuddy';
+      readonly kind: 'codebuddy';
       readonly name: string;
       readonly driver?: BackendDriver;
       readonly instanceId?: string;

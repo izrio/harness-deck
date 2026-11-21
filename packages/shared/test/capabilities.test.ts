@@ -44,10 +44,25 @@ describe('backendCapabilities', () => {
     expect(caps.subagents).toBe(false);
   });
 
-  it('CodeBuddy 走 ACP：只支持 OpenAI Chat，可查额度', () => {
-    const caps = backendCapabilities({ id: 'codebuddy', kind: 'acp', command: 'codebuddy --acp' });
+  it('Codex 原生 app-server 支持 OpenAI Responses/Chat、插队、提问卡片与子代理', () => {
+    const caps = backendCapabilities({ id: 'codex', kind: 'codex', name: 'Codex' });
+    expect(caps.protocols).toEqual({
+      kind: 'supported',
+      protocols: ['openai-responses', 'openai-chat'],
+    });
+    expect(caps.steer).toBe(true);
+    expect(caps.questions).toBe(true);
+    expect(caps.subagents).toBe(true);
+    expect(caps.webUi).toBe(false);
+    expect(caps.worktree).toBe(true);
+    expect(caps.rollback).toBe('none');
+  });
+
+  it('CodeBuddy 原生 stream-json：支持 OpenAI Chat、子代理与额度查询', () => {
+    const caps = backendCapabilities({ id: 'codebuddy', kind: 'codebuddy', name: 'CodeBuddy' });
     expect(caps.protocols).toEqual({ kind: 'supported', protocols: ['openai-chat'] });
     expect(caps.quota).toBe('codebuddy');
+    expect(caps.subagents).toBe(true);
     expect(caps.steer).toBe(false);
   });
 

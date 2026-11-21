@@ -521,9 +521,9 @@ export async function prepareBackendLaunch(params: {
     };
   }
 
-  if (params.profile.kind === 'claude') {
+  if (params.profile.kind === 'claude' || params.profile.kind === 'codebuddy') {
     const mcpJson = buildClaudeMcpConfigJson(activeMcp);
-    const mcpPath = join(params.storageRoot, 'runtime', 'claude.mcp.json');
+    const mcpPath = join(params.storageRoot, 'runtime', `${params.profile.kind}.mcp.json`);
     const extraArgs: string[] = [];
     if (staged.skillDirs.length > 0) {
       extraArgs.push('--add-dir', staged.bundleDir);
@@ -560,6 +560,18 @@ export async function prepareBackendLaunch(params: {
     return {
       launcherArgs: [],
       extraArgs: [],
+      ...(staged.skillDirs.length > 0 ? { skillBundleDir: staged.bundleDir } : {}),
+      skillMode: 'prompt',
+      skills: staged.skills,
+      mcpServers: activeMcp,
+    };
+  }
+
+  if (params.profile.kind === 'codex') {
+    const extraArgs = buildCodexMcpCliArgs(activeMcp);
+    return {
+      launcherArgs: [],
+      extraArgs,
       ...(staged.skillDirs.length > 0 ? { skillBundleDir: staged.bundleDir } : {}),
       skillMode: 'prompt',
       skills: staged.skills,
@@ -606,6 +618,39 @@ export async function prepareBackendLaunch(params: {
     skills: staged.skills,
     mcpServers: activeMcp,
   };
+}
+
+/** 为 Codex `app-server` 构造 `-c mcp_servers.<name>.*` 参数列表（TOML 字面量值，绝不修改用户 `~/.codex/config.toml`）。 */
+export function buildCodexMcpCliArgs(servers: readonly McpServerConfig[]): string[] {
+  const args: string[] = [];
+  for (const srv of servers) {
+    const cleanedName = srv.name.replace(/[^a-zA-Z0-9_-]+/gu, '_').replace(/^_+|_+$/gu, '');
+    const fallbackId = srv.id.replace(/[^a-zA-Z0-9_-]+/gu, '_').replace(/^_+|_+$/gu, '');
+    const safeName = cleanedName || fallbackId;
+    if (!safeName) continue;
+    if (srv.transport === 'stdio' && srv.command) {
+      args.push('-c', `mcp_servers.${safeName}.command=${JSON.stringify(srv.command)}`);
+      if (srv.args && srv.args.length > 0) {
+        args.push('-c', `mcp_servers.${safeName}.args=${JSON.stringify([...srv.args])}`);
+      }
+      if (srv.env && Object.keys(srv.env).length > 0) {
+        for (const [k, v] of Object.entries(srv.env)) {
+          const safeKey = k.replace(/[^a-zA-Z0-9_-]+/gu, '_');
+          if (safeKey) {
+            args.push('-c', `mcp_servers.${safeName}.env.${safeKey}=${JSON.stringify(v)}`);
+          }
+        }
+      }
+    } else if ((srv.transport === 'http' || srv.transport === 'sse') && srv.url) {
+      args.push('-c', `mcp_servers.${safeName}.url=${JSON.stringify(srv.url)}`);
+      if (srv.headers && Object.keys(srv.headers).length > 0) {
+        for (const [k, v] of Object.entries(srv.headers)) {
+          args.push('-c', `mcp_servers.${safeName}.http_headers.${JSON.stringify(k)}=${JSON.stringify(v)}`);
+        }
+      }
+    }
+  }
+  return args;
 }
 
 /** 计算指定 Agent 当前生效的技能与 MCP 签名（用于判断是否需要热重载当前运行的 Agent）。 */

@@ -16,6 +16,7 @@ export const DESCRIPTIONS: Readonly<Record<string, MessageKey>> = {
   'oh-my-pi': 'backend.desc.omp',
   codebuddy: 'backend.desc.codebuddy',
   claude: 'backend.desc.claude',
+  codex: 'backend.desc.codex',
   opencode: 'backend.desc.opencode',
   antigravity: 'backend.desc.antigravity',
   zcode: 'backend.desc.zcode',

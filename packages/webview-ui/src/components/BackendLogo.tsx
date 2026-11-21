@@ -6,6 +6,7 @@ import { cn } from '../lib/utils.ts';
 import antigravity from '../assets/backends/antigravity.svg?inline';
 import claude from '../assets/backends/claude.svg?inline';
 import codebuddy from '../assets/backends/codebuddy.svg?inline';
+import codex from '../assets/backends/codex.svg?inline';
 import deepseek from '../assets/backends/deepseek.svg?inline';
 import ohMyPi from '../assets/backends/oh-my-pi.svg?inline';
 import opencode from '../assets/backends/opencode.svg?inline';
@@ -17,6 +18,7 @@ const LOGOS: Readonly<Record<string, { readonly src: string; readonly tile?: boo
   'oh-my-pi': { src: ohMyPi },
   codebuddy: { src: codebuddy },
   claude: { src: claude, tile: true },
+  codex: { src: codex },
   opencode: { src: opencode },
   antigravity: { src: antigravity, tile: true },
   zcode: { src: zcode },

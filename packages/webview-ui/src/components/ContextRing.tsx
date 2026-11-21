@@ -1,20 +1,17 @@
 /**
- * 上下文用量的环形进度：随用量变色（70% 以上提醒，90% 以上警告），悬停显示用了多少 token。
- * 底层给出用量明细（输入、缓存读写、输出、累计与费用）时，悬停或点击圆环弹出 Popover 展示。
+ * 上下文用量标识：与订阅用量（UsageBadge）保持同一设计语言（图标 + 百分比），
+ * 随占用比例变色（70% 以上提醒，90% 以上警告），悬停或点击弹出 Popover 展示 token 明细与费用。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { ContextDetail, TokenBreakdown } from '@harness-deck/shared';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '../lib/utils.ts';
 import { useT } from '../i18n.ts';
+import { ChartPieIcon } from './icons.tsx';
 
-const SIZE = 16;
-const STROKE = 2.2;
-const RADIUS = (SIZE - STROKE) / 2;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 /** 悬浮多久后弹出明细，避免扫过工具条时误弹。 */
 const OPEN_DELAY = 250;
-/** 移开后多久收起，留出从圆环移到浮层内容的时间。 */
+/** 移开后多久收起，留出从标识移到浮层内容的时间。 */
 const CLOSE_DELAY = 250;
 
 /** 12345 → 12.3k，1048576 → 1.0M */
@@ -30,34 +27,33 @@ function formatCost(amount: number, currency: string): string {
   return currency === 'USD' ? `$${body}` : `${body} ${currency}`;
 }
 
-/** 圆环本体（svg + 过半才显示的百分比）。 */
-function RingVisual({ usage, percent }: { usage: number; percent: number }) {
-  // 有用量时至少画出一小段，避免 1% 以下看起来是空的
-  const filled = Math.max(usage, usage > 0 ? 0.02 : 0) * CIRCUMFERENCE;
+/** 图标 + 百分比，样式与 UsageBadge 对齐。 */
+function ContextBadgeVisual({ percent }: { readonly percent: number }) {
   return (
     <>
-      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} aria-hidden>
-        <circle className="context-ring__track" cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} strokeWidth={STROKE} fill="none" />
-        <circle
-          className="context-ring__value"
-          cx={SIZE / 2}
-          cy={SIZE / 2}
-          r={RADIUS}
-          strokeWidth={STROKE}
-          fill="none"
-          strokeLinecap="round"
-          strokeDasharray={`${filled} ${CIRCUMFERENCE}`}
-          transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
-        />
-      </svg>
-      {/* 用得不多时只显示圆环（数字在悬停提示里），过半才显示百分比，少打扰 */}
-      {percent >= 50 ? <span className="context-ring__label">{percent}%</span> : null}
+      <ChartPieIcon className="size-3.5 shrink-0" aria-hidden="true" />
+      <span>{percent}%</span>
     </>
   );
 }
 
+function breakdownTotal(b: TokenBreakdown): number {
+  return b.input + b.cacheRead + b.cacheWrite + b.output;
+}
+
+function sameBreakdown(a: TokenBreakdown | undefined, b: TokenBreakdown | undefined): boolean {
+  if (!a || !b) return false;
+  return (
+    a.input === b.input &&
+    a.output === b.output &&
+    a.cacheRead === b.cacheRead &&
+    a.cacheWrite === b.cacheWrite &&
+    (a.reasoning ?? 0) === (b.reasoning ?? 0)
+  );
+}
+
 /** 一组用量的四段横向占比条：输入 / 缓存读取 / 缓存写入 / 输出。 */
-function BreakdownBar({ b }: { b: TokenBreakdown }) {
+function BreakdownBar({ b }: { readonly b: TokenBreakdown }) {
   const t = useT();
   const segments = [
     { key: 'input', label: t('context.detail.input'), value: b.input, className: 'bg-brand' },
@@ -80,46 +76,84 @@ function BreakdownBar({ b }: { b: TokenBreakdown }) {
   );
 }
 
-/** 一组用量的逐项数字（与占比条同色的小圆点 + 数值 + 合计）。 */
-function BreakdownRows({ b }: { b: TokenBreakdown }) {
+/** 一组用量的逐项数字（与占比条同色的小圆点 + 数值；推理数内联在输出旁）。 */
+function BreakdownRows({ b }: { readonly b: TokenBreakdown }) {
   const t = useT();
   const rows = [
     { key: 'input', label: t('context.detail.input'), value: b.input, dot: 'bg-brand' },
     { key: 'cacheRead', label: t('context.detail.cacheRead'), value: b.cacheRead, dot: 'bg-brand/45' },
     { key: 'cacheWrite', label: t('context.detail.cacheWrite'), value: b.cacheWrite, dot: 'bg-ink-3' },
-    { key: 'output', label: t('context.detail.output'), value: b.output, dot: 'bg-ink' },
+    { key: 'output', label: t('context.detail.output'), value: b.output, dot: 'bg-ink', reasoning: b.reasoning },
   ].filter((r) => r.value > 0);
-  const total = b.input + b.cacheRead + b.cacheWrite + b.output;
   return (
     <div className="flex flex-col gap-1">
       {rows.map((r) => (
-        <div key={r.key} className="flex min-w-0 items-center gap-2 text-[11.5px] leading-4">
-          <span aria-hidden className={cn('size-2 shrink-0 rounded-full', r.dot)} />
-          <span className="min-w-0 flex-1 text-ink-2">{r.label}</span>
-          <span className="font-mono tabular-nums text-ink">{formatTokens(r.value)}</span>
+        <div key={r.key} className="flex min-w-0 items-baseline justify-between gap-2 text-[11.5px] leading-4">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span aria-hidden className={cn('size-2 shrink-0 rounded-full', r.dot)} />
+            <span className="truncate text-ink-2">{r.label}</span>
+            {r.reasoning && r.reasoning > 0 ? (
+              <span className="shrink-0 text-[10.5px] text-ink-3">({t('context.detail.reasoning', formatTokens(r.reasoning))})</span>
+            ) : null}
+          </span>
+          <span className="shrink-0 font-mono tabular-nums text-ink">{formatTokens(r.value)}</span>
         </div>
       ))}
-      {b.reasoning && b.reasoning > 0 ? (
-        <div className="pl-4 text-[11px] leading-4 text-ink-3">{t('context.detail.reasoning', formatTokens(b.reasoning))}</div>
-      ) : null}
-      <div className="mt-0.5 flex items-center justify-between border-t border-line pt-1.5 text-[11.5px] leading-4">
-        <span className="text-ink-3">{t('context.detail.total')}</span>
-        <span className="font-mono font-medium tabular-nums text-ink">{formatTokens(total)}</span>
-      </div>
     </div>
   );
 }
 
-/** 明细里的一节：小标题（最近一次请求 / 本会话累计）+ 占比条 + 逐项数字。 */
-function DetailSection({ title, hint, b }: { title: string; hint?: string; b: TokenBreakdown }) {
+/** 紧凑两列汇总：当「最近一次请求」已展开完整明细时，用轻量网格展示「本会话累计」。 */
+function CompactBreakdownGrid({ b }: { readonly b: TokenBreakdown }) {
+  const t = useT();
+  const items = [
+    { key: 'input', label: t('context.detail.input'), value: b.input },
+    { key: 'cacheRead', label: t('context.detail.cacheRead'), value: b.cacheRead },
+    { key: 'cacheWrite', label: t('context.detail.cacheWrite'), value: b.cacheWrite },
+    { key: 'output', label: t('context.detail.output'), value: b.output },
+  ].filter((r) => r.value > 0);
   return (
-    <section className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between text-[11px] font-medium leading-4 text-ink-3">
-        <span>{title}</span>
-        {hint ? <span className="tabular-nums">{hint}</span> : null}
+    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+      {items.map((item) => (
+        <div key={item.key} className="flex items-baseline justify-between gap-1 text-[11px] leading-4">
+          <span className="truncate text-ink-3">{item.label}</span>
+          <span className="shrink-0 font-mono tabular-nums text-ink-2">{formatTokens(item.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 明细里的一节：小标题 + 合计右对齐 + 占比条/明细行（或紧凑网格）。 */
+function DetailSection({
+  title,
+  hint,
+  b,
+  compact = false,
+}: {
+  readonly title: string;
+  readonly hint?: string;
+  readonly b: TokenBreakdown;
+  readonly compact?: boolean;
+}) {
+  const total = breakdownTotal(b);
+  return (
+    <section className="flex flex-col gap-1.5 border-t border-line pt-2">
+      <div className="flex items-baseline justify-between gap-2 text-[11.5px] leading-4">
+        <span className="min-w-0 truncate font-medium text-ink">
+          {title}
+          {hint ? <span className="ml-1.5 font-normal text-ink-3">{hint}</span> : null}
+        </span>
+        <span className="shrink-0 font-mono tabular-nums text-ink-2">{formatTokens(total)}</span>
       </div>
-      <BreakdownBar b={b} />
-      <BreakdownRows b={b} />
+      {compact ? (
+        <CompactBreakdownGrid b={b} />
+      ) : (
+        <>
+          <BreakdownBar b={b} />
+          <BreakdownRows b={b} />
+        </>
+      )}
     </section>
   );
 }
@@ -149,10 +183,15 @@ export function ContextRing({
     [],
   );
 
+  const badgeClass = cn(
+    'context-ring inline-flex h-7 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium tabular-nums transition-colors duration-150',
+    level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink-2',
+  );
+
   if (!detail) {
     return (
-      <span className={`context-ring context-ring--${level}`} title={title} role="img" aria-label={title} data-testid="context-ring">
-        <RingVisual usage={usage} percent={percent} />
+      <span className={badgeClass} title={title} role="img" aria-label={title} data-testid="context-ring">
+        <ContextBadgeVisual percent={percent} />
       </span>
     );
   }
@@ -174,19 +213,27 @@ export function ContextRing({
     setOpen(next);
   };
 
+  const barColor = level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-brand';
+  const clampedPercent = Math.min(100, Math.max(0, percent));
+  // 首轮请求时「最近一次请求」与「本会话累计」完全相同，只展示一节避免重复刷屏。
+  const deduplicated = sameBreakdown(detail.lastRequest, detail.session);
+  const showLast = Boolean(detail.lastRequest) && !deduplicated;
+  const sessionSection = detail.session;
+
   return (
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`context-ring context-ring--${level} cursor-default rounded-[6px] px-0.5 transition-colors duration-100 hover:bg-hover`}
+          className={cn(badgeClass, 'hover:bg-hover')}
           aria-label={title}
+          title={title}
           data-testid="context-ring"
           onPointerEnter={enter}
           onPointerLeave={leave}
           onClick={() => clearTimeout(openTimer.current)}
         >
-          <RingVisual usage={usage} percent={percent} />
+          <ContextBadgeVisual percent={percent} />
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -194,34 +241,38 @@ export function ContextRing({
         align="end"
         sideOffset={6}
         aria-label={t('context.detail.title')}
-        className="w-60 rounded-card p-0 shadow-raised"
+        className="max-h-[calc(var(--radix-popover-content-available-height)-8px)] w-72 overflow-y-auto rounded-card p-0 shadow-raised"
         data-testid="context-detail-popover"
         onOpenAutoFocus={(event) => event.preventDefault()}
         onPointerEnter={() => clearTimeout(closeTimer.current)}
         onPointerLeave={leave}
       >
-        <div className="flex flex-col gap-2.5 px-3 py-2.5" data-testid="context-detail">
-          <header>
+        <div className="flex flex-col gap-2 px-3 py-2.5" data-testid="context-detail">
+          <header className="flex flex-col gap-1">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[12px] font-semibold leading-4 text-ink">{t('context.detail.title')}</span>
               <span
-                className={cn('font-mono text-[12.5px] font-semibold tabular-nums', level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink')}
+                className={cn('font-mono text-[12px] font-semibold tabular-nums', level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink')}
               >
                 {percent}%
               </span>
             </div>
+            <div className={cn('h-1.5 w-full overflow-hidden rounded-full bg-field shadow-hairline', barColor)}>
+              <div className="h-full rounded-full bg-current opacity-80" style={{ width: `${clampedPercent}%` }} />
+            </div>
             {tokens ? (
-              <div className="mt-0.5 font-mono text-[11px] tabular-nums text-ink-3">
+              <div className="font-mono text-[11px] leading-4 tabular-nums text-ink-3">
                 {formatTokens(tokens.used)} / {formatTokens(tokens.window)} tokens
               </div>
             ) : null}
           </header>
-          {detail.lastRequest ? <DetailSection title={t('context.detail.last')} b={detail.lastRequest} /> : null}
-          {detail.session ? (
+          {showLast && detail.lastRequest ? <DetailSection title={t('context.detail.last')} b={detail.lastRequest} /> : null}
+          {sessionSection ? (
             <DetailSection
               title={t('context.detail.session')}
               {...(detail.requests ? { hint: t('context.detail.requests', detail.requests) } : {})}
-              b={detail.session}
+              b={sessionSection}
+              compact={showLast}
             />
           ) : null}
           {detail.cost ? (

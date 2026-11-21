@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Harness Deck",
   "description": "%extension.description%",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -169,6 +169,18 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "%config.pi.path%"
+        },
+        "harnessDeck.codex.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "%config.codex.path%"
+        },
+        "harnessDeck.codebuddy.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "%config.codebuddy.path%"
         },
         "harnessDeck.backends": {
           "type": "array",

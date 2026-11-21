@@ -167,8 +167,8 @@ jobs:
             echo
             echo "### 底层 / Backends"
             echo
-            echo "至少装好一个底层：dsh（0.2.1-rc.5 及以上，DeepSeek Desktop 菜单「管理 dsh 命令…」或 \`npm install -g @deepseek-ai/dsh\`）、Claude Code（\`npm install -g @anthropic-ai/claude-code\`）、Pi（\`npm install -g @earendil-works/pi-coding-agent\`）、ZCode（\`npm install -g zcode-app-cli\`）、OpenCode（\`npm install -g opencode-ai\`）或 CodeBuddy（\`npm install -g @tencent-ai/codebuddy-code\`）。"
-            echo "Install at least one backend: dsh 0.2.1-rc.5+ (DeepSeek Desktop → \"Manage dsh command…\", or \`npm install -g @deepseek-ai/dsh\`), Claude Code (\`npm install -g @anthropic-ai/claude-code\`), Pi (\`npm install -g @earendil-works/pi-coding-agent\`), ZCode (\`npm install -g zcode-app-cli\`), OpenCode (\`npm install -g opencode-ai\`), or CodeBuddy (\`npm install -g @tencent-ai/codebuddy-code\`)."
+            echo "至少装好一个底层：dsh（0.2.1-rc.5 及以上，DeepSeek Desktop 菜单「管理 dsh 命令…」或 \`npm install -g @deepseek-ai/dsh\`）、Claude Code（\`npm install -g @anthropic-ai/claude-code\`）、Codex（\`npm install -g @openai/codex\`）、CodeBuddy（\`npm install -g @tencent-ai/codebuddy-code\`）、Pi（\`npm install -g @earendil-works/pi-coding-agent\`）、ZCode（\`npm install -g zcode-app-cli\`）或 OpenCode（\`npm install -g opencode-ai\`）。"
+            echo "Install at least one backend: dsh 0.2.1-rc.5+ (DeepSeek Desktop → \"Manage dsh command…\", or \`npm install -g @deepseek-ai/dsh\`), Claude Code (\`npm install -g @anthropic-ai/claude-code\`), Codex (\`npm install -g @openai/codex\`), CodeBuddy (\`npm install -g @tencent-ai/codebuddy-code\`), Pi (\`npm install -g @earendil-works/pi-coding-agent\`), ZCode (\`npm install -g zcode-app-cli\`), or OpenCode (\`npm install -g opencode-ai\`)."
             echo
             echo "### SHA-256"
             echo

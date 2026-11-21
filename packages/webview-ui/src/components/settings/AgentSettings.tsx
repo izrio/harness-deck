@@ -141,7 +141,10 @@ export function AgentSettings() {
       return;
     }
     const rawId = (form.id.trim() || name).toLowerCase().replace(/[^a-z0-9._-]+/gu, '-');
-    const id = rawId === 'dsh' || rawId === 'zcode' ? `${rawId}-acp` : rawId || 'custom-agent';
+    const id =
+      rawId === 'dsh' || rawId === 'zcode' || rawId === 'claude' || rawId === 'pi' || rawId === 'codex' || rawId === 'codebuddy'
+        ? `${rawId}-acp`
+        : rawId || 'custom-agent';
     const args = form.argsText
       .split(/\s+/u)
       .map((s) => s.trim())

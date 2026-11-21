@@ -37,6 +37,10 @@ export const ZCODE_PROFILE: Extract<BackendProfile, { kind: 'zcode' }> = { id: '
 export const CLAUDE_PROFILE: Extract<BackendProfile, { kind: 'claude' }> = { id: 'claude', kind: 'claude', name: 'Claude Code' };
 /** 内置底层 Pi（通过 `pi --mode rpc` 原生接入）。 */
 export const PI_PROFILE: Extract<BackendProfile, { kind: 'pi' }> = { id: 'pi', kind: 'pi', name: 'Pi' };
+/** 内置底层 OpenAI Codex（通过 `codex app-server --listen stdio://` 原生接入）。 */
+export const CODEX_PROFILE: Extract<BackendProfile, { kind: 'codex' }> = { id: 'codex', kind: 'codex', name: 'Codex' };
+/** 内置底层腾讯 CodeBuddy（通过 `codebuddy -p --input-format stream-json --output-format stream-json` 原生接入）。 */
+export const CODEBUDDY_PROFILE: Extract<BackendProfile, { kind: 'codebuddy' }> = { id: 'codebuddy', kind: 'codebuddy', name: 'CodeBuddy' };
 
 type AcpProfile = Extract<BackendProfile, { kind: 'acp' }>;
 
@@ -44,8 +48,11 @@ export type BuiltinHintId =
   | 'pi'
   | 'pi-sign-in'
   | 'codebuddy'
+  | 'codebuddy-sign-in'
   | 'claude'
   | 'claude-sign-in'
+  | 'codex'
+  | 'codex-sign-in'
   | 'opencode'
   | 'opencode-sign-in'
   | 'antigravity'
@@ -54,7 +61,7 @@ export type BuiltinHintId =
   | 'zcode-sign-in';
 
 /**
- * 内置的智能体（原生 Pi / Claude Code / ZCode 与内置 ACP 代理）。
+ * 内置的智能体（原生 Pi / CodeBuddy / Claude Code / Codex / ZCode 与内置 ACP 代理）。
  * 不放在设置的默认值里：用户改过 `harnessDeck.backends` 后，设置的默认值就不再生效，新加的内置项会看不到。
  * @param hint - 安装与登录提示的文案（Host 侧 i18n）。
  */
@@ -62,10 +69,12 @@ export function builtinProfiles(hint: (id: BuiltinHintId) => string): BackendPro
   return [
     // Pi 原生通过 `pi --mode rpc` NDJSON 双向协议接入
     { ...PI_PROFILE, installHint: hint('pi'), signInHint: hint('pi-sign-in') },
-    // CodeBuddy 2.x 的 ACP 只给一个会话推送实时更新，见 BackendProfile.singleSession
-    { id: 'codebuddy', kind: 'acp', name: 'CodeBuddy', command: 'codebuddy', args: ['--acp'], env: {}, installHint: hint('codebuddy'), singleSession: true },
+    // CodeBuddy 原生通过 `codebuddy -p` 流式 JSON 协议接入（按会话独立进程，支持多开并发）
+    { ...CODEBUDDY_PROFILE, installHint: hint('codebuddy'), signInHint: hint('codebuddy-sign-in') },
     // Claude Code 原生通过 `claude -p` 流式 JSON 协议接入
     { ...CLAUDE_PROFILE, installHint: hint('claude'), signInHint: hint('claude-sign-in') },
+    // OpenAI Codex 原生通过 `codex app-server --listen stdio://` JSON-RPC 双向协议接入
+    { ...CODEX_PROFILE, installHint: hint('codex'), signInHint: hint('codex-sign-in') },
     // OpenCode 原生内置 ACP 子命令（opencode acp）
     { id: 'opencode', kind: 'acp', name: 'OpenCode', command: 'opencode', args: ['acp'], env: {}, installHint: hint('opencode'), signInHint: hint('opencode-sign-in') },
     // Google Antigravity 原生内置 ACP 子命令（agy acp）
@@ -103,7 +112,7 @@ export function parseProfiles(raw: unknown, log: (line: string) => void = () => 
   ];
 }
 
-const RESERVED_NATIVE_IDS = new Set<string>(['dsh', 'zcode', 'claude', 'pi']);
+const RESERVED_NATIVE_IDS = new Set<string>(['dsh', 'zcode', 'claude', 'pi', 'codex', 'codebuddy']);
 
 function parseSettings(raw: unknown, log: (line: string) => void): AcpProfile[] {
   const profiles: AcpProfile[] = [];
@@ -154,6 +163,7 @@ export const BACKEND_NPM_PACKAGES: Readonly<Record<string, string>> = {
   pi: '@earendil-works/pi-coding-agent',
   codebuddy: '@tencent-ai/codebuddy-code',
   claude: '@anthropic-ai/claude-code',
+  codex: '@openai/codex',
   opencode: 'opencode-ai',
   zcode: 'zcode-app-cli',
 };
@@ -169,6 +179,7 @@ const INSTALL_COMMANDS: Readonly<Record<string, string>> = {
   pi: 'npm install -g @earendil-works/pi-coding-agent',
   codebuddy: 'npm install -g @tencent-ai/codebuddy-code',
   claude: 'npm install -g @anthropic-ai/claude-code',
+  codex: 'npm install -g @openai/codex',
   opencode: 'npm install -g opencode-ai',
   zcode: 'npm install -g zcode-app-cli',
 };

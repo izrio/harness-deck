@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.8.0
+
+**原生接入 OpenAI Codex 与腾讯 CodeBuddy（多会话并发）、上下文用量标识与浮层视觉统一**：新增原生 OpenAI Codex（`codex app-server`）底层，支持模型与多档推理、运行中 `turn/steer` 插队、审批与提问卡片、子代理及无人值守定时任务；将 CodeBuddy 从单会话 ACP 升级为原生 `codebuddy -p` 双向流式底层，彻底解除单会话限制并支持多标签并发、思考档位与 `~/.codebuddy/projects` 本地历史秒开回放；重构上下文用量标识（`ContextRing`）与订阅额度浮层（`UsageBadge`），统一图标 + 百分比视觉语言并优化首轮明细去重与视口高度自适应。
+
+**Native OpenAI Codex & concurrent Tencent CodeBuddy backends, plus unified context & quota popovers**: Added native OpenAI Codex (`codex app-server`) with model/reasoning selection, live `turn/steer` steering, approval & question cards, subagents, and unattended schedules; upgraded CodeBuddy from single-session ACP to native bidirectional `codebuddy -p` stream-json with concurrent multi-tab sessions, thinking effort levels, and local `~/.codebuddy/projects` history replay; refreshed `ContextRing` and `UsageBadge` to share a unified icon + percentage design with first-turn deduplication and viewport-aware popover sizing.
+
+- **OpenAI Codex 原生底层（`codex app-server`）**：通过 `codex app-server --listen stdio://` NDJSON JSON-RPC 原生接入，支持模型与多档推理切换、逐字流式推理/正文、只读命令归类（`explore`）与 Shell 输出、unified diff 改动统计、命令/文件/权限提升审批（含未保存脏文件拦截）、提问卡片、子代理卡片、运行中 `turn/steer` 插队、OpenAI Responses/Chat 第三方服务商 `-c` 覆盖、MCP 服务器参数注入及定时无人值守运行；新增 `harnessDeck.codex.path` 设置与设置页一键安装（`@openai/codex`）。
+  **Native OpenAI Codex backend (`codex app-server`)**: Integrated `codex app-server --listen stdio://` over NDJSON JSON-RPC with model & reasoning effort switching, streaming reasoning/text, read-only `explore` grouping and shell output, unified diff stats, command/file/permission approvals (with unsaved-file guard), question & subagent cards, live `turn/steer`, third-party OpenAI Responses/Chat provider overrides via `-c`, MCP `-c` injection, and unattended schedule runs; added `harnessDeck.codex.path` and one-click `@openai/codex` installation.
+- **腾讯 CodeBuddy 原生多会话底层（`codebuddy -p`）**：从旧版单会话 ACP 迁移至 `codebuddy -p --input-format stream-json --output-format stream-json` 原生协议，按活跃会话独立运行子进程，支持多标签并发回复、在线模型与斜杠命令发现、`--effort` 思考档位、子代理卡片、未保存文件拦截与 Diff 预览、OpenAI Chat 服务商代理环境变量、`--mcp-config` / `--add-dir` 挂载、定时无人值守执行，以及直接扫描 `~/.codebuddy/projects` 回放历史会话并兼容旧版 ACP 状态键；新增 `harnessDeck.codebuddy.path` 设置。
+  **Native concurrent CodeBuddy backend (`codebuddy -p`)**: Migrated CodeBuddy from single-session ACP to native `codebuddy -p` bidirectional `stream-json` with isolated per-session child processes for true multi-tab concurrency, dynamic model/command discovery, `--effort` levels, subagent cards, unsaved-file guard and diff previews, OpenAI Chat provider proxy env, `--mcp-config` / `--add-dir` staging, unattended schedule runs, and direct `~/.codebuddy/projects` history replay with legacy ACP state compatibility; added `harnessDeck.codebuddy.path`.
+- **上下文用量与订阅额度标识统一**：`ContextRing` 改用 `ChartPieIcon` + 百分比样式与 `UsageBadge` 保持一致，浮层补充顶部进度条、首轮请求与会话累计自动去重、紧凑两列累计网格及 `--radix-popover-content-available-height` 自适应最大高度；同步清理未使用的 i18n key 并更新能力矩阵与文档。
+  **Unified context & subscription usage indicators**: Redesigned `ContextRing` with `ChartPieIcon` + percentage to match `UsageBadge`, adding a header progress bar, automatic first-turn deduplication, a compact two-column session summary grid, and viewport-aware popover max height (`--radix-popover-content-available-height`); cleaned up unused i18n keys and updated the capability matrix and docs.
+
 ## 0.7.0
 
 **底层能力模型、回合工作流与文件回滚、串行 Worktree 会话、工作台源码控制闭环与质量门禁**：统一底层能力描述符与 npm 安装归属检查；新增回合模型、DeepSeek 回合级文件恢复、串行 Worktree 会话与清理入口；工作台新增「改动」模块，支持只读状态、Diff 查看与受信任工作区内的提交 / 推送 / 创建 PR；补充 ACP 注册表导入、幂等命令回执、JetBrains Sidecar 退避自动重启、无头后台定时调度及多套质量门禁。

@@ -17,6 +17,13 @@ import type { BackendProfile } from '../backend/types.ts';
 import { ClaudeConnection } from '../claude/connection.ts';
 import { locateClaude } from '../claude/locate.ts';
 import { ClaudeSessionProjection } from '../claude/projection.ts';
+import { CodebuddyConnection } from '../codebuddy/connection.ts';
+import { locateCodebuddy } from '../codebuddy/locate.ts';
+import { CodebuddySessionProjection } from '../codebuddy/projection.ts';
+import { CodexConnection, CodexError, CodexTimeoutError } from '../codex/connection.ts';
+import { buildCodexUserInput, codexPermissionConfig } from '../codex/CodexController.ts';
+import { locateCodex } from '../codex/locate.ts';
+import { CodexSessionProjection } from '../codex/projection.ts';
 import { toAcpMcpServers, type PreparedBackendLaunch } from '../extensions/mcpService.ts';
 import { formatSkillsPromptCatalog } from '../extensions/skillService.ts';
 import { DshClient } from '../dsh/DshClient.ts';
@@ -78,6 +85,14 @@ export interface UnattendedRunnerHost {
     readonly configuredPath: string;
     readonly env: Readonly<Record<string, string | undefined>>;
   };
+  readonly getCodexConfig?: () => {
+    readonly configuredPath: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  };
+  readonly getCodebuddyConfig?: () => {
+    readonly configuredPath: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  };
   readonly getEnvForProfile: (profileEnv?: Readonly<Record<string, string>>) => Readonly<Record<string, string | undefined>>;
   readonly prepareBackendLaunch?: (profile: BackendProfile) => Promise<PreparedBackendLaunch>;
   readonly extensionVersion: string;
@@ -100,6 +115,12 @@ export class UnattendedRunner {
     }
     if (req.profile.kind === 'pi') {
       return this.runPi(req.profile, req);
+    }
+    if (req.profile.kind === 'codex') {
+      return this.runCodex(req.profile, req);
+    }
+    if (req.profile.kind === 'codebuddy') {
+      return this.runCodebuddy(req.profile, req);
     }
     return this.runAcp(req.profile, req);
   }
@@ -544,6 +565,179 @@ export class UnattendedRunner {
     }
   }
 
+  private async runCodex(
+    profile: Extract<BackendProfile, { kind: 'codex' }>,
+    req: UnattendedRunRequest,
+  ): Promise<UnattendedRunOutcome> {
+    const codexCfg = this.host.getCodexConfig?.() ?? { configuredPath: '', env: this.host.getEnvForProfile() };
+    const located = await locateCodex({
+      configuredPath: codexCfg.configuredPath,
+      env: codexCfg.env,
+      platform: process.platform,
+    });
+    if (located.kind === 'notFound') {
+      return { status: 'failed', error: profile.installHint ?? 'codex executable not found in PATH or settings' };
+    }
+
+    const prepared = await this.host.prepareBackendLaunch?.(profile).catch(() => undefined);
+    const projection = new CodexSessionProjection(req.projectPath);
+    let threadId: string | undefined;
+    let activeTurnId: string | undefined;
+    let resolveTurnDone: (() => void) | undefined;
+    let rejectTurnDone: ((err: Error) => void) | undefined;
+    const turnDone = new Promise<void>((resolveP, rejectP) => {
+      resolveTurnDone = resolveP;
+      rejectTurnDone = rejectP;
+    });
+
+    const runAbort = new AbortController();
+    const timeout = setTimeout(
+      () => runAbort.abort(new Error('Scheduled task timed out')),
+      req.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+    const onExternalAbort = () => runAbort.abort(req.signal?.reason ?? new Error('Aborted'));
+    req.signal?.addEventListener('abort', onExternalAbort, { once: true });
+
+    const permMode =
+      req.permission === 'danger-full-access'
+        ? 'danger-full-access'
+        : req.permission === 'read-only'
+          ? 'read-only'
+          : 'full-auto';
+    const permCfg = codexPermissionConfig(permMode);
+
+    const conn = new CodexConnection({
+      command: located.command,
+      args: ['app-server', '--listen', 'stdio://', ...(prepared?.extraArgs ?? [])],
+      cwd: req.projectPath,
+      env: codexCfg.env,
+      log: this.host.log,
+      onStderr: (line) => this.host.runtimeLog?.(line, 'stderr'),
+      onNotification: (method, params) => {
+        const obj = params && typeof params === 'object' ? (params as Record<string, unknown>) : {};
+        const tid = typeof obj.threadId === 'string' ? obj.threadId : threadId;
+        if (threadId && tid && tid !== threadId) return;
+        const outcome = projection.applyNotification(method, obj);
+        if (projection.activeTurnId) activeTurnId = projection.activeTurnId;
+        if (outcome.turnEnded) {
+          const turn = obj.turn as { status?: unknown; error?: { message?: unknown } } | undefined;
+          if (turn?.status === 'failed') {
+            rejectTurnDone?.(
+              new Error(typeof turn.error?.message === 'string' ? turn.error.message : 'Codex turn failed'),
+            );
+          } else {
+            resolveTurnDone?.();
+          }
+        }
+      },
+      onRequest: async (method, params) => {
+        if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
+          return { decision: req.permission === 'danger-full-access' ? 'acceptForSession' : 'decline' };
+        }
+        if (method === 'item/permissions/requestApproval') {
+          const requested =
+            params && typeof params === 'object' ? (params as { permissions?: unknown }).permissions : {};
+          return {
+            permissions: req.permission === 'danger-full-access' ? (requested ?? {}) : {},
+            scope: req.permission === 'danger-full-access' ? 'session' : 'turn',
+          };
+        }
+        if (method === 'item/tool/requestUserInput') {
+          return { answers: {} };
+        }
+        if (method === 'execCommandApproval' || method === 'applyPatchApproval') {
+          return { decision: req.permission === 'danger-full-access' ? 'approved_for_session' : 'denied' };
+        }
+        if (method === 'mcpServer/elicitation/request') {
+          return { action: 'cancel' };
+        }
+        throw new CodexError(method, -32601, `${method} is not supported by unattended runner`);
+      },
+      onExit: (code, signal, stderr) => {
+        this.host.log(`定时 Codex 进程退出（${signal ?? code}）${stderr ? `：${stderr}` : ''}`);
+        rejectTurnDone?.(new Error(stderr || `Codex exited (${signal ?? code})`));
+      },
+    });
+
+    const abortListener = () => {
+      if (threadId && activeTurnId && conn.running) {
+        void conn.request('turn/interrupt', { threadId, turnId: activeTurnId }).catch(() => undefined);
+      }
+      rejectTurnDone?.(new Error(describe(runAbort.signal.reason ?? 'Scheduled task aborted')));
+      void conn.dispose();
+    };
+    runAbort.signal.addEventListener('abort', abortListener, { once: true });
+
+    try {
+      await conn.start();
+      await conn.initialize(this.host.extensionVersion, INITIALIZE_TIMEOUT_MS);
+      const started = await conn.request<{ thread?: { id?: string } }>(
+        'thread/start',
+        {
+          cwd: req.projectPath,
+          approvalPolicy: permCfg.approvalPolicy,
+          sandbox: permCfg.sandbox,
+          experimentalRawEvents: false,
+          persistExtendedHistory: true,
+        },
+        INITIALIZE_TIMEOUT_MS,
+      );
+      threadId = started?.thread?.id;
+      if (!threadId) throw new Error('missing thread.id in thread/start');
+      req.onSessionCreated(threadId);
+
+      const skillCatalog =
+        prepared?.skillMode === 'prompt' && prepared.skills.length > 0
+          ? formatSkillsPromptCatalog(prepared.skills)
+          : undefined;
+      const finalPrompt = skillCatalog ? `${skillCatalog}\n\n${req.prompt}` : req.prompt;
+
+      projection.startTurn(Date.now());
+      const turnRes = await conn.request<{ turn?: { id?: string } }>('turn/start', {
+        threadId,
+        input: buildCodexUserInput(finalPrompt),
+        cwd: req.projectPath,
+        approvalPolicy: permCfg.approvalPolicy,
+        sandboxPolicy: permCfg.sandboxPolicy,
+      });
+      if (typeof turnRes?.turn?.id === 'string') {
+        activeTurnId = turnRes.turn.id;
+        projection.activeTurnId = turnRes.turn.id;
+      }
+      await turnDone;
+
+      const assistantTexts = projection
+        .snapshotItems()
+        .filter((item): item is Extract<typeof item, { kind: 'assistant' }> => item.kind === 'assistant')
+        .map((item) => item.markdown.trim())
+        .filter(Boolean);
+
+      return {
+        status: 'succeeded',
+        sessionId: threadId,
+        output: assistantTexts.join('\n\n').slice(0, MAX_OUTPUT_CHARS),
+      };
+    } catch (error) {
+      const msg =
+        error instanceof CodexTimeoutError
+          ? 'Codex handshake timed out'
+          : runAbort.signal.aborted
+            ? describe(runAbort.signal.reason ?? error)
+            : describe(error);
+      return {
+        status: 'failed',
+        ...(threadId ? { sessionId: threadId } : {}),
+        error: msg,
+      };
+    } finally {
+      clearTimeout(timeout);
+      req.signal?.removeEventListener('abort', onExternalAbort);
+      runAbort.signal.removeEventListener('abort', abortListener);
+      await conn.dispose().catch(() => undefined);
+    }
+  }
+
   private async runClaude(
     profile: Extract<BackendProfile, { kind: 'claude' }>,
     req: UnattendedRunRequest,
@@ -616,6 +810,121 @@ export class UnattendedRunner {
       onExit: (code, signal, stderr) => {
         this.host.log(`定时 Claude Code 进程退出（${signal ?? code}）${stderr ? `：${stderr}` : ''}`);
         rejectTurnDone?.(new Error(stderr || `Claude Code exited (${signal ?? code})`));
+      },
+    });
+
+    const abortListener = () => {
+      if (conn.running) {
+        void conn.sendControlRequest({ subtype: 'interrupt' }, 3_000).catch(() => undefined);
+      }
+      rejectTurnDone?.(new Error(describe(runAbort.signal.reason ?? 'Scheduled task aborted')));
+      void conn.dispose();
+    };
+    runAbort.signal.addEventListener('abort', abortListener, { once: true });
+
+    try {
+      await conn.start();
+      projection.startTurn(Date.now());
+      conn.sendUserMessage(req.prompt);
+      await turnDone;
+
+      const assistantTexts = projection
+        .snapshotItems()
+        .filter((item): item is Extract<typeof item, { kind: 'assistant' }> => item.kind === 'assistant')
+        .map((item) => item.markdown.trim())
+        .filter(Boolean);
+
+      return {
+        status: 'succeeded',
+        ...(sessionId ? { sessionId } : {}),
+        output: assistantTexts.join('\n\n').slice(0, MAX_OUTPUT_CHARS),
+      };
+    } catch (error) {
+      return {
+        status: 'failed',
+        ...(sessionId ? { sessionId } : {}),
+        error: runAbort.signal.aborted ? describe(runAbort.signal.reason ?? error) : describe(error),
+      };
+    } finally {
+      clearTimeout(timeout);
+      req.signal?.removeEventListener('abort', onExternalAbort);
+      runAbort.signal.removeEventListener('abort', abortListener);
+      await conn.dispose().catch(() => undefined);
+    }
+  }
+
+  private async runCodebuddy(
+    profile: Extract<BackendProfile, { kind: 'codebuddy' }>,
+    req: UnattendedRunRequest,
+  ): Promise<UnattendedRunOutcome> {
+    const cfg = this.host.getCodebuddyConfig?.() ?? { configuredPath: '', env: this.host.getEnvForProfile() };
+    const located = await locateCodebuddy({
+      configuredPath: cfg.configuredPath,
+      env: cfg.env,
+      platform: process.platform,
+    });
+    if (located.kind === 'notFound') {
+      return { status: 'failed', error: profile.installHint ?? 'codebuddy executable not found in PATH or settings' };
+    }
+
+    const prepared = await this.host.prepareBackendLaunch?.(profile).catch(() => undefined);
+    const projection = new CodebuddySessionProjection(req.projectPath);
+    let sessionId: string | undefined;
+    let notifiedHidden = false;
+    let resolveTurnDone: (() => void) | undefined;
+    let rejectTurnDone: ((err: Error) => void) | undefined;
+    const turnDone = new Promise<void>((resolveP, rejectP) => {
+      resolveTurnDone = resolveP;
+      rejectTurnDone = rejectP;
+    });
+
+    const runAbort = new AbortController();
+    const timeout = setTimeout(
+      () => runAbort.abort(new Error('Scheduled task timed out')),
+      req.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+    const onExternalAbort = () => runAbort.abort(req.signal?.reason ?? new Error('Aborted'));
+    req.signal?.addEventListener('abort', onExternalAbort, { once: true });
+
+    const conn = new CodebuddyConnection({
+      command: located.command,
+      permissionMode: req.permission === 'read-only' ? 'plan' : 'default',
+      extraArgs: prepared?.extraArgs ?? [],
+      cwd: req.projectPath,
+      env: cfg.env,
+      log: this.host.log,
+      onStderr: (line) => this.host.runtimeLog?.(line, 'stderr'),
+      onEvent: (event) => {
+        const sid =
+          typeof event.session_id === 'string' && event.session_id
+            ? event.session_id
+            : typeof event.sessionId === 'string' && event.sessionId
+              ? event.sessionId
+              : undefined;
+        if (sid && !notifiedHidden) {
+          sessionId = sid;
+          notifiedHidden = true;
+          req.onSessionCreated(sid);
+        }
+        projection.applyEvent(event);
+        if (event.type === 'result') {
+          if (event.is_error === true || (typeof event.subtype === 'string' && event.subtype.startsWith('error'))) {
+            const errText =
+              typeof event.result === 'string' && event.result.trim() ? event.result.trim() : 'CodeBuddy turn failed';
+            rejectTurnDone?.(new Error(errText));
+          } else {
+            resolveTurnDone?.();
+          }
+        }
+      },
+      onControlRequest: async (_reqId, request) => {
+        if (request.subtype !== 'can_use_tool') return {};
+        return resolveCodebuddyUnattendedPermission(request, req.permission, req.projectPath);
+      },
+      onExit: (code, signal, stderr) => {
+        this.host.log(`定时 CodeBuddy 进程退出（${signal ?? code}）${stderr ? `：${stderr}` : ''}`);
+        rejectTurnDone?.(new Error(stderr || `CodeBuddy exited (${signal ?? code})`));
       },
     });
 
@@ -882,6 +1191,42 @@ function resolveClaudeUnattendedPermission(
     }
   }
   return { behavior: 'deny', message: `Denied by unattended schedule permission (${permission}).` };
+}
+
+function resolveCodebuddyUnattendedPermission(
+  request: Record<string, unknown>,
+  permission: SchedulePermissionPreset,
+  projectPath: string,
+): Record<string, unknown> {
+  const toolName =
+    typeof request.tool_name === 'string'
+      ? request.tool_name
+      : typeof request.toolName === 'string'
+        ? request.toolName
+        : 'tool';
+  const canon = canonicalTool(toolName);
+  if (canon === 'ask_user_question' || canon === 'exit_plan_mode') {
+    return { allowed: false, message: 'Unattended scheduled run cannot answer interactive questions.' };
+  }
+  const input = parseArguments(request.input);
+  if (permission === 'danger-full-access') {
+    return { allowed: true, updatedInput: input };
+  }
+  const variant = toolVariant(toolName);
+  if (variant === 'explore') {
+    return { allowed: true, updatedInput: input };
+  }
+  if (permission === 'workspace-write' && variant === 'edit') {
+    const target = inputFilePath(input);
+    if (target) {
+      const abs = isAbsolute(target) ? resolve(target) : resolve(projectPath, target);
+      const rel = relative(projectPath, abs);
+      if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) {
+        return { allowed: true, updatedInput: input };
+      }
+    }
+  }
+  return { allowed: false, message: `Denied by unattended schedule permission (${permission}).` };
 }
 
 function pickAcpModeValue(

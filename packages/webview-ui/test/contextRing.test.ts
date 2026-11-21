@@ -31,10 +31,11 @@ const detail: ContextDetail = {
 };
 
 describe('上下文圆环用量明细', () => {
-  it('无明细时保持纯展示圆环：title 提示、不弹浮层', () => {
+  it('无明细时保持纯展示标识：显示百分比、title 提示、不弹浮层', () => {
     render(createElement(ContextRing, { usage: 0.28, tokens: { used: 36_400, window: 128_000 } }));
     const ring = screen.getByTestId('context-ring');
     expect(ring.getAttribute('role')).toBe('img');
+    expect(ring.textContent).toContain('28%');
     expect(ring.getAttribute('title')).toContain('28%');
     expect(screen.queryByTestId('context-detail')).toBeNull();
   });
@@ -53,6 +54,22 @@ describe('上下文圆环用量明细', () => {
     expect(body.textContent).toContain('输出');
     expect(body.textContent).toContain('36.4k / 128.0k tokens');
     expect(screen.getByTestId('context-detail-cost').textContent).toBe('$1.28');
+  });
+
+  it('首轮请求与会话累计一致时自动去重，只展示一节明细', () => {
+    const single: ContextDetail = {
+      lastRequest: { input: 142_000, output: 2_500, cacheRead: 405_300, cacheWrite: 0, reasoning: 672 },
+      session: { input: 142_000, output: 2_500, cacheRead: 405_300, cacheWrite: 0, reasoning: 672 },
+      requests: 1,
+    };
+    render(createElement(ContextRing, { usage: 0.15, tokens: { used: 156_900, window: 1_000_000 }, detail: single }));
+    fireEvent.click(screen.getByTestId('context-ring'));
+
+    const body = screen.getByTestId('context-detail');
+    expect(body.textContent).not.toContain('最近一次请求');
+    expect(body.textContent).toContain('本会话累计');
+    expect(body.textContent).toContain('1 次请求');
+    expect(body.textContent).toContain('其中推理 672');
   });
 
   it('悬停 250ms 后自动弹出明细浮层', async () => {

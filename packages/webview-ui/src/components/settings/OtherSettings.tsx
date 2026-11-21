@@ -21,6 +21,8 @@ const DEFAULT_ADVANCED: AdvancedPreferences = {
   zcodePath: '',
   claudePath: '',
   piPath: '',
+  codexPath: '',
+  codebuddyPath: '',
   backendTrace: false,
 };
 
@@ -88,6 +90,8 @@ export function AdvancedSettings() {
   const [zcodePath, setZcodePath] = useState(advanced.zcodePath ?? '');
   const [claudePath, setClaudePath] = useState(advanced.claudePath ?? '');
   const [piPath, setPiPath] = useState(advanced.piPath ?? '');
+  const [codexPath, setCodexPath] = useState(advanced.codexPath ?? '');
+  const [codebuddyPath, setCodebuddyPath] = useState(advanced.codebuddyPath ?? '');
 
   useEffect(() => {
     setDshPath(advanced.dshPath);
@@ -95,7 +99,9 @@ export function AdvancedSettings() {
     setZcodePath(advanced.zcodePath ?? '');
     setClaudePath(advanced.claudePath ?? '');
     setPiPath(advanced.piPath ?? '');
-  }, [advanced.dshPath, advanced.dshProfile, advanced.zcodePath, advanced.claudePath, advanced.piPath]);
+    setCodexPath(advanced.codexPath ?? '');
+    setCodebuddyPath(advanced.codebuddyPath ?? '');
+  }, [advanced.dshPath, advanced.dshProfile, advanced.zcodePath, advanced.claudePath, advanced.piPath, advanced.codexPath, advanced.codebuddyPath]);
 
   const updateAdvanced = (patch: Partial<AdvancedPreferences>) => {
     const nextAdvanced: AdvancedPreferences = { ...advanced, ...patch };
@@ -196,6 +202,34 @@ export function AdvancedSettings() {
             onChange={(e) => setPiPath(e.target.value)}
             onBlur={() => piPath.trim() !== (advanced.piPath ?? '') && updateAdvanced({ piPath: piPath.trim() })}
             onKeyDown={(e) => e.key === 'Enter' && updateAdvanced({ piPath: piPath.trim() })}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codexPath')}</span>
+          <Input
+            size="default"
+            data-testid="adv-codex-path"
+            className="font-mono text-[12px]"
+            value={codexPath}
+            placeholder={t('settings.advanced.codexPathPlaceholder')}
+            onChange={(e) => setCodexPath(e.target.value)}
+            onBlur={() => codexPath.trim() !== (advanced.codexPath ?? '') && updateAdvanced({ codexPath: codexPath.trim() })}
+            onKeyDown={(e) => e.key === 'Enter' && updateAdvanced({ codexPath: codexPath.trim() })}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codebuddyPath')}</span>
+          <Input
+            size="default"
+            data-testid="adv-codebuddy-path"
+            className="font-mono text-[12px]"
+            value={codebuddyPath}
+            placeholder={t('settings.advanced.codebuddyPathPlaceholder')}
+            onChange={(e) => setCodebuddyPath(e.target.value)}
+            onBlur={() => codebuddyPath.trim() !== (advanced.codebuddyPath ?? '') && updateAdvanced({ codebuddyPath: codebuddyPath.trim() })}
+            onKeyDown={(e) => e.key === 'Enter' && updateAdvanced({ codebuddyPath: codebuddyPath.trim() })}
           />
         </label>
 

@@ -77,6 +77,7 @@ describe('Claude 底层', () => {
       'pi',
       'codebuddy',
       'claude',
+      'codex',
       'opencode',
       'antigravity',
       'zcode',

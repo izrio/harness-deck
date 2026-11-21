@@ -282,6 +282,8 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
           zcodePath: z.string().max(1_000).optional(),
           claudePath: z.string().max(1_000).optional(),
           piPath: z.string().max(1_000).optional(),
+          codexPath: z.string().max(1_000).optional(),
+          codebuddyPath: z.string().max(1_000).optional(),
           backendTrace: z.boolean().optional(),
         })
         .optional(),

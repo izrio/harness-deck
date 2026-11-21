@@ -7,6 +7,7 @@ export const FALLBACK_BACKENDS: readonly Pick<BackendView, 'id' | 'name'>[] = [
   { id: 'pi', name: 'Pi' },
   { id: 'codebuddy', name: 'CodeBuddy' },
   { id: 'claude', name: 'Claude Code' },
+  { id: 'codex', name: 'Codex' },
   { id: 'opencode', name: 'OpenCode' },
   { id: 'antigravity', name: 'Antigravity' },
 ];

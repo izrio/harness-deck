@@ -66,6 +66,23 @@ const PI: BackendCapabilities = { ...BASIC, steer: true };
 /** Claude Code：原生 stream-json，可查订阅额度。 */
 const CLAUDE: BackendCapabilities = { ...BASIC, protocols: ANTHROPIC_ONLY, quota: 'claude' };
 
+/** Codex：原生 app-server，支持 OpenAI Responses/Chat、运行中插队、提问卡片与子代理调用。 */
+const CODEX: BackendCapabilities = {
+  ...BASIC,
+  protocols: OPENAI_RESPONSES_CHAT,
+  steer: true,
+  questions: true,
+  subagents: true,
+};
+
+/** CodeBuddy：原生 stream-json，支持 OpenAI Chat、多会话并发、子代理调用与订阅额度。 */
+const CODEBUDDY: BackendCapabilities = {
+  ...BASIC,
+  protocols: OPENAI_CHAT,
+  quota: 'codebuddy',
+  subagents: true,
+};
+
 function baseFor(kind: string | undefined): BackendCapabilities {
   switch (kind) {
     case 'dsh':
@@ -76,6 +93,10 @@ function baseFor(kind: string | undefined): BackendCapabilities {
       return CLAUDE;
     case 'pi':
       return PI;
+    case 'codex':
+      return CODEX;
+    case 'codebuddy':
+      return CODEBUDDY;
     default:
       return BASIC;
   }
@@ -88,8 +109,9 @@ function protocolFor(input: BackendCapabilityInput): BackendProtocolCapability {
   if (input.kind === 'zcode' || id === 'zcode') return THREE_PROTOCOLS;
   if (input.kind === 'claude' || id === 'claude') return ANTHROPIC_ONLY;
   if (input.kind === 'pi' || id === 'pi' || id === 'oh-my-pi') return THREE_PROTOCOLS;
+  if (input.kind === 'codex' || id === 'codex') return OPENAI_RESPONSES_CHAT;
+  if (input.kind === 'codebuddy' || id === 'codebuddy') return OPENAI_CHAT;
   if (id === 'opencode') return THREE_PROTOCOLS;
-  if (id === 'codebuddy') return OPENAI_CHAT;
   if (id === 'antigravity') return ACCOUNT_ONLY;
 
   const hint = `${id} ${input.name ?? ''} ${input.executable ?? ''} ${input.command ?? ''}`.toLowerCase();
@@ -108,6 +130,7 @@ function commandBin(command: string | undefined): string {
 /** 哪些底层能查订阅额度：Claude、Antigravity、CodeBuddy（自定义 ACP 按命令名识别）。 */
 function quotaFor(input: BackendCapabilityInput): QuotaProviderId | undefined {
   if (input.kind === 'claude') return 'claude';
+  if (input.kind === 'codebuddy') return 'codebuddy';
   const id = input.id.toLowerCase();
   if (id === 'antigravity') return 'antigravity';
   if (id === 'codebuddy') return 'codebuddy';
@@ -123,7 +146,8 @@ const ID_OVERRIDES: Readonly<Record<string, Partial<BackendCapabilities>>> = {
   zcode: ZCODE,
   pi: PI,
   'oh-my-pi': PI,
-  codebuddy: { protocols: OPENAI_CHAT, quota: 'codebuddy' },
+  codex: CODEX,
+  codebuddy: CODEBUDDY,
   opencode: { protocols: THREE_PROTOCOLS },
   antigravity: { protocols: ACCOUNT_ONLY, quota: 'antigravity' },
 };

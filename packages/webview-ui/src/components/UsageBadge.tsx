@@ -98,7 +98,7 @@ function WindowBar({
   const barColor = severity === 'critical' ? 'text-red' : severity === 'warning' ? 'text-orange' : 'text-green';
   const reset = resetLabel(w.resetsAt, t);
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-0.5">
       <div className="flex items-baseline justify-between gap-2 text-[11.5px] leading-4">
         <span className="min-w-0 truncate text-ink-2">{title}</span>
         <span
@@ -117,7 +117,7 @@ function WindowBar({
           style={{ width: `${remaining}%` }}
         />
       </div>
-      {reset ? <div className="text-[11px] leading-4 text-ink-3">{t('usage.resets', reset)}</div> : null}
+      {reset ? <div className="text-[10.5px] leading-3.5 text-ink-3">{t('usage.resets', reset)}</div> : null}
     </div>
   );
 }
@@ -221,13 +221,13 @@ export function UsageBadge() {
         align="end"
         sideOffset={6}
         aria-label={t('usage.title')}
-        className="max-h-96 w-72 overflow-y-auto rounded-card p-0 shadow-raised"
+        className="max-h-[calc(var(--radix-popover-content-available-height)-8px)] w-72 overflow-y-auto rounded-card p-0 shadow-raised"
         data-testid="usage-popover"
         onOpenAutoFocus={(event) => event.preventDefault()}
         onPointerEnter={() => clearTimeout(closeTimer.current)}
         onPointerLeave={leave}
       >
-        <div className="flex flex-col gap-2.5 px-3 py-2.5">
+        <div className="flex flex-col gap-2 px-3 py-2.5">
           <div className="text-[12px] font-semibold leading-4 text-ink">{t('usage.title')}</div>
           {sections.map((section, index) => {
             if (section.type === 'single') {
@@ -240,7 +240,7 @@ export function UsageBadge() {
             return (
               <section
                 key={section.key}
-                className={cn('flex flex-col gap-1.5', index > 0 && 'border-t border-line pt-2')}
+                className={cn('flex flex-col gap-1', index > 0 && 'border-t border-line pt-1.5')}
               >
                 <div className="flex flex-col gap-0.5">
                   <div className="text-[11.5px] font-medium leading-4 text-ink">{poolName(section.label, t)}</div>

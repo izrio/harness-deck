@@ -107,28 +107,28 @@ describe('内置底层', () => {
       'pi',
       'codebuddy',
       'claude',
+      'codex',
       'opencode',
       'antigravity',
       'zcode',
       'gemini-cli',
     ]);
-    expect(builtins.find((p) => p.id === 'codebuddy')).toMatchObject({ command: 'codebuddy', args: ['--acp'], installHint: 'install codebuddy' });
+    expect(builtins.find((p) => p.id === 'codebuddy')).toMatchObject({ kind: 'codebuddy', installHint: 'install codebuddy', signInHint: 'install codebuddy-sign-in' });
   });
 
   it('设置里 id 相同的项替换内置 ACP 项，位置不变；没写安装提示时沿用内置的', () => {
-    const profiles = parseProfiles([{ id: 'codebuddy', name: 'CodeBuddy', command: '/opt/cb/bin/codebuddy', args: ['--acp'], env: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' } }], undefined, builtins);
-    expect(profiles.map((p) => p.id)).toEqual(['dsh', 'pi', 'codebuddy', 'claude', 'opencode', 'antigravity', 'zcode']);
-    expect(profiles[2]).toMatchObject({ command: '/opt/cb/bin/codebuddy', env: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' }, installHint: 'install codebuddy' });
+    const profiles = parseProfiles([{ id: 'opencode', name: 'OpenCode', command: '/opt/oc/bin/opencode', args: ['acp'], env: { FOO: '1' } }], undefined, builtins);
+    expect(profiles.map((p) => p.id)).toEqual(['dsh', 'pi', 'codebuddy', 'claude', 'codex', 'opencode', 'antigravity', 'zcode']);
+    expect(profiles[5]).toMatchObject({ command: '/opt/oc/bin/opencode', env: { FOO: '1' }, installHint: 'install opencode' });
   });
 
-  it('CodeBuddy 是单会话代理；覆盖命令路径时保留，明确写 false 时关闭', () => {
-    const cb = builtins.find((p) => p.id === 'codebuddy');
-    const oc = builtins.find((p) => p.id === 'opencode');
-    expect(cb?.kind === 'acp' ? cb.singleSession : undefined).toBe(true);
-    expect(oc?.kind === 'acp' ? oc.singleSession : undefined).toBeUndefined();
-    const kept = parseProfiles([{ id: 'codebuddy', name: 'CodeBuddy', command: 'cb' }], undefined, builtins)[2];
-    expect(kept).toMatchObject({ command: 'cb', singleSession: true });
-    const off = parseProfiles([{ id: 'codebuddy', name: 'CodeBuddy', command: 'cb', singleSession: false }], undefined, builtins)[2];
+  it('内置单会话 ACP 代理在覆盖命令路径时保留 singleSession，明确写 false 时关闭', () => {
+    const singleBuiltin = [
+      { id: 'legacy-acp', kind: 'acp' as const, name: 'Legacy', command: 'legacy', args: ['--acp'], env: {}, singleSession: true },
+    ];
+    const kept = parseProfiles([{ id: 'legacy-acp', name: 'Legacy', command: '/opt/legacy' }], undefined, singleBuiltin)[1];
+    expect(kept).toMatchObject({ command: '/opt/legacy', singleSession: true });
+    const off = parseProfiles([{ id: 'legacy-acp', name: 'Legacy', command: '/opt/legacy', singleSession: false }], undefined, singleBuiltin)[1];
     expect(off).toMatchObject({ singleSession: false });
   });
 });

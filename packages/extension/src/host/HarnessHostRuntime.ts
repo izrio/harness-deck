@@ -38,6 +38,8 @@ import {
 import { createAcpBackend } from '../backend/acp.ts';
 import { parseAcpRegistry } from '../backend/acpRegistry.ts';
 import { createClaudeBackend } from '../backend/claude.ts';
+import { createCodebuddyBackend } from '../backend/codebuddy.ts';
+import { createCodexBackend } from '../backend/codex.ts';
 import { createDshBackend } from '../backend/dsh.ts';
 import {
   BACKEND_ENV_CACHE_KEY,
@@ -73,6 +75,8 @@ import {
 import type { BackendProfile, RunningBackend } from '../backend/types.ts';
 import { createZcodeBackend } from '../backend/zcode.ts';
 import { locateClaude } from '../claude/locate.ts';
+import { locateCodebuddy } from '../codebuddy/locate.ts';
+import { locateCodex } from '../codex/locate.ts';
 import { parseMcpConfigFileContent, scanAgentMcpConfigs } from '../extensions/mcpImporter.ts';
 import {
   backendExtensionsSignature,
@@ -141,9 +145,12 @@ const LEGACY_BACKEND_KEY = 'dsh.backend';
 const BUILTIN_HINTS: Readonly<Record<BuiltinHintId, HostMessageKey>> = {
   pi: 'pi.hint',
   'pi-sign-in': 'pi.signIn',
-  codebuddy: 'acp.codebuddyHint',
+  codebuddy: 'codebuddy.hint',
+  'codebuddy-sign-in': 'codebuddy.signIn',
   claude: 'claude.hint',
   'claude-sign-in': 'claude.signIn',
+  codex: 'codex.hint',
+  'codex-sign-in': 'codex.signIn',
   opencode: 'acp.opencodeHint',
   'opencode-sign-in': 'acp.opencodeSignIn',
   antigravity: 'acp.antigravityHint',
@@ -499,7 +506,7 @@ export function createHarnessHostRuntime(
     const overriddenIds = new Set(
       customParsed
         .map((p) => p.id)
-        .filter((id) => id !== DSH_PROFILE.id && id !== 'zcode' && id !== 'claude' && id !== 'pi' && builtinIds.has(id)),
+        .filter((id) => id !== DSH_PROFILE.id && id !== 'zcode' && id !== 'claude' && id !== 'pi' && id !== 'codex' && id !== 'codebuddy' && builtinIds.has(id)),
     );
     return {
       items: profiles().map((p) => {
@@ -586,6 +593,8 @@ export function createHarnessHostRuntime(
     zcodePath: platform.settings.get<string>('zcode.path', ''),
     claudePath: platform.settings.get<string>('claude.path', ''),
     piPath: platform.settings.get<string>('pi.path', ''),
+    codexPath: platform.settings.get<string>('codex.path', ''),
+    codebuddyPath: platform.settings.get<string>('codebuddy.path', ''),
     backendTrace: platform.settings.get<boolean>('backendTrace', false),
   });
 
@@ -874,6 +883,8 @@ export function createHarnessHostRuntime(
         const zcodePath = platform.settings.get<string>('zcode.path', '');
         const claudePath = platform.settings.get<string>('claude.path', '');
         const piPath = platform.settings.get<string>('pi.path', '');
+        const codexPath = platform.settings.get<string>('codex.path', '');
+        const codebuddyPath = platform.settings.get<string>('codebuddy.path', '');
         const detected = await detectNodeEnv({ env: processEnv(), platform: osPlatform });
         nodeEnv = detected.state;
         npmCommand = detected.npmCommand;
@@ -884,7 +895,7 @@ export function createHarnessHostRuntime(
 
         await Promise.all(
           profiles().map(async (p) => {
-            const cmdSpec = commandSpecForProfile(p, dshPath, zcodePath, claudePath, piPath);
+            const cmdSpec = commandSpecForProfile(p, dshPath, zcodePath, claudePath, piPath, codexPath, codebuddyPath);
             let isAvailable = false;
             let resolvedTarget: string | undefined;
             let isZcodeScript = false;
@@ -920,6 +931,26 @@ export function createHarnessHostRuntime(
             } else if (p.kind === 'pi') {
               const located = await locatePi({
                 configuredPath: piPath,
+                env: processEnv(),
+                platform: osPlatform,
+              });
+              if (located.kind === 'found') {
+                isAvailable = true;
+                resolvedTarget = located.command;
+              }
+            } else if (p.kind === 'codex') {
+              const located = await locateCodex({
+                configuredPath: codexPath,
+                env: processEnv(),
+                platform: osPlatform,
+              });
+              if (located.kind === 'found') {
+                isAvailable = true;
+                resolvedTarget = located.command;
+              }
+            } else if (p.kind === 'codebuddy') {
+              const located = await locateCodebuddy({
+                configuredPath: codebuddyPath,
                 env: processEnv(),
                 platform: osPlatform,
               });
@@ -964,6 +995,8 @@ export function createHarnessHostRuntime(
               (p.kind === 'dsh' ||
                 p.kind === 'claude' ||
                 p.kind === 'pi' ||
+                p.kind === 'codex' ||
+                p.kind === 'codebuddy' ||
                 p.id === 'antigravity' ||
                 (p.kind === 'zcode' && !isZcodeScript))
             ) {
@@ -1083,6 +1116,12 @@ export function createHarnessHostRuntime(
       }
       if (patch.advanced.piPath !== undefined) {
         await writeSetting('pi', 'path', patch.advanced.piPath.trim() || undefined);
+      }
+      if (patch.advanced.codexPath !== undefined) {
+        await writeSetting('codex', 'path', patch.advanced.codexPath.trim() || undefined);
+      }
+      if (patch.advanced.codebuddyPath !== undefined) {
+        await writeSetting('codebuddy', 'path', patch.advanced.codebuddyPath.trim() || undefined);
       }
       if (patch.advanced.backendTrace !== undefined) {
         await writeSetting(undefined, 'backendTrace', patch.advanced.backendTrace);
@@ -1387,6 +1426,8 @@ export function createHarnessHostRuntime(
     if (profile.kind === 'zcode') return createZcodeBackend(profile, profileHost);
     if (profile.kind === 'claude') return createClaudeBackend(profile, profileHost);
     if (profile.kind === 'pi') return createPiBackend(profile, profileHost);
+    if (profile.kind === 'codex') return createCodexBackend(profile, profileHost);
+    if (profile.kind === 'codebuddy') return createCodebuddyBackend(profile, profileHost);
     return createAcpBackend(profile, profileHost);
   };
 
@@ -1856,6 +1897,14 @@ export function createHarnessHostRuntime(
       configuredPath: platform.settings.get<string>('pi.path', ''),
       env: processEnv(),
     }),
+    getCodexConfig: () => ({
+      configuredPath: platform.settings.get<string>('codex.path', ''),
+      env: processEnv(),
+    }),
+    getCodebuddyConfig: () => ({
+      configuredPath: platform.settings.get<string>('codebuddy.path', ''),
+      env: processEnv(),
+    }),
     getEnvForProfile: (profileEnv) => processEnv(profileEnv),
     prepareBackendLaunch: (targetProfile) =>
       prepareBackendLaunch({
@@ -1980,6 +2029,14 @@ export function createHarnessHostRuntime(
         log('Pi 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
         pushPreferences();
       }
+      if (affects('codex')) {
+        log('Codex 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        pushPreferences();
+      }
+      if (affects('codebuddy')) {
+        log('CodeBuddy 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        pushPreferences();
+      }
       if (affects('defaultBackend')) {
         const configured = platform.settings.get<string>('defaultBackend', '').trim();
         if (configured) {
@@ -2041,7 +2098,7 @@ export function createHarnessHostRuntime(
         pushUnifiedTabs();
         void checkAvailability();
       }
-      if (affects('dsh.path') || affects('zcode.path') || affects('claude.path') || affects('pi.path')) {
+      if (affects('dsh.path') || affects('zcode.path') || affects('claude.path') || affects('pi.path') || affects('codex.path') || affects('codebuddy.path')) {
         void checkAvailability();
       }
       if (affects('context')) {
@@ -2884,6 +2941,8 @@ export function createHarnessHostRuntime(
       const zcodePath = platform.settings.get<string>('zcode.path', '');
       const claudePath = platform.settings.get<string>('claude.path', '');
       const piPath = platform.settings.get<string>('pi.path', '');
+      const codexPath = platform.settings.get<string>('codex.path', '');
+      const codebuddyPath = platform.settings.get<string>('codebuddy.path', '');
       if (
         !isBackendEnvCacheComplete(
           { nodeEnv, availability, executables: cachedExecutables },
@@ -2892,6 +2951,8 @@ export function createHarnessHostRuntime(
           zcodePath,
           claudePath,
           piPath,
+          codexPath,
+          codebuddyPath,
         )
       ) {
         void checkAvailability();
@@ -2948,7 +3009,11 @@ export function createHarnessHostRuntime(
                     ? 'pi --mode rpc'
                     : p.kind === 'zcode'
                       ? 'zcode app-server'
-                      : `ACP · ${p.command}`,
+                      : p.kind === 'codex'
+                        ? 'codex app-server'
+                        : p.kind === 'codebuddy'
+                          ? 'codebuddy -p'
+                          : `ACP · ${p.command}`,
             picked: p.id === active?.backend.profile.id,
           })),
           { placeHolder: t('ext.selectBackend') },

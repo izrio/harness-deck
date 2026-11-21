@@ -23,6 +23,8 @@ const GLOBAL_ONLY_SETTINGS = new Set([
   'zcode.path',
   'claude.path',
   'pi.path',
+  'codex.path',
+  'codebuddy.path',
   'chatCommands',
 ]);
 
@@ -37,6 +39,10 @@ const WATCHED_SETTING_KEYS = [
   'claude.path',
   'pi',
   'pi.path',
+  'codex',
+  'codex.path',
+  'codebuddy',
+  'codebuddy.path',
   'backends',
   'acpRegistryUrl',
   'context',

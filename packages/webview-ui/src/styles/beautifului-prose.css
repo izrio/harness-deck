@@ -223,38 +223,6 @@ button.inline-code--link:hover {
   display: none;
 }
 
-/* ---------- Context ring ---------- */
-
-.context-ring {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--ink-3);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.context-ring__track {
-  stroke: var(--line-strong);
-}
-
-.context-ring__value {
-  stroke: var(--accent);
-  transition: stroke-dasharray 0.3s ease;
-}
-
-.context-ring--medium .context-ring__value {
-  stroke: var(--orange);
-}
-
-.context-ring--high .context-ring__value {
-  stroke: var(--red);
-}
-
-.context-ring--high {
-  color: var(--red);
-}
-
 /* ---------- Composer resize handle ---------- */
 
 .composer__resize {

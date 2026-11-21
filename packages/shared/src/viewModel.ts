@@ -472,14 +472,14 @@ export interface BackendCapabilities {
 }
 
 /**
- * 底层：内置原生接入的 DeepSeek (dsh)、Claude Code (`claude -p`)、Pi (`pi --mode rpc`)、ZCode (`zcode app-server --stdio`)，
- * 或通过 ACP（Agent Client Protocol）接入的编程代理（如 CodeBuddy、OpenCode）。
+ * 底层：内置原生接入的 DeepSeek (dsh)、Claude Code (`claude -p`)、Codex (`codex app-server`)、CodeBuddy (`codebuddy -p`)、Pi (`pi --mode rpc`)、ZCode (`zcode app-server --stdio`)，
+ * 或通过 ACP（Agent Client Protocol）接入的编程代理（如 OpenCode、Antigravity）。
  * 设置里可以配多个，界面上随时切换。
  */
 export interface BackendView {
   readonly id: string;
   readonly name: string;
-  readonly kind: 'dsh' | 'zcode' | 'claude' | 'pi' | 'acp';
+  readonly kind: 'dsh' | 'zcode' | 'claude' | 'pi' | 'codex' | 'codebuddy' | 'acp';
   /** 接入协议；与 kind 相同，独出来为后续多账号实例做准备。 */
   readonly driver?: string;
   /** 账号实例标识；旧数据没有时回退到 id。 */
@@ -596,6 +596,8 @@ export interface AdvancedPreferences {
   readonly zcodePath?: string;
   readonly claudePath?: string;
   readonly piPath?: string;
+  readonly codexPath?: string;
+  readonly codebuddyPath?: string;
   readonly backendTrace: boolean;
 }
 

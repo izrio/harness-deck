@@ -8,7 +8,7 @@ describe('README 能力矩阵', () => {
   it('覆盖所有内置底层', () => {
     const section = readme.split('### 不同底层的差别')[1] ?? '';
     const header = section.split('\n').find((line) => line.startsWith('| 功能')) ?? '';
-    for (const name of ['DeepSeek', 'Pi', 'ZCode', 'Claude', 'ACP']) {
+    for (const name of ['DeepSeek', 'Pi', 'ZCode', 'Claude', 'Codex', 'CodeBuddy', 'ACP']) {
       expect(header).toContain(name);
     }
     for (const profile of builtinProfiles(() => 'hint')) {

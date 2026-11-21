@@ -12,8 +12,9 @@ const acp = (command: string): BackendProfile => ({
 });
 
 describe('订阅额度提供方分发', () => {
-  it('Claude profile 直接用 claude 服务', () => {
+  it('Claude 与原生 CodeBuddy profile 直接映射到对应服务', () => {
     expect(quotaProviderFor({ id: 'claude', kind: 'claude', name: 'Claude Code' })).toBe('claude');
+    expect(quotaProviderFor({ id: 'codebuddy', kind: 'codebuddy', name: 'CodeBuddy' })).toBe('codebuddy');
   });
 
   it('ACP 按启动命令识别 Antigravity，包含绝对路径', () => {

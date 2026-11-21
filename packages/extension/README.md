@@ -8,9 +8,11 @@
 
 - **DeepSeek**（原生，即 dsh）：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。功能最全，会话和 dsh Web UI、DeepSeek Desktop 共用。
 - **Claude Code**（原生）：Anthropic [Claude Code](https://docs.anthropic.com/en/docs/claude-code)（以 `claude -p` 双向 `stream-json` 原生对接），与终端 Claude Code 共用登录与 `~/.claude/projects` 历史会话。
+- **Codex**（原生）：OpenAI [Codex](https://developers.openai.com/codex)（以 `codex app-server` 双向 JSON-RPC 原生对接），支持模型与推理等级切换、运行中插队、提问卡片与子代理，与终端 Codex 共用登录与历史会话。
+- **CodeBuddy**（原生）：腾讯 [CodeBuddy](https://www.codebuddy.ai/cli)（以 `codebuddy -p` 双向 `stream-json` 原生对接），支持多标签并发运行、子代理、订阅额度与 `~/.codebuddy/projects` 本地历史会话。
 - **Pi**（原生）：[Pi Coding Agent](https://pi.dev)（以 `pi --mode rpc` 原生对接），支持多家模型提供方、思考档位与运行中 `steer` 插队。
 - **ZCode**（原生）：智谱 [ZCode](https://zcode.z.ai/)（`zcode app-server --stdio` 原生对接），支持逐字流式、推理、工具行、审批、提问卡片与消息插队。
-- **ACP 代理**：任何支持 [Agent Client Protocol](https://agentclientprotocol.com) 的代理。内置了 [OpenCode](https://opencode.ai)（`opencode acp`）与腾讯 [CodeBuddy](https://www.codebuddy.ai/cli)（`codebuddy --acp`），也可以自己加（例如 Gemini CLI）。
+- **ACP 代理**：任何支持 [Agent Client Protocol](https://agentclientprotocol.com) 的代理。内置了 [OpenCode](https://opencode.ai)（`opencode acp`）与 Google Antigravity（`agy acp`），也可以自己加（例如 Gemini CLI）。
 
 Agent 能力（读写文件、执行命令、审批、会话、模型）都由底层提供；插件负责启动和连接底层、显示界面，并补上 VS Code 的集成。这个插件以前叫 **DSH Copilot**。
 
@@ -35,15 +37,21 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 
 **用 CodeBuddy**
 
-1. 执行 `npm install -g @tencent-ai/codebuddy-code`，确认终端里 `codebuddy --version` 能运行。
-2. 在对话面板「…」→「底层」里选 **CodeBuddy**。第一次使用时会让你选登录方式（iOA、Google/GitHub、微信、企业域名），在打开的浏览器页面里完成登录；登录信息由 CodeBuddy 自己保存。也可以先在终端运行一次 `codebuddy` 登录。
-3. 不想用浏览器登录（例如远程开发时浏览器打不开），可以用 API Key：在 `harnessDeck.backends` 里覆盖内置的 CodeBuddy，通过 `env` 传 `CODEBUDDY_API_KEY`；中国版还要加 `CODEBUDDY_INTERNET_ENVIRONMENT: "internal"`（见 CodeBuddy 文档）。
+1. 执行 `npm install -g @tencent-ai/codebuddy-code`（或在设置页一键安装），确认终端里 `codebuddy --version` 能运行，也可在设置 `harnessDeck.codebuddy.path` 中指定路径。
+2. 在终端运行一次 `codebuddy` 完成账号登录（与终端共用凭证与 `~/.codebuddy/projects` 会话），或在插件「设置 → 服务商」里直接为 CodeBuddy 绑定 OpenAI Chat 兼容服务商。
+3. 在对话面板「设置 → 智能体」或「切换智能体」命令里选 **CodeBuddy**（插件以 `codebuddy -p` 原生流式 JSON 模式按会话独立运行，支持多标签并发）。
 
 **用 Claude Code**
 
 1. 执行 `npm install -g @anthropic-ai/claude-code`（或在设置页一键安装），确认终端里 `claude --version` 能运行，也可在设置 `harnessDeck.claude.path` 中指定路径。
 2. 在终端运行 `claude` 输入 `/login` 登录（与终端共用会话与凭证），或在插件「设置 → 服务商」里直接为 Claude Code 绑定服务商。
 3. 在对话面板「设置 → 智能体」或「切换智能体」命令里选 **Claude Code**（插件以 `claude -p` 流式 JSON 模式原生运行它）。
+
+**用 Codex**
+
+1. 执行 `npm install -g @openai/codex`（或在设置页一键安装），确认终端里 `codex --version` 能运行，也可在设置 `harnessDeck.codex.path` 中指定路径。
+2. 在终端运行 `codex login` 登录 ChatGPT 账号（与终端共用会话与凭证），或在插件「设置 → 服务商」里直接为 Codex 绑定 OpenAI Responses / Chat 兼容服务商。
+3. 在对话面板「设置 → 智能体」或「切换智能体」命令里选 **Codex**（插件以 `codex app-server` 原生运行它）。
 
 **用 OpenCode**
 
@@ -57,13 +65,12 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 2. 在 ZCode 桌面端或终端运行 `zcode` 登录智谱 BigModel / Z.ai Coding Plan 账号（凭证保存在 `~/.zcode`）。
 3. 在对话面板的设置页或「切换智能体」命令里选 **ZCode**。
 
-**其他 ACP 代理**：在设置 `harnessDeck.backends` 里加一项，写上名称和以 ACP 模式启动它的命令。`id` 和内置项相同（`oh-my-pi`、`codebuddy`）时替换内置项，例如写上完整路径或环境变量：
+**其他 ACP 代理**：在设置 `harnessDeck.backends` 里加一项，写上名称和以 ACP 模式启动它的命令。`id` 和内置 ACP 项相同（`opencode`、`antigravity`）时替换内置项，例如写上完整路径或环境变量：
 
 ```json
 "harnessDeck.backends": [
   { "name": "Gemini CLI", "command": "gemini", "args": ["--experimental-acp"] },
-  { "id": "codebuddy", "name": "CodeBuddy", "command": "codebuddy", "args": ["--acp"],
-    "env": { "CODEBUDDY_API_KEY": "…", "CODEBUDDY_INTERNET_ENVIRONMENT": "internal" } }
+  { "id": "opencode", "name": "OpenCode", "command": "/usr/local/bin/opencode", "args": ["acp"] }
 ]
 ```
 
@@ -85,31 +92,31 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 
 ### 不同底层的差别
 
-| 功能 | DeepSeek | Pi | ZCode | Claude | ACP（CodeBuddy / OpenCode / Antigravity） |
-| --- | --- | --- | --- | --- | --- |
-| 流式回复、推理、工具行、审批、待办、停止 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 文件修改的增删行数和 Diff | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 切换模型、思考等级、模式（计划模式） | ✅ | ✅ | ✅ | ✅ | ✅（视代理而定） |
-| 会话列表、重新打开历史会话 | ✅ | ✅ | ✅ | ✅ | ✅（CodeBuddy 的列表由插件记录） |
-| 图片 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 同时在几个会话里回复 | ✅ | ✅ | ✅ | ✅ | CodeBuddy 一次一个（见下） |
-| 多开标签（后台会话继续回复） | ✅ | ✅ | ✅ | ✅ | ✅（CodeBuddy 切标签发消息时重启一次） |
-| 会话改动栏（本会话改过的文件，点开看累计 Diff） | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 每轮改动汇总，以及命令（如 `sed`、脚本）造成的改动 | ✅ | — | — | — | — |
-| 消息插队 | ✅ | ✅ | ✅ | — | — |
-| 子代理卡片 | ✅ | — | — | — | — |
-| 提问卡片 | ✅ | — | ✅ | — | — |
-| `/goal` | ✅ | — | — | — | — |
-| 在浏览器打开底层 Web UI | ✅ | — | — | — | — |
-| 订阅额度 | — | — | — | ✅ | Antigravity、CodeBuddy |
-| 回合级回滚 | 文件（不回溯对话） | —（暂不支持） | —（暂不支持） | —（暂不支持） | —（暂不支持） |
-| 独立 worktree 会话 | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） |
+| 功能 | DeepSeek | Pi | ZCode | Claude | Codex | CodeBuddy | ACP（OpenCode / Antigravity） |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 流式回复、推理、工具行、审批、待办、停止 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 文件修改的增删行数和 Diff | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 切换模型、思考等级、模式（计划模式） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅（视代理而定） |
+| 会话列表、重新打开历史会话 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 图片 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 同时在几个会话里回复 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 多开标签（后台会话继续回复） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 会话改动栏（本会话改过的文件，点开看累计 Diff） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 每轮改动汇总，以及命令（如 `sed`、脚本）造成的改动 | ✅ | — | — | — | — | — | — |
+| 消息插队 | ✅ | ✅ | ✅ | — | ✅ | — | — |
+| 子代理卡片 | ✅ | — | — | — | ✅ | ✅ | — |
+| 提问卡片 | ✅ | — | ✅ | — | ✅ | — | — |
+| `/goal` | ✅ | — | — | — | — | — | — |
+| 在浏览器打开底层 Web UI | ✅ | — | — | — | — | — | — |
+| 订阅额度 | — | — | — | ✅ | — | ✅ | Antigravity |
+| 回合级回滚 | 文件（不回溯对话） | —（暂不支持） | —（暂不支持） | —（暂不支持） | —（暂不支持） | —（暂不支持） | —（暂不支持） |
+| 独立 worktree 会话 | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） | ✅（串行单工作区） |
 
 能力由 [`packages/shared/src/capabilities.ts`](../shared/src/capabilities.ts) 的能力描述符统一声明；界面只读描述符，不再按底层 id 判断。新增或调整底层能力时，先改描述符，再同步这张表。
 
 DeepSeek 的「恢复本轮文件」按记录的工具片段把最后一轮改过的文件写回本轮开始前；对话不会回退，操作前会弹窗确认，且不会覆盖有未保存内容的文件。其他底层暂不提供回合级回滚。
 
-CodeBuddy 的一个进程只给一个会话推送回复。回到别的会话发消息时，插件会重启 CodeBuddy 并重新加载那个会话（大约 2 秒）；一个会话正在回复时，要等它结束或先停止，才能在另一个会话里发送。
+CodeBuddy 通过原生 `codebuddy -p` 流式协议接入，按活跃会话独立运行子进程，支持多标签并发回复，并直接扫描 `~/.codebuddy/projects` 回放历史会话。
 
 OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号登录（不能绑定第三方服务商），并支持查询订阅额度。
 
@@ -117,9 +124,14 @@ OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号
 
 | 设置 | 默认 | 说明 |
 | --- | --- | --- |
-| `harnessDeck.backends` | 空 | 额外的 ACP 底层：`name`、`command`、`args`、`env`、`installHint`；`id` 与内置项（`oh-my-pi`、`codebuddy`、`claude`）相同时替换内置项 |
+| `harnessDeck.backends` | 空 | 额外的 ACP 底层：`name`、`command`、`args`、`env`、`installHint`；`id` 与内置 ACP 项（`opencode`、`antigravity`）相同时替换内置项 |
 | `harnessDeck.dsh.path` | 空 | dsh 可执行文件路径；为空时在 `PATH` 中查找 |
 | `harnessDeck.dsh.profile` | `web` | 启动 dsh 用的 profile，默认与你自己运行的 `dsh web` 共用设置 |
+| `harnessDeck.claude.path` | 空 | Claude Code（`claude`）可执行文件路径；为空时自动查找 |
+| `harnessDeck.codex.path` | 空 | OpenAI Codex（`codex`）可执行文件路径；为空时自动查找 |
+| `harnessDeck.codebuddy.path` | 空 | CodeBuddy（`codebuddy` / `cbc`）可执行文件路径；为空时自动查找 |
+| `harnessDeck.pi.path` | 空 | Pi（`pi`）可执行文件路径；为空时自动查找 |
+| `harnessDeck.zcode.path` | 空 | ZCode 可执行文件或 `zcode.cjs` 路径；为空时自动查找 |
 | `harnessDeck.context.includeActiveEditor` | `true` | 发送时默认附带当前编辑器 |
 | `harnessDeck.ui.language` | `auto` | 界面语言：跟随 VS Code，或固定 `zh` / `en` |
 | `harnessDeck.ui.fontSize` | `0` | 对话面板字号（px）；`0` 表示比 VS Code 工作台字号大 1px |
@@ -148,12 +160,20 @@ OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号
 
 ## English
 
-A VS Code chat panel for coding agents: streaming replies, compact tool rows, approvals, and VS Code diffs for every change. The agent behind the panel is switchable: **dsh** ([DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)), or any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) — [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp acp`), [CodeBuddy](https://www.codebuddy.ai/cli) (`codebuddy --acp`) and [Claude Code](https://github.com/agentclientprotocol/claude-agent-acp) (`claude-agent-acp`) are built in. Formerly **DSH Copilot**.
+A VS Code chat panel for coding agents: streaming replies, compact tool rows, approvals, questions, and VS Code diffs for every change. The agent behind the panel is switchable: native **DeepSeek** (`dsh`), **Claude Code** (`claude -p`), **Codex** (`codex app-server`), **CodeBuddy** (`codebuddy -p`), **Pi** (`pi --mode rpc`), and **ZCode** (`zcode app-server --stdio`), plus any [Agent Client Protocol](https://agentclientprotocol.com) (ACP) agent — **OpenCode** (`opencode acp`) and **Antigravity** (`agy acp`) are built in. Formerly **DSH Copilot**.
 
-**Setup**: for dsh, install it (DeepSeek Desktop → "Manage dsh command…", or `npm install -g @deepseek-ai/dsh`) and set the API key when asked. For oh-my-pi, install Bun ≥ 1.4.4, run `bun install -g @oh-my-pi/pi-coding-agent`, configure a model provider for omp, then pick **oh-my-pi** under "…" → Backend (or run "Harness Deck: Switch Backend"). For CodeBuddy, run `npm install -g @tencent-ai/codebuddy-code`, pick **CodeBuddy**, and choose a sign-in method when asked (finished in the browser); or pass `CODEBUDDY_API_KEY` through `env` by overriding the built-in entry (same `id`, `codebuddy`) in `harnessDeck.backends`. For Claude, run `npm install -g @agentclientprotocol/claude-agent-acp` (Node 22+), sign in with `claude` → `/login` (shared with Claude Code) or pass `ANTHROPIC_API_KEY` through `env` on an entry with `id` `claude`, then pick **Claude**. Add other ACP agents there too (`name`, `command`, `args`, `env`). The workspace must be trusted.
+**Setup**: install at least one backend (via npm or one-click install in Settings → Agents) and sign in with its CLI or bind a model provider in Settings → Providers:
 
-**Differences**: dsh supports everything; ACP backends cover streaming, tool rows, approvals, to-dos, stop, diffs, models and modes, session list and reload, and images when the agent offers them. Tabs and the session changes bar work on every backend (ACP backends count edits made by file tools). Per-turn change summaries, changes made by commands, steering, subagent cards, questions, `/goal` and the browser link are dsh-only. A CodeBuddy process streams to one session at a time: sending in another session restarts CodeBuddy and reloads that session (about 2 s), and while one session is replying you need to wait or stop it before sending elsewhere.
+- **DeepSeek (`dsh`)**: DeepSeek Desktop → "Manage dsh command…", or `npm install -g @deepseek-ai/dsh`.
+- **Claude Code**: `npm install -g @anthropic-ai/claude-code`, then `claude` → `/login` (or set `harnessDeck.claude.path`).
+- **Codex**: `npm install -g @openai/codex`, then `codex login` (or set `harnessDeck.codex.path`).
+- **CodeBuddy**: `npm install -g @tencent-ai/codebuddy-code`, then run `codebuddy` to sign in (or set `harnessDeck.codebuddy.path`). Runs natively via `codebuddy -p` with concurrent multi-session tabs and `~/.codebuddy/projects` history replay.
+- **Pi**: `npm install -g @earendil-works/pi-coding-agent`, then `pi` → `/login` (or set `harnessDeck.pi.path`).
+- **ZCode**: install ZCode Desktop or `npm install -g zcode-app-cli` (or set `harnessDeck.zcode.path`).
+- **ACP agents**: **OpenCode** (`npm install -g opencode-ai`) and **Antigravity** (`agy acp`) are built in; add more in `harnessDeck.backends` (`name`, `command`, `args`, `env`). The workspace must be trusted.
 
-**Settings** moved from `dsh.*` to `harnessDeck.*` (old values are migrated on first start): `harnessDeck.backends`, `harnessDeck.dsh.path`, `harnessDeck.dsh.profile`, `harnessDeck.context.includeActiveEditor`, `harnessDeck.ui.language`, `harnessDeck.ui.fontSize`, `harnessDeck.ui.fontFamily`, `harnessDeck.ui.codeFontFamily`, `harnessDeck.ui.showTurnChanges`.
+**Differences**: all backends support streaming, tool rows, approvals, to-dos, stop, diffs, models/modes, session history, concurrent multi-tab sessions, session changes bar, and serial worktree sessions. Message steering is supported on DeepSeek, Pi, ZCode, and Codex; subagent cards on DeepSeek, Codex, and CodeBuddy; question cards on DeepSeek, ZCode, and Codex; subscription quota on Claude Code, CodeBuddy, and Antigravity; per-turn file rollback, `/goal`, and the browser Web UI link are DeepSeek-only.
+
+**Settings**: `harnessDeck.backends`, `harnessDeck.dsh.path`, `harnessDeck.dsh.profile`, `harnessDeck.claude.path`, `harnessDeck.codex.path`, `harnessDeck.codebuddy.path`, `harnessDeck.pi.path`, `harnessDeck.zcode.path`, `harnessDeck.context.includeActiveEditor`, `harnessDeck.ui.language`, `harnessDeck.ui.fontSize`, `harnessDeck.ui.fontFamily`, `harnessDeck.ui.codeFontFamily`, `harnessDeck.ui.showTurnChanges`.
 
 **Privacy**: the extension itself makes no network requests; the backend makes all model requests. Only the context chips you see above the input box are attached to a message.

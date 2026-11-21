@@ -58,6 +58,8 @@ export function commandSpecForProfile(
   zcodeConfiguredPath = '',
   claudeConfiguredPath = '',
   piConfiguredPath = '',
+  codexConfiguredPath = '',
+  codebuddyConfiguredPath = '',
 ): string {
   if (profile.kind === 'dsh') {
     return `dsh::${dshConfiguredPath.trim()}`;
@@ -70,6 +72,12 @@ export function commandSpecForProfile(
   }
   if (profile.kind === 'pi') {
     return `pi::${piConfiguredPath.trim()}`;
+  }
+  if (profile.kind === 'codex') {
+    return `codex::${codexConfiguredPath.trim()}`;
+  }
+  if (profile.kind === 'codebuddy') {
+    return `codebuddy::${codebuddyConfiguredPath.trim()}`;
   }
   return `acp::${profile.command.trim()}`;
 }
@@ -179,6 +187,8 @@ export function isBackendEnvCacheComplete(
   zcodeConfiguredPath = '',
   claudeConfiguredPath = '',
   piConfiguredPath = '',
+  codexConfiguredPath = '',
+  codebuddyConfiguredPath = '',
 ): boolean {
   if (!state.nodeEnv.checked) return false;
   for (const profile of profiles) {
@@ -189,6 +199,8 @@ export function isBackendEnvCacheComplete(
       zcodeConfiguredPath,
       claudeConfiguredPath,
       piConfiguredPath,
+      codexConfiguredPath,
+      codebuddyConfiguredPath,
     );
     const cachedExec = state.executables.get(profile.id);
     if (cachedExec && cachedExec.commandSpec !== expectedSpec) return false;
