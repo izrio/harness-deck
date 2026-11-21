@@ -605,6 +605,7 @@ export class ChatController implements ChatBackendController {
       case 'runTaskNow':
       case 'startProjectSession':
       case 'openProjectSession':
+      case 'deleteProjectSession':
       case 'scanGitSkills':
       case 'installGitSkills':
       case 'updateSkill':

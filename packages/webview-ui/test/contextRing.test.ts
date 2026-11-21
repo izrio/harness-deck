@@ -31,13 +31,21 @@ const detail: ContextDetail = {
 };
 
 describe('上下文圆环用量明细', () => {
-  it('无明细时保持纯展示标识：显示百分比、title 提示、不弹浮层', () => {
-    render(createElement(ContextRing, { usage: 0.28, tokens: { used: 36_400, window: 128_000 } }));
+  it('仅有占比且无 tokens 与明细时保持纯展示标识：显示百分比、title 提示、不弹浮层', () => {
+    render(createElement(ContextRing, { usage: 0.28 }));
     const ring = screen.getByTestId('context-ring');
     expect(ring.getAttribute('role')).toBe('img');
     expect(ring.textContent).toContain('28%');
     expect(ring.getAttribute('title')).toContain('28%');
     expect(screen.queryByTestId('context-detail')).toBeNull();
+  });
+
+  it('仅有 tokens 无四段明细时仍可点击弹出上下文进度与 token 数浮窗', () => {
+    render(createElement(ContextRing, { usage: 0.28, tokens: { used: 36_400, window: 128_000 } }));
+    fireEvent.click(screen.getByTestId('context-ring'));
+    const body = screen.getByTestId('context-detail');
+    expect(body.textContent).toContain('28%');
+    expect(body.textContent).toContain('36.4k / 128.0k tokens');
   });
 
   it('点击圆环弹出明细：输入 / 缓存读写 / 输出、请求数与费用', () => {

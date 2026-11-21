@@ -13,13 +13,11 @@ import { cn } from '../lib/utils.ts';
 import { Completion, type CompletionItem } from './Completion.tsx';
 import { ContextChips } from './ContextChips.tsx';
 import { ContextRing } from './ContextRing.tsx';
-import { AgentIcon, ArrowUpIcon, CloseIcon, FileIcon, PlanIcon, PlusIcon, StopIcon } from './icons.tsx';
+import { AgentIcon, ArrowUpIcon, CloseIcon, PaperclipIcon, PlanIcon, StopIcon } from './icons.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { PermissionPicker } from './PermissionPicker.tsx';
 import { StatusDock } from './StatusDock.tsx';
 import { UsageBadge } from './UsageBadge.tsx';
-import { GlideMenu, MenuItem } from './beautifului/index.ts';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useT } from '../i18n.ts';
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
@@ -104,7 +102,6 @@ export function Composer() {
   const [toggledKey, setToggledKey] = useState<string | undefined>();
   const ref = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const [attachOpen, setAttachOpen] = useState(false);
   const [inputHeight, setInputHeight] = useState<number | undefined>(() => loadState().inputHeight);
 
   useEffect(() => {
@@ -401,7 +398,7 @@ export function Composer() {
         />
       ) : null}
       <div
-        className="composer relative mb-2.5 flex flex-col rounded-window bg-surface p-1.5 shadow-card transition-shadow duration-150 focus-within:shadow-[0_0_0_1px_var(--accent),var(--shadow-sm)]"
+        className="composer relative mb-2.5 flex flex-col rounded-window bg-surface p-1.5 shadow-card transition-shadow duration-150 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--ink)_24%,var(--line-strong)),var(--shadow-md)]"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes('Files')) event.preventDefault();
         }}
@@ -467,44 +464,17 @@ export function Composer() {
         />
         <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
           <div className="relative">
-            <Popover open={attachOpen} onOpenChange={setAttachOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  data-testid="composer-attach-btn"
-                  disabled={!connected || readOnly}
-                  aria-label={t('composer.attach')}
-                  title={t('composer.attach')}
-                  className={cn(
-                    'inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40',
-                    attachOpen && 'bg-field text-ink shadow-hairline',
-                  )}
-                >
-                  <PlusIcon className="size-4" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                side="top"
-                align="start"
-                sideOffset={6}
-                aria-label={t('composer.attach')}
-                className="w-44 min-w-[168px] rounded-card p-1 shadow-raised"
-              >
-                <div role="menu" data-testid="composer-attach-menu">
-                  <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
-                    <MenuItem
-                      icon={<FileIcon className="size-3.5" />}
-                      onSelect={() => {
-                        setAttachOpen(false);
-                        postToHost({ type: 'pickFiles', payload: {} });
-                      }}
-                    >
-                      {t('composer.attachFile')}
-                    </MenuItem>
-                  </GlideMenu>
-                </div>
-              </PopoverContent>
-            </Popover>
+            <button
+              type="button"
+              data-testid="composer-attach-btn"
+              disabled={!connected || readOnly}
+              aria-label={t('composer.attach')}
+              title={t('composer.attach')}
+              onClick={() => postToHost({ type: 'pickFiles', payload: {} })}
+              className="inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+            >
+              <PaperclipIcon className="size-4" />
+            </button>
             <input
               ref={imageInputRef}
               type="file"
@@ -520,7 +490,6 @@ export function Composer() {
             />
           </div>
           <ModelPicker disabled={!connected || readOnly} />
-          <PermissionPicker disabled={!connected || readOnly} />
           {session.planMode ? (
             <button
               type="button"
@@ -543,35 +512,36 @@ export function Composer() {
           ) : null}
           <UsageBadge />
           <span className="composer__spacer min-w-0 flex-1!" />
+          <PermissionPicker disabled={!connected || readOnly} />
           {showStop ? (
             <button
               type="button"
               className={cn(
-                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-[8px] transition-[background-color,color,transform] duration-150 active:scale-[0.95]',
-                showSend
-                  ? 'send-button--secondary bg-field text-ink shadow-hairline hover:bg-hover-2'
-                  : 'bg-ink text-surface hover:opacity-90',
+                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-full bg-red-tint text-red shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--red)_28%,transparent)] transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red hover:text-white active:scale-[0.94]',
+                showSend && 'send-button--secondary',
               )}
               onClick={() => postToHost({ type: 'interrupt', payload: {} })}
               aria-label={t('composer.stop')}
               title={t('composer.stopHint')}
             >
-              <StopIcon className="size-3.5" />
+              <StopIcon className="size-2.5" />
             </button>
           ) : null}
           {showSend ? (
             <button
               type="button"
               className={cn(
-                'send-button inline-flex size-7 items-center justify-center rounded-[8px] transition-[background-color,color,transform] duration-150 enabled:active:scale-[0.95] disabled:cursor-default',
-                canSend ? 'bg-ink text-surface hover:opacity-90' : 'bg-line-strong text-ink-2',
+                'send-button inline-flex size-7 items-center justify-center rounded-full transition-[background-color,color,box-shadow,transform,opacity] duration-150 enabled:active:scale-[0.94] disabled:cursor-default',
+                canSend
+                  ? 'bg-ink text-surface shadow-xs hover:opacity-88'
+                  : 'bg-field text-ink-3 shadow-hairline',
               )}
               disabled={!canSend}
               onClick={send}
               aria-label={t('composer.send')}
               title={t('composer.sendTitle')}
             >
-              <ArrowUpIcon className="size-4" />
+              <ArrowUpIcon className="size-3.5" strokeWidth={2.25} />
             </button>
           ) : null}
         </div>

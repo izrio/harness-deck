@@ -534,7 +534,7 @@ CRLF 文件先统一成 LF 计算，结果再转回 CRLF。增删行数用 jsdif
 
 - **技术栈**：React 19 + TypeScript + Vite + Tailwind CSS v4；状态用 `useSyncExternalStore` 自己管（Host 推送，Webview 只做按 id 的增量合并，不需要状态库）；Markdown 用 `react-markdown` + `remark-gfm`；代码高亮用 `shiki`（按需加载语言）
 - **组件库规范（仅限 `shadcn-ui` 与 `beautifului`，禁止新造组件）**：通用基础交互控件统一使用 `shadcn-ui`（`src/components/ui/`，通过 `shadcn` CLI 管理）；AI 对话专属组件使用 `beautifului`（`src/components/beautifului/` 及对话复合组件），严禁手写自造基础 UI 组件
-- **样式**：基于 `beautifului-foundation.css` 的浅/深主题与 5 套配色令牌（同时桥接 `shadcn-ui` 语义变量），遵循 [3.1](#31-界面设计原则) 的原则
+- **样式**：基于 `beautifului-foundation.css` 的浅/深主题令牌（同时桥接 `shadcn-ui` 语义变量），遵循 [3.1](#31-界面设计原则) 的原则
 - **主要组件**：
   - `Header`：会话标题（下拉切换会话、搜索）、新建、更多菜单
   - `Thread`：条目列表，屏幕外的条目用 `content-visibility: auto` 跳过布局和绘制（没有做虚拟列表），顶部有「加载更早的消息」
@@ -738,7 +738,6 @@ dsh 负责沙箱、审批和文件/命令边界，插件负责下面这些：
 | `harnessDeck.ui.fontSize` | number / `0` | 对话面板字号（px）；`0` 跟随 VS Code，比工作台字号大 1px |
 | `harnessDeck.ui.fontFamily` / `harnessDeck.ui.codeFontFamily` | string / `""` | 对话面板字体 / 代码与路径的字体；为空时跟随 VS Code。通过 `appearance` 消息下发，Webview 设置成 CSS 变量（`--hd-*`） |
 | `harnessDeck.ui.theme` | `system` / `light` / `dark`，默认 `system` | 界面主题模式 |
-| `harnessDeck.ui.colorScheme` | `slate` / `warm` / `forest` / `violet` / `rose`，默认 `slate` | 整套界面配色方案，随主题自动切换浅色与深色 |
 | `harnessDeck.ui.showTurnChanges` | boolean / `false` | 每轮结束时在对话流里显示改动汇总卡片（dsh） |
 
 ### 8.2 命令

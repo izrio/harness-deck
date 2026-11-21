@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { RuntimeStatus } from './runtime.ts';
-import { COLOR_SCHEMES, IMAGE_MEDIA_TYPES, MAX_IMAGE_BASE64, MAX_IMAGES, TASK_COLUMNS } from './limits.ts';
+import { IMAGE_MEDIA_TYPES, MAX_IMAGE_BASE64, MAX_IMAGES, TASK_COLUMNS } from './limits.ts';
 import type {
   AppearanceState,
   CommandView,
@@ -172,6 +172,13 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('activateTab'), payload: z.object({ key: z.string().min(1) }) }),
   /** 关闭标签只是不再显示，会话仍在 dsh 里，可以从会话列表重新打开。 */
   z.object({ type: z.literal('closeTab'), payload: z.object({ key: z.string().min(1) }) }),
+  /** 拖动标签调整顺序：把 `key` 移到标签列表的 `toIndex` 位置（越界时夹到首尾）。 */
+  z.object({ type: z.literal('moveTab'), payload: z.object({ key: z.string().min(1), toIndex: z.number().int().nonnegative() }) }),
+  /** 右键批量关闭：`scope` 相对 `key`，others 为除它以外的标签，left/right 为左侧/右侧，all 为全部。 */
+  z.object({
+    type: z.literal('closeTabs'),
+    payload: z.object({ key: z.string().min(1), scope: z.enum(['others', 'left', 'right', 'all']) }),
+  }),
   z.object({ type: z.literal('loadOlder'), payload: empty }),
   z.object({
     type: z.literal('selectModel'),
@@ -244,7 +251,6 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('setAppearance'),
     payload: z.object({
       theme: z.enum(['system', 'light', 'dark']).nullable().optional(),
-      colorScheme: z.enum(COLOR_SCHEMES).nullable().optional(),
       fontSize: z.number().int().min(8).max(32).nullable().optional(),
       fontFamily: z.string().max(500).nullable().optional(),
       lineHeight: z.number().min(1.2).max(2.4).nullable().optional(),
@@ -421,6 +427,14 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('openProjectSession'),
     payload: z.object({
       projectPath: z.string().min(1).max(4_096),
+      sessionId: z.string().min(1).max(500),
+      backendId: z.string().min(1).max(100).optional(),
+    }),
+  }),
+  /** 会话模块：从会话列表中删除条目（关闭其标签，不再显示；底层历史文件保留）。 */
+  z.object({
+    type: z.literal('deleteProjectSession'),
+    payload: z.object({
       sessionId: z.string().min(1).max(500),
       backendId: z.string().min(1).max(100).optional(),
     }),

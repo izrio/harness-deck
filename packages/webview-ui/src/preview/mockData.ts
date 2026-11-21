@@ -299,7 +299,7 @@ export function createInitialSessions(): Record<string, PreviewSessionData> {
             '已经为 `@harness-deck/webview-ui` 接好了**浏览器本地预览模式**（带热更新与交互式 Mock Host）。\n\n',
             '### 已包含的演示能力\n\n',
             '- **实时流式对话**：在下方输入框直接发消息，会模拟推理流（Thinking）、工具执行与 Markdown 代码块流式输出。\n',
-            '- **主题与配色实时切换**：点右上角设置 → 外观，可切换浅色/深色与 5 套整套配色（`slate` / `warm` / `forest` / `violet` / `rose`）。\n',
+            '- **主题实时切换**：点右上角设置 → 外观，可切换浅色 / 深色 / 跟随系统主题。\n',
             '- **工作台五大模块**：顶部可切换 **总览 / 定时 / 智能体 / 任务 / 会话**，支持新建任务、拖拽流转状态、编辑规则。\n\n',
             '```ts\n',
             'export function installPreviewBridge(): void {\n',
@@ -489,8 +489,8 @@ export function createInitialWorkbench(): WorkbenchState {
     },
     {
       id: 'task-2',
-      title: '核对 5 套配色方案在暗色模式下的对比度',
-      prompt: '依次切换 slate / warm / forest / violet / rose 检查气泡和表格可读性。',
+      title: '核对浅色与深色主题下的对比度',
+      prompt: '依次切换浅色与深色主题检查气泡和表格可读性。',
       status: 'todo',
       projectPath: PREVIEW_WORKSPACE_PATH,
       projectName: 'harness-deck',
@@ -568,7 +568,7 @@ export function createInitialWorkbench(): WorkbenchState {
       ],
       todos: [
         { id: 'todo-1', kind: 'agent-todo', content: '实现浏览器本地预览 Mock Host', status: 'in_progress', contextLabel: '浏览器本地预览模式调试', sessionId: 'session-preview-main', projectPath: PREVIEW_WORKSPACE_PATH, backendId: 'dsh' },
-        { id: 'todo-2', kind: 'kanban-todo', content: '核对 5 套配色方案在暗色模式下的对比度', status: 'pending', contextLabel: 'harness-deck', taskId: 'task-2' },
+        { id: 'todo-2', kind: 'kanban-todo', content: '核对浅色与深色主题下的对比度', status: 'pending', contextLabel: 'harness-deck', taskId: 'task-2' },
       ],
       running: [],
       upcoming: [

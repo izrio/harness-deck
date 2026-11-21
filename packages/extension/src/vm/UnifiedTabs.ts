@@ -8,6 +8,7 @@
  * - 每个标签归属一个智能体（`backendId`），可选关联一个会话（`sessionId`；`undefined` 表示新对话）；
  * - 同一 `(backendId, sessionId)` 不同时出现在两个标签里；
  * - 最多保留一个空的新对话标签：再点「新建」时切过去并更新为当前智能体；
+ * - 新开的标签一律追加到最右侧，已有标签的顺序只受拖动影响；
  * - 空的新对话标签上切换智能体时，就地更新该标签的 `backendId`，保留其他所有标签；
  * - 关掉最后一个标签时换成同智能体的新对话标签。
  */
@@ -49,6 +50,12 @@ export interface RestoreUnifiedTabsOptions {
 
 export interface CloseUnifiedTabResult {
   readonly closed: UnifiedTab;
+  readonly nextActive: UnifiedTab;
+  readonly activeChanged: boolean;
+}
+
+export interface CloseManyUnifiedTabsResult {
+  readonly closed: readonly UnifiedTab[];
   readonly nextActive: UnifiedTab;
   readonly activeChanged: boolean;
 }
@@ -210,7 +217,7 @@ export class UnifiedTabsModel {
     return { restoredFromPersisted: false };
   }
 
-  /** 新建对话标签：若已有空的新对话标签则切过去并设为目标智能体，否则在当前标签后插入新标签。 */
+  /** 新建对话标签：若已有空的新对话标签则切过去并设为目标智能体，否则追加到最右侧。 */
   openNew(backendId: string): UnifiedTab {
     const blank = this.tabs.find((tab) => !tab.sessionId);
     if (blank) {
@@ -224,11 +231,11 @@ export class UnifiedTabsModel {
       backendId,
       sessionId: undefined,
     };
-    this.insertAfterActive(created);
+    this.append(created);
     return created;
   }
 
-  /** 打开指定智能体的会话：已在标签里时切过去；当前为空标签时就地打开；否则在当前标签后新开。 */
+  /** 打开指定智能体的会话：已在标签里时切过去；当前为空标签时就地打开；否则追加到最右侧。 */
   open(backendId: string, sessionId: string, title?: string): UnifiedTab {
     const existing = this.tabs.find((tab) => tab.backendId === backendId && tab.sessionId === sessionId);
     if (existing) {
@@ -251,7 +258,7 @@ export class UnifiedTabsModel {
       sessionId,
       ...(title ? { cachedTitle: title } : {}),
     };
-    this.insertAfterActive(created);
+    this.append(created);
     return created;
   }
 
@@ -303,6 +310,56 @@ export class UnifiedTabsModel {
     }
     this.persist();
     return { closed: tab, nextActive: this.current!, activeChanged: false };
+  }
+
+  /** 拖动排序：把标签移到目标位置，越界时夹到首尾；顺序会写入持久化数据。 */
+  move(key: string, toIndex: number): boolean {
+    const from = this.tabs.findIndex((tab) => tab.key === key);
+    if (from < 0) return false;
+    const to = Math.max(0, Math.min(this.tabs.length - 1, toIndex));
+    if (from === to) return false;
+    const [tab] = this.tabs.splice(from, 1);
+    this.tabs.splice(to, 0, tab!);
+    this.persist();
+    return true;
+  }
+
+  /**
+   * 批量关闭标签（右键菜单的「关闭其他 / 关闭左侧 / 关闭右侧 / 关闭全部」）。
+   * 与单个关闭一致：活动标签被关掉时优先接管它右侧的标签，没有右侧时接管左侧；
+   * 全部关掉时补一个空的新对话标签。
+   */
+  closeMany(keys: readonly string[]): CloseManyUnifiedTabsResult | undefined {
+    const remove = new Set(keys);
+    const closed = this.tabs.filter((tab) => remove.has(tab.key));
+    if (closed.length === 0) return undefined;
+
+    const activeIndex = this.tabs.findIndex((tab) => tab.key === this.activeKey);
+    const activeChanged = remove.has(this.activeKey);
+    const survivorAfter = this.tabs.slice(activeIndex + 1).find((tab) => !remove.has(tab.key));
+    const survivorBefore = this.tabs
+      .slice(0, Math.max(activeIndex, 0))
+      .reverse()
+      .find((tab) => !remove.has(tab.key));
+
+    this.tabs = this.tabs.filter((tab) => !remove.has(tab.key));
+    if (this.tabs.length === 0) {
+      const replacement: UnifiedTab = {
+        key: this.nextKey(),
+        backendId: closed[closed.length - 1]!.backendId,
+        sessionId: undefined,
+      };
+      this.tabs = [replacement];
+      this.activeKey = replacement.key;
+      this.persist();
+      return { closed, nextActive: replacement, activeChanged: true };
+    }
+
+    if (activeChanged) {
+      this.activeKey = (survivorAfter ?? survivorBefore ?? this.tabs[0]!).key;
+    }
+    this.persist();
+    return { closed, nextActive: this.current!, activeChanged };
   }
 
   /** 当前标签发出首条消息后绑定到新创建的会话 id；若该会话已在其他标签则去重。 */
@@ -390,10 +447,9 @@ export class UnifiedTabsModel {
     return { items, active: this.activeKey };
   }
 
-  private insertAfterActive(tab: UnifiedTab): void {
-    const idx = this.tabs.findIndex((t) => t.key === this.activeKey);
-    const insertAt = idx >= 0 ? idx + 1 : this.tabs.length;
-    this.tabs.splice(insertAt, 0, tab);
+  /** 新开的标签一律追加到最右侧，不挤动已有标签的位置。 */
+  private append(tab: UnifiedTab): void {
+    this.tabs.push(tab);
     this.activeKey = tab.key;
     this.persist();
   }

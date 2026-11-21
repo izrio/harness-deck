@@ -45,6 +45,8 @@ export class ClaudeSessionProjection {
   private readonly messageUsage = new Map<string, Record<string, unknown>>();
   private currentMessageId?: string;
   private lastMessageId?: string;
+  private turnSeq = 0;
+  private turnRecordedUsage = false;
   /** `result.total_cost_usd` 是进程内累计值：记下上一次，进程重启（值变小）时重新累加。 */
   private lastResultCost?: number;
   private sessionCost?: number;
@@ -126,6 +128,8 @@ export class ClaudeSessionProjection {
     this.messageUsage.clear();
     this.currentMessageId = undefined;
     this.lastMessageId = undefined;
+    this.turnSeq = 0;
+    this.turnRecordedUsage = false;
     this.changed();
   }
 
@@ -156,6 +160,7 @@ export class ClaudeSessionProjection {
     }
     this.messageUsage.set(key, merged);
     this.lastMessageId = key;
+    this.turnRecordedUsage = true;
   }
 
   addUserMessage(text: string, images: readonly ImageView[] = []): void {
@@ -175,6 +180,8 @@ export class ClaudeSessionProjection {
     if (this.runningSince === undefined) this.runningSince = now;
     this.streamedText = false;
     this.streamedThinking = false;
+    this.turnSeq += 1;
+    this.turnRecordedUsage = false;
     this.changed();
   }
 
@@ -421,7 +428,12 @@ export class ClaudeSessionProjection {
 
       case 'result': {
         this.applyModelUsageWindow(raw.modelUsage);
-        if (raw.usage) this.applyUsageObject(raw.usage);
+        if (raw.usage) {
+          this.applyUsageObject(raw.usage);
+          if (!this.turnRecordedUsage) {
+            this.recordMessageUsage(`turn:${this.turnSeq}`, raw.usage);
+          }
+        }
         if (!isReplay && typeof raw.total_cost_usd === 'number' && Number.isFinite(raw.total_cost_usd) && raw.total_cost_usd >= 0) {
           const cost = raw.total_cost_usd;
           const prev = this.lastResultCost;

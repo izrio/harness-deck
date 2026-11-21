@@ -195,7 +195,7 @@ export class CodebuddyController implements ChatBackendController {
   private queueCounter = 0;
   private draftCounter = 0;
   private selectedModel: CodebuddyPreferredModel | undefined;
-  private draftMode = 'default';
+  private draftMode = 'auto';
   private discoveredModels: ModelOption[] = [];
   private discoveredDefaultModelId: string | undefined;
   private discoveredCommands: { readonly name: string; readonly description: string }[] = [];
@@ -897,7 +897,7 @@ export class CodebuddyController implements ChatBackendController {
     if (slash?.name === 'plan') {
       const currentMode = this.currentMode();
       const nextMode =
-        slash.args.trim() === 'off' ? 'default' : currentMode === 'plan' && !slash.args.trim() ? 'default' : 'plan';
+        slash.args.trim() === 'off' ? 'auto' : currentMode === 'plan' && !slash.args.trim() ? 'auto' : 'plan';
       await this.setMode(nextMode);
       return slash.args.trim() && slash.args.trim() !== 'off' ? this.send(slash.args, options) : true;
     }
@@ -930,7 +930,7 @@ export class CodebuddyController implements ChatBackendController {
       this.tabs.setCurrentSession(sessionKey);
       const proj = this.projectionFor(sessionKey);
       proj.title = (prompt || t('acp.image')).replace(/\s+/gu, ' ').trim().slice(0, MAX_TITLE);
-      if (this.draftMode !== 'default') proj.mode = this.draftMode;
+      proj.mode = this.draftMode;
     }
 
     this.editorContext.clearPinned();

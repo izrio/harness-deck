@@ -38,7 +38,7 @@
 - **禁止自造组件**：禁止手写自定义 `Modal`、`Popover`、`SidebarNav`、`FormControls`、`Stepper`、自定义 CSS 开关（如 `.bui-switch`）等基础控件，也禁止将手写组件冠以 `Beautiful UI` 或 `shadcn` 注释混入代码库。
 - **禁止向 `src/components/ui/` 手动添加非 `shadcn-ui` 官方组件文件**。
 - **业务视图只做组合**：`src/components/settings/*`、`src/components/workbench/*` 等业务模块只能组合 `shadcn-ui` 与 `beautifului` 已有组件实现业务布局，遇到缺失的通用交互原语请先从 `shadcn-ui` 安装。
-- **禁止硬编码颜色**：`shadcn-ui` 语义变量已与 `beautifului-foundation.css` 的浅/深模式及 5 套配色方案（`slate` / `warm` / `forest` / `violet` / `rose`）打通，请使用语义主题类名，禁止写死固定色值（色卡预览数据除外）。
+- **禁止硬编码颜色**：`shadcn-ui` 语义变量已与 `beautifului-foundation.css` 的浅/深模式打通，请使用语义主题类名，禁止写死固定色值（主题预览卡片数据除外）。
 
 ## 组件尺寸规范（统一 size，杜绝高低不齐）
 

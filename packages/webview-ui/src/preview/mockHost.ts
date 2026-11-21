@@ -100,7 +100,7 @@ function installMockHost(): void {
   let models: ModelState = PREVIEW_MODELS;
   let permissions: PermissionState = PREVIEW_PERMISSIONS;
   let preferences: PreferencesState = PREVIEW_PREFERENCES;
-  let appearance: AppearanceState = { theme: 'system', colorScheme: 'slate' };
+  let appearance: AppearanceState = { theme: 'system' };
   let locale: Locale = resolveLocale(preferences.language);
   let projects: ProjectsState = PREVIEW_PROJECTS;
   let workbench: WorkbenchState = createInitialWorkbench();
@@ -402,6 +402,52 @@ function installMockHost(): void {
         return;
       }
 
+      case 'moveTab': {
+        const from = tabs.findIndex((t) => t.key === message.payload.key);
+        if (from < 0) return;
+        const to = Math.max(0, Math.min(tabs.length - 1, message.payload.toIndex));
+        if (to === from) return;
+        const next = [...tabs];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved!);
+        tabs = next;
+        syncTabsAndList();
+        return;
+      }
+
+      case 'closeTabs': {
+        const index = tabs.findIndex((t) => t.key === message.payload.key);
+        if (index < 0) return;
+        const scope = message.payload.scope;
+        const keys = new Set(
+          tabs
+            .filter((_, i) => (scope === 'others' ? i !== index : scope === 'left' ? i < index : scope === 'right' ? i > index : true))
+            .map((t) => t.key),
+        );
+        tabs = tabs.filter((t) => !keys.has(t.key));
+        if (tabs.length === 0) {
+          const key = nextId('tab');
+          tabs = [
+            {
+              key,
+              backendId: backends.active,
+              backendName: backendNameOf(backends.active),
+              title: locale === 'zh' ? '新对话' : 'New chat',
+              running: false,
+            },
+          ];
+        }
+        if (!tabs.some((t) => t.key === activeTabKey)) activeTabKey = tabs[tabs.length - 1]!.key;
+        const nextActive = tabs.find((t) => t.key === activeTabKey);
+        if (nextActive?.backendId && nextActive.backendId !== backends.active) {
+          backends = { ...backends, active: nextActive.backendId };
+          postToWebview({ type: 'backends', payload: backends });
+        }
+        syncTabsAndList();
+        pushActiveSession();
+        return;
+      }
+
       case 'closeTab': {
         tabs = tabs.filter((t) => t.key !== message.payload.key);
         if (tabs.length === 0) {
@@ -524,7 +570,6 @@ function installMockHost(): void {
         appearance = {
           ...appearance,
           ...(p.theme !== undefined ? { theme: p.theme ?? undefined } : {}),
-          ...(p.colorScheme !== undefined ? { colorScheme: p.colorScheme ?? undefined } : {}),
           ...(p.fontSize !== undefined ? { fontSize: p.fontSize ?? undefined } : {}),
           ...(p.fontFamily !== undefined ? { fontFamily: p.fontFamily ?? undefined } : {}),
           ...(p.lineHeight !== undefined ? { lineHeight: p.lineHeight ?? undefined } : {}),
@@ -703,7 +748,7 @@ function installMockHost(): void {
           payload: {
             path: message.payload.path,
             title: message.payload.path.split('/').pop() ?? message.payload.path,
-            content: `# ${message.payload.path}\n\n这是浏览器本地预览模式返回的模拟 Markdown 内容。\n\n- 支持 GFM 表格与代码块\n- 支持实时切换配色与阅读排版`,
+            content: `# ${message.payload.path}\n\n这是浏览器本地预览模式返回的模拟 Markdown 内容。\n\n- 支持 GFM 表格与代码块\n- 支持实时切换主题与阅读排版`,
           },
         });
         return;
@@ -820,6 +865,29 @@ function installMockHost(): void {
         syncTabsAndList();
         pushActiveSession();
         postToWebview({ type: 'navigateToSession', payload: { sessionId: message.payload.sessionId } });
+        return;
+      }
+
+      case 'deleteProjectSession': {
+        for (const tab of tabs.filter((t) => t.sessionId === message.payload.sessionId)) {
+          handleMessage({ type: 'closeTab', payload: { key: tab.key } });
+        }
+        workbench = {
+          ...workbench,
+          sessionGroups: workbench.sessionGroups
+            .map((group) => ({
+              ...group,
+              sessions: group.sessions.filter(
+                (s) =>
+                  !(
+                    s.id === message.payload.sessionId &&
+                    (!message.payload.backendId || s.backendId === message.payload.backendId)
+                  ),
+              ),
+            }))
+            .filter((group) => group.sessions.length > 0),
+        };
+        postToWebview({ type: 'workbench', payload: workbench });
         return;
       }
 

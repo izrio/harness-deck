@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { HostToWebview } from '@harness-deck/shared';
 import { applyHostMessage, requestPrefill, useView } from './store.ts';
 import { cn } from './lib/utils.ts';
-import { applyColorScheme, applyThemeMode } from './theme.ts';
+import { applyThemeMode } from './theme.ts';
 import { postToHost } from './vscode.ts';
 import { Button } from '@/components/ui/button';
 import {
@@ -58,7 +58,7 @@ export function App() {
     const style = document.documentElement.style;
     const apply = (name: string, value: string | undefined) => (value ? style.setProperty(name, value) : style.removeProperty(name));
 
-    // 阅读与聊天：聊天回复、计划和 Markdown 文件预览共用，与主题和配色完全正交独立
+    // 阅读与聊天：聊天回复、计划和 Markdown 文件预览共用，与主题完全正交独立
     apply('--prose-font-family', appearance.fontFamily);
     apply('--prose-font-size', appearance.fontSize ? `${appearance.fontSize}px` : undefined);
     apply('--prose-line-height', appearance.lineHeight ? String(appearance.lineHeight) : undefined);
@@ -70,8 +70,7 @@ export function App() {
     apply('--terminal-font-size', appearance.terminalFontSize ? `${appearance.terminalFontSize}px` : undefined);
     apply('--terminal-line-height', appearance.terminalLineHeight ? String(appearance.terminalLineHeight) : undefined);
 
-    // 主题模式与 5 套整套界面配色
-    applyColorScheme(appearance.colorScheme ?? 'slate');
+    // 主题模式（浅色 / 深色 / 跟随系统）
     applyThemeMode(appearance.theme ?? 'system');
   }, [appearance]);
 

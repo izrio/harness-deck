@@ -1,5 +1,5 @@
 export type { RuntimeStatus } from './runtime.ts';
-export { COLOR_SCHEMES, IMAGE_MEDIA_TYPES, MAX_IMAGES, TASK_COLUMNS, WORKBENCH_MODULES } from './limits.ts';
+export { IMAGE_MEDIA_TYPES, MAX_IMAGES, TASK_COLUMNS, WORKBENCH_MODULES } from './limits.ts';
 export { joinLabel, splitLabel } from './labels.ts';
 export type {
   AdvancedPreferences,
@@ -14,7 +14,6 @@ export type {
   BackendView,
   ChangedFileView,
   ChatCommand,
-  ColorSchemeId,
   CommandView,
   ConnectionState,
   ContextDetail,

@@ -48,7 +48,6 @@ const WATCHED_SETTING_KEYS = [
   'context',
   'context.includeActiveEditor',
   'ui.theme',
-  'ui.colorScheme',
   'ui.fontSize',
   'ui.fontFamily',
   'ui.lineHeight',

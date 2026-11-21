@@ -570,12 +570,24 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
     const afterBgFinish = latestTabs();
     expect(afterBgFinish?.items[1]).toMatchObject({ key: claudeTabKey, running: false });
 
-    // 6. 关闭第二个 Claude 标签：只剩第一个 DeepSeek 标签
-    runtime.handleWebviewMessage({ type: 'closeTab', payload: { key: claudeTabKey } });
+    // 6. 拖动第一个标签到末尾：顺序变化并写入持久化数据
+    runtime.handleWebviewMessage({ type: 'moveTab', payload: { key: dshTabKey, toIndex: 1 } });
+    await flushAsync();
+    const afterMove = latestTabs();
+    expect(afterMove?.items.map((t) => t.key)).toEqual([claudeTabKey, dshTabKey]);
+    expect(afterMove?.active).toBe(dshTabKey);
+    const persistedTabs = env.workspaceState.get('harnessDeck.unifiedTabs') as
+      | { items: { backendId: string; sessionId: string }[] }
+      | undefined;
+    expect(persistedTabs?.items.map((t) => `${t.backendId}:${t.sessionId}`)).toEqual(['claude:claude-c1', 'dsh:dsh-s1']);
+
+    // 7. 右键「关闭其他标签」：保留 Claude 标签并切到它，DeepSeek 标签被移除
+    runtime.handleWebviewMessage({ type: 'closeTabs', payload: { key: claudeTabKey, scope: 'others' } });
     await flushAsync();
     const afterClose = latestTabs();
     expect(afterClose?.items).toHaveLength(1);
-    expect(afterClose?.items[0]).toMatchObject({ key: dshTabKey, backendId: 'dsh', sessionId: 'dsh-s1' });
+    expect(afterClose?.items[0]).toMatchObject({ key: claudeTabKey, backendId: 'claude', sessionId: 'claude-c1' });
+    expect(afterClose?.active).toBe(claudeTabKey);
   });
 
   it('冷启动恢复跨智能体标签时不提前启动非激活智能体，点击对应标签后按需启动并加载会话', async () => {

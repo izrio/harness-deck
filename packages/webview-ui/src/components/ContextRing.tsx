@@ -188,7 +188,7 @@ export function ContextRing({
     level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink-2',
   );
 
-  if (!detail) {
+  if (!detail && !tokens) {
     return (
       <span className={badgeClass} title={title} role="img" aria-label={title} data-testid="context-ring">
         <ContextBadgeVisual percent={percent} />
@@ -216,9 +216,9 @@ export function ContextRing({
   const barColor = level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-brand';
   const clampedPercent = Math.min(100, Math.max(0, percent));
   // 首轮请求时「最近一次请求」与「本会话累计」完全相同，只展示一节避免重复刷屏。
-  const deduplicated = sameBreakdown(detail.lastRequest, detail.session);
-  const showLast = Boolean(detail.lastRequest) && !deduplicated;
-  const sessionSection = detail.session;
+  const deduplicated = sameBreakdown(detail?.lastRequest, detail?.session);
+  const showLast = Boolean(detail?.lastRequest) && !deduplicated;
+  const sessionSection = detail?.session;
 
   return (
     <Popover open={open} onOpenChange={toggle}>
@@ -266,16 +266,16 @@ export function ContextRing({
               </div>
             ) : null}
           </header>
-          {showLast && detail.lastRequest ? <DetailSection title={t('context.detail.last')} b={detail.lastRequest} /> : null}
+          {showLast && detail?.lastRequest ? <DetailSection title={t('context.detail.last')} b={detail.lastRequest} /> : null}
           {sessionSection ? (
             <DetailSection
               title={t('context.detail.session')}
-              {...(detail.requests ? { hint: t('context.detail.requests', detail.requests) } : {})}
+              {...(detail?.requests ? { hint: t('context.detail.requests', detail.requests) } : {})}
               b={sessionSection}
               compact={showLast}
             />
           ) : null}
-          {detail.cost ? (
+          {detail?.cost ? (
             <div className="flex items-center justify-between border-t border-line pt-2 text-[11.5px] leading-4">
               <span className="text-ink-3">{t('context.detail.cost')}</span>
               <span className="font-mono tabular-nums text-ink" data-testid="context-detail-cost">

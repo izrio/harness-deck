@@ -303,25 +303,6 @@
           "maximum": 2.4,
           "markdownDescription": "%config.ui.terminalLineHeight%"
         },
-        "harnessDeck.ui.colorScheme": {
-          "type": "string",
-          "enum": [
-            "slate",
-            "warm",
-            "forest",
-            "violet",
-            "rose"
-          ],
-          "markdownEnumDescriptions": [
-            "%config.ui.colorScheme.slate%",
-            "%config.ui.colorScheme.warm%",
-            "%config.ui.colorScheme.forest%",
-            "%config.ui.colorScheme.violet%",
-            "%config.ui.colorScheme.rose%"
-          ],
-          "default": "slate",
-          "markdownDescription": "%config.ui.colorScheme%"
-        },
         "harnessDeck.backendTrace": {
           "type": "boolean",
           "default": false,

@@ -81,7 +81,10 @@ const SCHEDULES_STORAGE_KEY = 'harnessDeck.hub.schedules';
 const AGENTS_STORAGE_KEY = 'harnessDeck.hub.agents';
 const TASKS_STORAGE_KEY = 'harnessDeck.hub.tasks';
 const SESSION_REGISTRY_KEY = 'harnessDeck.hub.sessionRegistry';
+const DELETED_SESSIONS_KEY = 'harnessDeck.hub.deletedSessions';
 const MAX_REGISTRY_SESSIONS = 400;
+/** 用户从会话列表删除过的会话 key（`backendId:sessionId`），防止底层重新扫描后再次出现。 */
+const MAX_DELETED_SESSIONS = 500;
 const TICK_INTERVAL_MS = 15_000;
 
 export interface StateStore {
@@ -96,6 +99,8 @@ interface StoredRegistrySession {
   readonly projectPath: string;
   readonly backendId: string;
   readonly updatedAt: number;
+  /** 首次登记到会话列表的时间；列表据此排序并保持位置稳定，不再随最近活动变化。 */
+  readonly createdAt: number;
   readonly unread?: boolean;
   readonly unreadSummary?: string;
   readonly agentName?: string;
@@ -118,6 +123,8 @@ export interface WorkbenchHubHost {
   readonly locale: () => 'zh' | 'en';
   readonly isWorkspaceTrusted: () => boolean;
   readonly isWebviewVisible: () => boolean;
+  /** 关闭指定会话打开的所有标签（删除会话时调用，避免留下空标签或继续停留在被删会话）。 */
+  readonly closeSessionTabs?: (backendId: string, sessionId: string) => Promise<void>;
   /** 后台无头调度进程是否持有单实例锁；持有则 IDE 内的定时器跳过自动触发，避免重复。 */
   readonly isBackgroundSchedulerActive?: () => boolean;
   /** 定时规则变更后通知宿主（用于 Sidecar 在启用首条规则时拉起无头调度进程）。 */
@@ -151,12 +158,19 @@ interface ActiveTaskTracker {
   sawRunning: boolean;
 }
 
+function parseDeletedSessionKeys(raw: unknown): Set<string> {
+  if (!Array.isArray(raw)) return new Set();
+  const keys = raw.filter((entry): entry is string => typeof entry === 'string' && entry.includes(':'));
+  return new Set(keys.slice(-MAX_DELETED_SESSIONS));
+}
+
 export class WorkbenchHub {
   private scheduleData: StoredScheduleData;
   private hiddenSet: Set<string>;
   private agentData: StoredAgentData;
   private taskBoard: TaskBoardState;
   private registry = new Map<string, StoredRegistrySession>();
+  private deletedSessionKeys: Set<string>;
   private readonly runningRuleIds = new Set<string>();
   private readonly sessionPrevRunning = new Map<string, boolean>();
   private activeTaskTracker: ActiveTaskTracker | undefined;
@@ -175,6 +189,7 @@ export class WorkbenchHub {
     this.hiddenSet = new Set(this.scheduleData.hiddenSessionIds);
     this.agentData = parseStoredAgentData(host.globalState.get(AGENTS_STORAGE_KEY));
     this.taskBoard = parseTaskBoardState(host.globalState.get(TASKS_STORAGE_KEY));
+    this.deletedSessionKeys = parseDeletedSessionKeys(host.globalState.get(DELETED_SESSIONS_KEY));
     this.loadRegistry(host.globalState.get(SESSION_REGISTRY_KEY));
 
     this.unsubscribeExternalState = host.globalState.onDidExternalChange?.(() => {
@@ -224,6 +239,19 @@ export class WorkbenchHub {
   isHiddenSession = (sessionId: string): boolean => {
     return this.hiddenSet.has(sessionId);
   };
+
+  /** 判断会话是否已被用户从列表中删除。 */
+  private isDeletedSession(backendId: string, sessionId: string): boolean {
+    return this.deletedSessionKeys.has(`${backendId}:${sessionId}`);
+  }
+
+  private markSessionDeleted(backendId: string, sessionId: string): void {
+    this.deletedSessionKeys.add(`${backendId}:${sessionId}`);
+    if (this.deletedSessionKeys.size > MAX_DELETED_SESSIONS) {
+      this.deletedSessionKeys = new Set([...this.deletedSessionKeys].slice(-MAX_DELETED_SESSIONS));
+    }
+    void this.host.globalState.update(DELETED_SESSIONS_KEY, [...this.deletedSessionKeys]);
+  }
 
   /** 移除指定项目在会话注册表中的缓存记录（用于「设置 -> 项目」删除最近项目后同步清理残留分组）。 */
   removeProjectSessions(projectPath: string): void {
@@ -722,6 +750,19 @@ export class WorkbenchHub {
         return true;
       }
 
+      case 'deleteProjectSession': {
+        const backendId = message.payload.backendId ?? this.host.activeContext()?.backendId ?? 'dsh';
+        const sessionId = message.payload.sessionId;
+        // 先记录删除标记，避免关闭标签触发的快照同步把会话重新写回注册表
+        this.markSessionDeleted(backendId, sessionId);
+        await this.host.closeSessionTabs?.(backendId, sessionId);
+        const key = `${backendId}:${sessionId}`;
+        if (this.registry.delete(key)) this.persistRegistry();
+        this.sessionPrevRunning.delete(key);
+        this.pushNow();
+        return true;
+      }
+
       default:
         return false;
     }
@@ -1043,6 +1084,7 @@ export class WorkbenchHub {
       projectPath: resolvedPath,
       backendId,
       updatedAt: this.now(),
+      createdAt: existing?.createdAt ?? this.now(),
       ...(existing?.unread ? { unread: true } : {}),
       ...(existing?.unreadSummary ? { unreadSummary: existing.unreadSummary } : {}),
       ...(existing?.model ? { model: existing.model } : {}),
@@ -1056,7 +1098,7 @@ export class WorkbenchHub {
     const currentProject = resolveEnclosingProjectPath(ctx.workspacePath, knownPaths);
     let dirty = false;
     const upsert = (id: string, title: string, projectPath: string, backendId: string, updatedAt: number) => {
-      if (this.isHiddenSession(id) || !projectPath) return;
+      if (this.isHiddenSession(id) || this.isDeletedSession(backendId, id) || !projectPath) return;
       const key = `${backendId}:${id}`;
       const prev = this.registry.get(key);
       if (!prev || prev.title !== title || prev.projectPath !== projectPath || Math.abs(prev.updatedAt - updatedAt) > 1_000) {
@@ -1066,6 +1108,7 @@ export class WorkbenchHub {
           projectPath,
           backendId,
           updatedAt,
+          createdAt: prev?.createdAt ?? (updatedAt > 0 ? updatedAt : this.now()),
           ...(prev?.unread ? { unread: true } : {}),
           ...(prev?.unreadSummary ? { unreadSummary: prev.unreadSummary } : {}),
           ...(prev?.agentName ? { agentName: prev.agentName } : {}),
@@ -1154,15 +1197,18 @@ export class WorkbenchHub {
 
     const knownPaths = this.knownProjectPaths();
     const grouped = new Map<string, GroupedSessionItem[]>();
+    /** 会话首次创建时间：列表顺序只看它，运行中的活动更新不再引起重排。 */
+    const createdAtByKey = new Map<string, number>();
     for (const path of knownPaths) {
       if (path && !grouped.has(path)) grouped.set(path, []);
     }
 
     for (const [key, rec] of this.registry) {
-      if (this.isHiddenSession(rec.id)) continue;
+      if (this.isHiddenSession(rec.id) || this.isDeletedSession(rec.backendId, rec.id)) continue;
       const targetProject = resolveEnclosingProjectPath(rec.projectPath, knownPaths);
       if (!targetProject) continue;
       const live = liveMap.get(key);
+      createdAtByKey.set(key, rec.createdAt);
       grouped.get(targetProject)!.push({
         id: rec.id,
         title: live?.title || rec.title,
@@ -1197,7 +1243,8 @@ export class WorkbenchHub {
 
     const result: ProjectSessionGroup[] = [];
     for (const [projectPath, sessions] of grouped) {
-      sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+      const keyOf = (s: GroupedSessionItem) => `${s.backendId}:${s.id}`;
+      sessions.sort((a, b) => (createdAtByKey.get(keyOf(b)) ?? 0) - (createdAtByKey.get(keyOf(a)) ?? 0));
       result.push({
         projectPath,
         projectName: disambiguatedNames.get(projectPath) ?? (projectBaseName(projectPath) || projectPath),
@@ -1206,10 +1253,18 @@ export class WorkbenchHub {
       });
     }
 
+    const newestCreatedAt = (group: ProjectSessionGroup): number => {
+      let max = 0;
+      for (const s of group.sessions) {
+        max = Math.max(max, createdAtByKey.get(`${s.backendId}:${s.id}`) ?? 0);
+      }
+      return max;
+    };
     result.sort((a, b) => {
       if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
-      const aActivity = Math.max(a.sessions[0]?.updatedAt ?? 0, recentMap.get(a.projectPath)?.lastOpenedAt ?? 0);
-      const bActivity = Math.max(b.sessions[0]?.updatedAt ?? 0, recentMap.get(b.projectPath)?.lastOpenedAt ?? 0);
+      // 项目分组同样只看会话创建时间与项目打开时间，避免会话活动导致整组来回跳动
+      const aActivity = Math.max(newestCreatedAt(a), recentMap.get(a.projectPath)?.lastOpenedAt ?? 0);
+      const bActivity = Math.max(newestCreatedAt(b), recentMap.get(b.projectPath)?.lastOpenedAt ?? 0);
       if (aActivity !== bActivity) return bActivity - aActivity;
       const byName = a.projectName.localeCompare(b.projectName);
       if (byName !== 0) return byName;
@@ -1475,7 +1530,7 @@ export class WorkbenchHub {
 
     const knownPaths = this.knownProjectPaths();
     for (const [key, rec] of this.registry) {
-      if (!rec.unread || this.isHiddenSession(rec.id)) continue;
+      if (!rec.unread || this.isHiddenSession(rec.id) || this.isDeletedSession(rec.backendId, rec.id)) continue;
       const targetProject = resolveEnclosingProjectPath(rec.projectPath, knownPaths);
       if (!targetProject) continue;
       unread.push({
@@ -1496,6 +1551,7 @@ export class WorkbenchHub {
 
   private loadRegistry(raw: unknown): void {
     if (!Array.isArray(raw)) return;
+    let needsPersist = false;
     for (const entry of raw) {
       if (!entry || typeof entry !== 'object') continue;
       const r = entry as Partial<StoredRegistrySession>;
@@ -1503,19 +1559,26 @@ export class WorkbenchHub {
         continue;
       }
       if (this.hiddenSet.has(r.id)) continue;
+      if (this.deletedSessionKeys.has(`${r.backendId}:${r.id}`)) continue;
       const projectPath = normalizeProjectPath(r.projectPath) || r.projectPath;
+      const updatedAt = typeof r.updatedAt === 'number' ? r.updatedAt : 0;
+      // 旧数据没有 createdAt：用当时的最近活动时间补一次，随后固定下来不再变化
+      const createdAt = typeof r.createdAt === 'number' ? r.createdAt : updatedAt;
+      if (typeof r.createdAt !== 'number') needsPersist = true;
       this.registry.set(`${r.backendId}:${r.id}`, {
         id: r.id,
         title: r.title,
         projectPath,
         backendId: r.backendId,
-        updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : 0,
+        updatedAt,
+        createdAt,
         ...(r.unread ? { unread: true } : {}),
         ...(typeof r.unreadSummary === 'string' && r.unreadSummary ? { unreadSummary: r.unreadSummary } : {}),
         ...(typeof r.agentName === 'string' && r.agentName ? { agentName: r.agentName } : {}),
         ...(typeof r.model === 'string' && r.model ? { model: r.model } : {}),
       });
     }
+    if (needsPersist) this.persistRegistry();
   }
 
   private persistRegistry(): void {

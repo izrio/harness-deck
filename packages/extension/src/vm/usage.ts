@@ -62,7 +62,8 @@ export function normalizeUsage(raw: unknown): TokenBreakdown | undefined {
   const detailWrite = pick(inDetails, 'cacheWriteTokens', 'cache_write_tokens', 'cache_creation_tokens', 'cacheCreationTokens');
   const noCache = pick(inDetails, 'noCacheTokens', 'no_cache_tokens');
   const reasoning =
-    pick(o, 'reasoning_tokens', 'reasoningTokens', 'thoughtTokens', 'thought_tokens') ?? pick(outDetails, 'reasoning_tokens', 'reasoningTokens');
+    pick(o, 'reasoning_tokens', 'reasoningTokens', 'reasoningOutputTokens', 'reasoning_output_tokens', 'thoughtTokens', 'thought_tokens') ??
+    pick(outDetails, 'reasoning_tokens', 'reasoningTokens');
 
   let input = rawInput ?? 0;
   let cacheRead = topRead ?? 0;

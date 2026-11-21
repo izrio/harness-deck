@@ -18,7 +18,7 @@ const LOGOS: Readonly<Record<string, { readonly src: string; readonly tile?: boo
   'oh-my-pi': { src: ohMyPi },
   codebuddy: { src: codebuddy },
   claude: { src: claude, tile: true },
-  codex: { src: codex },
+  codex: { src: codex, tile: true },
   opencode: { src: opencode },
   antigravity: { src: antigravity, tile: true },
   zcode: { src: zcode },

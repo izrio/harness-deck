@@ -50,7 +50,6 @@ describe('parseWebviewMessage', () => {
         type: 'setAppearance',
         payload: {
           theme: 'dark',
-          colorScheme: 'forest',
           fontSize: 16,
           lineHeight: 1.7,
           paragraphSpacing: 12,
@@ -63,7 +62,6 @@ describe('parseWebviewMessage', () => {
       type: 'setAppearance',
       payload: {
         theme: 'dark',
-        colorScheme: 'forest',
         fontSize: 16,
         lineHeight: 1.7,
         paragraphSpacing: 12,

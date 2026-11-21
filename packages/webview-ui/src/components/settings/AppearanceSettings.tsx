@@ -1,17 +1,17 @@
 /**
  * 设置 -> 界面 -> 外观模块：
  * 分为四个独立子块：
- * 1. 主题与配色：浅色 / 深色 / 跟随系统 + 5 套整套界面配色（色卡左浅右深，随主题切换浅深）
+ * 1. 主题：浅色 / 深色 / 跟随系统
  * 2. 阅读与聊天：字体、字号、行高、段距与内容宽度（聊天回复、计划和 Markdown 文件预览共用，切换主题不改变）
  * 3. 终端：终端与代码字体、字号、行高
  * 4. 语言：界面显示语言（跟随 VS Code / 简体中文 / English）
  */
 import { useEffect, useState } from 'react';
-import type { AppearanceState, ColorSchemeId, PreferencesState } from '@harness-deck/shared';
+import type { AppearanceState, PreferencesState } from '@harness-deck/shared';
 import { useT, type MessageKey } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
 import { setAppearanceLocal, setPreferencesLocal, useView } from '../../store.ts';
-import { COLOR_SCHEME_SWATCHES, type ColorSchemeSwatch, type ThemeMode } from '../../theme.ts';
+import type { ThemeMode } from '../../theme.ts';
 import { postToHost } from '../../vscode.ts';
 import { AppearancePanel } from '../AppearancePanel.tsx';
 import { SettingsSection } from './SettingsSection.tsx';
@@ -37,13 +37,23 @@ const THEME_CARDS: readonly {
   { mode: 'system', titleKey: 'settings.appearance.theme.system', descKey: 'settings.appearance.theme.systemDesc' },
 ];
 
-const SCHEME_LABEL_KEYS: Readonly<Record<ColorSchemeId, MessageKey>> = {
-  slate: 'settings.appearance.scheme.slate',
-  warm: 'settings.appearance.scheme.warm',
-  forest: 'settings.appearance.scheme.forest',
-  violet: 'settings.appearance.scheme.violet',
-  rose: 'settings.appearance.scheme.rose',
-};
+const LIGHT_PREVIEW = {
+  canvas: '#f1f4f8',
+  surface: '#ffffff',
+  ink: '#1b212c',
+  inkMuted: '#687385',
+  accent: '#2b74eb',
+  line: '#e3e8ef',
+} as const;
+
+const DARK_PREVIEW = {
+  canvas: '#191b22',
+  surface: '#22252f',
+  ink: '#eef1f7',
+  inkMuted: '#8f98a8',
+  accent: '#579cf9',
+  line: '#2f3441',
+} as const;
 
 const MIN_TERM_SIZE = 10;
 const MAX_TERM_SIZE = 20;
@@ -60,7 +70,6 @@ export function AppearanceSettings() {
   const preferences = useView((s) => s.preferences);
 
   const currentTheme: ThemeMode = appearance.theme ?? 'system';
-  const currentScheme: ColorSchemeId = appearance.colorScheme ?? 'slate';
 
   const termSize = appearance.terminalFontSize ?? DEFAULT_TERM_SIZE;
   const termLineHeight = appearance.terminalLineHeight ?? DEFAULT_TERM_LH;
@@ -76,14 +85,6 @@ export function AppearanceSettings() {
     else next.theme = theme;
     setAppearanceLocal(next as AppearanceState);
     postToHost({ type: 'setAppearance', payload: { theme } });
-  };
-
-  const selectColorScheme = (colorScheme: ColorSchemeId) => {
-    const next: Record<string, unknown> = { ...appearance };
-    if (colorScheme === 'slate') delete next.colorScheme;
-    else next.colorScheme = colorScheme;
-    setAppearanceLocal(next as AppearanceState);
-    postToHost({ type: 'setAppearance', payload: { colorScheme } });
   };
 
   const updateTerminal = (patch: {
@@ -116,11 +117,9 @@ export function AppearanceSettings() {
     postToHost({ type: 'setPreferences', payload: { language } });
   };
 
-  const activeSwatch = COLOR_SCHEME_SWATCHES.find((s) => s.id === currentScheme) ?? COLOR_SCHEME_SWATCHES[0]!;
-
   return (
     <div className="flex flex-col gap-5" data-testid="settings-appearance">
-      {/* 1. 主题 + 5 套整套界面配色 */}
+      {/* 1. 主题 */}
       <SettingsSection id="appearance-sec-theme" title={t('settings.appearance.theme')}>
         <div className="primitive-card-pad">
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label={t('settings.appearance.theme')}>
@@ -141,7 +140,7 @@ export function AppearanceSettings() {
                       : 'bg-field shadow-hairline hover:bg-hover',
                   )}
                 >
-                  <ThemePreview mode={mode} swatch={activeSwatch} />
+                  <ThemePreview mode={mode} />
                   <div className="flex items-center justify-between gap-1.5">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span className={cn('inline-flex shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}>
@@ -161,52 +160,6 @@ export function AppearanceSettings() {
                 </button>
               );
             })}
-          </div>
-        </div>
-      </SettingsSection>
-
-      {/* 1b. 整套配色 */}
-      <SettingsSection
-        id="appearance-sec-palette"
-        testId="appearance-palettes"
-        title={t('settings.appearance.palette')}
-      >
-        <div className="primitive-card-pad">
-          <div
-            className="grid grid-cols-2 gap-2 sm:grid-cols-5"
-            role="radiogroup"
-            aria-label={t('settings.appearance.palette')}
-          >
-            {COLOR_SCHEME_SWATCHES.map((swatch) => {
-              const active = currentScheme === swatch.id;
-              const label = t(SCHEME_LABEL_KEYS[swatch.id]);
-              return (
-                <button
-                  key={swatch.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  data-testid={`palette-card-${swatch.id}`}
-                  onClick={() => selectColorScheme(swatch.id)}
-                  className={cn(
-                    'flex flex-col gap-1.5 rounded-card p-2 text-left transition-all duration-150',
-                    active
-                      ? 'bg-inset shadow-[inset_0_0_0_1.5px_var(--accent)]'
-                      : 'bg-field shadow-hairline hover:bg-hover',
-                  )}
-                >
-                  <SplitPaletteSwatch swatch={swatch} />
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="truncate text-[12px] font-medium text-ink">{label}</span>
-                    {active ? (
-                      <span className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
-                        <CheckIcon className="size-2.5" />
-                      </span>
-                    ) : null}
-                  </div>
-                  </button>
-                );
-              })}
           </div>
         </div>
       </SettingsSection>
@@ -325,106 +278,52 @@ export function AppearanceSettings() {
   );
 }
 
-/** 配色方案色卡：左浅色、右深色，完整展示每套配色的画布、卡片、文字层级与强调色。 */
-function SplitPaletteSwatch({ swatch }: { readonly swatch: ColorSchemeSwatch }) {
-  return (
-    <div
-      className="flex h-12 w-full overflow-hidden rounded-[7px] border border-line/80"
-      aria-hidden="true"
-    >
-      {/* 左半：浅色 */}
-      <div
-        data-half="light"
-        className="flex w-1/2 flex-col justify-between p-1.5"
-        style={{ backgroundColor: swatch.light.canvas }}
-      >
-        <div className="flex items-center justify-between gap-1">
-          <span className="h-1.5 w-5 rounded-full" style={{ backgroundColor: swatch.light.ink }} />
-          <span className="size-2 rounded-full" style={{ backgroundColor: swatch.light.accent }} />
-        </div>
-        <div
-          className="flex flex-col gap-1 rounded-[4px] p-1"
-          style={{
-            backgroundColor: swatch.light.surface,
-            boxShadow: `0 0 0 1px ${swatch.light.line}`,
-          }}
-        >
-          <span className="h-1 w-4/5 rounded-full" style={{ backgroundColor: swatch.light.inkMuted }} />
-          <span className="h-1 w-1/2 rounded-full" style={{ backgroundColor: swatch.light.accent }} />
-        </div>
-      </div>
-
-      {/* 右半：深色 */}
-      <div
-        data-half="dark"
-        className="flex w-1/2 flex-col justify-between p-1.5"
-        style={{ backgroundColor: swatch.dark.canvas }}
-      >
-        <div className="flex items-center justify-between gap-1">
-          <span className="h-1.5 w-5 rounded-full" style={{ backgroundColor: swatch.dark.ink }} />
-          <span className="size-2 rounded-full" style={{ backgroundColor: swatch.dark.accent }} />
-        </div>
-        <div
-          className="flex flex-col gap-1 rounded-[4px] p-1"
-          style={{
-            backgroundColor: swatch.dark.surface,
-            boxShadow: `0 0 0 1px ${swatch.dark.line}`,
-          }}
-        >
-          <span className="h-1 w-4/5 rounded-full" style={{ backgroundColor: swatch.dark.inkMuted }} />
-          <span className="h-1 w-1/2 rounded-full" style={{ backgroundColor: swatch.dark.accent }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** 主题模式预览卡（联动当前选中的配色方案展示浅色 / 深色 / 跟随系统）。 */
-function ThemePreview({ mode, swatch }: { readonly mode: ThemeMode; readonly swatch: ColorSchemeSwatch }) {
+/** 主题模式预览卡（展示浅色 / 深色 / 跟随系统）。 */
+function ThemePreview({ mode }: { readonly mode: ThemeMode }) {
   if (mode === 'system') {
     return (
       <div className="relative flex h-15 w-full overflow-hidden rounded-[7px] border border-line/80" aria-hidden="true">
-        <div className="flex w-1/2 flex-col gap-1.5 p-2" style={{ backgroundColor: swatch.light.canvas }}>
-          <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: swatch.light.ink }} />
+        <div className="flex w-1/2 flex-col gap-1.5 p-2" style={{ backgroundColor: LIGHT_PREVIEW.canvas }}>
+          <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: LIGHT_PREVIEW.ink }} />
           <div
             className="flex-1 rounded-[4px] p-1.5"
-            style={{ backgroundColor: swatch.light.surface, boxShadow: `0 0 0 1px ${swatch.light.line}` }}
+            style={{ backgroundColor: LIGHT_PREVIEW.surface, boxShadow: `0 0 0 1px ${LIGHT_PREVIEW.line}` }}
           >
-            <div className="h-1 w-full rounded-full" style={{ backgroundColor: swatch.light.inkMuted }} />
-            <div className="mt-1 h-1 w-2/3 rounded-full" style={{ backgroundColor: swatch.light.accent }} />
+            <div className="h-1 w-full rounded-full" style={{ backgroundColor: LIGHT_PREVIEW.inkMuted }} />
+            <div className="mt-1 h-1 w-2/3 rounded-full" style={{ backgroundColor: LIGHT_PREVIEW.accent }} />
           </div>
         </div>
-        <div className="flex w-1/2 flex-col gap-1.5 p-2" style={{ backgroundColor: swatch.dark.canvas }}>
-          <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: swatch.dark.ink }} />
+        <div className="flex w-1/2 flex-col gap-1.5 p-2" style={{ backgroundColor: DARK_PREVIEW.canvas }}>
+          <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: DARK_PREVIEW.ink }} />
           <div
             className="flex-1 rounded-[4px] p-1.5"
-            style={{ backgroundColor: swatch.dark.surface, boxShadow: `0 0 0 1px ${swatch.dark.line}` }}
+            style={{ backgroundColor: DARK_PREVIEW.surface, boxShadow: `0 0 0 1px ${DARK_PREVIEW.line}` }}
           >
-            <div className="h-1 w-full rounded-full" style={{ backgroundColor: swatch.dark.inkMuted }} />
-            <div className="mt-1 h-1 w-2/3 rounded-full" style={{ backgroundColor: swatch.dark.accent }} />
+            <div className="h-1 w-full rounded-full" style={{ backgroundColor: DARK_PREVIEW.inkMuted }} />
+            <div className="mt-1 h-1 w-2/3 rounded-full" style={{ backgroundColor: DARK_PREVIEW.accent }} />
           </div>
         </div>
       </div>
     );
   }
 
-  const palette = mode === 'dark' ? swatch.dark : swatch.light;
+  const preview = mode === 'dark' ? DARK_PREVIEW : LIGHT_PREVIEW;
   return (
     <div
       className="flex h-15 w-full flex-col gap-1.5 rounded-[7px] border border-line/80 p-2"
-      style={{ backgroundColor: palette.canvas }}
+      style={{ backgroundColor: preview.canvas }}
       aria-hidden="true"
     >
       <div className="flex items-center justify-between">
-        <div className="h-1.5 w-10 rounded-full" style={{ backgroundColor: palette.ink }} />
-        <div className="h-1.5 w-3 rounded-full" style={{ backgroundColor: palette.accent }} />
+        <div className="h-1.5 w-10 rounded-full" style={{ backgroundColor: preview.ink }} />
+        <div className="h-1.5 w-3 rounded-full" style={{ backgroundColor: preview.accent }} />
       </div>
       <div
         className="flex flex-1 flex-col justify-center gap-1 rounded-[5px] p-1.5"
-        style={{ backgroundColor: palette.surface, boxShadow: `0 0 0 1px ${palette.line}` }}
+        style={{ backgroundColor: preview.surface, boxShadow: `0 0 0 1px ${preview.line}` }}
       >
-        <div className="h-1.5 w-4/5 rounded-full" style={{ backgroundColor: palette.inkMuted }} />
-        <div className="h-1.5 w-3/5 rounded-full" style={{ backgroundColor: palette.accent }} />
+        <div className="h-1.5 w-4/5 rounded-full" style={{ backgroundColor: preview.inkMuted }} />
+        <div className="h-1.5 w-3/5 rounded-full" style={{ backgroundColor: preview.accent }} />
       </div>
     </div>
   );

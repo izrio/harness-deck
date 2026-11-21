@@ -127,6 +127,73 @@ describe('UnifiedTabsModel 跨智能体统一会话标签', () => {
     expect(model.close(model.activeTabKey)).toBeUndefined();
   });
 
+  it('新开的标签始终追加到最右侧，不插入当前标签之后', () => {
+    const { model, summary } = makeModel();
+    model.restore({
+      defaultBackendId: 'dsh',
+      validBackendIds: VALID,
+      fallbackTabs: [
+        { sessionId: 's1', title: 'DSH 1' },
+        { sessionId: 's2', title: 'DSH 2' },
+      ],
+      fallbackActiveSessionId: 's1',
+    });
+    expect(summary().map((t) => t.sessionId)).toEqual(['s1', 's2']);
+
+    // 当前激活的是第一个标签，新会话仍然出现在最右侧
+    const claudeTab = model.open('claude', 'c1', 'Claude 1');
+    expect(summary().map((t) => t.sessionId)).toEqual(['s1', 's2', 'c1']);
+    expect(model.activeTabKey).toBe(claudeTab.key);
+
+    // 新建空对话同样追加到末尾
+    const blank = model.openNew('pi');
+    expect(summary().map((t) => t.sessionId)).toEqual(['s1', 's2', 'c1', undefined]);
+    expect(model.activeTabKey).toBe(blank.key);
+  });
+
+  it('拖动排序写回持久化顺序，批量关闭按相对位置处理后保留活动标签或接管右侧标签', () => {
+    const ctx = makeModel();
+    const { model, summary } = ctx;
+    const persisted = () => ctx.persisted;
+    model.restore({
+      defaultBackendId: 'dsh',
+      validBackendIds: VALID,
+      fallbackTabs: [{ sessionId: 's1', title: 'DSH 1' }],
+      fallbackActiveSessionId: 's1',
+    });
+    model.open('claude', 'c1', 'Claude 1');
+    model.open('pi', 'p1', 'Pi 1');
+    const [dshTab, claudeTab, piTab] = model.items;
+    expect(summary().map((t) => t.sessionId)).toEqual(['s1', 'c1', 'p1']);
+
+    // 把第一个标签拖到最后：顺序持久化，活动标签不变
+    expect(model.move(dshTab!.key, 2)).toBe(true);
+    expect(summary().map((t) => t.sessionId)).toEqual(['c1', 'p1', 's1']);
+    expect(persisted()?.items.map((t) => t.sessionId)).toEqual(['c1', 'p1', 's1']);
+    expect(model.activeTabKey).toBe(piTab!.key);
+
+    // 关闭其他：活动标签保留
+    const others = model.closeMany([claudeTab!.key, dshTab!.key]);
+    expect(others).toMatchObject({ activeChanged: false });
+    expect(others?.closed.map((t) => t.sessionId).sort()).toEqual(['c1', 's1']);
+    expect(summary().map((t) => t.sessionId)).toEqual(['p1']);
+    expect(model.activeTabKey).toBe(piTab!.key);
+
+    // 关闭的标签里包含活动标签：接管它右侧的标签
+    model.open('claude', 'c2', 'Claude 2');
+    model.open('dsh', 's2', 'DSH 2');
+    const active = model.current!;
+    expect(active.sessionId).toBe('s2');
+    const res = model.closeMany([model.items[0]!.key, active.key]);
+    expect(res?.activeChanged).toBe(true);
+    expect(model.current?.sessionId).toBe('c2');
+
+    // 关闭全部：补一个空的新对话标签
+    const all = model.closeMany(model.items.map((t) => t.key));
+    expect(all?.closed).toHaveLength(1);
+    expect(summary()).toEqual([{ backendId: 'claude', sessionId: undefined, cachedTitle: undefined }]);
+  });
+
   it('删除自定义智能体时清理归属标签，并在全部清空时补齐默认智能体空标签', () => {
     const { model, summary } = makeModel();
     model.restore({

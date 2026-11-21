@@ -131,7 +131,6 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   document.documentElement.classList.remove('dark');
-  delete document.documentElement.dataset.colorScheme;
   document.documentElement.removeAttribute('style');
   store.resetStoreForTests();
   posted.length = 0;
@@ -181,7 +180,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     expect((screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).value).toBe('未发送草稿');
   });
 
-  it('界面 -> 外观：支持浅色/深色/跟随系统主题、5 套左浅右深整套配色，且切换主题与配色绝不改变阅读与聊天排版参数', () => {
+  it('界面 -> 外观：支持浅色/深色/跟随系统主题（不含配色设置），且切换主题绝不改变阅读与聊天排版参数', () => {
     render(createElement(App));
     host({
       type: 'snapshot',
@@ -197,18 +196,10 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     });
     fireEvent.click(screen.getByTestId('settings-button'));
 
-    // 校验 5 套配色色卡均存在，且每张色卡包含左浅右深结构
-    for (const schemeId of ['slate', 'warm', 'forest', 'violet', 'rose'] as const) {
-      const card = screen.getByTestId(`palette-card-${schemeId}`);
-      expect(card.querySelector('[data-half="light"]')).toBeTruthy();
-      expect(card.querySelector('[data-half="dark"]')).toBeTruthy();
-    }
+    // 已移除配色设置
+    expect(screen.queryByTestId('appearance-palettes')).toBeNull();
 
-    // 切换整套配色与主题
-    fireEvent.click(screen.getByTestId('palette-card-warm'));
-    expect(posted).toContainEqual({ type: 'setAppearance', payload: { colorScheme: 'warm' } });
-    expect(document.documentElement.dataset.colorScheme).toBe('warm');
-
+    // 切换主题
     fireEvent.click(screen.getByTestId('theme-card-dark'));
     expect(posted).toContainEqual({ type: 'setAppearance', payload: { theme: 'dark' } });
     expect(document.documentElement.classList.contains('dark')).toBe(true);
@@ -220,7 +211,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     fireEvent.click(screen.getByTestId('theme-card-system'));
     expect(posted).toContainEqual({ type: 'setAppearance', payload: { theme: 'system' } });
 
-    // 验证阅读与聊天的字体、字号、行高、段距与内容宽度在主题/配色切换后纹丝未动
+    // 验证阅读与聊天的字体、字号、行高、段距与内容宽度在主题切换后纹丝未动
     const style = document.documentElement.style;
     expect(style.getPropertyValue('--prose-font-family')).toBe('Georgia, serif');
     expect(style.getPropertyValue('--prose-font-size')).toBe('17px');

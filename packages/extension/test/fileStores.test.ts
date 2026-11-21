@@ -44,13 +44,13 @@ describe('~/.harness-deck 文件存储（FileSettingsStore & FileKeyValueStore�
       // 模拟另一个 JetBrains IDE 窗口修改了 settings.json
       await writeFile(
         settingsPath,
-        JSON.stringify({ ui: { colorScheme: 'forest' }, backendTrace: true }, null, 2),
+        JSON.stringify({ ui: { theme: 'light' }, backendTrace: true }, null, 2),
         'utf8',
       );
       await store.reloadFromDisk();
-      expect(store.get('ui.colorScheme', 'slate')).toBe('forest');
+      expect(store.get('ui.theme', 'system')).toBe('light');
       expect(store.get('backendTrace', false)).toBe(true);
-      expect(events.at(-1)).toEqual(['backendTrace', 'ui.colorScheme']);
+      expect(events.at(-1)).toEqual(['backendTrace', 'ui.theme']);
     } finally {
       store.dispose();
     }

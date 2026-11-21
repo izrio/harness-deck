@@ -1110,6 +1110,7 @@ export class ZcodeController implements ChatBackendController {
     ];
 
     const usage = projection?.usage;
+    const contextDetail = projection?.usageTracker.detail();
     const mode = this.currentMode();
     const changes = this.sessionChanges(projection);
     const session: SessionHeader = {
@@ -1120,6 +1121,7 @@ export class ZcodeController implements ChatBackendController {
       loadingOlder: false,
       sync: !sessionId ? 'idle' : this.loading.has(sessionId) || !this.link ? 'opening' : 'live',
       ...(usage ? { contextUsage: Math.min(1, usage.used / usage.size), contextTokens: { used: usage.used, window: usage.size } } : {}),
+      ...(contextDetail ? { contextDetail } : {}),
       ...(mode === 'plan' ? { planMode: true } : {}),
       ...(projection?.todos?.length ? { todos: projection.todos } : {}),
       ...(projection?.goal ? { goal: projection.goal } : {}),

@@ -10,6 +10,20 @@ import { Fragment, useState, type ReactNode } from 'react';
 import type { GroupedSessionItem, ProjectSessionGroup } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -17,6 +31,7 @@ import {
   SidebarHeader,
   SidebarInput,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
@@ -38,6 +53,7 @@ import {
   SearchIcon,
   SidebarIcon,
   SpinnerIcon,
+  TrashIcon,
 } from '../icons.tsx';
 
 export function SessionsView({
@@ -66,6 +82,7 @@ export function SessionsView({
   });
   const [query, setQuery] = useState('');
   const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({});
+  const [pendingDelete, setPendingDelete] = useState<GroupedSessionItem | undefined>(undefined);
 
   const toggleSidebar = () => {
     const next = !sidebarOpen;
@@ -226,6 +243,7 @@ export function SessionsView({
                     activeBackendId={activeBackendId}
                     currentModelLabel={currentModelLabel}
                     onToggle={() => toggleGroup(group.projectPath)}
+                    onRequestDelete={setPendingDelete}
                   />
                 </Fragment>
               ))
@@ -236,6 +254,39 @@ export function SessionsView({
 
       {/* 右侧主对话工作区 */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+
+      <Dialog open={pendingDelete !== undefined} onOpenChange={(open) => !open && setPendingDelete(undefined)}>
+        <DialogContent data-testid="delete-session-dialog" className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="text-[14px]">{t('wb.sessions.deleteTitle')}</DialogTitle>
+            <DialogDescription className="text-[12.5px] leading-relaxed">
+              {t('wb.sessions.deleteHint', pendingDelete?.title ?? '')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setPendingDelete(undefined)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="delete-session-confirm"
+              onClick={() => {
+                if (!pendingDelete) return;
+                postToHost({
+                  type: 'deleteProjectSession',
+                  payload: { sessionId: pendingDelete.id, backendId: pendingDelete.backendId },
+                });
+                setPendingDelete(undefined);
+              }}
+            >
+              <TrashIcon className="size-3.5" />
+              {t('common.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 }
@@ -249,6 +300,7 @@ function ProjectSessionGroupBlock({
   activeBackendId,
   currentModelLabel,
   onToggle,
+  onRequestDelete,
 }: {
   readonly group: ProjectSessionGroup;
   readonly filteredSessions: readonly GroupedSessionItem[];
@@ -258,6 +310,7 @@ function ProjectSessionGroupBlock({
   readonly activeBackendId: string;
   readonly currentModelLabel: string | undefined;
   readonly onToggle: () => void;
+  readonly onRequestDelete: (session: GroupedSessionItem) => void;
 }) {
   const t = useT();
 
@@ -315,6 +368,7 @@ function ProjectSessionGroupBlock({
                   session={sess}
                   isCurrent={group.isCurrent && sess.id === currentSessionId && sess.backendId === activeBackendId}
                   currentModelLabel={currentModelLabel}
+                  onRequestDelete={onRequestDelete}
                 />
               ))}
             </SidebarMenu>
@@ -329,77 +383,104 @@ function SessionListItemRow({
   session,
   isCurrent,
   currentModelLabel,
+  onRequestDelete,
 }: {
   readonly session: GroupedSessionItem;
   readonly isCurrent: boolean;
   readonly currentModelLabel?: string | undefined;
+  readonly onRequestDelete: (session: GroupedSessionItem) => void;
 }) {
   const t = useT();
   // 逐条会话展示各自最近使用的模型；当前会话在注册表同步前先用实时模型兜底
   const modelLabel = session.model ?? (isCurrent ? currentModelLabel : undefined);
+  // 运行中的会话仍需要保持可见，避免关掉列表后无法再停止它
+  const canDelete = !session.running;
+  const deleteTitle = canDelete ? t('wb.sessions.deleteSession') : t('wb.sessions.deleteRunning');
 
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        type="button"
-        isActive={isCurrent}
-        data-testid={`grouped-session-${session.id}`}
-        title={session.title}
-        className={cn(
-          'h-auto flex-col items-stretch gap-1.5 rounded-control px-2.5 py-2 transition-colors duration-100',
-          isCurrent
-            ? 'bg-surface text-ink shadow-card hover:bg-surface data-[active=true]:bg-surface data-[active=true]:text-ink'
-            : 'text-ink-2 hover:bg-hover hover:text-ink',
-        )}
-        onClick={() =>
-          postToHost({
-            type: 'openProjectSession',
-            payload: {
-              projectPath: session.projectPath,
-              sessionId: session.id,
-              backendId: session.backendId,
-            },
-          })
-        }
-      >
-        <div className="flex w-full min-w-0 items-center gap-2">
-          <span
+    <SidebarMenuItem className="group/menu-item relative">
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuButton
+            type="button"
+            isActive={isCurrent}
+            data-testid={`grouped-session-${session.id}`}
+            title={session.title}
             className={cn(
-              'min-w-0 flex-1 truncate text-[12.5px] leading-snug',
-              isCurrent ? 'font-semibold text-ink' : 'font-medium text-ink/90',
+              'h-auto flex-col items-stretch gap-1.5 rounded-control px-2.5 py-2 pr-6 transition-colors duration-100',
+              isCurrent
+                ? 'bg-surface text-ink shadow-card hover:bg-surface data-[active=true]:bg-surface data-[active=true]:text-ink'
+                : 'text-ink-2 hover:bg-hover hover:text-ink',
             )}
+            onClick={() =>
+              postToHost({
+                type: 'openProjectSession',
+                payload: {
+                  projectPath: session.projectPath,
+                  sessionId: session.id,
+                  backendId: session.backendId,
+                },
+              })
+            }
           >
-            {session.title}
-          </span>
-          {session.running ? <SpinnerIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
-          {session.needsAttention ? (
-            <span
-              className="size-2 shrink-0 rounded-full bg-orange ring-2 ring-orange-tint"
-              title={t('approval.label')}
-            />
-          ) : session.unread ? (
-            <span className="size-2 shrink-0 rounded-full bg-brand ring-2 ring-accent-tint" />
-          ) : null}
-        </div>
-
-        <div className="flex w-full min-w-0 items-center justify-between gap-2 text-[11px] leading-4 text-ink-3">
-          <span
-            className="flex min-w-0 items-center gap-1.5"
-            title={session.agentName ? `${session.backendName} · ${session.agentName}` : session.backendName}
-          >
-            <BackendLogo backend={{ id: session.backendId, name: session.backendName }} size="sm" />
-            {modelLabel ? (
-              <span className="min-w-0 truncate" title={modelLabel}>
-                {modelLabel}
+            <div className="flex w-full min-w-0 items-center gap-2">
+              <span
+                className={cn(
+                  'min-w-0 flex-1 truncate text-[12.5px] leading-snug',
+                  isCurrent ? 'font-semibold text-ink' : 'font-medium text-ink/90',
+                )}
+              >
+                {session.title}
               </span>
-            ) : null}
-            <span className="sr-only">{session.backendName}</span>
-          </span>
-          {session.updatedAt > 0 ? (
-            <span className="shrink-0 tabular-nums">{relativeTime(session.updatedAt, t)}</span>
-          ) : null}
-        </div>
-      </SidebarMenuButton>
+              {session.running ? <SpinnerIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
+              {session.needsAttention ? (
+                <span
+                  className="size-2 shrink-0 rounded-full bg-orange ring-2 ring-orange-tint"
+                  title={t('approval.label')}
+                />
+              ) : session.unread ? (
+                <span className="size-2 shrink-0 rounded-full bg-brand ring-2 ring-accent-tint" />
+              ) : null}
+            </div>
+
+            <div className="flex w-full min-w-0 items-center justify-between gap-2 text-[11px] leading-4 text-ink-3">
+              <span
+                className="flex min-w-0 items-center gap-1.5"
+                title={session.agentName ? `${session.backendName} · ${session.agentName}` : session.backendName}
+              >
+                <BackendLogo backend={{ id: session.backendId, name: session.backendName }} size="sm" />
+                {modelLabel ? (
+                  <span className="min-w-0 truncate" title={modelLabel}>
+                    {modelLabel}
+                  </span>
+                ) : null}
+                <span className="sr-only">{session.backendName}</span>
+              </span>
+              {session.updatedAt > 0 ? (
+                <span className="shrink-0 tabular-nums">{relativeTime(session.updatedAt, t)}</span>
+              ) : null}
+            </div>
+          </SidebarMenuButton>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem variant="destructive" disabled={!canDelete} onSelect={() => onRequestDelete(session)}>
+            <TrashIcon />
+            {deleteTitle}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+
+      <SidebarMenuAction
+        showOnHover
+        disabled={!canDelete}
+        title={deleteTitle}
+        aria-label={deleteTitle}
+        data-testid={`delete-session-${session.id}`}
+        className="text-ink-3 hover:bg-hover-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+        onClick={() => onRequestDelete(session)}
+      >
+        <TrashIcon />
+      </SidebarMenuAction>
     </SidebarMenuItem>
   );
 }

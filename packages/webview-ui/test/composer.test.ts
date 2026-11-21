@@ -102,19 +102,13 @@ describe('输入框', () => {
     expect(posted.at(-1)).toMatchObject({ type: 'interrupt' });
   });
 
-  it('点击 + 展示合并后的「文件或文件夹」菜单，支持选中文件/文件夹与通过 Host 回传图片', async () => {
+  it('点击附件按钮直接发送 pickFiles，支持通过 Host 回传或隐藏 input 添加图片', async () => {
     render(createElement(Composer));
     host({ type: 'snapshot', payload: snapshot() });
 
     fireEvent.click(screen.getByTestId('composer-attach-btn'));
-    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy();
-    expect(screen.getAllByRole('menuitem')).toHaveLength(1);
-    expect(screen.queryByRole('menuitem', { name: '上传图片' })).toBeNull();
-
-    // 选择「文件或文件夹」-> 发送 pickFiles
-    fireEvent.click(screen.getByRole('menuitem', { name: '文件或文件夹' }));
-    expect(posted.at(-1)).toEqual({ type: 'pickFiles', payload: {} });
     expect(screen.queryByTestId('composer-attach-menu')).toBeNull();
+    expect(posted.at(-1)).toEqual({ type: 'pickFiles', payload: {} });
 
     // Host 通过 attachImages 传入选中的图片 -> 展示缩略图并随消息发出
     host({
@@ -157,28 +151,46 @@ describe('输入框', () => {
     expect(completion.querySelectorAll('.completion__icon')).toHaveLength(0);
   });
 
-  it('权限列表从左侧对齐展开，且权限名称不压缩截断', () => {
+  it('权限选择器位于发送按钮左侧，下拉项以两行完整展示说明并区分图标', () => {
     render(createElement(Composer));
     host({
       type: 'snapshot',
       payload: snapshot({
         permissions: {
-          options: ['read-only', 'workspace-write', 'danger-full-access'],
-          current: 'workspace-write',
+          options: ['default', 'acceptEdits', 'auto', 'plan'],
+          current: 'default',
+          labels: {
+            default: { name: 'Default', description: 'Ask before edits and commands, per your permission rules.' },
+            acceptEdits: { name: 'Accept edits', description: 'Approve file edits in the workspace without asking.' },
+            auto: { name: 'Auto', description: 'Approve edits and safe commands; ask before irreversible actions.' },
+            plan: { name: 'Plan', description: 'Plan carefully before executing a task.' },
+          },
         },
       }),
     });
 
-    fireEvent.click(screen.getByTestId('permission-picker'));
+    const toolbar = document.querySelector('.composer__toolbar') as HTMLElement;
+    const spacer = toolbar.querySelector('.composer__spacer') as HTMLElement;
+    const permissionBtn = screen.getByTestId('permission-picker');
+    const sendBtn = screen.getByRole('button', { name: '发送' });
+    expect(spacer.compareDocumentPosition(permissionBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(permissionBtn.compareDocumentPosition(sendBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(permissionBtn);
     const menu = document.querySelector('.permission-menu') as HTMLElement;
     expect(menu).toBeTruthy();
-    expect(menu.className).toContain('left-0');
     const items = [...menu.querySelectorAll('[role="menuitem"]')];
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
+
+    const iconKinds = items.map((item) => item.querySelector('[data-permission-icon]')?.getAttribute('data-permission-icon'));
+    expect(iconKinds).toEqual(['default', 'edit', 'auto', 'plan']);
+
     for (const item of items) {
-      expect(item.querySelector('.menu-item__label')?.className).toContain('shrink-0');
-      expect(item.querySelector('.menu-item__hint')?.className).toContain('min-w-0');
+      const hint = item.querySelector('.menu-item__hint');
+      expect(hint?.className).toContain('whitespace-normal');
+      expect(hint?.className).not.toContain('truncate');
     }
+    expect(items[0]?.textContent).toContain('Ask before edits and commands, per your permission rules.');
   });
 });
 

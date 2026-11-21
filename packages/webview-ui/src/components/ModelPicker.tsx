@@ -1,13 +1,14 @@
 /**
  * 模型选择（上方列表选模型 + 下方滑块调思考等级）。
  */
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import type { ModelOption } from '@harness-deck/shared';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import { GlideMenu } from './beautifului/index.ts';
-import { CheckIcon, ChevronDownIcon, SparkleIcon, SpinnerIcon } from './icons.tsx';
+import { CheckIcon, ChevronDownIcon, SpinnerIcon } from './icons.tsx';
+import { ModelVendorLogo } from './ModelVendorLogo.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useT } from '../i18n.ts';
 
@@ -55,7 +56,17 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
             title={t('model.switch')}
             data-testid="model-picker"
           >
-            {loading && !option ? <SpinnerIcon className="size-3.5 shrink-0 text-ink-3" /> : <SparkleIcon className="size-3.5 shrink-0 text-ink-3" />}
+            {loading && !option ? (
+              <SpinnerIcon className="size-3.5 shrink-0 text-ink-3" />
+            ) : (
+              <ModelVendorLogo
+                provider={option?.provider ?? current?.provider}
+                model={option?.model ?? current?.model}
+                name={option?.name}
+                group={option?.group}
+                className="size-3.5 shrink-0"
+              />
+            )}
             <span className="toolbar-button__text min-w-0 truncate">{label}</span>
             <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
           </button>
@@ -87,6 +98,7 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
                         <ModelItem
                           key={keyOf(o)}
                           active={active}
+                          icon={<ModelVendorLogo provider={o.provider} model={o.model} name={o.name} group={o.group} className="size-3.5 shrink-0" />}
                           {...(o.description ? { title: o.description } : {})}
                           {...(active && o.efforts.length > 1 && currentEffort ? { hint: currentEffort.name } : {})}
                           onSelect={() => select(o, nextEffort, o.efforts.length <= 1)}
@@ -268,12 +280,14 @@ function EffortSlider({
 
 function ModelItem({
   active,
+  icon,
   hint,
   title,
   onSelect,
   children,
 }: {
   active: boolean;
+  icon?: ReactNode;
   hint?: string;
   title?: string;
   onSelect: () => void;
@@ -293,6 +307,7 @@ function ModelItem({
       title={title ?? children}
     >
       <span className="model-item__check inline-flex w-3.5 shrink-0 text-ink">{active ? <CheckIcon className="size-3.5" strokeWidth={2.2} /> : null}</span>
+      {icon ? <span className="model-item__vendor inline-flex shrink-0 items-center">{icon}</span> : null}
       <span className="menu-item__label min-w-0 flex-1 truncate">{children}</span>
       {hint ? <span className={cn('menu-item__hint shrink-0 font-mono text-[11px]', active ? 'text-ink-2' : 'text-ink-3')}>{hint}</span> : null}
     </button>

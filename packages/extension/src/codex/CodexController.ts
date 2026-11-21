@@ -1199,6 +1199,7 @@ export class CodexController implements ChatBackendController {
     ];
 
     const usage = projection?.usage;
+    const contextDetail = projection?.contextDetail();
     const mode = this.currentMode();
     const changes = this.sessionChanges(projection);
     const session: SessionHeader = {
@@ -1209,6 +1210,7 @@ export class CodexController implements ChatBackendController {
       loadingOlder: false,
       sync: !threadId ? 'idle' : this.loading.has(threadId) || !this.link ? 'opening' : 'live',
       ...(usage ? { contextUsage: Math.min(1, usage.used / usage.size), contextTokens: { used: usage.used, window: usage.size } } : {}),
+      ...(contextDetail ? { contextDetail } : {}),
       ...(mode === 'read-only' ? { planMode: true } : {}),
       ...(projection?.todos?.length ? { todos: projection.todos } : {}),
       ...(running && projection?.runningSince !== undefined ? { runningSince: projection.runningSince } : {}),

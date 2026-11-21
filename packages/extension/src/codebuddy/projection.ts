@@ -11,7 +11,7 @@ import { countLines, lineStats, sumStats } from '../vm/diffs.ts';
 import { displayPath } from '../vm/paths.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
 import { activityLabel, parseArguments, summarizeExplore, toolVariant } from '../vm/toolRows.ts';
-import { addUsage, normalizeUsage } from '../vm/usage.ts';
+import { addUsage, normalizeUsage, totalOf } from '../vm/usage.ts';
 
 const OUTPUT_LIMIT = 4_000;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -44,6 +44,8 @@ export class CodebuddySessionProjection {
   private readonly messageUsage = new Map<string, Record<string, unknown>>();
   private currentMessageId?: string;
   private lastMessageId?: string;
+  private turnSeq = 0;
+  private turnRecordedUsage = false;
   private lastResultCost?: number;
   private sessionCost?: number;
 
@@ -123,6 +125,8 @@ export class CodebuddySessionProjection {
     this.messageUsage.clear();
     this.currentMessageId = undefined;
     this.lastMessageId = undefined;
+    this.turnSeq = 0;
+    this.turnRecordedUsage = false;
     this.changed();
   }
 
@@ -153,6 +157,7 @@ export class CodebuddySessionProjection {
     }
     this.messageUsage.set(key, merged);
     this.lastMessageId = key;
+    this.turnRecordedUsage = true;
   }
 
   addUserMessage(text: string, images: readonly ImageView[] = []): void {
@@ -172,6 +177,8 @@ export class CodebuddySessionProjection {
     if (this.runningSince === undefined) this.runningSince = now;
     this.streamedText = false;
     this.streamedThinking = false;
+    this.turnSeq += 1;
+    this.turnRecordedUsage = false;
     this.changed();
   }
 
@@ -381,8 +388,19 @@ export class CodebuddySessionProjection {
             meta?.['codebuddy.ai/turnUsage'] && typeof meta['codebuddy.ai/turnUsage'] === 'object'
               ? (meta['codebuddy.ai/turnUsage'] as Record<string, unknown>)
               : undefined;
-          if (turnUsage?.usage) {
-            this.applyUsageObject(turnUsage.usage);
+          const win = typeof turnUsage?.contextWindow === 'number' && turnUsage.contextWindow > 0 ? turnUsage.contextWindow : undefined;
+          if (win) this.contextWindow = win;
+          const usagePayload = turnUsage?.usage ?? raw.usage;
+          if (usagePayload) {
+            this.applyUsageObject(usagePayload);
+            const usageKey =
+              typeof turnUsage?.messageId === 'string' && turnUsage.messageId
+                ? turnUsage.messageId
+                : typeof turnUsage?.turnId === 'string' && turnUsage.turnId
+                  ? `turn:${turnUsage.turnId}`
+                  : (this.currentMessageId ?? `turn:${this.turnSeq}`);
+            this.recordMessageUsage(usageKey, usagePayload);
+            this.changed();
           }
         }
         return;
@@ -571,7 +589,19 @@ export class CodebuddySessionProjection {
 
       case 'result': {
         this.applyModelUsageWindow(raw.modelUsage);
-        if (raw.usage) this.applyUsageObject(raw.usage);
+        if (raw.usage) {
+          this.applyUsageObject(raw.usage);
+          if (!this.turnRecordedUsage) {
+            this.recordMessageUsage(`turn:${this.turnSeq}`, raw.usage);
+          }
+        } else if (!this.turnRecordedUsage && raw.modelUsage && typeof raw.modelUsage === 'object' && !Array.isArray(raw.modelUsage)) {
+          for (const [modelKey, entry] of Object.entries(raw.modelUsage as Record<string, unknown>)) {
+            if (normalizeUsage(entry)) {
+              this.applyUsageObject(entry);
+              this.recordMessageUsage(`turn:${this.turnSeq}:${modelKey}`, entry);
+            }
+          }
+        }
         if (!isReplay && typeof raw.total_cost_usd === 'number' && Number.isFinite(raw.total_cost_usd) && raw.total_cost_usd >= 0) {
           const cost = raw.total_cost_usd;
           const prev = this.lastResultCost;
@@ -632,25 +662,14 @@ export class CodebuddySessionProjection {
   private applyUsageObject(raw: unknown): void {
     if (!raw || typeof raw !== 'object') return;
     const u = raw as Record<string, unknown>;
-    const input =
-      typeof u.input_tokens === 'number'
-        ? u.input_tokens
-        : typeof u.inputTokens === 'number'
-          ? u.inputTokens
-          : typeof u.prompt_tokens === 'number'
-            ? u.prompt_tokens
-            : 0;
-    const cacheCreate = typeof u.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : 0;
-    const cacheRead = typeof u.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : 0;
-    const output =
-      typeof u.output_tokens === 'number'
-        ? u.output_tokens
-        : typeof u.outputTokens === 'number'
-          ? u.outputTokens
-          : typeof u.completion_tokens === 'number'
-            ? u.completion_tokens
-            : 0;
-    const used = input + cacheCreate + cacheRead + output;
+    const normalized = normalizeUsage(u);
+    const used = normalized
+      ? totalOf(normalized)
+      : typeof u.total_tokens === 'number' && u.total_tokens > 0
+        ? u.total_tokens
+        : typeof u.totalTokens === 'number' && u.totalTokens > 0
+          ? u.totalTokens
+          : 0;
     if (used > 0) {
       this.usage = { used, size: this.contextWindow };
     }

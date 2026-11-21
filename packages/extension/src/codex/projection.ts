@@ -5,7 +5,7 @@
  * `turn/plan/updated`、`thread/tokenUsage/updated`、`turn/completed`、`error` 等）
  * 以及历史快照（`thread/read` / `thread/resume` 返回的 `Thread`）统一投影为 Harness Deck 视图模型。
  */
-import { joinLabel, type Item, type LineStats } from '@harness-deck/shared';
+import { joinLabel, type ContextDetail, type Item, type LineStats, type TokenBreakdown } from '@harness-deck/shared';
 import type { AcpDiff, FileChange } from '../acp/projection.ts';
 import { t } from '../i18n.ts';
 import { splitContext } from '../vm/context.ts';
@@ -121,6 +121,10 @@ export class CodexSessionProjection {
   private readonly itemToViewIndex = new Map<string, number>();
   private counter = 0;
   private changesCache: { readonly version: number; readonly value: readonly CodexFileChange[] } | undefined;
+  private lastUsageBreakdown?: TokenBreakdown;
+  private totalUsageBreakdown?: TokenBreakdown;
+  private lastReportedTotalTokens = 0;
+  private usageUpdates = 0;
 
   version = 0;
   title?: string;
@@ -187,7 +191,22 @@ export class CodexSessionProjection {
     this.runningSince = undefined;
     this.activeTurnId = undefined;
     this.todos = undefined;
+    this.usage = undefined;
+    this.lastUsageBreakdown = undefined;
+    this.totalUsageBreakdown = undefined;
+    this.lastReportedTotalTokens = 0;
+    this.usageUpdates = 0;
     this.changed();
+  }
+
+  /** 悬浮在上下文标识上展示的用量明细（最近一次请求与本会话累计）。 */
+  contextDetail(): ContextDetail | undefined {
+    if (!this.lastUsageBreakdown && !this.totalUsageBreakdown) return undefined;
+    return {
+      ...(this.lastUsageBreakdown ? { lastRequest: this.lastUsageBreakdown } : {}),
+      ...(this.totalUsageBreakdown ? { session: this.totalUsageBreakdown } : {}),
+      ...(this.usageUpdates > 0 ? { requests: this.usageUpdates } : {}),
+    };
   }
 
   addUserMessage(text: string, images: Extract<Item, { kind: 'user' }>['images'] = []): void {
@@ -385,19 +404,41 @@ export class CodexSessionProjection {
       }
       case 'thread/tokenUsage/updated': {
         const tokenUsage = params.tokenUsage as Record<string, unknown> | undefined;
-        const last = tokenUsage?.last as { totalTokens?: unknown } | undefined;
-        const total = tokenUsage?.total as { totalTokens?: unknown } | undefined;
+        const last = tokenUsage?.last as Record<string, unknown> | undefined;
+        const total = tokenUsage?.total as Record<string, unknown> | undefined;
         const windowSize = typeof tokenUsage?.modelContextWindow === 'number' ? tokenUsage.modelContextWindow : undefined;
+        const lastBreakdown = parseCodexTokenBreakdown(last);
+        const totalBreakdown = parseCodexTokenBreakdown(total);
+        let updated = false;
+        if (lastBreakdown) {
+          this.lastUsageBreakdown = lastBreakdown;
+          updated = true;
+        }
+        if (totalBreakdown) {
+          this.totalUsageBreakdown = totalBreakdown;
+          const nextTotal =
+            typeof total?.totalTokens === 'number'
+              ? total.totalTokens
+              : totalBreakdown.input + totalBreakdown.cacheRead + totalBreakdown.output;
+          if (nextTotal > this.lastReportedTotalTokens) {
+            this.lastReportedTotalTokens = nextTotal;
+            this.usageUpdates += 1;
+          }
+          updated = true;
+        }
         const used =
           typeof last?.totalTokens === 'number' && last.totalTokens > 0
             ? last.totalTokens
             : typeof total?.totalTokens === 'number'
               ? total.totalTokens
-              : undefined;
+              : lastBreakdown
+                ? lastBreakdown.input + lastBreakdown.cacheRead + lastBreakdown.output
+                : undefined;
         if (used !== undefined && windowSize !== undefined && windowSize > 0) {
           this.usage = { used, size: windowSize };
-          this.changed();
+          updated = true;
         }
+        if (updated) this.changed();
         return {};
       }
       case 'thread/name/updated': {
@@ -929,4 +970,23 @@ function summarizeCollabStates(raw: unknown): string | undefined {
     lines.push([id, status, msg].filter(Boolean).join(': '));
   }
   return lines.length > 0 ? trimOutput(lines.join('\n')) : undefined;
+}
+
+/** 解析 Codex `TokenUsageBreakdown`：OpenAI Responses 的 `inputTokens` 包含 `cachedInputTokens`，需拆出未命中缓存部分。 */
+function parseCodexTokenBreakdown(raw: Record<string, unknown> | undefined): TokenBreakdown | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+  const rawInput = num(raw.inputTokens) ?? num(raw.input_tokens);
+  const cached = num(raw.cachedInputTokens) ?? num(raw.cached_input_tokens) ?? 0;
+  const output = num(raw.outputTokens) ?? num(raw.output_tokens);
+  const reasoning = num(raw.reasoningOutputTokens) ?? num(raw.reasoning_output_tokens);
+  if (rawInput === undefined && output === undefined && cached === 0) return undefined;
+  const input = rawInput !== undefined ? Math.max(0, rawInput - cached) : 0;
+  return {
+    input,
+    output: output ?? 0,
+    cacheRead: cached,
+    cacheWrite: 0,
+    ...(reasoning && reasoning > 0 ? { reasoning } : {}),
+  };
 }

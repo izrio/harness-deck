@@ -3,9 +3,9 @@
  * 这里的类型是插件自己的，不直接暴露任何底层的原始事件结构（docs/DESIGN.md D8）。
  */
 
-import type { ColorSchemeId, TaskColumn } from './limits.ts';
+import type { TaskColumn } from './limits.ts';
 
-export type { ColorSchemeId, ImageMediaType, TaskColumn, WorkbenchModule } from './limits.ts';
+export type { ImageMediaType, TaskColumn, WorkbenchModule } from './limits.ts';
 
 /**
  * 打开某个改动的 Diff：单次工具调用（来自会话日志，长期可用）、本轮汇总里的一个文件（Host 内存中），
@@ -38,13 +38,12 @@ export interface SessionChangesView {
 
 /**
  * 界面外观与排版（对应设置 `harnessDeck.ui.*`）。
- * - 主题与配色：`theme`（浅色/深色/跟随系统）与 `colorScheme`（5 套整套界面配色，随主题切换浅/深色）。
- * - 阅读与聊天：`fontFamily`、`fontSize`、`lineHeight`、`paragraphSpacing`、`contentWidth` 共用于聊天回复、计划和 Markdown 文件预览，切换主题或配色不会改变这些设置。
+ * - 主题：`theme`（浅色/深色/跟随系统）。
+ * - 阅读与聊天：`fontFamily`、`fontSize`、`lineHeight`、`paragraphSpacing`、`contentWidth` 共用于聊天回复、计划和 Markdown 文件预览，切换主题不会改变这些设置。
  * - 终端与代码：`codeFontFamily`、`terminalFontSize`、`terminalLineHeight`。
  */
 export interface AppearanceState {
   readonly theme?: 'system' | 'light' | 'dark';
-  readonly colorScheme?: ColorSchemeId;
   readonly fontSize?: number;
   readonly fontFamily?: string;
   readonly lineHeight?: number;

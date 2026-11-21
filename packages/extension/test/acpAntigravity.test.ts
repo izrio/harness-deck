@@ -103,6 +103,33 @@ describe('Antigravity 内置 ACP 底层', () => {
       { value: 'auto', name: 'Auto' },
       { value: 'plan', name: 'Plan' },
     ];
+    let currentModel = 'gemini-4-neon';
+    let currentEffort = 'xhigh';
+    let currentMode = 'default';
+    const buildConfigOptions = () => [
+      { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: currentModel, options: baseModelOptions },
+      {
+        id: 'thought_level',
+        name: 'Thinking Level',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: currentEffort,
+        options:
+          currentModel === 'gemini-3.8-flash'
+            ? [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' },
+                { value: 'high', name: 'High' },
+              ]
+            : [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' },
+                { value: 'high', name: 'High' },
+                { value: 'xhigh', name: 'Extra' },
+              ],
+      },
+      { id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: currentMode, options: modeOptions },
+    ];
 
     const link: AcpLink = {
       request: async <T,>(method: string, params: unknown): Promise<T> => {
@@ -119,69 +146,22 @@ describe('Antigravity 内置 ACP 底层', () => {
               ],
             },
             modes: {
-              currentModeId: 'default',
+              currentModeId: currentMode,
               availableModes: modeOptions.map((m) => ({ id: m.value, name: m.name })),
             },
-            configOptions: [
-              { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'gemini-4-neon', options: baseModelOptions },
-              {
-                id: 'thought_level',
-                name: 'Thinking Level',
-                category: 'thought_level',
-                type: 'select',
-                currentValue: 'xhigh',
-                options: [
-                  { value: 'low', name: 'Low' },
-                  { value: 'medium', name: 'Medium' },
-                  { value: 'high', name: 'High' },
-                  { value: 'xhigh', name: 'Extra' },
-                ],
-              },
-              { id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: 'default', options: modeOptions },
-            ],
+            configOptions: buildConfigOptions(),
           } as T;
         }
         if (method === 'session/set_config_option') {
           const p = params as { configId: string; value: string };
           if (p.configId === 'model' && p.value === 'gemini-3.8-flash') {
-            return {
-              configOptions: [
-                { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'gemini-3.8-flash', options: baseModelOptions },
-                {
-                  id: 'thought_level',
-                  name: 'Thinking Level',
-                  category: 'thought_level',
-                  type: 'select',
-                  currentValue: 'high',
-                  options: [
-                    { value: 'low', name: 'Low' },
-                    { value: 'medium', name: 'Medium' },
-                    { value: 'high', name: 'High' },
-                  ],
-                },
-                { id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: 'default', options: modeOptions },
-              ],
-            } as T;
+            currentModel = 'gemini-3.8-flash';
+            currentEffort = 'high';
+            return { configOptions: buildConfigOptions() } as T;
           }
           if (p.configId === 'mode') {
-            return {
-              configOptions: [
-                { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'gemini-3.8-flash', options: baseModelOptions },
-                {
-                  id: 'thought_level',
-                  name: 'Thinking Level',
-                  category: 'thought_level',
-                  type: 'select',
-                  currentValue: 'high',
-                  options: [
-                    { value: 'low', name: 'Low' },
-                    { value: 'medium', name: 'Medium' },
-                    { value: 'high', name: 'High' },
-                  ],
-                },
-                { id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: p.value, options: modeOptions },
-              ],
-            } as T;
+            currentMode = p.value;
+            return { configOptions: buildConfigOptions() } as T;
           }
         }
         return null as T;
@@ -211,6 +191,11 @@ describe('Antigravity 内置 ACP 底层', () => {
     const snap1 = controller.snapshot();
     expect(snap1.models.current).toEqual({ provider: 'acp', model: 'gemini-4-neon', reasoningEffort: 'xhigh' });
     expect(snap1.models.options.map((m) => m.model)).toEqual(['gemini-4-neon', 'gemini-3.8-flash']);
+    expect(snap1.permissions.current).toBe('auto');
+    expect(calls).toContainEqual({
+      method: 'session/set_config_option',
+      params: { sessionId: 'ses_agy_1', configId: 'mode', value: 'auto' },
+    });
 
     // 若代理同时推送旧版 current_model_update（组合 ID），不应破坏 configOptions 的 model 值
     controller.onSessionUpdate({

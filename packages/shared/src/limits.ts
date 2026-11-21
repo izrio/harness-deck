@@ -11,10 +11,6 @@ export type ImageMediaType = (typeof IMAGE_MEDIA_TYPES)[number];
 export const MAX_IMAGES = 10;
 export const MAX_IMAGE_BASE64 = 20_000_000;
 
-/** 整套界面配色方案标识（默认 slate，均内置浅色与深色两套令牌，随主题自动切换）。 */
-export const COLOR_SCHEMES = ['slate', 'warm', 'forest', 'violet', 'rose'] as const;
-export type ColorSchemeId = (typeof COLOR_SCHEMES)[number];
-
 /** 工作台核心模块：总览 / 改动 / 定时 / 智能体 / 任务 / 会话。 */
 export const WORKBENCH_MODULES = ['overview', 'changes', 'schedules', 'agents', 'tasks', 'sessions'] as const;
 export type WorkbenchModule = (typeof WORKBENCH_MODULES)[number];

@@ -656,6 +656,7 @@ export class AcpController implements ChatBackendController {
       case 'runTaskNow':
       case 'startProjectSession':
       case 'openProjectSession':
+      case 'deleteProjectSession':
       case 'scanGitSkills':
       case 'installGitSkills':
       case 'updateSkill':
@@ -792,6 +793,7 @@ export class AcpController implements ChatBackendController {
         async (id) => {
           if (this.link !== link) return id;
           await this.applyPreferredModel(id);
+          await this.applyDefaultMode(id);
           if (this.link === link) this.draftId = id;
           return id;
         },
@@ -930,7 +932,12 @@ export class AcpController implements ChatBackendController {
     }
     // 计划模式的标记点击后发 /plan off；代理有 plan 模式时切换模式
     if (slash?.name === 'plan' && this.modeOption()?.options?.some((o) => o.value === 'plan')) {
-      await this.setMode(slash.args.trim() === 'off' ? (this.modeOption()?.options?.find((o) => o.value !== 'plan')?.value ?? 'default') : 'plan');
+      const modeOptions = this.modeOption()?.options ?? [];
+      const fallbackMode =
+        modeOptions.find((o) => o.value.toLowerCase() === 'auto' && !isUnrestrictedMode(o.value, o.name))?.value ??
+        modeOptions.find((o) => o.value !== 'plan')?.value ??
+        'default';
+      await this.setMode(slash.args.trim() === 'off' ? fallbackMode : 'plan');
       return slash.args.trim() && slash.args.trim() !== 'off' ? this.send(slash.args, options) : true;
     }
     let prompt = text;
@@ -1248,6 +1255,23 @@ export class AcpController implements ChatBackendController {
       }
     } catch (error) {
       this.options.log(`新对话套用上次的模型失败：${describe(error)}`);
+    }
+  }
+
+  /** 新对话（草稿会话）若代理提供安全的 `auto` 权限模式，则默认切到 `auto`；不自动启用无确认的全放行模式。 */
+  private async applyDefaultMode(sessionId: string): Promise<void> {
+    const projection = this.projections.get(sessionId);
+    if (!projection || projection.snapshotItems().length > 0) return;
+    const modeOpt = this.modeOption(projection);
+    if (!modeOpt?.options?.length) return;
+    const autoOpt = modeOpt.options.find(
+      (o) => o.value.toLowerCase() === 'auto' && !isUnrestrictedMode(o.value, o.name),
+    );
+    if (!autoOpt || modeOpt.currentValue === autoOpt.value) return;
+    try {
+      await this.setOption(sessionId, modeOpt.id, autoOpt.value);
+    } catch (error) {
+      this.options.log(`新对话套用默认 auto 权限失败：${describe(error)}`);
     }
   }
 

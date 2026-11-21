@@ -1,6 +1,6 @@
 /**
  * 阅读与聊天排版控件：
- * 聊天回复、计划和 Markdown 文件预览共用字体、字号、行高、段距与内容宽度，切换主题或配色不会改变这些设置。
+ * 聊天回复、计划和 Markdown 文件预览共用字体、字号、行高、段距与内容宽度，切换主题不会改变这些设置。
  */
 import { useEffect, useState } from 'react';
 import type { AppearanceState } from '@harness-deck/shared';

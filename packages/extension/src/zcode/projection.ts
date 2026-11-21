@@ -11,6 +11,7 @@ import { countLines, lineStats, sumStats } from '../vm/diffs.ts';
 import { displayPath } from '../vm/paths.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
 import { activityLabel, parseArguments, summarizeExplore, toolVariant } from '../vm/toolRows.ts';
+import { costOf, normalizeUsage, UsageTracker } from '../vm/usage.ts';
 import { inputFilePath, type AcpDiff, type FileChange } from '../acp/projection.ts';
 
 const OUTPUT_LIMIT = 4_000;
@@ -44,6 +45,7 @@ export class ZcodeSessionProjection {
   todos?: readonly Todo[];
   goal?: SessionHeader['goal'];
   usage?: { readonly used: number; readonly size: number };
+  readonly usageTracker = new UsageTracker();
   runningSince?: number;
 
   constructor(private readonly workspacePath: string) {}
@@ -103,6 +105,8 @@ export class ZcodeSessionProjection {
     this.runningSince = undefined;
     this.todos = undefined;
     this.goal = undefined;
+    this.usage = undefined;
+    this.usageTracker.reset();
     this.changed();
   }
 
@@ -359,6 +363,14 @@ export class ZcodeSessionProjection {
             : undefined;
     if (used !== undefined && size !== undefined && size > 0) {
       this.usage = { used, size };
+    }
+    const breakdown = normalizeUsage(usageObj);
+    if (breakdown) {
+      this.usageTracker.setLast(breakdown);
+    }
+    const cost = costOf(usageObj);
+    if (cost !== undefined) {
+      this.usageTracker.setCost(cost);
     }
 
     const todos = extractTodoArray(meta.todos);

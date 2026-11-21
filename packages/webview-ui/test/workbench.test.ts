@@ -607,6 +607,17 @@ describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 
     fireEvent.click(sidebar.querySelector('button[aria-label="关闭"]') as HTMLElement);
     expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
 
+    // 删除会话：先弹出确认，确认后通知宿主移除（不立即删除）
+    fireEvent.click(screen.getByTestId('delete-session-s2'));
+    expect(screen.getByTestId('delete-session-dialog')).toBeTruthy();
+    expect(posted.some((m) => (m as { type?: string }).type === 'deleteProjectSession')).toBe(false);
+    fireEvent.click(screen.getByTestId('delete-session-confirm'));
+    expect(posted).toContainEqual({
+      type: 'deleteProjectSession',
+      payload: { sessionId: 's2', backendId: 'claude' },
+    });
+    expect(screen.queryByTestId('delete-session-dialog')).toBeNull();
+
     // 折叠与展开项目分组
     const alphaToggle = screen.getByTestId('project-group-alpha').querySelector('button') as HTMLElement;
     fireEvent.click(alphaToggle);

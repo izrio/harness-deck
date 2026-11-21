@@ -243,8 +243,20 @@ describe('CodexSessionProjection 与 unified diff 解析', () => {
       threadId: 't1',
       turnId: 'turn_1',
       tokenUsage: {
-        total: { totalTokens: 5000 },
-        last: { totalTokens: 2000 },
+        total: {
+          totalTokens: 5000,
+          inputTokens: 4000,
+          cachedInputTokens: 2500,
+          outputTokens: 1000,
+          reasoningOutputTokens: 300,
+        },
+        last: {
+          totalTokens: 2000,
+          inputTokens: 1600,
+          cachedInputTokens: 1000,
+          outputTokens: 400,
+          reasoningOutputTokens: 120,
+        },
         modelContextWindow: 200000,
       },
     }, 101_200);
@@ -260,6 +272,11 @@ describe('CodexSessionProjection 与 unified diff 解析', () => {
       { content: '跑单测', status: 'in_progress' },
     ]);
     expect(p.usage).toEqual({ used: 2000, size: 200000 });
+    expect(p.contextDetail()).toEqual({
+      lastRequest: { input: 600, cacheRead: 1000, cacheWrite: 0, output: 400, reasoning: 120 },
+      session: { input: 1500, cacheRead: 2500, cacheWrite: 0, output: 1000, reasoning: 300 },
+      requests: 1,
+    });
     expect(p.fileChanges()).toMatchObject([{ path: '/w/foo.ts', additions: 2, deletions: 1, created: false }]);
 
     const items = p.snapshotItems();

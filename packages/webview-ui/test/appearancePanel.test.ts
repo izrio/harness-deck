@@ -28,7 +28,7 @@ describe('阅读与聊天排版面板', () => {
   it('加减字号、行高、段距与内容宽度：本地立即生效，并写入设置', () => {
     store.applyHostMessage({
       type: 'appearance',
-      payload: { theme: 'dark', colorScheme: 'warm', fontSize: 15, lineHeight: 1.6, paragraphSpacing: 10, contentWidth: 820 },
+      payload: { theme: 'dark', fontSize: 15, lineHeight: 1.6, paragraphSpacing: 10, contentWidth: 820 },
     } as HostToWebview);
     render(createElement(AppearancePanel));
 
@@ -50,10 +50,10 @@ describe('阅读与聊天排版面板', () => {
     expect(posted).toContainEqual({ type: 'setAppearance', payload: { contentWidth: 980 } });
   });
 
-  it('字体输入回车保存；恢复排版默认只重置阅读与聊天排版，不重置主题与配色', () => {
+  it('字体输入回车保存；恢复排版默认只重置阅读与聊天排版，不重置主题', () => {
     store.applyHostMessage({
       type: 'appearance',
-      payload: { theme: 'dark', colorScheme: 'forest', fontSize: 17, lineHeight: 1.8 },
+      payload: { theme: 'dark', fontSize: 17, lineHeight: 1.8 },
     } as HostToWebview);
     render(createElement(AppearancePanel));
 
@@ -67,7 +67,7 @@ describe('阅读与聊天排版面板', () => {
       type: 'setAppearance',
       payload: { fontSize: null, fontFamily: null, lineHeight: null, paragraphSpacing: null, contentWidth: null },
     });
-    expect(store.getState().appearance).toEqual({ theme: 'dark', colorScheme: 'forest' });
+    expect(store.getState().appearance).toEqual({ theme: 'dark' });
     expect(screen.getByTestId('appearance-size').textContent).toBe('14px');
   });
 });

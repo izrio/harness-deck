@@ -80,4 +80,32 @@ describe('模型选择', () => {
     expect(posted).toEqual([{ type: 'selectModel', payload: { provider: 'p', model: 'old' } }]);
     expect(screen.queryByTestId('model-list')).toBeNull();
   });
+
+  it('根据当前模型与选项识别并展示对应的模型厂商图标', () => {
+    store.applyHostMessage({ type: 'connection', payload: 'connected' } as HostToWebview);
+    store.applyHostMessage({
+      type: 'models',
+      payload: {
+        options: [
+          { provider: 'acp', model: 'gemini-4-neon', name: 'Gemini 4 Neon', group: 'Antigravity', efforts, defaultEffort: 'high' },
+          { provider: 'acp', model: 'claude-sonnet-4', name: 'Claude Sonnet 4', group: 'Antigravity', efforts: [] },
+          { provider: 'openai', model: 'gpt-5', name: 'GPT-5', group: 'OpenAI', efforts: [] },
+          { provider: 'deepseek', model: 'deepseek-reasoner', name: 'DeepSeek R1', group: 'DeepSeek', efforts: [] },
+          { provider: 'bailian', model: 'qwen3-coder-plus', name: 'Qwen3-Coder-Plus', group: 'Bailian', efforts: [] },
+          { provider: 'zhipu', model: 'glm-5', name: 'GLM-5', group: 'Zhipu', efforts: [] },
+        ],
+        current: { provider: 'acp', model: 'gemini-4-neon', reasoningEffort: 'high' },
+      },
+    } as HostToWebview);
+
+    render(createElement(ModelPicker, { disabled: false }));
+    const trigger = screen.getByTestId('model-picker');
+    expect(trigger.querySelector('[data-vendor="gemini"]')).not.toBeNull();
+
+    fireEvent.click(trigger);
+    const vendors = [...document.querySelectorAll('[data-testid="model-list"] .model-item [data-vendor]')].map((el) =>
+      el.getAttribute('data-vendor'),
+    );
+    expect(vendors).toEqual(['gemini', 'claude', 'openai', 'deepseek', 'qwen', 'zhipu']);
+  });
 });

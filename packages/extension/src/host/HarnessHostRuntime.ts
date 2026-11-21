@@ -11,12 +11,10 @@
 import { homedir } from 'node:os';
 import { basename, isAbsolute, resolve } from 'node:path';
 import {
-  COLOR_SCHEMES,
   type AdvancedPreferences,
   type AppearanceState,
   type BackendsState,
   type ChatCommand,
-  type ColorSchemeId,
   type DiscoveredGitSkill,
   type ExtensionsState,
   type HostSnapshot,
@@ -185,6 +183,7 @@ const WORKBENCH_MESSAGE_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'runTaskNow',
   'startProjectSession',
   'openProjectSession',
+  'deleteProjectSession',
 ]);
 
 export interface HarnessHostRuntime {
@@ -639,8 +638,6 @@ export function createHarnessHostRuntime(
   const readAppearance = (): AppearanceState => {
     const rawTheme = platform.settings.get<string>('ui.theme', 'system');
     const theme = rawTheme === 'light' || rawTheme === 'dark' ? rawTheme : undefined;
-    const rawScheme = platform.settings.get<string>('ui.colorScheme', 'slate');
-    const colorScheme = isColorScheme(rawScheme) && rawScheme !== 'slate' ? rawScheme : undefined;
     const size = platform.settings.get<number>('ui.fontSize', 0);
     const family = platform.settings.get<string>('ui.fontFamily', '').trim();
     const lineHeight = platform.settings.get<number>('ui.lineHeight', 0);
@@ -651,7 +648,6 @@ export function createHarnessHostRuntime(
     const terminalLineHeight = platform.settings.get<number>('ui.terminalLineHeight', 0);
     return {
       ...(theme ? { theme } : {}),
-      ...(colorScheme ? { colorScheme } : {}),
       ...(Number.isFinite(size) && size > 0 ? { fontSize: Math.min(32, Math.max(8, Math.round(size))) } : {}),
       ...(family ? { fontFamily: family } : {}),
       ...(Number.isFinite(lineHeight) && lineHeight > 0
@@ -1068,7 +1064,6 @@ export function createHarnessHostRuntime(
         value === null ||
         value === '' ||
         (key === 'theme' && value === 'system') ||
-        (key === 'colorScheme' && value === 'slate') ||
         (key === 'paragraphSpacing' && typeof value === 'number' && value < 0) ||
         (key !== 'paragraphSpacing' && typeof value === 'number' && value <= 0);
       await writeSetting('ui', key, cleared ? undefined : value);
@@ -1630,35 +1625,81 @@ export function createHarnessHostRuntime(
       pushUnifiedTabs();
     });
 
+  type ClosedTabLike = { readonly backendId: string; readonly sessionId?: string };
+  /** 统一标签关闭后的收尾：同步底层标签、切换活动标签并推送最新标签栏。 */
+  const finishClosedTabs = async (
+    closed: readonly ClosedTabLike[],
+    activeChanged: boolean,
+    nextActive: ClosedTabLike,
+  ): Promise<void> => {
+    for (const tab of closed) {
+      await closeSessionInController(tab.backendId, tab.sessionId);
+    }
+    if (activeChanged && nextActive.backendId !== active?.backend.profile.id) {
+      await activateBackend(
+        nextActive.backendId,
+        false,
+        nextActive.sessionId ? { targetSessionId: nextActive.sessionId } : { openBlank: true },
+      );
+      pushUnifiedTabs();
+      return;
+    }
+    if (activeChanged && active) {
+      await withSuppressedTabSync(async () => {
+        if (nextActive.sessionId) {
+          await active!.backend.controller.handle({
+            type: 'switchSession',
+            payload: { sessionId: nextActive.sessionId },
+          });
+        } else {
+          await active!.backend.controller.handle({ type: 'newSession', payload: {} });
+        }
+      });
+    }
+    pushUnifiedTabs();
+  };
+
   const closeUnifiedTab = (key: string): Promise<void> =>
     enqueueBackendTransition(async () => {
       ensureUnifiedTabsRestored(active);
       const res = unifiedTabs.close(key);
       if (!res) return;
-      if (res.activeChanged && res.nextActive.backendId !== active?.backend.profile.id) {
-        await activateBackend(
-          res.nextActive.backendId,
-          false,
-          res.nextActive.sessionId ? { targetSessionId: res.nextActive.sessionId } : { openBlank: true },
-        );
-        await closeSessionInController(res.closed.backendId, res.closed.sessionId);
-        pushUnifiedTabs();
-        return;
-      }
-      await closeSessionInController(res.closed.backendId, res.closed.sessionId);
-      if (res.activeChanged && active) {
-        await withSuppressedTabSync(async () => {
-          if (res.nextActive.sessionId) {
-            await active!.backend.controller.handle({
-              type: 'switchSession',
-              payload: { sessionId: res.nextActive.sessionId },
-            });
-          } else {
-            await active!.backend.controller.handle({ type: 'newSession', payload: {} });
-          }
-        });
-      }
-      pushUnifiedTabs();
+      await finishClosedTabs([res.closed], res.activeChanged, res.nextActive);
+    });
+
+  /** 关闭某个会话在所有底层中打开的标签（删除会话时使用）。 */
+  const closeUnifiedTabsForSession = (backendId: string, sessionId: string): Promise<void> =>
+    enqueueBackendTransition(async () => {
+      ensureUnifiedTabsRestored(active);
+      const keys = unifiedTabs.items
+        .filter((tab) => tab.backendId === backendId && tab.sessionId === sessionId)
+        .map((tab) => tab.key);
+      const res = keys.length > 0 ? unifiedTabs.closeMany(keys) : undefined;
+      if (!res) return;
+      await finishClosedTabs(res.closed, res.activeChanged, res.nextActive);
+    });
+
+  /** 标签顺序只影响界面，不需要排队切底层。 */
+  const moveUnifiedTab = (key: string, toIndex: number): void => {
+    ensureUnifiedTabsRestored(active);
+    if (unifiedTabs.move(key, toIndex)) pushUnifiedTabs();
+  };
+
+  const closeUnifiedTabs = (
+    key: string,
+    scope: Extract<WebviewToHost, { type: 'closeTabs' }>['payload']['scope'],
+  ): Promise<void> =>
+    enqueueBackendTransition(async () => {
+      ensureUnifiedTabsRestored(active);
+      const items = [...unifiedTabs.items];
+      const index = items.findIndex((tab) => tab.key === key);
+      if (index < 0) return;
+      const keys = items
+        .filter((_, i) => (scope === 'others' ? i !== index : scope === 'left' ? i < index : scope === 'right' ? i > index : true))
+        .map((tab) => tab.key);
+      const res = keys.length > 0 ? unifiedTabs.closeMany(keys) : undefined;
+      if (!res) return;
+      await finishClosedTabs(res.closed, res.activeChanged, res.nextActive);
     });
 
   const selectBackendForCurrentTab = (id: string, persistDefault = true): Promise<void> =>
@@ -1979,6 +2020,7 @@ export function createHarnessHostRuntime(
       startIfNeeded();
       await openNewTabInActive();
     },
+    closeSessionTabs: (backendId, sessionId) => closeUnifiedTabsForSession(backendId, sessionId),
     post,
     focusView,
     openPanel: () => platform.openWorkbenchPanel(t('workbench.title')),
@@ -2107,7 +2149,6 @@ export function createHarnessHostRuntime(
       }
       if (
         affects('ui.theme') ||
-        affects('ui.colorScheme') ||
         affects('ui.fontSize') ||
         affects('ui.fontFamily') ||
         affects('ui.lineHeight') ||
@@ -2205,6 +2246,14 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'closeTab') {
       void closeUnifiedTab(message.payload.key);
+      return;
+    }
+    if (message.type === 'moveTab') {
+      moveUnifiedTab(message.payload.key, message.payload.toIndex);
+      return;
+    }
+    if (message.type === 'closeTabs') {
+      void closeUnifiedTabs(message.payload.key, message.payload.scope);
       return;
     }
     if (message.type === 'checkBackendEnv') {
@@ -3133,8 +3182,4 @@ function emptyWorkbenchState(): WorkbenchState {
     tasks: { items: [], autoRun: true },
     sessionGroups: [],
   };
-}
-
-function isColorScheme(value: string): value is ColorSchemeId {
-  return (COLOR_SCHEMES as readonly string[]).includes(value);
 }

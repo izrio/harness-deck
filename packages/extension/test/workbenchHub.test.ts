@@ -692,3 +692,168 @@ describe('WorkbenchHub 五大模块协同与顺序调度', () => {
     revived.dispose();
   });
 });
+
+describe('会话删除', () => {
+  it('删除后关闭其标签、从分组移除并按 backend 持久化，重启后底层扫描结果不会把它带回', async () => {
+    const store = new MemoryStore();
+    const now = 5_000_000;
+    const profiles: BackendProfile[] = [
+      { id: 'dsh', kind: 'dsh', name: 'DeepSeek' },
+      { id: 'claude', kind: 'claude', name: 'Claude Code' },
+    ];
+    const projects: ProjectsState = {
+      currentPath: '/repo/alpha',
+      recent: [{ path: '/repo/alpha', name: 'alpha', lastOpenedAt: 100, isCurrent: true }],
+      configs: {},
+    };
+    const dshSnapshot = makeBaseSnapshot({
+      sessions: [{ id: 'shared-s1', title: 'DeepSeek 会话', updatedAt: now - 1000, running: false }],
+      session: { id: 'shared-s1', title: 'DeepSeek 会话', running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
+    });
+    const dshCtx: ActiveControllerContext = {
+      backendId: 'dsh',
+      backendName: 'DeepSeek',
+      workspacePath: '/repo/alpha',
+      snapshot: dshSnapshot,
+      crossProjectSessions: [],
+      latestAssistantText: () => undefined,
+    };
+    const claudeCtx: ActiveControllerContext = {
+      backendId: 'claude',
+      backendName: 'Claude Code',
+      workspacePath: '/repo/alpha',
+      snapshot: makeBaseSnapshot(),
+      crossProjectSessions: [{ id: 'shared-s1', title: 'Claude 会话', cwd: '/repo/alpha', updatedAt: now - 2000, running: false }],
+      latestAssistantText: () => undefined,
+    };
+    const closedTabs: string[] = [];
+
+    const createHub = (): WorkbenchHub =>
+      new WorkbenchHub({
+        globalState: store,
+        runner: { run: async () => ({ status: 'failed', output: '' }) } as unknown as UnattendedRunner,
+        locale: () => 'zh',
+        isWorkspaceTrusted: () => true,
+        isWebviewVisible: () => true,
+        closeSessionTabs: async (backendId, sessionId) => {
+          closedTabs.push(`${backendId}:${sessionId}`);
+        },
+        workspacePath: () => '/repo/alpha',
+        projects: () => projects,
+        profiles: () => profiles,
+        schedulePermission: () => 'workspace-write',
+        activeContext: () => dshCtx,
+        liveContexts: () => [dshCtx, claudeCtx],
+        backendContext: (backendId) => (backendId === 'dsh' ? dshCtx : backendId === 'claude' ? claudeCtx : undefined),
+        switchProjectAndBackend: async () => undefined,
+        startProgrammaticSession: async () => undefined,
+        switchSessionInActive: async () => undefined,
+        openNewSessionInActive: async () => undefined,
+        post: () => undefined,
+        focusView: async () => undefined,
+        openPanel: () => undefined,
+        log: () => undefined,
+        now: () => now,
+        enableTimer: false,
+      });
+
+    const hub = createHub();
+    const groupsOf = (state: ReturnType<WorkbenchHub['state']>) =>
+      state.sessionGroups.flatMap((g) => g.sessions.map((s) => `${s.backendId}:${s.id}`));
+    expect(groupsOf(hub.state())).toEqual(expect.arrayContaining(['dsh:shared-s1', 'claude:shared-s1']));
+
+    await hub.handleMessage({ type: 'deleteProjectSession', payload: { sessionId: 'shared-s1', backendId: 'dsh' } });
+
+    expect(closedTabs).toEqual(['dsh:shared-s1']);
+    const afterDelete = groupsOf(hub.state());
+    expect(afterDelete).not.toContain('dsh:shared-s1');
+    // 只删除指定底层；另一个底层即便有同 id 会话也保留
+    expect(afterDelete).toContain('claude:shared-s1');
+    expect(store.get('harnessDeck.hub.deletedSessions')).toEqual(['dsh:shared-s1']);
+
+    // 重启后底层仍会扫描到该会话，但删除标记让它不再出现在列表里
+    hub.dispose();
+    const revived = createHub();
+    expect(groupsOf(revived.state())).not.toContain('dsh:shared-s1');
+    expect(groupsOf(revived.state())).toContain('claude:shared-s1');
+    revived.dispose();
+  });
+});
+
+describe('会话列表排序', () => {
+  it('按首次创建时间排序，后续活动更新不会改变会话位置', () => {
+    const store = new MemoryStore();
+    let snapshot = makeBaseSnapshot({
+      sessions: [
+        { id: 's-old', title: '旧会话', updatedAt: 1_000, running: false },
+        { id: 's-new', title: '新会话', updatedAt: 2_000, running: false },
+      ],
+      session: { title: '新对话', running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
+    });
+    const projects: ProjectsState = {
+      currentPath: '/repo/alpha',
+      recent: [{ path: '/repo/alpha', name: 'alpha', lastOpenedAt: 100, isCurrent: true }],
+      configs: {},
+    };
+    const createHub = (): WorkbenchHub =>
+      new WorkbenchHub({
+        globalState: store,
+        runner: { run: async () => ({ status: 'failed', output: '' }) } as unknown as UnattendedRunner,
+        locale: () => 'zh',
+        isWorkspaceTrusted: () => true,
+        isWebviewVisible: () => true,
+        workspacePath: () => '/repo/alpha',
+        projects: () => projects,
+        profiles: () => [{ id: 'dsh', kind: 'dsh', name: 'DeepSeek' }],
+        schedulePermission: () => 'workspace-write',
+        activeContext: () => ({
+          backendId: 'dsh',
+          backendName: 'DeepSeek',
+          workspacePath: '/repo/alpha',
+          snapshot,
+          crossProjectSessions: [],
+          latestAssistantText: () => undefined,
+        }),
+        switchProjectAndBackend: async () => undefined,
+        startProgrammaticSession: async () => undefined,
+        switchSessionInActive: async () => undefined,
+        openNewSessionInActive: async () => undefined,
+        post: () => undefined,
+        focusView: async () => undefined,
+        openPanel: () => undefined,
+        log: () => undefined,
+        now: () => 10_000,
+        enableTimer: false,
+      });
+
+    const ids = (hub: WorkbenchHub) =>
+      hub.state().sessionGroups.flatMap((g) => g.sessions.map((s) => s.id));
+
+    const hub = createHub();
+    // 首次登记时旧会话创建更早：新会话在上
+    expect(ids(hub)).toEqual(['s-new', 's-old']);
+
+    // 旧会话重新活动后 updatedAt 变成最新，但列表位置不变
+    snapshot = {
+      ...snapshot,
+      sessions: [
+        { id: 's-old', title: '旧会话', updatedAt: 9_000, running: true },
+        { id: 's-new', title: '新会话', updatedAt: 2_000, running: false },
+      ],
+    };
+    expect(ids(hub)).toEqual(['s-new', 's-old']);
+
+    // 新建的会话按创建时间排到最前
+    snapshot = {
+      ...snapshot,
+      sessions: [...(snapshot.sessions ?? []), { id: 's-newest', title: '刚创建', updatedAt: 10_000, running: false }],
+    };
+    expect(ids(hub)).toEqual(['s-newest', 's-new', 's-old']);
+
+    // 重启后仍按首次创建时间排序，不因最近活动回退
+    hub.dispose();
+    const revived = createHub();
+    expect(ids(revived)).toEqual(['s-newest', 's-new', 's-old']);
+    revived.dispose();
+  });
+});

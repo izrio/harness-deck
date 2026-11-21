@@ -498,7 +498,7 @@ try {
   await page.getByTestId('tabs').locator('.tab').nth(1).locator('.tab__close').click();
   await page.waitForTimeout(200);
 
-  // 2b3. 多 Tab 设置页、阅读与聊天字号与 5 套整套配色：点顶栏设置按钮进入
+  // 2b3. 多 Tab 设置页、阅读与聊天字号与浅色/深色主题：点顶栏设置按钮进入
   const proseSize = () =>
     page!.evaluate(() => {
       const el = document.querySelector('.markdown') ?? document.body;
@@ -511,12 +511,11 @@ try {
   await page.getByRole('button', { name: '增大字号' }).click();
   check('阅读与聊天面板里加大字号立即生效', (await proseSize()) === sizeBefore + 2, `${sizeBefore} → ${await proseSize()}`);
   await shot('14c-appearance');
-  // 5 套整套界面配色：切换配色不会改变阅读与聊天字号
-  const schemeState = () => page!.evaluate(() => document.documentElement.dataset.colorScheme);
-  check('默认配色方案为 slate', (await schemeState()) === 'slate');
-  await page.getByTestId('palette-card-warm').click();
-  check('切换到暖砂琥珀配色且不改变阅读字号', (await schemeState()) === 'warm' && (await proseSize()) === sizeBefore + 2);
-  await page.getByTestId('palette-card-slate').click();
+  // 浅色/深色主题：切换主题不会改变阅读与聊天字号
+  const isDarkTheme = () => page!.evaluate(() => document.documentElement.classList.contains('dark'));
+  await page.getByTestId('theme-card-dark').click();
+  check('切换到深色主题且不改变阅读字号', (await isDarkTheme()) === true && (await proseSize()) === sizeBefore + 2);
+  await page.getByTestId('theme-card-system').click();
   await page.getByTestId('prose-reset').click();
   check('恢复排版默认后回到原来的字号', (await proseSize()) === sizeBefore);
   await page.getByTestId('settings-back').click();

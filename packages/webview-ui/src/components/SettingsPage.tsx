@@ -1,7 +1,7 @@
 /**
  * 设置页面（shadcn/ui Sidebar 架构）：
  * 左侧为分组侧边栏导航（Sidebar），右侧为对应设置内容区：
- * - 界面 -> 外观（appearance）：主题、5 套整套配色、阅读与聊天排版、终端、界面语言
+ * - 界面 -> 外观（appearance）：主题、阅读与聊天排版、终端、界面语言
  * - 界面 -> 通知（notifications）：系统通知开关、触发时机与测试通知
  * - Agent -> 外部智能体（agents）：Node.js/npm 环境检测、内置与外部 ACP 智能体管理
  * - Agent -> 服务商（providers）：第三方编程套餐与自定义模型接口及智能体绑定

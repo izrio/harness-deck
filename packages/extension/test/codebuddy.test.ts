@@ -246,6 +246,47 @@ describe('CodebuddySessionProjection（实时流 + JSONL 历史回放）', () =>
     ]);
   });
 
+  it('通过 system usage_update 与 result.usage 兜底采集 contextDetail，确保上下文明细浮窗可用', () => {
+    const proj = new CodebuddySessionProjection('/ws');
+    proj.startTurn(1_000);
+    proj.applyEvent({
+      type: 'system',
+      subtype: 'usage_update',
+      _meta: {
+        'codebuddy.ai/turnUsage': {
+          turnId: 'turn-1',
+          contextWindow: 128_000,
+          usage: {
+            prompt_tokens: 40_000,
+            completion_tokens: 6_080,
+            prompt_tokens_details: { cached_tokens: 30_000 },
+            completion_tokens_details: { reasoning_tokens: 1_200 },
+          },
+        },
+      },
+    });
+    expect(proj.usage).toEqual({ used: 46_080, size: 128_000 });
+    expect(proj.contextDetail()).toEqual({
+      lastRequest: { input: 10_000, cacheRead: 30_000, cacheWrite: 0, output: 6_080, reasoning: 1_200 },
+      session: { input: 10_000, cacheRead: 30_000, cacheWrite: 0, output: 6_080, reasoning: 1_200 },
+      requests: 1,
+    });
+
+    // 第二轮仅在 result.usage 给出用量时同样记录明细
+    proj.startTurn(2_000);
+    proj.applyEvent({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      usage: { input_tokens: 5_000, cache_read_input_tokens: 20_000, output_tokens: 1_000 },
+    });
+    expect(proj.contextDetail()).toEqual({
+      lastRequest: { input: 5_000, cacheRead: 20_000, cacheWrite: 0, output: 1_000 },
+      session: { input: 15_000, cacheRead: 50_000, cacheWrite: 0, output: 7_080, reasoning: 1_200 },
+      requests: 2,
+    });
+  });
+
   it('回放 CodeBuddy 原生 JSONL 历史记录（message / function_call / function_call_result）', () => {
     const proj = new CodebuddySessionProjection('/ws');
     proj.applyHistoryRecords([
