@@ -45,11 +45,18 @@ export interface PersistedState {
 
 const MOBILE_STATE_KEY = 'harness-deck:mobile-persisted-state';
 
-/** 第一次用到时才取（acquireVsCodeApi 每个页面只能调一次；测试里没有它）。 */
+/** 第一次用到时才取（acquireVsCodeApi 每个页面只能调一次；仅在测试替换 mock 函数时重新获取）。 */
 let cachedVsCodeApi: ReturnType<typeof acquireVsCodeApi<PersistedState>> | undefined;
+let cachedVsCodeApiFactory: unknown;
 function getVsCodeApi(): ReturnType<typeof acquireVsCodeApi<PersistedState>> | undefined {
   if (!isIdeWebviewEnvironment()) return undefined;
-  return (cachedVsCodeApi ??= acquireVsCodeApi<PersistedState>());
+  const factory = (globalThis as { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
+  if (cachedVsCodeApi && cachedVsCodeApiFactory === factory) {
+    return cachedVsCodeApi;
+  }
+  cachedVsCodeApiFactory = factory;
+  cachedVsCodeApi = acquireVsCodeApi<PersistedState>();
+  return cachedVsCodeApi;
 }
 
 /** 这些消息带一次性 commandId；宿主在 5 分钟内忽略重复 id（HD-16）。 */
@@ -78,7 +85,7 @@ let messageHandler: ((message: HostToWebview) => void) | undefined;
 let transportState: TransportState = {
   mode: isIdeWebviewEnvironment() ? 'ide' : 'mobile-web',
   status: isIdeWebviewEnvironment() ? 'ide' : 'checking',
-  routes: typeof window !== 'undefined' ? loadKnownRoutes() : [],
+  routes: typeof window !== 'undefined' && !isIdeWebviewEnvironment() ? loadKnownRoutes() : [],
   reconnectAttempt: 0,
 };
 
@@ -317,7 +324,6 @@ export async function unregisterMobilePush(): Promise<void> {
 export function startHostBridge(onMessage: (message: HostToWebview) => void): () => void {
   messageHandler = onMessage;
   if (isIdeWebviewEnvironment()) {
-    cachedVsCodeApi = undefined;
     updateTransportState({ mode: 'ide', status: 'ide', reconnectAttempt: 0 });
     const onWindowMessage = (event: MessageEvent<HostToWebview>) => onMessage(event.data);
     window.addEventListener('message', onWindowMessage);

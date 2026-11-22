@@ -1,5 +1,16 @@
 # 更新记录 / Changelog
 
+## 0.9.1
+
+**修复 VS Code 插件面板空白（重复调用 `acquireVsCodeApi()`）**：修复 0.9.0 在启动 Webview 宿主通信桥接时清空 `acquireVsCodeApi()` 缓存导致同一页面二次获取 VS Code API 抛错、进而引发界面空白的严重回归，并同步加固单测与 E2E 的 `acquireVsCodeApi` 单次调用约束。
+
+**Fix blank VS Code webview panel (duplicate `acquireVsCodeApi()` call)**: Fixed a 0.9.0 regression where starting the webview host bridge cleared the cached `acquireVsCodeApi()` instance and called it a second time, throwing an uncaught error and rendering a blank panel; hardened unit tests and E2E harnesses to enforce VS Code's single-acquisition invariant.
+
+- **Webview 宿主桥接修复**：移除 `startHostBridge()` 中重置 `cachedVsCodeApi` 的逻辑，改为按 `globalThis.acquireVsCodeApi` 函数引用缓存实例，确保同一 Webview 页面严格仅调用一次 `acquireVsCodeApi()`，并在 IDE 模式下初始化时跳过 `localStorage` 读取。
+  **Webview host bridge fix**: Removed the `cachedVsCodeApi` reset inside `startHostBridge()` and keyed the cache by `globalThis.acquireVsCodeApi` function identity so `acquireVsCodeApi()` is strictly called at most once per webview session, while avoiding unnecessary `localStorage` access in IDE mode.
+- **单测与 E2E 回归防护**：在 `packages/webview-ui/test/setup.ts`、`ui-e2e.ts` 与 `acp-e2e.ts` 的 `acquireVsCodeApi` 模拟实现中强制执行单次调用校验，并补充首屏前调用 `loadState()` 与重复挂载 `<App />` 的回归用例。
+  **Unit test & E2E regression guard**: Enforced single-acquisition checks in the `acquireVsCodeApi` mocks across `packages/webview-ui/test/setup.ts`, `ui-e2e.ts`, and `acp-e2e.ts`, and added a regression test covering pre-mount `loadState()` calls and `<App />` remounts.
+
 ## 0.9.0
 
 **手机端远程互通（M5 全量落地）、多客户端会话总线、QR 配对与权限作用域、PWA 响应式界面与内嵌 Diff、Tailscale / 自带隧道、Web Push 与 Webhook 推送、脱离 IDE 的独立守护进程**：新增宿主内嵌 HTTP/WS 远程桥接（默认关闭），用一次性二维码在局域网手机浏览器或 PWA 上接入同一会话；引入 `ClientHub` 统一本地 Webview 与远程客户端，按 `read-only` / `operate` 作用域鉴权并屏蔽高危操作；移动端补齐响应式面板、软键盘安全区、PWA 安装、内嵌 Diff 审阅与推送跳转深链；支持 `tailscale serve` 自动反代与自带 HTTPS 隧道，并提供本地 VAPID Web Push、Bark / ntfy / 自定义 Webhook 兜底推送；新增 `--headless-server` 常驻守护模式与配套启停命令。

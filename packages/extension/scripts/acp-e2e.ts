@@ -209,7 +209,7 @@ const NONCE = 'e2e-nonce';
 const html = (origin: string) => `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${origin}; img-src ${origin} data:; font-src ${origin}; script-src 'nonce-${NONCE}' ${origin}">
 <link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/index.css">
-<script nonce="${NONCE}">let state; window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__toHost(JSON.stringify(m)), getState: () => state, setState: (s) => { state = s; } });</script>
+<script nonce="${NONCE}">let state; let acquired = false; window.acquireVsCodeApi = () => { if (acquired) throw new Error('An instance of the VS Code API has already been acquired'); acquired = true; return { postMessage: (m) => window.__toHost(JSON.stringify(m)), getState: () => state, setState: (s) => { state = s; } }; };</script>
 </head><body class="vscode-dark"><div id="root"></div><script type="module" nonce="${NONCE}" src="/index.js"></script></body></html>`;
 const server = createServer((request, response) => {
   void (async () => {

@@ -31,15 +31,23 @@ export function mockVsCodeApi(): {
 
   if (!apiInstalled) {
     apiInstalled = true;
-    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
-      postMessage: (message: WebviewToHost) => {
-        sink.posted.push(message);
-      },
-      getState: () => sink.state,
-      setState: (next: PersistedState) => {
-        sink.state = next;
-      },
-    });
+    let acquired = false;
+    (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => {
+      // 模拟真实 VS Code Webview 行为：同一页面只能调用一次 acquireVsCodeApi()
+      if (acquired) {
+        throw new Error('An instance of the VS Code API has already been acquired');
+      }
+      acquired = true;
+      return {
+        postMessage: (message: WebviewToHost) => {
+          sink.posted.push(message);
+        },
+        getState: () => sink.state,
+        setState: (next: PersistedState) => {
+          sink.state = next;
+        },
+      };
+    };
   }
 
   return {

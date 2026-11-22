@@ -234,11 +234,16 @@ const harnessHtml = (theme: 'dark' | 'light', origin: string) => `<!doctype html
   document.addEventListener('securitypolicyviolation', (e) =>
     window.__cspViolations.push(e.violatedDirective + ' ' + (e.blockedURI || 'inline') + (e.sourceFile ? ' @ ' + e.sourceFile.split('/').pop() + ':' + e.lineNumber + ':' + e.columnNumber : '') + (e.sample ? ' ' + e.sample : '')),
   );
-  window.acquireVsCodeApi = () => ({
-    postMessage: (m) => window.__toHost(JSON.stringify(m)),
-    getState: () => state,
-    setState: (s) => { state = s; },
-  });
+  let acquired = false;
+  window.acquireVsCodeApi = () => {
+    if (acquired) throw new Error('An instance of the VS Code API has already been acquired');
+    acquired = true;
+    return {
+      postMessage: (m) => window.__toHost(JSON.stringify(m)),
+      getState: () => state,
+      setState: (s) => { state = s; },
+    };
+  };
 </script>
 </head><body class="vscode-${theme}"><div id="root"></div><script type="module" nonce="${NONCE}" src="/index.js"></script></body></html>`;
 
