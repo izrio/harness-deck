@@ -23,6 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
   Sidebar,
   SidebarContent,
@@ -37,6 +39,7 @@ import {
   SidebarProvider,
   SidebarSeparator,
 } from '@/components/ui/sidebar';
+import { useIsMobile } from '../../hooks/use-mobile.ts';
 import { useT } from '../../i18n.ts';
 import { relativeTime } from '../../lib/time.ts';
 import { cn } from '../../lib/utils.ts';
@@ -64,6 +67,9 @@ export function SessionsView({
   readonly children: ReactNode;
 }) {
   const t = useT();
+  const isMobile = useIsMobile();
+  const clientSurface = useView((s) => s.clientSurface);
+  const isMobileRemote = clientSurface === 'mobile-web';
   const sessionGroups = useView((s) => s.workbench.sessionGroups);
   const currentSessionId = useView((s) => s.session.id);
   const activeBackendId = useView((s) => s.backends.active);
@@ -80,6 +86,9 @@ export function SessionsView({
       return true;
     }
   });
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [worktreeBranch, setWorktreeBranch] = useState('');
   const [query, setQuery] = useState('');
   const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({});
   const [pendingDelete, setPendingDelete] = useState<GroupedSessionItem | undefined>(undefined);
@@ -125,6 +134,68 @@ export function SessionsView({
     })
     .filter((item) => item.visible);
 
+  const openNewWorktree = () => {
+    if (isMobileRemote) {
+      setWorktreeBranch('');
+      setWorktreeDialogOpen(true);
+      return;
+    }
+    postToHost({ type: 'newWorktreeSession', payload: {} });
+  };
+
+  const renderSidebarBody = (onSessionPicked?: () => void) => (
+    <>
+      {sessionGroups.length > 1 || totalSessions > 3 ? (
+        <div className="relative px-3 pt-2.5 pb-1">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-5.5 size-3.5 -translate-y-1/2 text-ink-3" />
+          <SidebarInput
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('header.search')}
+            aria-label={t('header.search')}
+            className="h-8 bg-surface/90 pr-7 pl-8 text-[12px]"
+          />
+          {query ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t('common.close')}
+              onClick={() => setQuery('')}
+              className="absolute top-1/2 right-4 size-6 -translate-y-1/2 text-ink-3 hover:bg-hover hover:text-ink"
+            >
+              <CloseIcon className="size-3" />
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <SidebarContent className="gap-0 px-2 py-2.5">
+        {visibleGroups.length === 0 ? (
+          <div className="px-3 py-8 text-center text-[12px] text-ink-3">{t('header.noMatch')}</div>
+        ) : (
+          visibleGroups.map(({ group, filteredSessions }, index) => (
+            <Fragment key={group.projectPath}>
+              {index > 0 ? <SidebarSeparator className="mx-1 my-2" /> : null}
+              <ProjectSessionGroupBlock
+                group={group}
+                filteredSessions={filteredSessions}
+                collapsed={Boolean(collapsedPaths[group.projectPath])}
+                hasQuery={q.length > 0}
+                currentSessionId={currentSessionId}
+                activeBackendId={activeBackendId}
+                currentModelLabel={currentModelLabel}
+                onToggle={() => toggleGroup(group.projectPath)}
+                onRequestDelete={setPendingDelete}
+                {...(onSessionPicked ? { onPicked: onSessionPicked } : {})}
+              />
+            </Fragment>
+          ))
+        )}
+      </SidebarContent>
+    </>
+  );
+
   return (
     <SidebarProvider
       keyboardShortcut={false}
@@ -133,8 +204,58 @@ export function SessionsView({
       aria-hidden={hidden || undefined}
       data-testid="workbench-sessions"
     >
-      {/* 折叠状态下窄条开关 */}
-      {!sidebarOpen ? (
+      {/* 移动端（<768px）：顶部折叠条 + shadcn/ui Sheet 抽屉 */}
+      {isMobile ? (
+        <>
+          <div className="flex shrink-0 items-center justify-between border-b border-sidebar-border bg-sidebar px-2.5 py-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              data-testid="mobile-sessions-drawer-btn"
+              onClick={() => setMobileDrawerOpen(true)}
+            >
+              <SidebarIcon className="size-3.5" />
+              <span>{t('mobile.sessions.openDrawer')}</span>
+            </Button>
+            <div className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid="new-worktree-session"
+                title={t('wb.sessions.worktreeSession')}
+                aria-label={t('wb.sessions.worktreeSession')}
+                onClick={openNewWorktree}
+              >
+                <GitBranchIcon className="size-3.5" />
+              </Button>
+              {!isMobileRemote ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  title={t('wb.sessions.addProject')}
+                  aria-label={t('wb.sessions.addProject')}
+                  onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
+                >
+                  <PlusIcon className="size-3.5" />
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+            <SheetContent side="left" className="flex w-[86vw] max-w-80 flex-col gap-0 p-0" data-testid="mobile-sessions-sheet">
+              <SheetHeader className="border-b border-sidebar-border px-3 py-2.5">
+                <SheetTitle className="text-[13px]">{t('wb.sessions.groupsTitle')}</SheetTitle>
+              </SheetHeader>
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                {renderSidebarBody(() => setMobileDrawerOpen(false))}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </>
+      ) : !sidebarOpen ? (
         <div className="flex shrink-0 items-center justify-between border-b border-sidebar-border bg-sidebar px-2.5 py-1.5 min-[760px]:flex-col min-[760px]:justify-start min-[760px]:border-r min-[760px]:border-b-0 min-[760px]:px-1.5 min-[760px]:py-2.5">
           <Button
             type="button"
@@ -171,21 +292,23 @@ export function SessionsView({
                   title={t('wb.sessions.worktreeSession')}
                   aria-label={t('wb.sessions.worktreeSession')}
                   className="text-ink-2 hover:bg-hover hover:text-ink"
-                  onClick={() => postToHost({ type: 'newWorktreeSession', payload: {} })}
+                  onClick={openNewWorktree}
                 >
                   <GitBranchIcon className="size-3.5" />
                 </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  title={t('wb.sessions.addProject')}
-                  aria-label={t('wb.sessions.addProject')}
-                  className="text-ink-2 hover:bg-hover hover:text-ink"
-                  onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
-                >
-                  <PlusIcon className="size-3.5" />
-                </Button>
+                {!isMobileRemote ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    title={t('wb.sessions.addProject')}
+                    aria-label={t('wb.sessions.addProject')}
+                    className="text-ink-2 hover:bg-hover hover:text-ink"
+                    onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
+                  >
+                    <PlusIcon className="size-3.5" />
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -200,60 +323,50 @@ export function SessionsView({
                 </Button>
               </div>
             </div>
-
-            {sessionGroups.length > 1 || totalSessions > 3 ? (
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-ink-3" />
-                <SidebarInput
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={t('header.search')}
-                  aria-label={t('header.search')}
-                  className="h-8 bg-surface/90 pr-7 pl-8 text-[12px]"
-                />
-                {query ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={t('common.close')}
-                    onClick={() => setQuery('')}
-                    className="absolute top-1/2 right-1 size-6 -translate-y-1/2 text-ink-3 hover:bg-hover hover:text-ink"
-                  >
-                    <CloseIcon className="size-3" />
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
           </SidebarHeader>
-
-          <SidebarContent className="gap-0 px-2 py-2.5">
-            {visibleGroups.length === 0 ? (
-              <div className="px-3 py-8 text-center text-[12px] text-ink-3">{t('header.noMatch')}</div>
-            ) : (
-              visibleGroups.map(({ group, filteredSessions }, index) => (
-                <Fragment key={group.projectPath}>
-                  {index > 0 ? <SidebarSeparator className="mx-1 my-2" /> : null}
-                  <ProjectSessionGroupBlock
-                    group={group}
-                    filteredSessions={filteredSessions}
-                    collapsed={Boolean(collapsedPaths[group.projectPath])}
-                    hasQuery={q.length > 0}
-                    currentSessionId={currentSessionId}
-                    activeBackendId={activeBackendId}
-                    currentModelLabel={currentModelLabel}
-                    onToggle={() => toggleGroup(group.projectPath)}
-                    onRequestDelete={setPendingDelete}
-                  />
-                </Fragment>
-              ))
-            )}
-          </SidebarContent>
+          {renderSidebarBody()}
         </Sidebar>
       )}
 
       {/* 右侧主对话工作区 */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+
+      <Dialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen}>
+        <DialogContent data-testid="mobile-worktree-session-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.confirm.worktreeTitle')}</DialogTitle>
+          </DialogHeader>
+          <Input
+            size="sm"
+            data-testid="mobile-worktree-session-input"
+            value={worktreeBranch}
+            placeholder={t('mobile.confirm.worktreePlaceholder')}
+            onChange={(e) => setWorktreeBranch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                postToHost({ type: 'newWorktreeSession', payload: { branch: worktreeBranch.trim() } });
+                setWorktreeDialogOpen(false);
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setWorktreeDialogOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="mobile-worktree-session-confirm"
+              onClick={() => {
+                postToHost({ type: 'newWorktreeSession', payload: { branch: worktreeBranch.trim() } });
+                setWorktreeDialogOpen(false);
+              }}
+            >
+              {t('wb.sessions.worktreeSession')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={pendingDelete !== undefined} onOpenChange={(open) => !open && setPendingDelete(undefined)}>
         <DialogContent data-testid="delete-session-dialog" className="sm:max-w-[420px]">
@@ -301,6 +414,7 @@ function ProjectSessionGroupBlock({
   currentModelLabel,
   onToggle,
   onRequestDelete,
+  onPicked,
 }: {
   readonly group: ProjectSessionGroup;
   readonly filteredSessions: readonly GroupedSessionItem[];
@@ -311,6 +425,7 @@ function ProjectSessionGroupBlock({
   readonly currentModelLabel: string | undefined;
   readonly onToggle: () => void;
   readonly onRequestDelete: (session: GroupedSessionItem) => void;
+  readonly onPicked?: () => void;
 }) {
   const t = useT();
 
@@ -343,12 +458,13 @@ function ProjectSessionGroupBlock({
           title={t('wb.sessions.newInProject')}
           aria-label={`${group.projectName} · ${t('wb.sessions.newInProject')}`}
           className="shrink-0 text-ink-2 hover:bg-hover-2 hover:text-ink"
-          onClick={() =>
+          onClick={() => {
             postToHost({
               type: 'startProjectSession',
               payload: { projectPath: group.projectPath, backendId: activeBackendId },
-            })
-          }
+            });
+            onPicked?.();
+          }}
         >
           <PlusIcon className="size-3.5" />
         </Button>
@@ -369,6 +485,7 @@ function ProjectSessionGroupBlock({
                   isCurrent={group.isCurrent && sess.id === currentSessionId && sess.backendId === activeBackendId}
                   currentModelLabel={currentModelLabel}
                   onRequestDelete={onRequestDelete}
+                  {...(onPicked ? { onPicked } : {})}
                 />
               ))}
             </SidebarMenu>
@@ -384,11 +501,13 @@ function SessionListItemRow({
   isCurrent,
   currentModelLabel,
   onRequestDelete,
+  onPicked,
 }: {
   readonly session: GroupedSessionItem;
   readonly isCurrent: boolean;
   readonly currentModelLabel?: string | undefined;
   readonly onRequestDelete: (session: GroupedSessionItem) => void;
+  readonly onPicked?: () => void;
 }) {
   const t = useT();
   // 逐条会话展示各自最近使用的模型；当前会话在注册表同步前先用实时模型兜底
@@ -412,7 +531,7 @@ function SessionListItemRow({
                 ? 'bg-surface text-ink shadow-card hover:bg-surface data-[active=true]:bg-surface data-[active=true]:text-ink'
                 : 'text-ink-2 hover:bg-hover hover:text-ink',
             )}
-            onClick={() =>
+            onClick={() => {
               postToHost({
                 type: 'openProjectSession',
                 payload: {
@@ -420,8 +539,9 @@ function SessionListItemRow({
                   sessionId: session.id,
                   backendId: session.backendId,
                 },
-              })
-            }
+              });
+              onPicked?.();
+            }}
           >
             <div className="flex w-full min-w-0 items-center gap-2">
               <span

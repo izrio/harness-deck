@@ -62,7 +62,7 @@ export interface ChatBackendController {
   /** 扩展（Agent Skills 与 MCP 服务器）配置变化（推送给 Webview）。 */
   extensionsChanged?(): void;
   setWorkspace(path: string): void;
-  renameSession(): Promise<void>;
+  renameSession(explicitTitle?: string): Promise<void>;
   configureApiKey(): Promise<void>;
   setRuntimeStatus(status: RuntimeStatus): void;
   /** 底层已知的跨项目会话摘要（供工作台按项目分组会话展示）。 */

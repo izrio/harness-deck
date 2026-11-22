@@ -1,9 +1,8 @@
-import { useEffect } from 'react';
-import type { HostToWebview } from '@harness-deck/shared';
-import { applyHostMessage, requestPrefill, useView } from './store.ts';
+import { useEffect, useRef } from 'react';
+import { applyHostMessage, requestPrefill, setActiveModule, useView } from './store.ts';
 import { cn } from './lib/utils.ts';
 import { applyThemeMode } from './theme.ts';
-import { postToHost } from './vscode.ts';
+import { postToHost, startHostBridge, useTransportState } from './vscode.ts';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -13,10 +12,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { LoaderGrid, Shimmer } from './components/beautifului/index.ts';
 import { BackendLogo } from './components/BackendLogo.tsx';
+import { DiffViewerModal } from './components/DiffViewerModal.tsx';
 import { HarnessDeckLogo } from './components/HarnessDeckLogo.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Header } from './components/Header.tsx';
 import { MarkdownPreviewModal } from './components/MarkdownPreviewModal.tsx';
+import { MobilePairingGate } from './components/MobilePairingGate.tsx';
 import { RuntimeBanner } from './components/RuntimeBanner.tsx';
 import { SessionHistoryPage } from './components/SessionHistoryPage.tsx';
 import { SettingsPage } from './components/SettingsPage.tsx';
@@ -34,25 +35,75 @@ import type { MessageKey } from './i18n.ts';
 import { useT } from './i18n.ts';
 
 export function App() {
-  useEffect(() => {
-    const onMessage = (event: MessageEvent<HostToWebview>) => applyHostMessage(event.data);
-    window.addEventListener('message', onMessage);
-    postToHost({ type: 'ready', payload: {} });
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
+  useEffect(() => startHostBridge((msg) => applyHostMessage(msg)), []);
 
+  const transport = useTransportState();
   const ready = useView((s) => s.ready);
   const runtime = useView((s) => s.runtime);
   const connection = useView((s) => s.connection);
+  const clientSurface = useView((s) => s.clientSurface);
+  const clientScope = useView((s) => s.clientScope);
   const historyOpen = useView((s) => s.historyOpen);
   const settingsOpen = useView((s) => s.settingsOpen);
   const hasPreview = useView((s) => s.markdownPreview !== undefined);
+  const hasDiff = useView((s) => s.diffContent !== undefined);
   const activeModule = useView((s) => s.activeModule);
   const empty = useView((s) => s.items.length === 0 && s.interactions.length === 0 && !s.session.running && !s.session.hasOlder);
   const failure = useView((s) => (s.session.sync === 'failed' ? s.session.failure : undefined));
   const opening = useView((s) => s.session.id !== undefined && s.items.length === 0 && s.session.sync === 'opening');
   const t = useT();
   const appearance = useView((s) => s.appearance);
+  const sessionGroups = useView((s) => s.workbench.sessionGroups);
+  const deepLinkedRef = useRef(false);
+
+  // 手机端 PWA 从推送通知点开 `/?session=<id>` 时，首屏快照到达后自动跳到对应会话（支持跨项目/跨底层）
+  useEffect(() => {
+    if (!ready || deepLinkedRef.current || typeof window === 'undefined') return;
+    deepLinkedRef.current = true;
+    const targetSession = new URLSearchParams(window.location.search).get('session');
+    if (targetSession) {
+      setActiveModule('sessions');
+      let matched: { projectPath: string; backendId: string } | undefined;
+      for (const group of sessionGroups) {
+        const hit = group.sessions.find((s) => s.id === targetSession);
+        if (hit) {
+          matched = { projectPath: hit.projectPath, backendId: hit.backendId };
+          break;
+        }
+      }
+      if (matched) {
+        postToHost({
+          type: 'openProjectSession',
+          payload: { sessionId: targetSession, projectPath: matched.projectPath, backendId: matched.backendId },
+        });
+      } else {
+        postToHost({ type: 'switchSession', payload: { sessionId: targetSession } });
+      }
+      try {
+        window.history.replaceState(null, '', window.location.pathname);
+      } catch {
+        // ignore
+      }
+    }
+  }, [ready, sessionGroups]);
+
+  // 适配移动端软键盘（visualViewport）与安全区高度，避免输入框/审批按钮被遮挡
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const syncViewport = () => {
+      const keyboardInset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      document.documentElement.style.setProperty('--hd-keyboard-inset', `${keyboardInset}px`);
+    };
+    syncViewport();
+    vv.addEventListener('resize', syncViewport);
+    vv.addEventListener('scroll', syncViewport);
+    return () => {
+      vv.removeEventListener('resize', syncViewport);
+      vv.removeEventListener('scroll', syncViewport);
+      document.documentElement.style.removeProperty('--hd-keyboard-inset');
+    };
+  }, []);
 
   useEffect(() => {
     const style = document.documentElement.style;
@@ -74,13 +125,58 @@ export function App() {
     applyThemeMode(appearance.theme ?? 'system');
   }, [appearance]);
 
-  const overlayOpen = settingsOpen || historyOpen || hasPreview;
+  if (transport.mode === 'mobile-web') {
+    if (transport.status === 'checking') {
+      return (
+        <div className="app flex min-h-dvh items-center justify-center bg-canvas" data-testid="mobile-checking">
+          <div className="flex items-center gap-2 text-[13px] text-ink-2">
+            <LoaderGrid />
+            <Shimmer>{t('mobile.pair.connecting')}</Shimmer>
+          </div>
+        </div>
+      );
+    }
+    if (transport.status === 'unauthenticated') {
+      return (
+        <div className="app flex min-h-dvh flex-col bg-canvas">
+          <MobilePairingGate />
+        </div>
+      );
+    }
+  }
+
+  const overlayOpen = settingsOpen || historyOpen || hasPreview || hasDiff;
   const hideChat = overlayOpen || activeModule !== 'sessions';
 
   return (
-    <div className="app">
+    <div className="app" style={{ paddingBottom: 'var(--hd-keyboard-inset, 0px)' }}>
       <Header />
-      {hasPreview ? <MarkdownPreviewModal /> : settingsOpen ? <SettingsPage /> : historyOpen ? <SessionHistoryPage /> : null}
+      {transport.mode === 'mobile-web' && transport.status !== 'connected' && transport.suggestedRoute ? (
+        <a
+          href={transport.suggestedRoute.url}
+          data-testid="mobile-route-fallback-banner"
+          className="block shrink-0 border-b border-line bg-accent-tint px-3 py-1.5 text-center text-[12px] font-medium text-accent-ink hover:underline"
+        >
+          {t('mobile.conn.switchRoute', t(`remote.route.${transport.suggestedRoute.kind}` as MessageKey))}
+        </a>
+      ) : null}
+      {clientSurface === 'mobile-web' && clientScope === 'read-only' ? (
+        <div
+          className="shrink-0 border-b border-line bg-field px-3 py-1 text-center text-[11.5px] text-ink-2"
+          data-testid="mobile-readonly-banner"
+        >
+          {t('mobile.readOnlyBanner')}
+        </div>
+      ) : null}
+      {hasDiff ? (
+        <DiffViewerModal />
+      ) : hasPreview ? (
+        <MarkdownPreviewModal />
+      ) : settingsOpen ? (
+        <SettingsPage />
+      ) : historyOpen ? (
+        <SessionHistoryPage />
+      ) : null}
       {!overlayOpen && activeModule === 'overview' ? <OverviewView /> : null}
       {!overlayOpen && activeModule === 'changes' ? <ChangesView /> : null}
       {!overlayOpen && activeModule === 'schedules' ? <SchedulesView /> : null}

@@ -427,13 +427,16 @@ export class PiController implements ChatBackendController {
     this.options.post({ type: 'focusComposer', payload: {} });
   }
 
-  async renameSession(): Promise<void> {
+  async renameSession(explicitTitle?: string): Promise<void> {
     const sessionId = this.activeId;
     if (!sessionId) {
       this.toast('info', t('rename.needsSession'));
       return;
     }
-    const title = await this.workbench.input({ title: t('rename.title'), value: this.titleOf(sessionId) });
+    const title =
+      explicitTitle !== undefined
+        ? explicitTitle
+        : await this.workbench.input({ title: t('rename.title'), value: this.titleOf(sessionId) });
     if (!title?.trim()) return;
     const trimmed = title.trim();
     this.remember(sessionId, trimmed, true);
@@ -481,7 +484,7 @@ export class PiController implements ChatBackendController {
         await this.queueAction(message.payload);
         return;
       case 'renameSession':
-        return this.renameSession();
+        return this.renameSession(message.payload.title);
       case 'configureApiKey':
         return this.configureApiKey();
       case 'selectFolder':

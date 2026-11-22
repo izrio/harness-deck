@@ -44,6 +44,9 @@ export const hostCommandSchema = z.enum([
   'restartRuntime',
   'openWebUI',
   'showLogs',
+  'toggleRemoteBridge',
+  'generateRemotePairing',
+  'showRemoteDevices',
 ]);
 
 export const sidecarInitParamsSchema = z.object({

@@ -12,6 +12,15 @@ import { postToHost } from '../../vscode.ts';
 import { FolderIcon, GitBranchIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
 import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
 const EMPTY_CONFIG: WorktreeProjectConfig = {
@@ -34,7 +43,12 @@ function fromLines(raw: string): string[] {
 export function ProjectSettings() {
   const t = useT();
   const projects = useView((s) => s.projects);
+  const clientSurface = useView((s) => s.clientSurface);
+  const isMobileRemote = clientSurface === 'mobile-web';
   const folder = useView((s) => s.session.folder);
+  const [createWtOpen, setCreateWtOpen] = useState(false);
+  const [createWtBranch, setCreateWtBranch] = useState('');
+  const [removeWtOpen, setRemoveWtOpen] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | undefined>(() => projects.currentPath ?? projects.recent[0]?.path);
   const activePath =
     selectedPath && projects.recent.some((r) => r.path === selectedPath)
@@ -82,31 +96,33 @@ export function ProjectSettings() {
       <SettingsSection
         title={t('settings.projects.recent')}
         actions={
-          <>
-            {folder ? (
+          !isMobileRemote ? (
+            <>
+              {folder ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="default"
+                  data-testid="project-switch-folder-btn"
+                  onClick={() => postToHost({ type: 'selectFolder', payload: {} })}
+                >
+                  <FolderIcon className="size-3 text-ink-3" />
+                  <span>{t('header.folder')}</span>
+                  <span className="text-[11px] text-ink-3">{folder}</span>
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
                 size="default"
-                data-testid="project-switch-folder-btn"
-                onClick={() => postToHost({ type: 'selectFolder', payload: {} })}
+                data-testid="project-add-btn"
+                onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
               >
-                <FolderIcon className="size-3 text-ink-3" />
-                <span>{t('header.folder')}</span>
-                <span className="text-[11px] text-ink-3">{folder}</span>
+                <PlusIcon className="size-3" />
+                <span>{t('settings.projects.add')}</span>
               </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              size="default"
-              data-testid="project-add-btn"
-              onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
-            >
-              <PlusIcon className="size-3" />
-              <span>{t('settings.projects.add')}</span>
-            </Button>
-          </>
+            </>
+          ) : undefined
         }
       >
         <div className="primitive-card-pad flex flex-col gap-1.5">
@@ -140,30 +156,32 @@ export function ProjectSettings() {
                       <span className="block truncate font-mono text-[11px] text-ink-3">{project.path}</span>
                     </span>
                   </button>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {!project.isCurrent ? (
+                  {!isMobileRemote ? (
+                    <div className="flex shrink-0 items-center gap-1">
+                      {!project.isCurrent ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="default"
+                          data-testid={`project-open-${index}`}
+                          onClick={() => postToHost({ type: 'openProject', payload: { path: project.path } })}
+                        >
+                          {t('settings.projects.open')}
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
-                        variant="outline"
-                        size="default"
-                        data-testid={`project-open-${index}`}
-                        onClick={() => postToHost({ type: 'openProject', payload: { path: project.path } })}
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t('settings.projects.remove')}
+                        title={t('settings.projects.remove')}
+                        data-testid={`project-remove-${index}`}
+                        onClick={() => postToHost({ type: 'removeRecentProject', payload: { path: project.path } })}
                       >
-                        {t('settings.projects.open')}
+                        <TrashIcon className="size-3.5 text-ink-3" />
                       </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t('settings.projects.remove')}
-                      title={t('settings.projects.remove')}
-                      data-testid={`project-remove-${index}`}
-                      onClick={() => postToHost({ type: 'removeRecentProject', payload: { path: project.path } })}
-                    >
-                      <TrashIcon className="size-3.5 text-ink-3" />
-                    </Button>
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               );
             })
@@ -182,7 +200,14 @@ export function ProjectSettings() {
                 variant="outline"
                 size="default"
                 data-testid="project-create-wt-btn"
-                onClick={() => postToHost({ type: 'createWorktree', payload: { path: activePath } })}
+                onClick={() => {
+                  if (isMobileRemote) {
+                    setCreateWtBranch('');
+                    setCreateWtOpen(true);
+                  } else {
+                    postToHost({ type: 'createWorktree', payload: { path: activePath } });
+                  }
+                }}
               >
                 <GitBranchIcon className="size-3" />
                 <span>{t('settings.projects.createWorktree')}</span>
@@ -192,7 +217,13 @@ export function ProjectSettings() {
                 variant="outline"
                 size="default"
                 data-testid="project-remove-wt-btn"
-                onClick={() => postToHost({ type: 'removeWorktree', payload: { path: activePath } })}
+                onClick={() => {
+                  if (isMobileRemote) {
+                    setRemoveWtOpen(true);
+                  } else {
+                    postToHost({ type: 'removeWorktree', payload: { path: activePath } });
+                  }
+                }}
               >
                 <TrashIcon className="size-3" />
                 <span>{t('settings.projects.removeWorktree')}</span>
@@ -218,6 +249,7 @@ export function ProjectSettings() {
                 data-testid="project-copy-files"
                 rows={3}
                 className="font-mono text-[12px]"
+                disabled={isMobileRemote}
                 value={copyFilesText}
                 placeholder={t('settings.projects.copyFilesPlaceholder')}
                 onChange={(e) => setCopyFilesText(e.target.value)}
@@ -231,6 +263,7 @@ export function ProjectSettings() {
                 data-testid="project-setup-commands"
                 rows={2}
                 className="font-mono text-[12px]"
+                disabled={isMobileRemote}
                 value={setupText}
                 placeholder={t('settings.projects.setupCommandsPlaceholder')}
                 onChange={(e) => setSetupText(e.target.value)}
@@ -244,21 +277,90 @@ export function ProjectSettings() {
                 data-testid="project-verify-commands"
                 rows={2}
                 className="font-mono text-[12px]"
+                disabled={isMobileRemote}
                 value={verifyText}
                 placeholder={t('settings.projects.verifyCommandsPlaceholder')}
                 onChange={(e) => setVerifyText(e.target.value)}
               />
             </label>
 
-            <div className="flex items-center justify-end gap-2">
-              {justSaved ? <span className="text-[11.5px] text-green">{t('settings.projects.saved')}</span> : null}
-              <Button type="button" size="default" data-testid="project-save-btn" onClick={saveConfig}>
-                {t('settings.projects.saveConfig')}
-              </Button>
-            </div>
+            {!isMobileRemote ? (
+              <div className="flex items-center justify-end gap-2">
+                {justSaved ? <span className="text-[11.5px] text-green">{t('settings.projects.saved')}</span> : null}
+                <Button type="button" size="default" data-testid="project-save-btn" onClick={saveConfig}>
+                  {t('settings.projects.saveConfig')}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </SettingsSection>
       ) : null}
+      <Dialog open={createWtOpen} onOpenChange={setCreateWtOpen}>
+        <DialogContent data-testid="mobile-create-worktree-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.confirm.worktreeCreateTitle')}</DialogTitle>
+          </DialogHeader>
+          <Input
+            size="sm"
+            data-testid="mobile-create-worktree-input"
+            value={createWtBranch}
+            placeholder={t('mobile.confirm.worktreePlaceholder')}
+            onChange={(e) => setCreateWtBranch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && activePath) {
+                postToHost({ type: 'createWorktree', payload: { path: activePath, branch: createWtBranch.trim() } });
+                setCreateWtOpen(false);
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCreateWtOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="mobile-create-worktree-confirm"
+              onClick={() => {
+                if (!activePath) return;
+                postToHost({ type: 'createWorktree', payload: { path: activePath, branch: createWtBranch.trim() } });
+                setCreateWtOpen(false);
+              }}
+            >
+              {t('settings.projects.createWorktree')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={removeWtOpen} onOpenChange={setRemoveWtOpen}>
+        <DialogContent data-testid="mobile-remove-worktree-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.confirm.removeWorktreeTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('mobile.confirm.removeWorktreeDetail', activePath ?? '')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setRemoveWtOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="mobile-remove-worktree-confirm"
+              onClick={() => {
+                if (!activePath) return;
+                postToHost({ type: 'removeWorktree', payload: { path: activePath, confirmed: true } });
+                setRemoveWtOpen(false);
+              }}
+            >
+              {t('settings.projects.removeWorktree')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -454,13 +454,16 @@ export class ClaudeController implements ChatBackendController {
     this.options.post({ type: 'focusComposer', payload: {} });
   }
 
-  async renameSession(): Promise<void> {
+  async renameSession(explicitTitle?: string): Promise<void> {
     const sessionId = this.activeId;
     if (!sessionId || sessionId.startsWith('pending:')) {
       this.toast('info', t('rename.needsSession'));
       return;
     }
-    const title = await this.workbench.input({ title: t('rename.title'), value: this.titleOf(sessionId) });
+    const title =
+      explicitTitle !== undefined
+        ? explicitTitle
+        : await this.workbench.input({ title: t('rename.title'), value: this.titleOf(sessionId) });
     if (!title?.trim()) return;
     const trimmed = title.trim();
     this.remember(sessionId, trimmed, true);
@@ -510,7 +513,7 @@ export class ClaudeController implements ChatBackendController {
         await this.queueAction(message.payload);
         return;
       case 'renameSession':
-        return this.renameSession();
+        return this.renameSession(message.payload.title);
       case 'configureApiKey':
         return this.configureApiKey();
       case 'selectFolder':
@@ -592,7 +595,7 @@ export class ClaudeController implements ChatBackendController {
         );
       }
       case 'selectPermission':
-        await this.setMode(message.payload.preset);
+        await this.setMode(message.payload.preset, message.payload.confirmed);
         return;
       case 'saveAll':
         return this.workbench.saveAll();
@@ -1062,11 +1065,11 @@ export class ClaudeController implements ChatBackendController {
     return (this.activeId ? this.projections.get(this.activeId)?.mode : undefined) ?? this.draftMode;
   }
 
-  private async setMode(mode: string): Promise<void> {
+  private async setMode(mode: string, preConfirmed?: boolean): Promise<void> {
     if (mode === this.currentMode()) return;
     const labelInfo = CLAUDE_MODES.find((m) => m.id === mode);
     const displayName = labelInfo ? (getLocale() === 'zh' ? labelInfo.zh : labelInfo.en) : mode;
-    if (isUnrestrictedMode(mode, displayName)) {
+    if (preConfirmed !== true && isUnrestrictedMode(mode, displayName)) {
       if (
         !(await this.workbench.confirm(
           t('acp.dangerTitle', displayName),

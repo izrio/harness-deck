@@ -8,6 +8,7 @@
  * - 工作台五模块协调器（WorkbenchHub）与后台隔离任务执行器（UnattendedRunner）
  * - 系统通知调度（NotificationDispatcher）与全部 16 个宿主命令
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, resolve } from 'node:path';
 import {
@@ -15,6 +16,7 @@ import {
   type AppearanceState,
   type BackendsState,
   type ChatCommand,
+  type ClientSurface,
   type DiscoveredGitSkill,
   type ExtensionsState,
   type HostSnapshot,
@@ -26,6 +28,9 @@ import {
   type PreferencesState,
   type ProjectsState,
   type ProvidersState,
+  type RemoteRouteKind,
+  type RemoteScope,
+  type RemoteState,
   type RuntimeStatus,
   type AcpRegistryState,
   type TabsState,
@@ -128,8 +133,15 @@ import { isWslEnvironment, isWslWindowsPath } from '../runtime/wsl.ts';
 import { redactSecrets } from '../util/redact.ts';
 import { locateZcode, verifyZcodeTarget } from '../zcode/locate.ts';
 import { UnifiedTabsModel } from '../vm/UnifiedTabs.ts';
+import type { Workbench } from '../vm/workbench.ts';
+import { ClientHub, UNICAST_HOST_MESSAGE_TYPES } from './ClientHub.ts';
 import type { HostCommandId, HostPlatform } from './HostPlatform.ts';
 import { CommandReceipts } from './receipts.ts';
+import { DeviceAuthStore } from '../remote/DeviceAuthStore.ts';
+import { buildMobileDiffContent, buildMobileFileContent } from '../remote/mobileDiff.ts';
+import { PushService } from '../remote/PushService.ts';
+import { RemoteBridgeServer } from '../remote/RemoteBridgeServer.ts';
+import type { TailscaleExec } from '../remote/TailscaleService.ts';
 import { isSchedulerLockHeld, schedulerLockPath } from '../sidecar/schedulerLock.ts';
 
 const FOLDER_KEY = 'harnessDeck.folder';
@@ -187,15 +199,21 @@ const WORKBENCH_MESSAGE_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
 ]);
 
 export interface HarnessHostRuntime {
-  handleWebviewMessage(message: WebviewToHost): void;
+  handleWebviewMessage(message: WebviewToHost, clientId?: string): void;
   onViewVisible(): void;
   onWorkspaceChanged(): void;
   executeCommand(cmd: HostCommandId): Promise<void>;
+  getRemoteState?(): RemoteState;
+  generateRemotePairing?(options?: { readonly scope?: RemoteScope; readonly routeKind?: RemoteRouteKind }): Promise<RemoteState>;
   dispose(): Promise<void>;
 }
 
 export interface HarnessHostRuntimeOptions {
   readonly createBackend?: (profile: BackendProfile, host: BackendHost) => RunningBackend;
+  readonly remotePort?: number;
+  readonly remoteBindHost?: string;
+  readonly tailscaleExec?: TailscaleExec;
+  readonly fetchImpl?: typeof fetch;
 }
 
 export function createHarnessHostRuntime(
@@ -212,16 +230,109 @@ export function createHarnessHostRuntime(
   const runtimeLog = (line: string, stream: 'stdout' | 'stderr'): void =>
     platform.runtimeLog(redactSecrets(line), stream);
 
+  const clientRequestContext = new AsyncLocalStorage<{
+    readonly clientId: string;
+    readonly surface: ClientSurface;
+    readonly unicastSnapshot?: boolean;
+  }>();
+
+  let updateStatusBarRef: () => void = () => undefined;
+  const remoteBridgeBox: { current?: RemoteBridgeServer } = {};
+  let startIfNeededRef: () => void = () => undefined;
+
+  const clientHub = new ClientHub({
+    hostKind: platform.hostKind,
+    postToIde: (message) => platform.postToWebview(message),
+    isIdeVisible: () => platform.isWebviewVisible(),
+    onRemoteClientsChanged: () => {
+      updateStatusBarRef();
+      if (clientHub.remoteClientCount() > 0) {
+        startIfNeededRef();
+      }
+      if (remoteBridgeBox.current) {
+        clientHub.sendTo('ide', { type: 'remote', payload: remoteBridgeBox.current.getState() });
+      }
+    },
+  });
+
+  const isAnyClientVisible = (): boolean => clientHub.isAnyClientVisible();
+
   const post = (message: HostToWebview): void => {
-    if (message.type === 'snapshot' && message.payload.hostKind === undefined) {
-      platform.postToWebview({
-        type: 'snapshot',
-        payload: { ...message.payload, hostKind: platform.hostKind },
-      });
-      return;
+    const outgoing: HostToWebview =
+      message.type === 'snapshot'
+        ? {
+            type: 'snapshot',
+            payload: {
+              ...message.payload,
+              ...(message.payload.hostKind === undefined ? { hostKind: platform.hostKind } : {}),
+              ...(remoteBridgeBox.current && message.payload.remote === undefined
+                ? { remote: remoteBridgeBox.current.getState() }
+                : {}),
+            },
+          }
+        : message;
+
+    const ctx = clientRequestContext.getStore();
+    if (ctx) {
+      if (outgoing.type === 'snapshot' && ctx.unicastSnapshot) {
+        clientHub.sendTo(ctx.clientId, outgoing);
+        return;
+      }
+      if (outgoing.type === 'switchWorkbenchModule' && ctx.unicastSnapshot) {
+        clientHub.sendTo(ctx.clientId, outgoing);
+        return;
+      }
+      if (UNICAST_HOST_MESSAGE_TYPES.has(outgoing.type)) {
+        clientHub.sendTo(ctx.clientId, outgoing);
+        return;
+      }
     }
-    platform.postToWebview(message);
+    clientHub.broadcast(outgoing);
   };
+
+  const mobileAwareWorkbench: Workbench = {
+    openDiff: async (request) => {
+      const ctx = clientRequestContext.getStore();
+      if (ctx?.surface === 'mobile-web') {
+        const diffData = await buildMobileDiffContent(request, platform.workbench.readFile);
+        clientHub.sendTo(ctx.clientId, { type: 'diffContent', payload: diffData });
+        return;
+      }
+      return platform.workbench.openDiff(request);
+    },
+    readFile: (path) => platform.workbench.readFile(path),
+    writeFile: (path, content) => platform.workbench.writeFile(path, content),
+    deleteFile: (path) => platform.workbench.deleteFile(path),
+    openFile: async (path, range) => {
+      const ctx = clientRequestContext.getStore();
+      if (ctx?.surface === 'mobile-web') {
+        const content = await platform.workbench.readFile(path);
+        const fileData = buildMobileFileContent(path, content, t('open.failed', basename(path), 'ENOENT'));
+        clientHub.sendTo(ctx.clientId, { type: 'diffContent', payload: fileData });
+        return;
+      }
+      return platform.workbench.openFile(path, range);
+    },
+    activeEditor: () => platform.workbench.activeEditor(),
+    findFiles: (query) => platform.workbench.findFiles(query),
+    dirtyFiles: () => platform.workbench.dirtyFiles(),
+    saveAll: () => platform.workbench.saveAll(),
+    confirm: async (message, detail, action) => {
+      if (clientRequestContext.getStore()?.surface === 'mobile-web') return false;
+      return platform.workbench.confirm(message, detail, action);
+    },
+    input: async (options) => {
+      if (clientRequestContext.getStore()?.surface === 'mobile-web') return undefined;
+      return platform.workbench.input(options);
+    },
+  };
+
+  const deviceAuthStore = new DeviceAuthStore(platform.globalState);
+  const pushService = new PushService(platform.globalState, deviceAuthStore, {
+    isWindowFocused: () => platform.isWindowFocused(),
+    ...(runtimeOptions.fetchImpl ? { fetchImpl: runtimeOptions.fetchImpl } : {}),
+    log,
+  });
 
   const processEnv = (extra: Readonly<Record<string, string | undefined>> = {}): Record<string, string | undefined> =>
     processEnvWithProxy(extra, platform.settings.getHttpProxy());
@@ -458,7 +569,7 @@ export function createHarnessHostRuntime(
   });
 
   const pushUnifiedTabs = (force = false): void => {
-    if (!platform.isWebviewVisible()) return;
+    if (!isAnyClientVisible()) return;
     const next = buildUnifiedTabsState();
     const json = JSON.stringify(next);
     if (!force && json === lastPostedTabsJson) return;
@@ -690,6 +801,19 @@ export function createHarnessHostRuntime(
         isWindowFocused: () => platform.isWindowFocused(),
         getPreferences: readNotificationPreferences,
         actionLabel: () => t('notify.openSession'),
+        onRemoteNotify: async (event, options) => {
+          await pushService.dispatch(
+            {
+              kind: event.kind,
+              title: 'Harness Deck',
+              body: event.message,
+              ...(event.sessionId
+                ? { sessionId: event.sessionId, url: `/?session=${encodeURIComponent(event.sessionId)}` }
+                : { url: '/' }),
+            },
+            options,
+          );
+        },
         showNotification: async (level, message, actionLabel) => {
           const choice = await platform.showMessage(level, message, [actionLabel]);
           return choice === actionLabel;
@@ -1025,7 +1149,7 @@ export function createHarnessHostRuntime(
         persistEnvCache();
         pushBackends();
         if (
-          platform.isWebviewVisible() &&
+          isAnyClientVisible() &&
           active?.backend.currentStatus().kind === 'notInstalled' &&
           availability.get(active.backend.profile.id) === true
         ) {
@@ -1047,8 +1171,18 @@ export function createHarnessHostRuntime(
       backendName,
       status,
       ...(active?.modelLabel ? { modelLabel: active.modelLabel } : {}),
+      ...(remoteBridgeBox.current
+        ? {
+            remote: {
+              enabled: remoteBridgeBox.current.isEnabled,
+              running: remoteBridgeBox.current.isRunning,
+              connectedClients: clientHub.remoteClientCount(),
+            },
+          }
+        : {}),
     });
   };
+  updateStatusBarRef = updateStatusBar;
 
   const writeSetting = async (sub: string | undefined, key: string, value: unknown): Promise<void> => {
     const fullKey = sub ? `${sub}.${key}` : key;
@@ -1152,6 +1286,7 @@ export function createHarnessHostRuntime(
     projects: projectsState(),
     extensions: extensionsState(),
     ...(hub ? { workbench: hub.state() } : {}),
+    ...(remoteBridgeBox.current ? { remote: remoteBridgeBox.current.getState() } : {}),
   });
 
   const selectFolderCommand = async (): Promise<void> => {
@@ -1257,10 +1392,10 @@ export function createHarnessHostRuntime(
       pushBackends();
     },
     controllerOptions: () => ({
-      workbench: platform.workbench,
+      workbench: mobileAwareWorkbench,
       includeActiveEditor: () => platform.settings.get<boolean>('context.includeActiveEditor', true),
       post: (message) => postForBackend(profile.id, message),
-      isVisible: () => platform.isWebviewVisible() && active?.backend.profile.id === profile.id,
+      isVisible: () => isAnyClientVisible() && active?.backend.profile.id === profile.id,
       log,
       folderLabel: () => {
         const targetWs = managedBackends.get(profile.id)?.workspacePath ?? workspacePath;
@@ -1431,6 +1566,7 @@ export function createHarnessHostRuntime(
     const kind = active.backend.currentStatus().kind;
     if (kind === 'idle' || kind === 'notInstalled' || kind === 'untrusted') active.backend.start();
   };
+  startIfNeededRef = startIfNeeded;
 
   const isBackendRunningTurn = (entry: ManagedBackend): boolean =>
     entry.backend.controller.peekSnapshot?.()?.session.running === true;
@@ -1517,7 +1653,7 @@ export function createHarnessHostRuntime(
         });
       }
       updateStatusBar();
-      if (platform.isWebviewVisible()) {
+      if (isAnyClientVisible()) {
         startIfNeeded();
         const snap = withUnifiedTabs(entry.backend.controller.snapshot());
         lastPostedTabsJson = JSON.stringify(snap.tabs);
@@ -1536,7 +1672,7 @@ export function createHarnessHostRuntime(
   const switchBackend = (id: string, forceReload = false): Promise<void> =>
     enqueueBackendTransition(async () => {
       if (!forceReload && active?.backend.profile.id === id) {
-        if (platform.isWebviewVisible()) startIfNeeded();
+        if (isAnyClientVisible()) startIfNeeded();
         return;
       }
       targetBackendId = id;
@@ -1973,12 +2109,12 @@ export function createHarnessHostRuntime(
     runner: unattendedRunner,
     locale: getLocale,
     isWorkspaceTrusted: () => platform.isWorkspaceTrusted(),
-    isWebviewVisible: () => platform.isWebviewVisible(),
+    isWebviewVisible: isAnyClientVisible,
     isBackgroundSchedulerActive: () =>
       platform.schedulerLockDir ? isSchedulerLockHeld(schedulerLockPath(platform.schedulerLockDir), process.pid) : false,
     ...(platform.onSchedulesChanged ? { onSchedulesChanged: platform.onSchedulesChanged } : {}),
-    openFile: (path) => platform.workbench.openFile(path),
-    openDiff: (request) => platform.workbench.openDiff(request),
+    openFile: (path) => mobileAwareWorkbench.openFile(path),
+    openDiff: (request) => mobileAwareWorkbench.openDiff(request),
     workspacePath: () => workspacePath,
     projects: projectsState,
     profiles,
@@ -2035,11 +2171,37 @@ export function createHarnessHostRuntime(
     log,
   });
 
+  const pushRemote = (): void => {
+    if (!remoteBridgeBox.current) return;
+    clientHub.sendTo('ide', { type: 'remote', payload: remoteBridgeBox.current.getState() });
+    updateStatusBar();
+  };
+
+  let handleWebviewMessageRef: (message: WebviewToHost, clientId?: string) => void = () => undefined;
+
+  const remoteBridge = new RemoteBridgeServer({
+    hostKind: platform.hostKind,
+    globalState: platform.globalState,
+    clientHub,
+    deviceAuth: deviceAuthStore,
+    pushService,
+    ...(platform.webviewDistRoot ? { webviewDistRoot: platform.webviewDistRoot } : {}),
+    ...(runtimeOptions.remotePort !== undefined ? { port: runtimeOptions.remotePort } : {}),
+    ...(runtimeOptions.remoteBindHost ? { bindHost: runtimeOptions.remoteBindHost } : {}),
+    locale: getLocale,
+    onWebviewMessage: (msg, clientId) => handleWebviewMessageRef(msg, clientId),
+    onStateChange: () => pushRemote(),
+    log,
+    ...(runtimeOptions.tailscaleExec ? { tailscaleExec: runtimeOptions.tailscaleExec } : {}),
+  });
+  remoteBridgeBox.current = remoteBridge;
+  void remoteBridge.restoreIfEnabled().then(() => pushRemote());
+
   updateStatusBar();
 
   disposers.push(
     platform.onDidGrantWorkspaceTrust(() => {
-      if (platform.isWebviewVisible()) startIfNeeded();
+      if (isAnyClientVisible()) startIfNeeded();
     }),
     platform.settings.onDidChange((changedKeys) => {
       const affects = (prefix: string): boolean => {
@@ -2221,7 +2383,21 @@ export function createHarnessHostRuntime(
 
   const commandReceipts = new CommandReceipts();
 
-  const handleWebviewMessage = (message: WebviewToHost): void => {
+  const handleWebviewMessage = (message: WebviewToHost, clientId = 'ide'): void => {
+    const client = clientHub.getClient(clientId);
+    const surface: ClientSurface = client?.surface ?? 'ide';
+    clientRequestContext.run(
+      {
+        clientId,
+        surface,
+        ...(message.type === 'ready' ? { unicastSnapshot: true } : {}),
+      },
+      () => dispatchWebviewMessage(message),
+    );
+  };
+  handleWebviewMessageRef = handleWebviewMessage;
+
+  const dispatchWebviewMessage = (message: WebviewToHost): void => {
     const commandId = 'commandId' in message ? message.commandId : undefined;
     if (commandId && !commandReceipts.accept(`${message.type}:${commandId}`)) return;
     if (WORKBENCH_MESSAGE_TYPES.has(message.type)) {
@@ -2812,13 +2988,13 @@ export function createHarnessHostRuntime(
         const config = configs[repoPath] ?? EMPTY_WORKTREE_CONFIG;
         const branch =
           message.payload.branch ??
-          (await platform.workbench.input({
+          (await mobileAwareWorkbench.input({
             title: t('project.worktreeBranchPrompt'),
             prompt: t('project.worktreeBranchPrompt'),
             placeHolder: 'feat/my-task',
             allowEmpty: true,
           }));
-        if (branch === undefined && !message.payload.branch) return;
+        if (branch === undefined && message.payload.branch === undefined) return;
         try {
           const result = await createProjectWorktree({
             repoPath,
@@ -2845,11 +3021,13 @@ export function createHarnessHostRuntime(
           return;
         }
         const target = normalizeProjectPath(message.payload.path) || message.payload.path;
-        const confirmed = await platform.workbench.confirm(
-          t('project.worktreeRemoveConfirm'),
-          t('project.worktreeRemoveDetail', target),
-          t('project.worktreeRemoveAction'),
-        );
+        const confirmed =
+          message.payload.confirmed === true ||
+          (await mobileAwareWorkbench.confirm(
+            t('project.worktreeRemoveConfirm'),
+            t('project.worktreeRemoveDetail', target),
+            t('project.worktreeRemoveAction'),
+          ));
         if (!confirmed) return;
         try {
           const { mainRepoPath } = await removeProjectWorktree({ worktreePath: target, log });
@@ -2880,13 +3058,13 @@ export function createHarnessHostRuntime(
         const config = configs[targetPath] ?? EMPTY_WORKTREE_CONFIG;
         const branch =
           message.payload.branch ??
-          (await platform.workbench.input({
+          (await mobileAwareWorkbench.input({
             title: t('project.worktreeBranchPrompt'),
             prompt: t('project.worktreeBranchPrompt'),
             placeHolder: 'feat/my-task',
             allowEmpty: true,
           }));
-        if (branch === undefined && !message.payload.branch) return;
+        if (branch === undefined && message.payload.branch === undefined) return;
         try {
           const result = await createProjectWorktree({
             repoPath: message.payload.path,
@@ -2985,7 +3163,83 @@ export function createHarnessHostRuntime(
       })();
       return;
     }
+    if (message.type === 'setRemoteEnabled') {
+      void remoteBridge.setEnabled(message.payload.enabled).then((state) => {
+        if (state.error) {
+          post({ type: 'toast', payload: { level: 'error', text: t('remote.startFailed', state.error) } });
+        }
+      });
+      return;
+    }
+    if (message.type === 'setRemoteConfig') {
+      void remoteBridge.updateConfig(message.payload);
+      return;
+    }
+    if (message.type === 'generateRemotePairing') {
+      void remoteBridge.generatePairing(message.payload);
+      return;
+    }
+    if (message.type === 'clearRemotePairing') {
+      remoteBridge.clearPairing();
+      return;
+    }
+    if (message.type === 'revokeRemoteDevice') {
+      void remoteBridge.revokeDevice(message.payload.deviceId).then(() => {
+        post({ type: 'toast', payload: { level: 'info', text: t('remote.deviceRevoked') } });
+      });
+      return;
+    }
+    if (message.type === 'disconnectAllRemote') {
+      void remoteBridge.disconnectAllRemote().then(() => {
+        post({ type: 'toast', payload: { level: 'info', text: t('remote.disconnectedAll') } });
+      });
+      return;
+    }
+    if (message.type === 'probeTailscale') {
+      void remoteBridge.probeTailscale();
+      return;
+    }
+    if (message.type === 'configureTailscaleServe') {
+      void remoteBridge.configureTailscaleServe(message.payload.enabled).then((res) => {
+        if (!res.ok) {
+          post({
+            type: 'toast',
+            payload: { level: 'error', text: t('remote.tailscaleServeFailed', res.manualCommand) },
+          });
+        } else {
+          post({
+            type: 'toast',
+            payload: { level: 'info', text: message.payload.enabled ? t('remote.tailscaleServeEnabled') : t('remote.tailscaleServeDisabled') },
+          });
+        }
+      });
+      return;
+    }
+    if (message.type === 'setRemotePushConfig') {
+      void pushService.updateConfig(message.payload).then(() => pushRemote());
+      return;
+    }
+    if (message.type === 'testRemotePush') {
+      void pushService
+        .dispatch(
+          {
+            kind: 'test',
+            title: 'Harness Deck',
+            body: t('remote.pushTestBody'),
+          },
+          { ignoreFocusCheck: true },
+        )
+        .then((res) => {
+          if (res.webPushSent > 0 || res.webhookSent) {
+            post({ type: 'toast', payload: { level: 'info', text: t('remote.pushTestOk') } });
+          } else {
+            post({ type: 'toast', payload: { level: 'info', text: t('remote.pushTestNone') } });
+          }
+        });
+      return;
+    }
     if (message.type === 'ready') {
+      const isIdeClient = (clientRequestContext.getStore()?.clientId ?? 'ide') === 'ide';
       const dshPath = platform.settings.get<string>('dsh.path', '');
       const zcodePath = platform.settings.get<string>('zcode.path', '');
       const claudePath = platform.settings.get<string>('claude.path', '');
@@ -3004,19 +3258,24 @@ export function createHarnessHostRuntime(
           codebuddyPath,
         )
       ) {
-        void checkAvailability();
+        // 退出请求级 AsyncLocalStorage，避免后台探测/进程继承 unicastSnapshot 上下文
+        clientRequestContext.exit(() => {
+          void checkAvailability();
+        });
       }
-      startIfNeeded();
+      clientRequestContext.exit(() => {
+        startIfNeeded();
+      });
       if (!active) {
         post({ type: 'snapshot', payload: idleSnapshot() });
-        if (pendingModule) {
+        if (isIdeClient && pendingModule) {
           post({ type: 'switchWorkbenchModule', payload: { module: pendingModule } });
           pendingModule = undefined;
         }
         return;
       }
       void active.backend.controller.handle(message).then(() => {
-        if (pendingModule) {
+        if (isIdeClient && pendingModule) {
           post({ type: 'switchWorkbenchModule', payload: { module: pendingModule } });
           pendingModule = undefined;
         }
@@ -3146,6 +3405,35 @@ export function createHarnessHostRuntime(
       case 'showLogs':
         platform.showLogs();
         return;
+      case 'toggleRemoteBridge': {
+        const nextEnabled = !remoteBridge.isEnabled;
+        const state = await remoteBridge.setEnabled(nextEnabled);
+        void platform.showMessage(
+          state.error ? 'error' : 'info',
+          state.error
+            ? t('remote.startFailed', state.error)
+            : nextEnabled
+              ? t('remote.enabledNotice', state.selectedHost ?? '127.0.0.1', String(state.port ?? 0))
+              : t('remote.disabledNotice'),
+        );
+        return;
+      }
+      case 'generateRemotePairing': {
+        const state = await remoteBridge.generatePairing();
+        if (state.pairing) {
+          await platform.writeClipboard(state.pairing.url);
+          void platform.showMessage('info', t('remote.pairingCopied', state.pairing.url));
+        }
+        return;
+      }
+      case 'showRemoteDevices': {
+        const state = remoteBridge.getState();
+        void platform.showMessage(
+          'info',
+          t('remote.devicesSummary', state.devices.length, state.connectedClients),
+        );
+        return;
+      }
     }
   };
 
@@ -3154,12 +3442,16 @@ export function createHarnessHostRuntime(
     onViewVisible: startIfNeeded,
     onWorkspaceChanged: () => active?.backend.controller.workspaceChanged(),
     executeCommand,
+    getRemoteState: () => remoteBridge.getState(),
+    generateRemotePairing: (opts) => remoteBridge.generatePairing(opts),
     dispose: async () => {
       if (gatewayLogTimer) {
         clearTimeout(gatewayLogTimer);
         gatewayLogTimer = undefined;
       }
       for (const dispose of disposers.splice(0)) dispose();
+      await remoteBridge.stop();
+      clientHub.dispose();
       hub?.dispose();
       hub = undefined;
       const stops = [...managedBackends.values()].map((entry) =>

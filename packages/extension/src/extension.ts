@@ -1,6 +1,7 @@
 /**
  * VS Code 插件入口：将 VS Code Extension API 适配为 HostPlatform，委托给核心宿主运行时 HarnessHostRuntime。
  */
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 import type { RuntimeStatus } from '@harness-deck/shared';
 import { createHarnessHostRuntime, type HarnessHostRuntime } from './host/HarnessHostRuntime.ts';
@@ -85,6 +86,9 @@ const ALL_COMMANDS: readonly HostCommandId[] = [
   'restartRuntime',
   'openWebUI',
   'showLogs',
+  'toggleRemoteBridge',
+  'generateRemotePairing',
+  'showRemoteDevices',
 ];
 
 let runtimeInstance: HarnessHostRuntime | undefined;
@@ -137,6 +141,7 @@ export function activate(context: vscode.ExtensionContext): void {
     hostKind: 'vscode',
     extensionVersion: String(context.extension.packageJSON.version ?? '0.4.0'),
     storageRoot: context.globalStorageUri.fsPath,
+    webviewDistRoot: join(context.extensionPath, 'dist', 'webview'),
     globalState: {
       get: <T>(key: string) => context.globalState.get<T>(key),
       update: async (key: string, value: unknown) => {
@@ -306,7 +311,9 @@ export async function deactivate(): Promise<void> {
 }
 
 function renderStatusBar(item: vscode.StatusBarItem, snap: StatusBarSnapshot): void {
-  const { backendName: name, status, modelLabel } = snap;
+  const { backendName: name, status, modelLabel, remote } = snap;
+  const remotePart =
+    remote?.enabled && remote.running ? ` · $(broadcast) ${remote.connectedClients}` : '';
   const text: Record<RuntimeStatus['kind'], string> = {
     idle: `$(circle-outline) ${name}`,
     locating: `$(loading~spin) ${name}`,
@@ -318,10 +325,10 @@ function renderStatusBar(item: vscode.StatusBarItem, snap: StatusBarSnapshot): v
     failed: `$(error) ${name}`,
     untrusted: `$(shield) ${name}`,
   };
-  item.text = text[status.kind];
+  item.text = `${text[status.kind]}${remotePart}`;
   item.tooltip =
     status.kind === 'connected'
-      ? `${name} ${status.version}`
+      ? `${name} ${status.version}${remotePart ? ` · Remote: ${remote?.connectedClients ?? 0}` : ''}`
       : status.kind === 'failed'
         ? status.message
         : undefined;

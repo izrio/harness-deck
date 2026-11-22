@@ -56,6 +56,11 @@ export interface StatusBarSnapshot {
   readonly backendName: string;
   readonly status: RuntimeStatus;
   readonly modelLabel?: string;
+  readonly remote?: {
+    readonly enabled: boolean;
+    readonly running: boolean;
+    readonly connectedClients: number;
+  };
 }
 
 export type HostCommandId =
@@ -74,12 +79,17 @@ export type HostCommandId =
   | 'selectFolder'
   | 'restartRuntime'
   | 'openWebUI'
-  | 'showLogs';
+  | 'showLogs'
+  | 'toggleRemoteBridge'
+  | 'generateRemotePairing'
+  | 'showRemoteDevices';
 
 export interface HostPlatform {
   readonly hostKind: HostIdeKind;
   readonly extensionVersion: string;
   readonly storageRoot: string;
+  /** Webview 构建产物目录（dist/webview），供 RemoteBridgeServer 托管静态壳与 PWA 资源。 */
+  readonly webviewDistRoot?: string;
   /** 后台无头调度单实例锁目录（仅 Sidecar / 无头宿主提供；VS Code 宿主不启用后台进程）。 */
   readonly schedulerLockDir?: string;
   /** 定时规则变更后通知宿主（用于 Sidecar 在启用首条规则时动态拉起后台无头调度）。 */

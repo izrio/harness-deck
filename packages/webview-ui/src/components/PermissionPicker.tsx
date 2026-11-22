@@ -16,6 +16,15 @@ import {
   ZapIcon,
 } from './icons.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useT, type Translate } from '../i18n.ts';
 
 const KNOWN = ['read-only', 'workspace-write', 'danger-full-access'] as const;
@@ -94,7 +103,9 @@ function PresetIcon({ preset, name }: { readonly preset: string | undefined; rea
 
 export function PermissionPicker({ disabled }: { disabled: boolean }) {
   const permissions = useView((s) => s.permissions);
+  const clientSurface = useView((s) => s.clientSurface);
   const [open, setOpen] = useState(false);
+  const [confirmPreset, setConfirmPreset] = useState<{ readonly preset: string; readonly label: string } | undefined>();
   const close = useCallback(() => setOpen(false), []);
   const t = useT();
   if (permissions.options.length === 0) return null;
@@ -150,7 +161,12 @@ export function PermissionPicker({ disabled }: { disabled: boolean }) {
                     )}
                     onClick={() => {
                       close();
-                      if (preset !== current) postToHost({ type: 'selectPermission', payload: { preset } });
+                      if (preset === current) return;
+                      if (clientSurface === 'mobile-web' && itemDanger) {
+                        setConfirmPreset({ preset, label });
+                        return;
+                      }
+                      postToHost({ type: 'selectPermission', payload: { preset } });
                     }}
                   >
                     <span
@@ -181,6 +197,34 @@ export function PermissionPicker({ disabled }: { disabled: boolean }) {
           </div>
         </PopoverContent>
       </Popover>
+      <Dialog open={confirmPreset !== undefined} onOpenChange={(next) => !next && setConfirmPreset(undefined)}>
+        <DialogContent data-testid="mobile-danger-permission-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.confirm.dangerTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('mobile.confirm.dangerDetail', confirmPreset?.label ?? '')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setConfirmPreset(undefined)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="mobile-danger-permission-confirm"
+              onClick={() => {
+                if (!confirmPreset) return;
+                postToHost({ type: 'selectPermission', payload: { preset: confirmPreset.preset, confirmed: true } });
+                setConfirmPreset(undefined);
+              }}
+            >
+              {t('mobile.confirm.dangerAllow')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

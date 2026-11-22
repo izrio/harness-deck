@@ -62,7 +62,12 @@ private class HarnessDeckStatusBarWidget(private val project: Project) :
             "failed" -> " (error)"
             else -> ""
         }
-        return "${s.backendName}$modelPart$statePart"
+        val remotePart = if (s.remote?.enabled == true && s.remote.running) {
+            " · Remote:${s.remote.connectedClients}"
+        } else {
+            ""
+        }
+        return "${s.backendName}$modelPart$statePart$remotePart"
     }
 
     override fun getAlignment(): Float = 0.0f

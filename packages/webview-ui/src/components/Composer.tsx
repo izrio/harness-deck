@@ -73,6 +73,8 @@ let nextRequestId = 0;
 export function Composer() {
   const session = useView((s) => s.session);
   const connected = useView((s) => s.connection === 'connected');
+  const clientSurface = useView((s) => s.clientSurface);
+  const clientScope = useView((s) => s.clientScope);
   const focusRequests = useView((s) => s.focusRequests);
   const prefill = useView((s) => s.prefill);
   const pendingImages = useView((s) => s.pendingImages);
@@ -323,7 +325,8 @@ export function Composer() {
       .filter((file): file is File => file !== null);
   };
 
-  const readOnly = session.subagentOf !== undefined;
+  const remoteReadOnly = clientSurface === 'mobile-web' && clientScope === 'read-only';
+  const readOnly = session.subagentOf !== undefined || remoteReadOnly;
   const canSend = connected && !readOnly && (text.trim().length > 0 || images.length > 0);
   const send = () => {
     if (!canSend) return;
@@ -371,7 +374,7 @@ export function Composer() {
   const showSend = !showStop || text.trim().length > 0 || images.length > 0;
 
   return (
-    <div className="content-column relative shrink-0">
+    <div className="content-column relative shrink-0 pb-[env(safe-area-inset-bottom,0px)]">
       <StatusDock />
       {session.subagentOf ? (
         <div className="mb-2 flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12px] text-ink-2 shadow-card" data-testid="subagent-strip">
@@ -449,7 +452,9 @@ export function Composer() {
           disabled={readOnly}
           placeholder={
             readOnly
-              ? t('subagent.readOnlyHint')
+              ? remoteReadOnly
+                ? t('mobile.readOnlyBanner')
+                : t('subagent.readOnlyHint')
               : connected
                 ? session.running
                   ? t('composer.placeholderRunning')
@@ -470,7 +475,13 @@ export function Composer() {
               disabled={!connected || readOnly}
               aria-label={t('composer.attach')}
               title={t('composer.attach')}
-              onClick={() => postToHost({ type: 'pickFiles', payload: {} })}
+              onClick={() => {
+                if (clientSurface === 'mobile-web') {
+                  imageInputRef.current?.click();
+                } else {
+                  postToHost({ type: 'pickFiles', payload: {} });
+                }
+              }}
               className="inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
               <PaperclipIcon className="size-4" />
@@ -517,7 +528,7 @@ export function Composer() {
             <button
               type="button"
               className={cn(
-                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-full bg-red-tint text-red shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--red)_28%,transparent)] transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red hover:text-white active:scale-[0.94]',
+                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-full bg-red-tint text-red shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--red)_28%,transparent)] transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red hover:text-white active:scale-[0.94] max-md:size-11',
                 showSend && 'send-button--secondary',
               )}
               onClick={() => postToHost({ type: 'interrupt', payload: {} })}
@@ -531,7 +542,7 @@ export function Composer() {
             <button
               type="button"
               className={cn(
-                'send-button inline-flex size-7 items-center justify-center rounded-full transition-[background-color,color,box-shadow,transform,opacity] duration-150 enabled:active:scale-[0.94] disabled:cursor-default',
+                'send-button inline-flex size-7 items-center justify-center rounded-full transition-[background-color,color,box-shadow,transform,opacity] duration-150 enabled:active:scale-[0.94] disabled:cursor-default max-md:size-11',
                 canSend
                   ? 'bg-ink text-surface shadow-xs hover:opacity-88'
                   : 'bg-field text-ink-3 shadow-hairline',

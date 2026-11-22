@@ -6,7 +6,9 @@ import { useSyncExternalStore } from 'react';
 import { loadState, postToHost, saveState } from './vscode.ts';
 import type {
   AppearanceState,
+  ClientSurface,
   CommandView,
+  DiffContentData,
   DiffRef,
   ConnectionState,
   ContextState,
@@ -26,6 +28,8 @@ import type {
   ProviderModelItem,
   ProvidersState,
   QuotaView,
+  RemoteScope,
+  RemoteState,
   RuntimeStatus,
   SessionHeader,
   SessionListItem,
@@ -39,6 +43,7 @@ import type {
 export type SettingsTab =
   | 'appearance'
   | 'notifications'
+  | 'remote'
   | 'agents'
   | 'providers'
   | 'skills'
@@ -56,6 +61,8 @@ export interface Toast {
 
 export interface ViewState {
   readonly hostKind: HostIdeKind;
+  readonly clientSurface: ClientSurface;
+  readonly clientScope: RemoteScope;
   readonly ready: boolean;
   readonly runtime: RuntimeStatus;
   readonly connection: ConnectionState;
@@ -113,6 +120,8 @@ export interface ViewState {
   readonly settingsOpen: boolean;
   readonly settingsTab: SettingsTab;
   readonly markdownPreview?: MarkdownPreviewData & { readonly loading?: boolean };
+  readonly diffContent?: DiffContentData;
+  readonly remote?: RemoteState;
   /** 图片内容缓存：`local:<localId>` 或 attachmentId → data URL；'loading' 读取中，'error' 读不到。 */
   readonly images: Readonly<Record<string, string>>;
   /** 正在打开的 Diff：`key` 是 DiffRef 的 JSON，对应的行显示加载中。 */
@@ -160,8 +169,16 @@ function readInitialHostKind(): HostIdeKind {
   return (globalThis as { __HARNESS_DECK_HOST__?: unknown }).__HARNESS_DECK_HOST__ === 'jetbrains' ? 'jetbrains' : 'vscode';
 }
 
+function readInitialClientSurface(): ClientSurface {
+  return (globalThis as { __HARNESS_DECK_CLIENT_SURFACE__?: unknown }).__HARNESS_DECK_CLIENT_SURFACE__ === 'mobile-web'
+    ? 'mobile-web'
+    : 'ide';
+}
+
 const initialState: ViewState = {
   hostKind: readInitialHostKind(),
+  clientSurface: readInitialClientSurface(),
+  clientScope: 'operate',
   ready: false,
   runtime: { kind: 'idle' },
   connection: 'idle',
@@ -277,6 +294,7 @@ export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRu
     historyOpen: false,
     settingsOpen: false,
     markdownPreview: undefined,
+    diffContent: undefined,
     inspectScheduleRuleId,
   });
   try {
@@ -293,7 +311,7 @@ function normalizeSettingsTab(tab: SettingsTab | 'interface' | 'extensions'): Se
 }
 
 export function openHistoryPage(): void {
-  set({ historyOpen: true, settingsOpen: false, markdownPreview: undefined });
+  set({ historyOpen: true, settingsOpen: false, markdownPreview: undefined, diffContent: undefined });
 }
 
 export function closeHistoryPage(): void {
@@ -302,11 +320,11 @@ export function closeHistoryPage(): void {
 
 export function toggleHistoryPage(): void {
   const nextOpen = !state.historyOpen;
-  set({ historyOpen: nextOpen, ...(nextOpen ? { settingsOpen: false, markdownPreview: undefined } : {}) });
+  set({ historyOpen: nextOpen, ...(nextOpen ? { settingsOpen: false, markdownPreview: undefined, diffContent: undefined } : {}) });
 }
 
 export function openSettingsPage(tab?: SettingsTab | 'interface' | 'extensions'): void {
-  set({ settingsOpen: true, historyOpen: false, markdownPreview: undefined, ...(tab ? { settingsTab: normalizeSettingsTab(tab) } : {}) });
+  set({ settingsOpen: true, historyOpen: false, markdownPreview: undefined, diffContent: undefined, ...(tab ? { settingsTab: normalizeSettingsTab(tab) } : {}) });
 }
 
 export function setSettingsTab(settingsTab: SettingsTab | 'interface' | 'extensions'): void {
@@ -319,7 +337,7 @@ export function closeSettingsPage(): void {
 
 export function toggleSettingsPage(): void {
   const nextOpen = !state.settingsOpen;
-  set({ settingsOpen: nextOpen, ...(nextOpen ? { historyOpen: false, markdownPreview: undefined } : {}) });
+  set({ settingsOpen: nextOpen, ...(nextOpen ? { historyOpen: false, markdownPreview: undefined, diffContent: undefined } : {}) });
 }
 
 export function requestMarkdownPreview(path: string): void {
@@ -331,6 +349,10 @@ export function requestMarkdownPreview(path: string): void {
 
 export function closeMarkdownPreview(): void {
   set({ markdownPreview: undefined });
+}
+
+export function closeDiffContent(): void {
+  set({ diffContent: undefined });
 }
 
 /** 图片在缓存里的键。 */
@@ -400,6 +422,8 @@ export function applyHostMessage(message: HostToWebview): void {
       persistActiveBackend(p.backends);
       set({
         ...(p.hostKind ? { hostKind: p.hostKind } : {}),
+        ...(p.clientSurface ? { clientSurface: p.clientSurface } : {}),
+        ...(p.clientScope ? { clientScope: p.clientScope } : {}),
         ready: true,
         runtime: p.runtime,
         connection: p.connection,
@@ -423,6 +447,7 @@ export function applyHostMessage(message: HostToWebview): void {
         ...(p.extensions ? { extensions: p.extensions } : {}),
         ...(p.projects ? { projects: p.projects } : {}),
         ...(p.workbench ? { workbench: p.workbench } : {}),
+        ...(p.remote !== undefined ? { remote: p.remote } : {}),
       });
       return;
     }
@@ -495,8 +520,21 @@ export function applyHostMessage(message: HostToWebview): void {
         set({ markdownPreview: message.payload });
       }
       return;
+    case 'diffContent':
+      set({ diffContent: message.payload, openingDiff: undefined });
+      return;
+    case 'remote':
+      set({ remote: message.payload });
+      return;
     case 'navigateToSession':
-      set({ activeModule: 'sessions', moduleExplicit: true, historyOpen: false, settingsOpen: false, markdownPreview: undefined });
+      set({
+        activeModule: 'sessions',
+        moduleExplicit: true,
+        historyOpen: false,
+        settingsOpen: false,
+        markdownPreview: undefined,
+        diffContent: undefined,
+      });
       return;
     case 'imageData':
       set({ images: { ...state.images, [message.payload.attachmentId]: message.payload.dataUrl ?? 'error' } });

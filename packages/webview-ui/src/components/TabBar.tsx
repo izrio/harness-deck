@@ -44,7 +44,7 @@ export function TabBar() {
 
   return (
     <div
-      className="tabs flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-surface px-2 py-1"
+      className="tabs flex shrink-0 touch-pan-x items-center gap-0.5 overflow-x-auto border-b border-line bg-surface px-2 py-1"
       role="tablist"
       aria-label={t('tabs.label')}
       ref={strip}
@@ -84,7 +84,7 @@ export function TabBar() {
             <ContextMenuTrigger asChild>
               <div
                 className={cn(
-                  'tab group/tab relative flex min-w-[72px] max-w-[184px] flex-none items-center gap-1.5 rounded-[6px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,opacity] duration-100',
+                  'tab group/tab relative flex min-w-[72px] max-w-[184px] flex-none items-center gap-1.5 rounded-[6px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,opacity] duration-100 max-md:min-h-11',
                   active
                     ? 'tab--active cursor-default bg-field font-medium text-ink opacity-100'
                     : 'cursor-pointer text-ink opacity-55 hover:bg-hover hover:opacity-85',

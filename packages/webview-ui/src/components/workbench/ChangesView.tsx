@@ -35,6 +35,7 @@ export function ChangesView() {
   const state = useView((s) => s.workbench.sourceControl);
   const session = useView((s) => s.session);
   const items = useView((s) => s.items);
+  const remoteReadOnly = useView((s) => s.clientSurface === 'mobile-web' && s.clientScope === 'read-only');
   const [commitMessage, setCommitMessage] = useState('');
   const [stageAll, setStageAll] = useState(true);
   const [sessionOnly, setSessionOnly] = useState(false);
@@ -184,9 +185,9 @@ export function ChangesView() {
               onChange={(event) => setCommitMessage(event.target.value)}
               placeholder={t('wb.changes.commitPlaceholder')}
               aria-label={t('wb.changes.commitPlaceholder')}
-              disabled={busy || state.files.length === 0}
+              disabled={busy || remoteReadOnly || state.files.length === 0}
             />
-            <Button type="button" size="sm" onClick={commit} disabled={busy || !commitMessage.trim() || state.files.length === 0}>
+            <Button type="button" size="sm" onClick={commit} disabled={busy || remoteReadOnly || !commitMessage.trim() || state.files.length === 0}>
               {t('wb.changes.commit')}
             </Button>
             <Button
@@ -195,7 +196,7 @@ export function ChangesView() {
               variant="outline"
               data-testid="changes-push-btn"
               onClick={() => setPushOpen(true)}
-              disabled={busy || !state.remote}
+              disabled={busy || remoteReadOnly || !state.remote}
             >
               {t('wb.changes.push')}
             </Button>
@@ -205,7 +206,7 @@ export function ChangesView() {
               variant="outline"
               data-testid="changes-pr-btn"
               onClick={openPr}
-              disabled={busy || !state.remote}
+              disabled={busy || remoteReadOnly || !state.remote}
             >
               {t('wb.changes.createPr')}
             </Button>

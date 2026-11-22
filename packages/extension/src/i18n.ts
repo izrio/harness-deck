@@ -235,6 +235,19 @@ const zh = {
   'mcp.imported': '已导入 {0} 个 MCP 服务器',
   'mcp.pickConfigTitle': '选择要导入的 MCP 配置文件',
   'mcp.noServersInFile': '所选文件中未解析到有效的 MCP 服务器配置',
+  'remote.startFailed': '启动手机端远程桥接失败：{0}',
+  'remote.deviceRevoked': '已吊销设备并断开其远程连接',
+  'remote.disconnectedAll': '已断开全部远程设备连接',
+  'remote.tailscaleServeFailed': '自动配置 tailscale serve 失败，请手动运行：{0}',
+  'remote.tailscaleServeEnabled': '已启用 Tailscale HTTPS 反代',
+  'remote.tailscaleServeDisabled': '已关闭 Tailscale HTTPS 反代',
+  'remote.pushTestBody': '这是一条来自 Harness Deck 的手机端测试推送',
+  'remote.pushTestOk': '测试推送已发送',
+  'remote.pushTestNone': '当前没有已订阅的 Web Push 设备或已启用的 Webhook',
+  'remote.enabledNotice': '手机端远程互通已开启（{0}:{1}）',
+  'remote.disabledNotice': '手机端远程互通已关闭',
+  'remote.pairingCopied': '一次性配对链接已复制到剪贴板（5 分钟有效）：{0}',
+  'remote.devicesSummary': '已授权设备：{0} 台 · 当前在线：{1} 个连接',
 };
 
 export type HostMessageKey = keyof typeof zh;
@@ -470,6 +483,19 @@ const en: Record<HostMessageKey, string> = {
   'mcp.imported': 'Imported {0} MCP server(s)',
   'mcp.pickConfigTitle': 'Select MCP Configuration File to Import',
   'mcp.noServersInFile': 'No valid MCP servers were found in the selected file',
+  'remote.startFailed': 'Failed to start mobile remote bridge: {0}',
+  'remote.deviceRevoked': 'Device revoked and disconnected',
+  'remote.disconnectedAll': 'Disconnected all remote devices',
+  'remote.tailscaleServeFailed': 'Failed to configure tailscale serve automatically. Run manually: {0}',
+  'remote.tailscaleServeEnabled': 'Tailscale HTTPS proxy enabled',
+  'remote.tailscaleServeDisabled': 'Tailscale HTTPS proxy disabled',
+  'remote.pushTestBody': 'This is a test mobile push notification from Harness Deck',
+  'remote.pushTestOk': 'Test push notification sent',
+  'remote.pushTestNone': 'No Web Push subscriptions or enabled Webhook configured',
+  'remote.enabledNotice': 'Mobile remote bridge enabled ({0}:{1})',
+  'remote.disabledNotice': 'Mobile remote bridge disabled',
+  'remote.pairingCopied': 'One-time pairing URL copied to clipboard (valid for 5 minutes): {0}',
+  'remote.devicesSummary': 'Authorized devices: {0} · Connected clients: {1}',
 };
 
 const catalogs: Record<Locale, Record<HostMessageKey, string>> = { zh, en };

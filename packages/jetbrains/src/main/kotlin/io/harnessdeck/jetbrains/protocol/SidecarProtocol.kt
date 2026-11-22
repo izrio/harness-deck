@@ -168,18 +168,36 @@ data class FileCandidate(
     val kind: String,
 )
 
+data class RemoteStatusBarInfo(
+    val enabled: Boolean,
+    val running: Boolean,
+    val connectedClients: Int,
+)
+
 data class StatusBarSnapshot(
     val backendName: String,
     val statusKind: String,
     val modelLabel: String? = null,
+    val remote: RemoteStatusBarInfo? = null,
 ) {
     companion object {
         fun fromJson(obj: JsonObject): StatusBarSnapshot {
             val statusObj = obj.getAsJsonObject("status")
+            val remoteObj = obj.getAsJsonObject("remote")
+            val remoteInfo = if (remoteObj != null) {
+                RemoteStatusBarInfo(
+                    enabled = remoteObj.get("enabled")?.asBoolean == true,
+                    running = remoteObj.get("running")?.asBoolean == true,
+                    connectedClients = remoteObj.get("connectedClients")?.asInt ?: 0,
+                )
+            } else {
+                null
+            }
             return StatusBarSnapshot(
                 backendName = obj.get("backendName")?.asString ?: "Harness Deck",
                 statusKind = statusObj?.get("kind")?.asString ?: "idle",
                 modelLabel = obj.get("modelLabel")?.takeIf { !it.isJsonNull }?.asString,
+                remote = remoteInfo,
             )
         }
     }

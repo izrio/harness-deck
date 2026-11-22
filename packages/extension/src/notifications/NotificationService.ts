@@ -20,10 +20,15 @@ export interface NotificationHost {
   readonly showNotification: (level: 'info' | 'warning', message: string, actionLabel: string) => Promise<boolean>;
   readonly openSession: (sessionId?: string) => void | Promise<void>;
   readonly actionLabel: () => string;
+  readonly onRemoteNotify?: (
+    event: NotificationEvent,
+    options: { readonly ignoreFocusCheck?: boolean },
+  ) => void | Promise<void>;
 }
 
 export class NotificationDispatcher {
   private readonly seenKeys = new Set<string>();
+  private readonly seenRemoteKeys = new Set<string>();
   private readonly lastTurnState = new Map<string, boolean>();
   private readonly lastGoalPhase = new Map<string, string>();
   private lastRuntimeKey = '';
@@ -33,6 +38,7 @@ export class NotificationDispatcher {
   /** 重置状态跟踪（例如切换底层后）。 */
   reset(): void {
     this.seenKeys.clear();
+    this.seenRemoteKeys.clear();
     this.lastTurnState.clear();
     this.lastGoalPhase.clear();
     this.lastRuntimeKey = '';
@@ -130,17 +136,22 @@ export class NotificationDispatcher {
     const prefs = this.host.getPreferences();
     if (!options.ignoreFocusCheck) {
       if (!prefs.enabled) return false;
-      if (prefs.onlyWhenUnfocused && this.host.isWindowFocused()) return false;
       if (!isKindEnabled(prefs, event.kind)) return false;
     }
-    if (event.dedupeKey) {
-      if (this.seenKeys.has(event.dedupeKey)) return false;
-      this.seenKeys.add(event.dedupeKey);
-      if (this.seenKeys.size > 200) {
-        const first = this.seenKeys.values().next().value;
-        if (first !== undefined) this.seenKeys.delete(first);
+    const trackKey = (set: Set<string>, key: string): boolean => {
+      if (set.has(key)) return false;
+      set.add(key);
+      if (set.size > 200) {
+        const first = set.values().next().value;
+        if (first !== undefined) set.delete(first);
       }
+      return true;
+    };
+    if (!event.dedupeKey || trackKey(this.seenRemoteKeys, event.dedupeKey)) {
+      void this.host.onRemoteNotify?.(event, options);
     }
+    if (!options.ignoreFocusCheck && prefs.onlyWhenUnfocused && this.host.isWindowFocused()) return false;
+    if (event.dedupeKey && !trackKey(this.seenKeys, event.dedupeKey)) return false;
     const level = event.kind === 'unexpectedExit' ? 'warning' : 'info';
     const clicked = await this.host.showNotification(level, event.message, this.host.actionLabel());
     if (clicked) {

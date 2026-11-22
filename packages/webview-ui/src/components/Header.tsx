@@ -5,7 +5,7 @@
 import { useRef, type KeyboardEvent } from 'react';
 import { WORKBENCH_MODULES, type WorkbenchModule } from '@harness-deck/shared/limits';
 import { setActiveModule, toggleHistoryPage, toggleSettingsPage, useView } from '../store.ts';
-import { postToHost } from '../vscode.ts';
+import { postToHost, reconnectMobileTransport, useTransportState } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import {
   AgentIcon,
@@ -18,18 +18,24 @@ import {
   KanbanIcon,
   PlusIcon,
   SettingsIcon,
+  WifiIcon,
+  WifiOffIcon,
 } from './icons.tsx';
 import { Button } from '@/components/ui/button';
 import { useT, type MessageKey } from '../i18n.ts';
 
 export function Header() {
   const session = useView((s) => s.session);
+  const clientSurface = useView((s) => s.clientSurface);
+  const clientScope = useView((s) => s.clientScope);
+  const remoteReadOnly = clientSurface === 'mobile-web' && clientScope === 'read-only';
   const historyOpen = useView((s) => s.historyOpen);
   const settingsOpen = useView((s) => s.settingsOpen);
   const activeModule = useView((s) => s.activeModule);
   const overview = useView((s) => s.workbench.overview);
   const tasks = useView((s) => s.workbench.tasks.items);
   const schedules = useView((s) => s.workbench.schedules);
+  const transport = useTransportState();
   const t = useT();
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -132,10 +138,52 @@ export function Header() {
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5" data-testid="header-actions">
+          {clientSurface === 'mobile-web' || transport.mode === 'mobile-web' ? (
+            <button
+              type="button"
+              data-testid="mobile-conn-pill"
+              onClick={reconnectMobileTransport}
+              className={cn(
+                'mr-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium shadow-hairline transition-colors',
+                transport.status === 'connected'
+                  ? 'bg-green-tint text-green'
+                  : transport.status === 'reconnecting' || transport.status === 'connecting'
+                    ? 'bg-orange-tint text-orange'
+                    : 'bg-red-tint text-red',
+              )}
+              title={t(
+                transport.status === 'connected'
+                  ? 'mobile.conn.connected'
+                  : transport.status === 'reconnecting'
+                    ? 'mobile.conn.reconnecting'
+                    : transport.status === 'connecting'
+                      ? 'mobile.conn.connecting'
+                      : 'mobile.conn.offline',
+              )}
+            >
+              {transport.status === 'connected' ? (
+                <WifiIcon className="size-3" />
+              ) : (
+                <WifiOffIcon className="size-3" />
+              )}
+              <span className="hidden sm:inline">
+                {t(
+                  transport.status === 'connected'
+                    ? 'mobile.conn.connected'
+                    : transport.status === 'reconnecting'
+                      ? 'mobile.conn.reconnecting'
+                      : transport.status === 'connecting'
+                        ? 'mobile.conn.connecting'
+                        : 'mobile.conn.offline',
+                )}
+              </span>
+            </button>
+          ) : null}
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
+            disabled={remoteReadOnly}
             aria-label={t('header.new')}
             title={t('header.newTab')}
             onClick={() => {
@@ -145,19 +193,21 @@ export function Header() {
           >
             <PlusIcon className="size-4" />
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            data-testid="open-workbench-panel-btn"
-            aria-label={t('wb.openPanel')}
-            title={t('wb.openPanel')}
-            onClick={() => {
-              postToHost({ type: 'openWorkbenchPanel', payload: {} });
-            }}
-          >
-            <ExpandPanelIcon className="size-3.5" />
-          </Button>
+          {clientSurface !== 'mobile-web' ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              data-testid="open-workbench-panel-btn"
+              aria-label={t('wb.openPanel')}
+              title={t('wb.openPanel')}
+              onClick={() => {
+                postToHost({ type: 'openWorkbenchPanel', payload: {} });
+              }}
+            >
+              <ExpandPanelIcon className="size-3.5" />
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant={historyOpen ? 'secondary' : 'ghost'}

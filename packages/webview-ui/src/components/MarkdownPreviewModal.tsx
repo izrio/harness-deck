@@ -17,6 +17,7 @@ export function isMarkdownPath(path: string): boolean {
 
 export function MarkdownPreviewModal() {
   const preview = useView((s) => s.markdownPreview);
+  const clientSurface = useView((s) => s.clientSurface);
   const t = useT();
 
   useEffect(() => {
@@ -47,15 +48,17 @@ export function MarkdownPreviewModal() {
           <span className="truncate text-[13px] font-semibold text-ink">{preview.title}</span>
           <ValuePill className="hidden truncate font-mono text-[10.5px] sm:inline-flex">{preview.path}</ValuePill>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          data-testid="markdown-preview-open-editor"
-          onClick={() => postToHost({ type: 'openFile', payload: { path: preview.path } })}
-        >
-          {t('markdown.openInEditor')}
-        </Button>
+        {clientSurface !== 'mobile-web' ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            data-testid="markdown-preview-open-editor"
+            onClick={() => postToHost({ type: 'openFile', payload: { path: preview.path } })}
+          >
+            {t('markdown.openInEditor')}
+          </Button>
+        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-4">

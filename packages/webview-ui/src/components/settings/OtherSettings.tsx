@@ -10,6 +10,13 @@ import { setPreferencesLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { LogIcon, PencilIcon, RefreshIcon } from '../icons.tsx';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
@@ -29,7 +36,10 @@ const DEFAULT_ADVANCED: AdvancedPreferences = {
 export function GeneralSettings() {
   const t = useT();
   const session = useView((s) => s.session);
+  const clientSurface = useView((s) => s.clientSurface);
   const preferences = useView((s) => s.preferences);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState('');
 
   const updatePref = (patch: Partial<PreferencesState>) => {
     setPreferencesLocal({ ...preferences, ...patch });
@@ -37,18 +47,32 @@ export function GeneralSettings() {
   };
 
   return (
-    <SettingsSection
-      title={t('settings.session.title')}
-      testId="settings-preferences"
-      actions={
-        session.id ? (
-          <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'renameSession', payload: {} })}>
-            <PencilIcon className="size-3 text-ink-3" />
-            <span>{t('header.rename')}</span>
-          </Button>
-        ) : undefined
-      }
-    >
+    <>
+      <SettingsSection
+        title={t('settings.session.title')}
+        testId="settings-preferences"
+        actions={
+          session.id ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="rename-session-btn"
+              onClick={() => {
+                if (clientSurface === 'mobile-web') {
+                  setRenameDraft(session.title ?? '');
+                  setRenameOpen(true);
+                } else {
+                  postToHost({ type: 'renameSession', payload: {} });
+                }
+              }}
+            >
+              <PencilIcon className="size-3 text-ink-3" />
+              <span>{t('header.rename')}</span>
+            </Button>
+          ) : undefined
+        }
+      >
       <div className="primitive-card-pad flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
@@ -75,14 +99,55 @@ export function GeneralSettings() {
             onCheckedChange={(checked) => updatePref({ showTurnChanges: checked })}
           />
         </div>
-      </div>
-    </SettingsSection>
+        </div>
+      </SettingsSection>
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent data-testid="mobile-rename-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.confirm.renameTitle')}</DialogTitle>
+          </DialogHeader>
+          <Input
+            size="sm"
+            data-testid="mobile-rename-input"
+            value={renameDraft}
+            placeholder={t('mobile.confirm.renamePlaceholder')}
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && renameDraft.trim()) {
+                postToHost({ type: 'renameSession', payload: { title: renameDraft.trim() } });
+                setRenameOpen(false);
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setRenameOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="mobile-rename-confirm"
+              disabled={!renameDraft.trim()}
+              onClick={() => {
+                if (!renameDraft.trim()) return;
+                postToHost({ type: 'renameSession', payload: { title: renameDraft.trim() } });
+                setRenameOpen(false);
+              }}
+            >
+              {t('common.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
 export function AdvancedSettings() {
   const t = useT();
   const hostKind = useView((s) => s.hostKind);
+  const clientSurface = useView((s) => s.clientSurface);
+  const isMobileRemote = clientSurface === 'mobile-web';
   const preferences = useView((s) => s.preferences);
   const advanced = preferences.advanced ?? DEFAULT_ADVANCED;
   const [dshPath, setDshPath] = useState(advanced.dshPath);
@@ -141,6 +206,7 @@ export function AdvancedSettings() {
             size="default"
             data-testid="adv-dsh-path"
             className="font-mono text-[12px]"
+            disabled={isMobileRemote}
             value={dshPath}
             placeholder={t('settings.advanced.dshPathPlaceholder')}
             onChange={(e) => setDshPath(e.target.value)}
@@ -155,6 +221,7 @@ export function AdvancedSettings() {
             size="default"
             data-testid="adv-dsh-profile"
             className="font-mono text-[12px]"
+            disabled={isMobileRemote}
             value={dshProfile}
             placeholder={t('settings.advanced.dshProfilePlaceholder')}
             onChange={(e) => setDshProfile(e.target.value)}
@@ -169,6 +236,7 @@ export function AdvancedSettings() {
             size="default"
             data-testid="adv-zcode-path"
             className="font-mono text-[12px]"
+            disabled={isMobileRemote}
             value={zcodePath}
             placeholder={t('settings.advanced.zcodePathPlaceholder')}
             onChange={(e) => setZcodePath(e.target.value)}
@@ -183,6 +251,7 @@ export function AdvancedSettings() {
             size="default"
             data-testid="adv-claude-path"
             className="font-mono text-[12px]"
+            disabled={isMobileRemote}
             value={claudePath}
             placeholder={t('settings.advanced.claudePathPlaceholder')}
             onChange={(e) => setClaudePath(e.target.value)}
@@ -197,6 +266,7 @@ export function AdvancedSettings() {
             size="default"
             data-testid="adv-pi-path"
             className="font-mono text-[12px]"
+            disabled={isMobileRemote}
             value={piPath}
             placeholder={t('settings.advanced.piPathPlaceholder')}
             onChange={(e) => setPiPath(e.target.value)}
@@ -211,6 +281,7 @@ export function AdvancedSettings() {
             size="default"
             data-testid="adv-codex-path"
             className="font-mono text-[12px]"
+            disabled={isMobileRemote}
             value={codexPath}
             placeholder={t('settings.advanced.codexPathPlaceholder')}
             onChange={(e) => setCodexPath(e.target.value)}
@@ -225,6 +296,7 @@ export function AdvancedSettings() {
             size="default"
             data-testid="adv-codebuddy-path"
             className="font-mono text-[12px]"
+            disabled={isMobileRemote}
             value={codebuddyPath}
             placeholder={t('settings.advanced.codebuddyPathPlaceholder')}
             onChange={(e) => setCodebuddyPath(e.target.value)}
@@ -241,31 +313,36 @@ export function AdvancedSettings() {
           <Switch
             data-testid="adv-backend-trace"
             aria-label={t('settings.advanced.backendTrace')}
+            disabled={isMobileRemote}
             checked={advanced.backendTrace}
             onCheckedChange={(checked) => updateAdvanced({ backendTrace: checked })}
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-          <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
-            <RefreshIcon className="size-3.5 text-ink-3" />
-            <span>{t('header.restart')}</span>
-          </Button>
-          <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
-            <LogIcon className="size-3.5 text-ink-3" />
-            <span>{t('header.logs')}</span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="default"
-            className="ml-auto text-ink-2 hover:text-ink"
-            data-testid="open-vscode-settings"
-            onClick={() => postToHost({ type: 'openSettings', payload: {} })}
-          >
-            {t(hostKind === 'jetbrains' ? 'settings.openIde' : 'settings.openVscode')}
-          </Button>
-        </div>
+        {!isMobileRemote ? (
+          <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
+              <RefreshIcon className="size-3.5 text-ink-3" />
+              <span>{t('header.restart')}</span>
+            </Button>
+            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
+              <LogIcon className="size-3.5 text-ink-3" />
+              <span>{t('header.logs')}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="default"
+              className="ml-auto text-ink-2 hover:text-ink"
+              data-testid="open-vscode-settings"
+              onClick={() => postToHost({ type: 'openSettings', payload: {} })}
+            >
+              {t(hostKind === 'jetbrains' ? 'settings.openIde' : 'settings.openVscode')}
+            </Button>
+          </div>
+        ) : (
+          <p className="m-0 border-t border-line pt-2 text-[11.5px] text-ink-3">{t('remote.mobileBlockedHint')}</p>
+        )}
       </div>
     </SettingsSection>
   );

@@ -154,6 +154,14 @@ OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号
 - **Claude 提示需要登录**：在终端运行 `claude` 并输入 `/login`，或给内置的 `claude` 配置 `ANTHROPIC_API_KEY`（见上面的「用 Claude」）。
 - **CodeBuddy 登录**：取消了登录方式选择或进度，下次发消息时会再问。浏览器登录不方便时用 `CODEBUDDY_API_KEY`（见上面的「用 CodeBuddy」）。
 
+## 手机端远程互通（PWA + 局域网 / Tailscale / 隧道）
+
+- **开启与配对**：在「设置 → 远程互通」（或命令面板「Harness Deck: 开启/关闭手机端远程互通」）启用宿主内嵌 HTTP/WS 桥接（默认关闭）；点击「生成配对二维码」后用手机扫码打开，一次性短效配对码通过 URL `#fragment` 传递（不落访问日志）并在换取 `HttpOnly` 设备 Cookie 后立即作废。
+- **跨网与 HTTPS**：局域网下可在设置页切换物理网卡 IP；离桌 4G/5G 场景支持只读探测本机 `tailscale status --json` 并启用 `tailscale serve` 获取 MagicDNS HTTPS 入口，或填写自带 HTTPS 隧道（`cloudflared` / `frp` / 反向代理）。
+- **权限与安全边界**：支持 `read-only`（只读查看会话与 Diff）和 `operate`（对话、审批、Git 提交/推送/PR）两种作用域；安装底层、修改服务商/MCP/技能/高级宿主机配置等高危操作默认在远程屏蔽。支持在设置页查看并一键吊销单个设备或全部断开。
+- **移动端体验与推送**：内置响应式布局、PWA 主屏安装、内嵌 Diff 审阅、面板内确认/输入弹窗（不阻塞桌面 IDE），以及免自建中继的本地 VAPID Web Push 和 Bark/ntfy/自定义 Webhook 兜底推送（默认在桌面 IDE 聚焦时静默）。
+- **独立守护进程**：需要脱离 IDE 常驻时，可运行 `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`（配合 `--headless-status` / `--headless-stop` 查看或停止）。
+
 ## 隐私
 
 插件本身不发网络请求：模型请求都由底层发出。随消息附带的上下文是你在输入框上方看到的那些标签，可以逐条关闭。
@@ -177,5 +185,7 @@ A VS Code chat panel for coding agents: streaming replies, compact tool rows, ap
 **Differences**: all backends support streaming, tool rows, approvals, to-dos, stop, diffs, models/modes, session history, concurrent multi-tab sessions, session changes bar, and serial worktree sessions. Message steering is supported on DeepSeek, Pi, ZCode, and Codex; subagent cards on DeepSeek, Codex, and CodeBuddy; question cards on DeepSeek, ZCode, and Codex; subscription quota on Claude Code, CodeBuddy, and Antigravity; per-turn file rollback, `/goal`, and the browser Web UI link are DeepSeek-only.
 
 **Settings**: `harnessDeck.backends`, `harnessDeck.dsh.path`, `harnessDeck.dsh.profile`, `harnessDeck.claude.path`, `harnessDeck.codex.path`, `harnessDeck.codebuddy.path`, `harnessDeck.pi.path`, `harnessDeck.zcode.path`, `harnessDeck.context.includeActiveEditor`, `harnessDeck.ui.language`, `harnessDeck.ui.fontSize`, `harnessDeck.ui.fontFamily`, `harnessDeck.ui.codeFontFamily`, `harnessDeck.ui.showTurnChanges`.
+
+**Mobile Remote Access (PWA + LAN / Tailscale / BYO Tunnel)**: disabled by default. Enable in Settings → Mobile Remote (or command `Harness Deck: Toggle Mobile Remote Access`), generate a 5-minute single-use QR pairing link (`#code=` fragment), and connect from your phone browser or installed PWA. Supports `read-only` and `operate` device scopes, per-device revocation, in-app Diff review, local VAPID Web Push & Webhook fallback (suppressed while IDE is focused), Tailscale `serve` / custom HTTPS tunnel routing, and standalone headless mode via `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`.
 
 **Privacy**: the extension itself makes no network requests; the backend makes all model requests. Only the context chips you see above the input box are attached to a message.

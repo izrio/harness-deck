@@ -3,7 +3,9 @@ import type { RuntimeStatus } from './runtime.ts';
 import { IMAGE_MEDIA_TYPES, MAX_IMAGE_BASE64, MAX_IMAGES, TASK_COLUMNS } from './limits.ts';
 import type {
   AppearanceState,
+  ClientSurface,
   CommandView,
+  DiffContentData,
   Locale,
   ConnectionState,
   ContextState,
@@ -19,6 +21,8 @@ import type {
   ProviderModelItem,
   ProvidersState,
   QuotaView,
+  RemoteScope,
+  RemoteState,
   SessionHeader,
   SessionListItem,
   BackendsState,
@@ -116,7 +120,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   /** 清理一个已创建的 git worktree（非 force，有未提交改动时拒绝）。 */
   z.object({
     type: z.literal('removeWorktree'),
-    payload: z.object({ path: z.string().min(1).max(4_096) }),
+    payload: z.object({ path: z.string().min(1).max(4_096), confirmed: z.boolean().optional() }),
   }),
   /** 提交改动（显式动作；stageAll 为 false 时仅提交已暂存文件）。 */
   z.object({
@@ -157,7 +161,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       z.object({ action: z.literal('send'), itemId: z.string().min(1) }),
     ]),
   }),
-  z.object({ type: z.literal('renameSession'), payload: empty }),
+  z.object({ type: z.literal('renameSession'), payload: z.object({ title: z.string().max(200).optional() }) }),
   z.object({ type: z.literal('configureApiKey'), payload: empty }),
   z.object({ type: z.literal('selectFolder'), payload: empty }),
   z.object({ type: z.literal('interrupt'), payload: empty }),
@@ -317,7 +321,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   /** 为项目创建 git worktree 并执行复制文件与准备命令。 */
   z.object({
     type: z.literal('createWorktree'),
-    payload: z.object({ path: z.string().min(1).max(4_096), branch: z.string().min(1).max(200).optional() }),
+    payload: z.object({ path: z.string().min(1).max(4_096), branch: z.string().max(200).optional() }),
   }),
   /** 执行项目的验收命令。 */
   z.object({ type: z.literal('runProjectVerify'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
@@ -327,10 +331,10 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('openFile'),
     payload: z.object({ path: z.string().min(1), startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional() }),
   }),
-  z.object({ type: z.literal('selectPermission'), payload: z.object({ preset: z.string().min(1) }) }),
+  z.object({ type: z.literal('selectPermission'), payload: z.object({ preset: z.string().min(1), confirmed: z.boolean().optional() }) }),
   z.object({ type: z.literal('saveAll'), payload: empty }),
   /** 把最后一轮改过的文件恢复到本轮开始前（仅 dsh；对话不回退）。 */
-  z.object({ type: z.literal('rollbackLastTurn'), payload: empty }),
+  z.object({ type: z.literal('rollbackLastTurn'), payload: z.object({ confirmed: z.boolean().optional() }) }),
   /** 在编辑器标签页中打开全宽工作台面板。 */
   z.object({ type: z.literal('openWorkbenchPanel'), payload: empty }),
   /** 总览未读项已读标记。 */
@@ -561,6 +565,57 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   }),
   /** 悬浮上下文旁的用量标识时查询官方订阅额度；宿主按激活后端判断是否有官方 OAuth 凭据。 */
   z.object({ type: z.literal('fetchQuota'), payload: z.object({ requestId: z.number().int() }) }),
+  /** 手机端远程互通（HD-23 / HD-26 / HD-27）。 */
+  z.object({ type: z.literal('setRemoteEnabled'), payload: z.object({ enabled: z.boolean() }) }),
+  z.object({
+    type: z.literal('setRemoteConfig'),
+    payload: z.object({
+      selectedHost: z.string().max(255).optional(),
+      scope: z.enum(['read-only', 'operate']).optional(),
+      tunnelUrl: z.string().max(2_000).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('generateRemotePairing'),
+    payload: z.object({
+      scope: z.enum(['read-only', 'operate']).optional(),
+      routeKind: z.enum(['lan', 'tailscale', 'tunnel']).optional(),
+    }),
+  }),
+  z.object({ type: z.literal('clearRemotePairing'), payload: empty }),
+  z.object({ type: z.literal('revokeRemoteDevice'), payload: z.object({ deviceId: z.string().min(1).max(120) }) }),
+  z.object({ type: z.literal('disconnectAllRemote'), payload: empty }),
+  z.object({ type: z.literal('probeTailscale'), payload: empty }),
+  z.object({ type: z.literal('configureTailscaleServe'), payload: z.object({ enabled: z.boolean() }) }),
+  z.object({
+    type: z.literal('setRemotePushConfig'),
+    payload: z.object({
+      webPushEnabled: z.boolean().optional(),
+      suppressWhenFocused: z.boolean().optional(),
+      webhook: z
+        .object({
+          enabled: z.boolean().optional(),
+          preset: z.enum(['bark', 'ntfy', 'custom']).optional(),
+          url: z.string().max(2_000).optional(),
+        })
+        .optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('registerWebPushSubscription'),
+    payload: z.object({
+      endpoint: z.string().url().max(2_000),
+      keys: z.object({
+        p256dh: z.string().min(1).max(512),
+        auth: z.string().min(1).max(256),
+      }),
+    }),
+  }),
+  z.object({
+    type: z.literal('unregisterWebPushSubscription'),
+    payload: z.object({ endpoint: z.string().max(2_000).optional() }),
+  }),
+  z.object({ type: z.literal('testRemotePush'), payload: empty }),
 ]);
 
 export type WebviewToHost = z.infer<typeof webviewToHostSchema>;
@@ -569,6 +624,8 @@ export type HostIdeKind = 'vscode' | 'jetbrains';
 
 export interface HostSnapshot {
   readonly hostKind?: HostIdeKind;
+  readonly clientSurface?: ClientSurface;
+  readonly clientScope?: RemoteScope;
   readonly runtime: RuntimeStatus;
   readonly connection: ConnectionState;
   readonly sessions: readonly SessionListItem[];
@@ -589,6 +646,7 @@ export interface HostSnapshot {
   readonly projects?: ProjectsState;
   readonly extensions?: ExtensionsState;
   readonly workbench?: WorkbenchState;
+  readonly remote?: RemoteState;
 }
 
 /**
@@ -634,6 +692,8 @@ export type HostToWebview =
   | { readonly type: 'workbench'; readonly payload: WorkbenchState }
   | { readonly type: 'switchWorkbenchModule'; readonly payload: { readonly module: WorkbenchModule } }
   | { readonly type: 'markdownPreview'; readonly payload: MarkdownPreviewData }
+  | { readonly type: 'diffContent'; readonly payload: DiffContentData }
+  | { readonly type: 'remote'; readonly payload: RemoteState }
   | { readonly type: 'navigateToSession'; readonly payload: { readonly sessionId?: string } }
   | { readonly type: 'diffOpened'; readonly payload: { readonly token: number } }
   | { readonly type: 'imageData'; readonly payload: { readonly attachmentId: string; readonly dataUrl?: string } }

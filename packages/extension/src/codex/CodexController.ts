@@ -497,13 +497,16 @@ export class CodexController implements ChatBackendController {
     this.options.post({ type: 'focusComposer', payload: {} });
   }
 
-  async renameSession(): Promise<void> {
+  async renameSession(explicitTitle?: string): Promise<void> {
     const threadId = this.activeId;
     if (!threadId) {
       this.toast('info', t('rename.needsSession'));
       return;
     }
-    const title = await this.workbench.input({ title: t('rename.title'), value: this.titleOf(threadId) });
+    const title =
+      explicitTitle !== undefined
+        ? explicitTitle
+        : await this.workbench.input({ title: t('rename.title'), value: this.titleOf(threadId) });
     if (!title?.trim()) return;
     const trimmed = title.trim();
     this.remember(threadId, trimmed, true);
@@ -549,7 +552,7 @@ export class CodexController implements ChatBackendController {
         await this.queueAction(message.payload);
         return;
       case 'renameSession':
-        return this.renameSession();
+        return this.renameSession(message.payload.title);
       case 'configureApiKey':
         return this.configureApiKey();
       case 'selectFolder':
@@ -614,7 +617,7 @@ export class CodexController implements ChatBackendController {
         );
       }
       case 'selectPermission':
-        await this.setMode(message.payload.preset);
+        await this.setMode(message.payload.preset, message.payload.confirmed);
         return;
       case 'saveAll':
         return this.workbench.saveAll();
@@ -1034,11 +1037,11 @@ export class CodexController implements ChatBackendController {
     return this.modeFor(this.activeId);
   }
 
-  private async setMode(rawMode: string): Promise<void> {
+  private async setMode(rawMode: string, preConfirmed?: boolean): Promise<void> {
     const cfg = codexPermissionConfig(rawMode);
     if (cfg.id === this.currentMode()) return;
     const displayName = getLocale() === 'zh' ? cfg.zh : cfg.en;
-    if (cfg.id === 'danger-full-access' || isUnrestrictedMode(cfg.id, displayName)) {
+    if (preConfirmed !== true && (cfg.id === 'danger-full-access' || isUnrestrictedMode(cfg.id, displayName))) {
       if (
         !(await this.workbench.confirm(
           t('acp.dangerTitle', displayName),

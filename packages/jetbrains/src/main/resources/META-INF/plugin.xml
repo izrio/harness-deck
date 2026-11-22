@@ -93,6 +93,16 @@
             <action id="HarnessDeck.ShowLogs"
                     class="io.harnessdeck.jetbrains.actions.ShowLogsAction"
                     text="Show Logs"/>
+            <separator/>
+            <action id="HarnessDeck.ToggleRemoteBridge"
+                    class="io.harnessdeck.jetbrains.actions.ToggleRemoteBridgeAction"
+                    text="Toggle Mobile Remote Access"/>
+            <action id="HarnessDeck.GenerateRemotePairing"
+                    class="io.harnessdeck.jetbrains.actions.GenerateRemotePairingAction"
+                    text="Generate Mobile Pairing Link"/>
+            <action id="HarnessDeck.ShowRemoteDevices"
+                    class="io.harnessdeck.jetbrains.actions.ShowRemoteDevicesAction"
+                    text="Show Remote Connected Devices"/>
         </group>
     </actions>
 </idea-plugin>

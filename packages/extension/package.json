@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Harness Deck",
   "description": "%extension.description%",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -129,6 +129,21 @@
       {
         "command": "harnessDeck.selectBackend",
         "title": "%command.selectBackend%",
+        "category": "Harness Deck"
+      },
+      {
+        "command": "harnessDeck.toggleRemoteBridge",
+        "title": "%command.toggleRemoteBridge%",
+        "category": "Harness Deck"
+      },
+      {
+        "command": "harnessDeck.generateRemotePairing",
+        "title": "%command.generateRemotePairing%",
+        "category": "Harness Deck"
+      },
+      {
+        "command": "harnessDeck.showRemoteDevices",
+        "title": "%command.showRemoteDevices%",
         "category": "Harness Deck"
       }
     ],

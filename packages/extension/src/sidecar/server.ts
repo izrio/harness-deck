@@ -4,7 +4,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { parseWebviewMessage } from '@harness-deck/shared';
 import { createHarnessHostRuntime, type HarnessHostRuntime } from '../host/HarnessHostRuntime.ts';
@@ -24,6 +24,12 @@ export interface SidecarSessionHandle {
 }
 
 const SCHEDULES_STORAGE_KEY = 'harnessDeck.hub.schedules';
+
+function resolveSidecarWebviewRoot(): string | undefined {
+  if (typeof __dirname === 'string') return join(__dirname, 'webview');
+  if (process.argv[1]) return join(dirname(process.argv[1]), 'webview');
+  return undefined;
+}
 
 /** 以 detached 进程拉起无头调度；IDE 关闭后它继续运行，单实例锁避免重复。 */
 function spawnHeadlessScheduler(configRoot: string, projectPath: string): void {
@@ -109,10 +115,12 @@ export function startSidecarSession(
         const ide = createIdeRpcClient(peer);
         workbench = new RemoteWorkbench(ide, init.activeEditor, init.dirtyFiles);
 
+        const webviewDistRoot = resolveSidecarWebviewRoot();
         const platform: HostPlatform = {
           hostKind: 'jetbrains',
           extensionVersion: init.extensionVersion,
           storageRoot,
+          ...(webviewDistRoot ? { webviewDistRoot } : {}),
           schedulerLockDir: configRoot,
           onSchedulesChanged: (hasEnabled) => {
             if (hasEnabled) spawnHeadlessScheduler(configRoot, init.projectPath);

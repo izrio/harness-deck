@@ -124,7 +124,10 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
   const dirtyKey = item.dirtyFiles.join('\0');
   const [sent, setSent] = usePendingReply<'allow' | 'allowAlways' | 'reject'>(`${item.id}\0${dirtyKey}`);
   const t = useT();
-  const blocked = item.dirtyFiles.length > 0;
+  const clientSurface = useView((s) => s.clientSurface);
+  const clientScope = useView((s) => s.clientScope);
+  const remoteReadOnly = clientSurface === 'mobile-web' && clientScope === 'read-only';
+  const blocked = item.dirtyFiles.length > 0 || remoteReadOnly;
   const showApprovalHint = useView((s) => {
     const backend = s.backends.items.find((b) => b.id === s.backends.active);
     return backend ? (backend.capabilities ?? backendCapabilities(backend)).approvalHint : false;
@@ -183,17 +186,17 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
         ) : (
           <span className="mr-auto" />
         )}
-        <Button type="button" variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => respond('reject')}>
+        <Button type="button" variant="ghost" size="sm" className="max-md:min-h-11" disabled={sent !== undefined || remoteReadOnly} onClick={() => respond('reject')}>
           {sent === 'reject' ? <SpinnerIcon className="size-3.5" /> : <CloseIcon className="size-3.5" />}
           {t('approval.reject')}
         </Button>
         {item.allowAlways ? (
-          <Button type="button" variant="outline" size="sm" disabled={sent !== undefined || blocked} title={t('approval.allowAlwaysTitle')} onClick={() => respond('allowAlways')}>
+          <Button type="button" variant="outline" size="sm" className="max-md:min-h-11" disabled={sent !== undefined || blocked} title={t('approval.allowAlwaysTitle')} onClick={() => respond('allowAlways')}>
             {sent === 'allowAlways' ? <SpinnerIcon className="size-3.5" /> : null}
             {item.allowAlways}
           </Button>
         ) : null}
-        <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
+        <Button type="button" size="sm" className="max-md:min-h-11 bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined || blocked} onClick={() => respond('allow')}>
           {sent === 'allow' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
           {t('approval.allow')}
         </Button>
@@ -204,6 +207,7 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
 
 function PlanReviewCard({ id, question }: { id: string; question: QuestionView }) {
   const t = useT();
+  const remoteReadOnly = useView((s) => s.clientSurface === 'mobile-web' && s.clientScope === 'read-only');
   const [feedback, setFeedback] = useState<string | undefined>();
   const [sent, setSent] = usePendingReply<'approve' | 'keep' | 'reply'>(id);
   const intent = question.intent!;
@@ -250,7 +254,7 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
           variant="ghost"
           size="sm"
           className="interaction__skip mr-auto text-ink-2"
-          disabled={sent !== undefined}
+          disabled={sent !== undefined || remoteReadOnly}
           title={t('plan.replyTitle')}
           onClick={() => {
             setSent('reply');
@@ -262,22 +266,22 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
         </Button>
         {feedback === undefined ? (
           <>
-            <Button type="button" variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback('')}>
+            <Button type="button" variant="ghost" size="sm" className="max-md:min-h-11" disabled={sent !== undefined || remoteReadOnly} onClick={() => setFeedback('')}>
               <PencilIcon className="size-3.5" />
               {t('plan.keep')}
             </Button>
-            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined} onClick={() => answer(intent.approve)}>
+            <Button type="button" size="sm" className="max-md:min-h-11 bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined || remoteReadOnly} onClick={() => answer(intent.approve)}>
               {sent === 'approve' ? <SpinnerIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
               {t('plan.approve')}
             </Button>
           </>
         ) : (
           <>
-            <Button type="button" variant="ghost" size="sm" disabled={sent !== undefined} onClick={() => setFeedback(undefined)}>
+            <Button type="button" variant="ghost" size="sm" className="max-md:min-h-11" disabled={sent !== undefined || remoteReadOnly} onClick={() => setFeedback(undefined)}>
               <ReplyIcon className="size-3.5" />
               {t('plan.back')}
             </Button>
-            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined} onClick={() => answer(keep, feedback.trim() || undefined)}>
+            <Button type="button" size="sm" className="max-md:min-h-11 bg-brand text-brand-foreground hover:opacity-90" disabled={sent !== undefined || remoteReadOnly} onClick={() => answer(keep, feedback.trim() || undefined)}>
               {sent === 'keep' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
               {t('plan.sendFeedback')}
             </Button>
@@ -298,6 +302,7 @@ const ADVANCE_DELAY_MS = 220;
 /** 对齐 Beautiful UI ApprovalCard 提问流。 */
 function QuestionCard({ item }: { item: Of<'question'> }) {
   const t = useT();
+  const remoteReadOnly = useView((s) => s.clientSurface === 'mobile-web' && s.clientScope === 'read-only');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [step, setStep] = useState(0);
   const [sent, setSent] = usePendingReply<'submit' | 'skip'>(item.id);
@@ -470,24 +475,24 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
         </fieldset>
       </div>
       <div className="interaction__actions question-card__actions primitive-card-footer flex items-center justify-between gap-2 border-t border-line">
-        <Button type="button" variant="ghost" size="sm" className="question-card__skip" disabled={sent !== undefined} onClick={skip}>
+        <Button type="button" variant="ghost" size="sm" className="question-card__skip max-md:min-h-11" disabled={sent !== undefined || remoteReadOnly} onClick={skip}>
           {sent === 'skip' ? <SpinnerIcon className="size-3.5" /> : <FastForwardIcon className="size-3.5" />}
           {total > 1 ? t('question.skipAll') : t('question.skip')}
         </Button>
         <div className="flex items-center gap-1.5">
           {total > 1 && index > 0 ? (
-            <Button type="button" variant="outline" size="sm" disabled={sent !== undefined} onClick={() => goTo(index - 1)}>
+            <Button type="button" variant="outline" size="sm" className="max-md:min-h-11" disabled={sent !== undefined || remoteReadOnly} onClick={() => goTo(index - 1)}>
               <ArrowLeftIcon className="size-3.5" />
               {t('question.prev')}
             </Button>
           ) : null}
           {last ? (
-            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={!complete || sent !== undefined} onClick={submit}>
+            <Button type="button" size="sm" className="max-md:min-h-11 bg-brand text-brand-foreground hover:opacity-90" disabled={!complete || sent !== undefined || remoteReadOnly} onClick={submit}>
               {sent === 'submit' ? <SpinnerIcon className="size-3.5" /> : <SendIcon className="size-3.5" />}
               {t('question.submit')}
             </Button>
           ) : (
-            <Button type="button" size="sm" className="bg-brand text-brand-foreground hover:opacity-90" disabled={!answered(q) || sent !== undefined} onClick={next}>
+            <Button type="button" size="sm" className="max-md:min-h-11 bg-brand text-brand-foreground hover:opacity-90" disabled={!answered(q) || sent !== undefined || remoteReadOnly} onClick={next}>
               {t('question.next')}
               <ArrowRightIcon className="size-3.5" />
             </Button>

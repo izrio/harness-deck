@@ -65,13 +65,13 @@
 | HD-19 | P2 | 文档体系与术语表 | M3 质量与评测 | 已完成 |
 | HD-20 | P2 | JetBrains 端冒烟测试 | M3 质量与评测 | 已完成 |
 | HD-21 | P3 | ACP 代理注册表导入 | M4 按需 | 已完成 |
-| HD-22 | P1 | 多客户端会话总线与 Webview 传输抽象 | M5 手机端互通 | 待开始 |
-| HD-23 | P1 | 宿主 HTTP/WS 桥接与局域网 QR 配对 | M5 手机端互通 | 待开始 |
-| HD-24 | P1 | 移动端响应式界面与 PWA 适配 | M5 手机端互通 | 待开始 |
-| HD-25 | P1 | 移动端内嵌 Diff 审阅与无 IDE 动作降级 | M5 手机端互通 | 待开始 |
-| HD-26 | P2 | 公网穿透（Tailscale 优先 + BYO 隧道） | M5 手机端互通 | 待开始 |
-| HD-27 | P2 | 移动端推送通知（Web Push + Webhook） | M5 手机端互通 | 待开始 |
-| HD-28 | P3 | 脱离 IDE 的独立守护进程模式 | M5 手机端互通 | 待开始 |
+| HD-22 | P1 | 多客户端会话总线与 Webview 传输抽象 | M5 手机端互通 | 已完成 |
+| HD-23 | P1 | 宿主 HTTP/WS 桥接与局域网 QR 配对 | M5 手机端互通 | 已完成 |
+| HD-24 | P1 | 移动端响应式界面与 PWA 适配 | M5 手机端互通 | 已完成 |
+| HD-25 | P1 | 移动端内嵌 Diff 审阅与无 IDE 动作降级 | M5 手机端互通 | 已完成 |
+| HD-26 | P2 | 公网穿透（Tailscale 优先 + BYO 隧道） | M5 手机端互通 | 已完成 |
+| HD-27 | P2 | 移动端推送通知（Web Push + Webhook） | M5 手机端互通 | 已完成 |
+| HD-28 | P3 | 脱离 IDE 的独立守护进程模式 | M5 手机端互通 | 已完成 |
 
 执行顺序建议：**M0–M4 已全部完成**；M5 手机端互通按 **HD-22 → HD-23 → HD-25 → HD-24（可与 HD-25 并行）→ HD-26 → HD-27 → HD-28** 推进。详细调研与架构约束见 [docs/MOBILE-INTEROP.md](./docs/MOBILE-INTEROP.md)。
 
@@ -469,6 +469,7 @@
 | 2026-11-20 | 0.6.1+ | HD-18 最小无头调度 | `pnpm headless:spike` 跑通真实定时任务 | 文件存储 + 单实例锁 + `UnattendedRunner` + mock ACP；结果写回 global-state |
 | 2026-11-20 | 0.6.1+ | HD-18 产品生命周期 | 集成测试 / sidecar 构建 | sidecar 自动 spawn detached 调度；锁被后台持有时 IDE 跳过自动触发；测试覆盖到期规则执行 |
 | 2026-11-20 | 0.6.1+ | HD-15 Kotlin 验证 | `gradle test --offline`（JDK21 + Gradle 8.11.1） | `compileTestKotlin` 与 `test` 均通过 |
+| 2026-11-22 | 0.8.0+ | HD-22–HD-28 手机端远程互通（M5 全量） | `typecheck` / `lint` / `check:i18n` / `test` / `build` | `ClientHub` 多客户端总线、`ConnectionSupervisor`、`RemoteBridgeServer`（QR/Cookie/ScopeGuard）、PWA 与移动端 Sheet/Diff/弹窗降级、Tailscale/BYO 隧道、VAPID Web Push + Webhook、`--headless-server` 独立守护模式及 VS Code / JetBrains 双端命令与状态栏指示全部落地并通过端到端集成与前端单测 |
 
 ---
 

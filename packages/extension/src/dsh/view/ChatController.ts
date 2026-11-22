@@ -479,7 +479,7 @@ export class ChatController implements ChatBackendController {
       case 'queueAction':
         return this.queueAction(message.payload);
       case 'renameSession':
-        return this.renameSession();
+        return this.renameSession(message.payload.title);
       case 'configureApiKey':
         return this.configureApiKey();
       case 'selectFolder':
@@ -636,11 +636,11 @@ export class ChatController implements ChatBackendController {
         return this.workbench.openFile(this.absolute(path), startLine ? { startLine, ...(endLine ? { endLine } : {}) } : undefined);
       }
       case 'selectPermission':
-        return this.selectPermission(message.payload.preset);
+        return this.selectPermission(message.payload.preset, message.payload.confirmed);
       case 'saveAll':
         return this.workbench.saveAll();
       case 'rollbackLastTurn':
-        return this.rollbackLastTurn();
+        return this.rollbackLastTurn(message.payload.confirmed);
     }
   }
 
@@ -799,7 +799,7 @@ export class ChatController implements ChatBackendController {
    * 把最后一轮改过的文件写回本轮开始前的内容（新建的文件直接删除）。只恢复文件，不回退对话。
    * 数据来自投影记录的工具片段；任何文件无法可靠还原、有未保存内容、或最后一轮本身未改文件时整体放弃，不写一半。
    */
-  private async rollbackLastTurn(): Promise<void> {
+  private async rollbackLastTurn(preConfirmed?: boolean): Promise<void> {
     const sessionId = this.tabs.current?.sessionId;
     if (!sessionId) return this.toast('error', t('rollback.noTurn'));
     const running = this.service?.sessions.find((item) => item.sessionId === sessionId)?.running ?? false;
@@ -835,11 +835,13 @@ export class ChatController implements ChatBackendController {
     if (plans.length === 0) return this.toast('error', t('rollback.noTurn'));
 
     const turnNumber = Math.max(1, deriveTurns(built.view.items, running).length);
-    const confirmed = await this.workbench.confirm(
-      t('rollback.confirm'),
-      t('rollback.confirmDetail', plans.length, turnNumber),
-      t('rollback.action'),
-    );
+    const confirmed =
+      preConfirmed === true ||
+      (await this.workbench.confirm(
+        t('rollback.confirm'),
+        t('rollback.confirmDetail', plans.length, turnNumber),
+        t('rollback.action'),
+      ));
     if (!confirmed) return;
 
     const applied: typeof plans = [];
@@ -881,8 +883,8 @@ export class ChatController implements ChatBackendController {
     return pending;
   }
 
-  private async selectPermission(preset: string): Promise<void> {
-    if (preset === DANGER_PRESET) {
+  private async selectPermission(preset: string, preConfirmed?: boolean): Promise<void> {
+    if (preset === DANGER_PRESET && preConfirmed !== true) {
       const ok = await this.workbench.confirm(
         t('danger.title'),
         t('danger.detail'),
@@ -1006,7 +1008,7 @@ export class ChatController implements ChatBackendController {
     }
   }
 
-  async renameSession(): Promise<void> {
+  async renameSession(explicitTitle?: string): Promise<void> {
     const sessionId = this.activeId;
     const service = this.service;
     if (!sessionId || !service) {
@@ -1014,7 +1016,11 @@ export class ChatController implements ChatBackendController {
       return;
     }
     const current = titleOf(service.projections(sessionId), []);
-    const title = (await this.workbench.input({ title: t('rename.title'), value: current === newSessionTitle() ? '' : current }))?.trim();
+    const title = (
+      explicitTitle !== undefined
+        ? explicitTitle
+        : await this.workbench.input({ title: t('rename.title'), value: current === newSessionTitle() ? '' : current })
+    )?.trim();
     if (!title || title === current) return;
     try {
       await service.rename(sessionId, title);

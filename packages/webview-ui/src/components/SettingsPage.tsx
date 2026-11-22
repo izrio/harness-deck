@@ -39,7 +39,9 @@ import {
   PuzzleIcon,
   ServerIcon,
   SlashIcon,
+  SmartphoneIcon,
 } from './icons.tsx';
+import { useIsMobile } from '../hooks/use-mobile.ts';
 import { AgentSettings } from './settings/AgentSettings.tsx';
 import { AppearanceSettings } from './settings/AppearanceSettings.tsx';
 import { ChatCommandSettings } from './settings/ChatCommandSettings.tsx';
@@ -48,6 +50,7 @@ import { NotificationSettings } from './settings/NotificationSettings.tsx';
 import { AdvancedSettings, GeneralSettings } from './settings/OtherSettings.tsx';
 import { ProjectSettings } from './settings/ProjectSettings.tsx';
 import { ProviderSettings } from './settings/ProviderSettings.tsx';
+import { RemoteSettings } from './settings/RemoteSettings.tsx';
 import { SkillSettings } from './settings/SkillSettings.tsx';
 
 interface SettingsNavGroup {
@@ -62,6 +65,7 @@ interface SettingsNavGroup {
 
 export function SettingsPage() {
   const t = useT();
+  const isMobile = useIsMobile();
   const activeTab = useView((s) => s.settingsTab);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -120,6 +124,7 @@ export function SettingsPage() {
       label: t('settings.nav.other'),
       items: [
         { id: 'other', label: t('settings.nav.advanced'), icon: <ServerIcon className="size-3.5" /> },
+        { id: 'remote', label: t('settings.nav.remote'), icon: <SmartphoneIcon className="size-3.5" /> },
       ],
     },
   ];
@@ -170,74 +175,126 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* 主体：左侧 shadcn/ui Sidebar + 右侧内容区 */}
-      <SidebarProvider keyboardShortcut={false} persistCookie={false} className="min-h-0 flex-1 overflow-hidden">
-        <Sidebar
-          collapsible="none"
-          aria-label={t('settings.title')}
-          className="w-36 shrink-0 overflow-y-auto border-r border-sidebar-border sm:w-48"
-        >
-          <SidebarContent
+      {/* 主体：桌面端左侧 shadcn/ui Sidebar；窄屏移动端顶部横向标签条 + 内容区 */}
+      {isMobile ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div
             role="tablist"
-            aria-orientation="vertical"
+            aria-orientation="horizontal"
             aria-label={t('settings.title')}
             data-testid="settings-tabs"
             onKeyDown={onKeyDown}
-            className="gap-2 p-1.5"
+            className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line bg-sidebar px-2.5 py-1.5"
           >
-            {groups.map((group) => (
-              <SidebarGroup key={group.id} className="p-1" data-testid={`sidebar-group-${group.id}`}>
-                <SidebarGroupLabel className="h-6 px-2 text-[10.5px] font-semibold tracking-wider text-ink-3 uppercase">
-                  {group.label}
-                </SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {group.items.map((item) => {
-                      const index = itemCursor++;
-                      const selected = activeTab === item.id;
-                      return (
-                        <SidebarMenuItem key={item.id}>
-                          <SidebarMenuButton
-                            ref={(el) => {
-                              buttonRefs.current[index] = el;
-                            }}
-                            type="button"
-                            role="tab"
-                            size="default"
-                            isActive={selected}
-                            id={`settings-tab-${item.id}`}
-                            aria-selected={selected}
-                            aria-controls={`settings-panel-${item.id}`}
-                            tabIndex={selected ? 0 : -1}
-                            data-testid={`settings-tab-${item.id}`}
-                            onClick={() => setSettingsTab(item.id)}
-                            className="text-[12.5px] data-[active=true]:bg-surface data-[active=true]:shadow-card"
-                          >
-                            {item.icon}
-                            <span>{item.label}</span>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    })}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-            ))}
-          </SidebarContent>
-        </Sidebar>
-
-        <div
-          role="tabpanel"
-          id={`settings-panel-${activeTab}`}
-          aria-labelledby={`settings-tab-${activeTab}`}
-          data-testid="settings-content"
-          className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3.5 py-3"
-        >
-          <div className="mx-auto flex w-full max-w-[var(--content-width)] flex-col gap-3">
-            {renderActiveTab(activeTab)}
+            {flatItems.map((item, index) => {
+              const selected = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  ref={(el) => {
+                    buttonRefs.current[index] = el;
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`settings-tab-${item.id}`}
+                  aria-selected={selected}
+                  aria-controls={`settings-panel-${item.id}`}
+                  tabIndex={selected ? 0 : -1}
+                  data-testid={`settings-tab-${item.id}`}
+                  onClick={() => setSettingsTab(item.id)}
+                  className={
+                    selected
+                      ? 'inline-flex shrink-0 items-center gap-1.5 rounded-[7px] bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink shadow-card'
+                      : 'inline-flex shrink-0 items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-[12px] text-ink-2 hover:bg-hover hover:text-ink'
+                  }
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div
+            role="tabpanel"
+            id={`settings-panel-${activeTab}`}
+            aria-labelledby={`settings-tab-${activeTab}`}
+            data-testid="settings-content"
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-3"
+          >
+            <div className="mx-auto flex w-full max-w-[var(--content-width)] flex-col gap-3">
+              {renderActiveTab(activeTab)}
+            </div>
           </div>
         </div>
-      </SidebarProvider>
+      ) : (
+        <SidebarProvider keyboardShortcut={false} persistCookie={false} className="min-h-0 flex-1 overflow-hidden">
+          <Sidebar
+            collapsible="none"
+            aria-label={t('settings.title')}
+            className="w-36 shrink-0 overflow-y-auto border-r border-sidebar-border sm:w-48"
+          >
+            <SidebarContent
+              role="tablist"
+              aria-orientation="vertical"
+              aria-label={t('settings.title')}
+              data-testid="settings-tabs"
+              onKeyDown={onKeyDown}
+              className="gap-2 p-1.5"
+            >
+              {groups.map((group) => (
+                <SidebarGroup key={group.id} className="p-1" data-testid={`sidebar-group-${group.id}`}>
+                  <SidebarGroupLabel className="h-6 px-2 text-[10.5px] font-semibold tracking-wider text-ink-3 uppercase">
+                    {group.label}
+                  </SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {group.items.map((item) => {
+                        const index = itemCursor++;
+                        const selected = activeTab === item.id;
+                        return (
+                          <SidebarMenuItem key={item.id}>
+                            <SidebarMenuButton
+                              ref={(el) => {
+                                buttonRefs.current[index] = el;
+                              }}
+                              type="button"
+                              role="tab"
+                              size="default"
+                              isActive={selected}
+                              id={`settings-tab-${item.id}`}
+                              aria-selected={selected}
+                              aria-controls={`settings-panel-${item.id}`}
+                              tabIndex={selected ? 0 : -1}
+                              data-testid={`settings-tab-${item.id}`}
+                              onClick={() => setSettingsTab(item.id)}
+                              className="text-[12.5px] data-[active=true]:bg-surface data-[active=true]:shadow-card"
+                            >
+                              {item.icon}
+                              <span>{item.label}</span>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              ))}
+            </SidebarContent>
+          </Sidebar>
+
+          <div
+            role="tabpanel"
+            id={`settings-panel-${activeTab}`}
+            aria-labelledby={`settings-tab-${activeTab}`}
+            data-testid="settings-content"
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3.5 py-3"
+          >
+            <div className="mx-auto flex w-full max-w-[var(--content-width)] flex-col gap-3">
+              {renderActiveTab(activeTab)}
+            </div>
+          </div>
+        </SidebarProvider>
+      )}
     </div>
   );
 }
@@ -264,5 +321,7 @@ function renderActiveTab(tab: SettingsTab): ReactNode {
       return <ProjectSettings />;
     case 'other':
       return <AdvancedSettings />;
+    case 'remote':
+      return <RemoteSettings />;
   }
 }

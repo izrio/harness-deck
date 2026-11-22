@@ -497,10 +497,13 @@ export class AcpController implements ChatBackendController {
     this.options.post({ type: 'focusComposer', payload: {} });
   }
 
-  async renameSession(): Promise<void> {
+  async renameSession(explicitTitle?: string): Promise<void> {
     const sessionId = this.activeId;
     if (!sessionId) return;
-    const title = await this.workbench.input({ title: t('rename.title'), value: this.titleOf(sessionId) });
+    const title =
+      explicitTitle !== undefined
+        ? explicitTitle
+        : await this.workbench.input({ title: t('rename.title'), value: this.titleOf(sessionId) });
     if (!title?.trim()) return;
     this.remember(sessionId, title.trim(), true);
     this.scheduleRender();
@@ -538,7 +541,7 @@ export class AcpController implements ChatBackendController {
       case 'queueAction':
         return this.queueAction(message.payload);
       case 'renameSession':
-        return this.renameSession();
+        return this.renameSession(message.payload.title);
       case 'configureApiKey':
         return this.configureApiKey();
       case 'selectFolder':
@@ -595,7 +598,7 @@ export class AcpController implements ChatBackendController {
         return this.workbench.openFile(this.absolute(path), startLine ? { startLine, ...(endLine ? { endLine } : {}) } : undefined);
       }
       case 'selectPermission':
-        return this.setMode(message.payload.preset);
+        return this.setMode(message.payload.preset, message.payload.confirmed);
       case 'saveAll':
         return this.workbench.saveAll();
       case 'openSettings':
@@ -1275,13 +1278,13 @@ export class AcpController implements ChatBackendController {
     }
   }
 
-  private async setMode(mode: string): Promise<void> {
+  private async setMode(mode: string, preConfirmed?: boolean): Promise<void> {
     const sessionId = this.currentId() ?? (await this.ensureDraft());
     const option = this.modeOption();
     if (!sessionId || !option || option.currentValue === mode) return;
     // 不再逐项询问的模式（Claude 的 bypassPermissions、各家的 yolo / full access）：和 dsh 的完全访问一样先确认
     const target = option.options?.find((o) => o.value === mode);
-    if (isUnrestrictedMode(mode, target?.name)) {
+    if (preConfirmed !== true && isUnrestrictedMode(mode, target?.name)) {
       const name = target?.name ?? mode;
       if (!(await this.workbench.confirm(t('acp.dangerTitle', name), t('acp.dangerDetail', this.agentName(), name), t('acp.dangerAllow', name)))) return;
     }

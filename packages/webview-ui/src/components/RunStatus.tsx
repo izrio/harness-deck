@@ -3,6 +3,15 @@
  */
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Item } from '@harness-deck/shared';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useView } from '../store.ts';
 import { cn } from '../lib/utils.ts';
 import { LoadingState } from './beautifului/index.ts';
@@ -143,6 +152,8 @@ export const TurnDone = memo(function TurnDone({
   canRollback?: boolean;
 }) {
   const t = useT();
+  const clientSurface = useView((s) => s.clientSurface);
+  const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false);
   const hasActions = copyText !== undefined;
   return (
     <div className={cn('turn-done flex items-center gap-2 text-[12px] text-ink-3', hasActions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
@@ -160,11 +171,42 @@ export const TurnDone = memo(function TurnDone({
         <button
           type="button"
           className="rounded px-1 text-[11.5px] text-ink-3 underline-offset-2 hover:text-ink hover:underline"
-          onClick={() => postToHost({ type: 'rollbackLastTurn', payload: {} })}
+          onClick={() => {
+            if (clientSurface === 'mobile-web') {
+              setRollbackConfirmOpen(true);
+            } else {
+              postToHost({ type: 'rollbackLastTurn', payload: {} });
+            }
+          }}
         >
           {t('run.rollback')}
         </button>
       ) : null}
+      <Dialog open={rollbackConfirmOpen} onOpenChange={setRollbackConfirmOpen}>
+        <DialogContent data-testid="mobile-rollback-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.confirm.rollbackTitle')}</DialogTitle>
+            <DialogDescription>{t('mobile.confirm.rollbackDetail')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setRollbackConfirmOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="mobile-rollback-confirm"
+              onClick={() => {
+                setRollbackConfirmOpen(false);
+                postToHost({ type: 'rollbackLastTurn', payload: { confirmed: true } });
+              }}
+            >
+              {t('mobile.confirm.rollbackAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 });

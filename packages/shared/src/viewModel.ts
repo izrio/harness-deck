@@ -1080,3 +1080,90 @@ export interface ProvidersState {
   /** 本地网关最近的请求与协议转换日志。 */
   readonly gatewayLogs?: readonly ProviderGatewayLogEntry[];
 }
+
+// ────────────────────────────────────────────────────────────
+// 手机端远程互通（HD-22–HD-28）
+// ────────────────────────────────────────────────────────────
+
+export type ClientSurface = 'ide' | 'mobile-web';
+export type RemoteScope = 'read-only' | 'operate';
+export type RemoteRouteKind = 'lan' | 'tailscale' | 'tunnel';
+export type RemoteWebhookPreset = 'bark' | 'ntfy' | 'custom';
+
+export interface RemoteInterfaceCandidate {
+  readonly name: string;
+  readonly address: string;
+}
+
+export interface RemoteDeviceView {
+  readonly id: string;
+  readonly name: string;
+  readonly scope: RemoteScope;
+  readonly createdAt: number;
+  readonly lastSeenAt: number;
+  readonly connected: boolean;
+  readonly pushSubscribed?: boolean;
+}
+
+export interface RemotePairingView {
+  readonly url: string;
+  readonly code: string;
+  readonly scope: RemoteScope;
+  readonly expiresAt: number;
+  readonly routeKind: RemoteRouteKind;
+}
+
+export interface RemoteTailscaleView {
+  readonly installed: boolean;
+  readonly loggedIn: boolean;
+  readonly dnsName?: string;
+  readonly serveUrl?: string;
+  readonly serveEnabled?: boolean;
+  readonly error?: string;
+}
+
+export interface RemoteWebhookConfig {
+  readonly enabled: boolean;
+  readonly preset: RemoteWebhookPreset;
+  readonly url: string;
+}
+
+export interface RemotePushConfig {
+  readonly webPushEnabled: boolean;
+  readonly vapidPublicKey?: string;
+  readonly suppressWhenFocused: boolean;
+  readonly webhook: RemoteWebhookConfig;
+}
+
+export interface RemoteState {
+  readonly enabled: boolean;
+  readonly running: boolean;
+  readonly port?: number;
+  readonly bindHost: string;
+  readonly interfaces: readonly RemoteInterfaceCandidate[];
+  readonly selectedHost?: string;
+  readonly scope: RemoteScope;
+  readonly connectedClients: number;
+  readonly devices: readonly RemoteDeviceView[];
+  readonly pairing?: RemotePairingView;
+  readonly tailscale?: RemoteTailscaleView;
+  readonly tunnelUrl?: string;
+  readonly push?: RemotePushConfig;
+  readonly error?: string;
+}
+
+/** 移动端内嵌 Diff 审阅与只读文件预览（HD-25）。 */
+export interface DiffContentData {
+  readonly path: string;
+  readonly title: string;
+  readonly language?: string;
+  readonly kind: 'pair' | 'unified' | 'cannotPreview' | 'file';
+  readonly before?: string;
+  readonly after?: string;
+  readonly patchText?: string;
+  readonly message?: string;
+  readonly additions?: number;
+  readonly deletions?: number;
+  readonly truncated?: boolean;
+  readonly readonly?: boolean;
+}
