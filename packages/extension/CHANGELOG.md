@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.10.0
+
+**工作台界面重构与 ZCode Protocol v1 适配**：工作台从「顶栏六大模块导航 + 独立会话列表」重构为「左侧项目/会话侧边栏 + 右侧工作区文件与 Git 面板 + 精简顶栏工具条」的三栏布局；会话模块更名为「项目」，历史会话整合进左侧栏并支持按运行中 / 等待处理 / 未读筛选；「改动」入口改为直接展开右侧 Git 面板。底层同步适配 ZCode Protocol v1 的会话创建、订阅、流式事件与交互响应 schema，确保 ZCode 后端的推理流、工具状态、模型切换与审批/提问卡片在新协议下正常渲染。
+
+**Workbench UI overhaul & ZCode Protocol v1 compatibility**: The workbench has been restructured from a "top-bar six-module navigation with a separate session list" into a three-pane layout — a left project/session sidebar, a right workspace Files & Git panel, and a slim top toolbar. The Sessions module is renamed to "Projects", history is consolidated into the left sidebar with running / needs-attention / unread filters, and the "Changes" entry now opens the right Git panel directly. On the backend, ZCode is updated to the Protocol v1 session-create, subscribe, streaming-event and interaction-response schemas so reasoning streams, tool statuses, model switching, and approval/question cards render correctly under the new protocol.
+
+- **三栏工作台与左侧项目侧边栏**：新增 `WorkbenchSidebar`（按项目分组的会话列表、状态徽标、运行中 / 等待处理 / 未读筛选、worktree 会话入口）与 `WorkbenchRightPanel`（工作区文件树浏览与搜索、Git 改动审阅 / 提交 / 推送 / PR），顶栏精简为「侧边栏开关 + 当前页标题 + 快捷操作」；侧栏、右侧面板的展开状态与会话模块持久化到本地，移动端以抽屉形式呈现侧栏。
+  **Three-pane workbench & left project sidebar**: Added `WorkbenchSidebar` (project-grouped session list, status badges, running / needs-attention / unread filters, worktree session entry) and `WorkbenchRightPanel` (workspace file-tree browsing and search, Git change review / commit / push / PR); the top bar is reduced to a "sidebar toggle + current page title + quick actions" toolbar. Sidebar and right-panel expansion plus the active module persist locally, with the sidebar shown as a drawer on mobile.
+- **历史会话整合与「会话 → 项目」更名**：移除独立的 `SessionHistoryPage`，历史会话并入左侧栏；中英文案同步更新，新增右侧面板、会话筛选与状态相关的 i18n key。
+  **History consolidation & "Sessions → Projects" rename**: Removed the standalone `SessionHistoryPage` and merged history into the left sidebar; Chinese/English strings updated in sync, with new i18n keys for the right panel, session filters and statuses.
+- **ZCode Protocol v1 协议适配**：`session/create` 兼容嵌套快照结构提取会话 ID，`session/subscribe` 携带 `deliveryKind`，附件图片改用 `attachments` 字段，模型选择改用 `model.options.reasoningLevel`；投影层支持字符串 delta 流式帧（`reasoning_delta` / `text_delta`）、`tool.updated` 的 `kind` 状态与嵌套状态/用量/模式快照；审批与提问响应严格遵循 V4 schema（`permissionUpdates`、`action: 'accept'`），运行时偏好返回合法 `preflight-v1` 策略。
+  **ZCode Protocol v1 compatibility**: `session/create` now extracts IDs from nested snapshot structures, `session/subscribe` carries `deliveryKind`, image attachments use the `attachments` field, and model selection uses `model.options.reasoningLevel`; the projection layer supports string-delta streaming frames (`reasoning_delta` / `text_delta`), `tool.updated` `kind` statuses, and nested status/usage/mode snapshots; approval and question responses follow the V4 schema (`permissionUpdates`, `action: 'accept'`) and runtime preferences return a valid `preflight-v1` strategy.
+
 ## 0.9.2
 
 **WSL 环境下自动识别 Windows 宿主机局域网地址与 WSL2 NAT 端口转发引导**：在 WSL 中运行 VS Code 时，远程互通不再默认暴露手机无法直连的 WSL 内部虚拟 NAT IP（`172.x.x.x`），而是自动探测并优先使用 Windows 宿主机的物理局域网网卡 IP，放行对应 `Host / Origin` 校验，并在 WSL2 NAT 模式下自动检测 Windows `netsh portproxy` 规则及提供一键复制的 PowerShell 转发命令。

@@ -53,6 +53,8 @@ export type SettingsTab =
   | 'projects'
   | 'other';
 
+export type RightPanelTab = 'files' | 'git';
+
 export interface Toast {
   readonly id: number;
   readonly level: 'info' | 'error';
@@ -99,6 +101,8 @@ export interface ViewState {
   readonly commands: readonly CommandView[];
   /** 最近一次 `@` 补全的结果。 */
   readonly fileCandidates: { readonly requestId: number; readonly items: readonly FileCandidate[] };
+  /** 右侧面板「文件」标签页的工作区文件列表与加载态。 */
+  readonly panelFiles: { readonly requestId: number; readonly items: readonly FileCandidate[]; readonly loading: boolean };
   readonly toasts: readonly Toast[];
   /**
    * 把一段文字放进输入框；`n` 每次递增，输入框据此更新。
@@ -115,8 +119,11 @@ export interface ViewState {
   readonly workbench: WorkbenchState;
   readonly activeModule: WorkbenchModule;
   readonly moduleExplicit: boolean;
+  readonly pendingCreateTask: boolean;
   readonly inspectScheduleRuleId?: string;
-  readonly historyOpen: boolean;
+  readonly rightPanelOpen: boolean;
+  readonly rightPanelTab: RightPanelTab;
+  readonly rightPanelExplicit: boolean;
   readonly settingsOpen: boolean;
   readonly settingsTab: SettingsTab;
   readonly markdownPreview?: MarkdownPreviewData & { readonly loading?: boolean };
@@ -198,6 +205,7 @@ const initialState: ViewState = {
   locale: 'zh',
   commands: [],
   fileCandidates: { requestId: -1, items: [] },
+  panelFiles: { requestId: -1, items: [], loading: false },
   toasts: [],
   prefill: { text: '', n: 0, mode: 'replace' },
   pendingImages: { images: [], n: 0 },
@@ -227,7 +235,10 @@ const initialState: ViewState = {
   workbench: emptyWorkbench,
   activeModule: 'sessions',
   moduleExplicit: false,
-  historyOpen: false,
+  pendingCreateTask: false,
+  rightPanelOpen: false,
+  rightPanelTab: 'files',
+  rightPanelExplicit: false,
   settingsOpen: false,
   settingsTab: 'appearance',
   images: {},
@@ -236,6 +247,8 @@ const initialState: ViewState = {
 let state: ViewState = initialState;
 const listeners = new Set<() => void>();
 let toastId = 0;
+let nextPanelSearchId = 1_000_000;
+const pendingPanelSearchIds = new Set<number>();
 
 function set(next: Partial<ViewState>): void {
   // 读屏按 <html lang> 选发音：界面语言变了要跟着改
@@ -288,10 +301,14 @@ export function setExtensionsLocal(extensions: ExtensionsState): void {
 }
 
 export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRuleId?: string): void {
+  if (activeModule === 'changes') {
+    setRightPanelOpen(true, 'git');
+    return;
+  }
   set({
     activeModule,
     moduleExplicit: true,
-    historyOpen: false,
+    pendingCreateTask: false,
     settingsOpen: false,
     markdownPreview: undefined,
     diffContent: undefined,
@@ -304,27 +321,71 @@ export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRu
   }
 }
 
+export function requestCreateTask(): void {
+  set({
+    activeModule: 'tasks',
+    moduleExplicit: true,
+    pendingCreateTask: true,
+    settingsOpen: false,
+    markdownPreview: undefined,
+    diffContent: undefined,
+  });
+  try {
+    saveState({ activeModule: 'tasks' });
+  } catch {
+    // ignore in test env
+  }
+}
+
+export function consumePendingCreateTask(): void {
+  if (state.pendingCreateTask) {
+    set({ pendingCreateTask: false });
+  }
+}
+
+export function setRightPanelOpen(open: boolean, tab?: RightPanelTab): void {
+  const nextTab = tab ?? state.rightPanelTab;
+  set({
+    rightPanelOpen: open,
+    rightPanelTab: nextTab,
+    rightPanelExplicit: true,
+    ...(open ? { settingsOpen: false, markdownPreview: undefined, diffContent: undefined } : {}),
+  });
+  try {
+    saveState({ rightPanelOpen: open, rightPanelTab: nextTab });
+  } catch {
+    // ignore in test env
+  }
+}
+
+export function toggleRightPanel(): void {
+  setRightPanelOpen(!state.rightPanelOpen);
+}
+
+export function setRightPanelTab(tab: RightPanelTab): void {
+  set({ rightPanelTab: tab, rightPanelOpen: true, rightPanelExplicit: true });
+  try {
+    saveState({ rightPanelOpen: true, rightPanelTab: tab });
+  } catch {
+    // ignore in test env
+  }
+}
+
+export function requestPanelFiles(query: string): void {
+  const requestId = ++nextPanelSearchId;
+  pendingPanelSearchIds.add(requestId);
+  set({ panelFiles: { ...state.panelFiles, loading: true } });
+  postToHost({ type: 'searchFiles', payload: { requestId, query } });
+}
+
 function normalizeSettingsTab(tab: SettingsTab | 'interface' | 'extensions'): SettingsTab {
   if (tab === 'interface') return 'appearance';
   if (tab === 'extensions') return 'skills';
   return tab;
 }
 
-export function openHistoryPage(): void {
-  set({ historyOpen: true, settingsOpen: false, markdownPreview: undefined, diffContent: undefined });
-}
-
-export function closeHistoryPage(): void {
-  set({ historyOpen: false });
-}
-
-export function toggleHistoryPage(): void {
-  const nextOpen = !state.historyOpen;
-  set({ historyOpen: nextOpen, ...(nextOpen ? { settingsOpen: false, markdownPreview: undefined, diffContent: undefined } : {}) });
-}
-
 export function openSettingsPage(tab?: SettingsTab | 'interface' | 'extensions'): void {
-  set({ settingsOpen: true, historyOpen: false, markdownPreview: undefined, diffContent: undefined, ...(tab ? { settingsTab: normalizeSettingsTab(tab) } : {}) });
+  set({ settingsOpen: true, markdownPreview: undefined, diffContent: undefined, ...(tab ? { settingsTab: normalizeSettingsTab(tab) } : {}) });
 }
 
 export function setSettingsTab(settingsTab: SettingsTab | 'interface' | 'extensions'): void {
@@ -337,7 +398,7 @@ export function closeSettingsPage(): void {
 
 export function toggleSettingsPage(): void {
   const nextOpen = !state.settingsOpen;
-  set({ settingsOpen: nextOpen, ...(nextOpen ? { historyOpen: false, markdownPreview: undefined, diffContent: undefined } : {}) });
+  set({ settingsOpen: nextOpen, ...(nextOpen ? { markdownPreview: undefined, diffContent: undefined } : {}) });
 }
 
 export function requestMarkdownPreview(path: string): void {
@@ -409,6 +470,8 @@ export function applyHostMessage(message: HostToWebview): void {
     case 'snapshot': {
       const p = message.payload;
       let resolvedModule = state.activeModule;
+      let resolvedRightPanelOpen = state.rightPanelOpen;
+      let resolvedRightPanelTab = state.rightPanelTab;
       if (!state.moduleExplicit) {
         let savedMod: WorkbenchModule | undefined;
         try {
@@ -416,7 +479,24 @@ export function applyHostMessage(message: HostToWebview): void {
         } catch {
           savedMod = undefined;
         }
-        resolvedModule = savedMod ?? (p.workbench !== undefined ? 'overview' : 'sessions');
+        if (savedMod === 'changes') {
+          resolvedModule = p.workbench !== undefined ? 'overview' : 'sessions';
+          if (!state.rightPanelExplicit) {
+            resolvedRightPanelOpen = true;
+            resolvedRightPanelTab = 'git';
+          }
+        } else {
+          resolvedModule = savedMod ?? (p.workbench !== undefined ? 'overview' : 'sessions');
+        }
+      }
+      if (!state.rightPanelExplicit) {
+        try {
+          const persisted = loadState();
+          if (persisted.rightPanelOpen !== undefined) resolvedRightPanelOpen = persisted.rightPanelOpen;
+          if (persisted.rightPanelTab !== undefined) resolvedRightPanelTab = persisted.rightPanelTab;
+        } catch {
+          // ignore
+        }
       }
       const resolvedBackends = p.backends ?? state.backends;
       persistActiveBackend(p.backends);
@@ -442,6 +522,8 @@ export function applyHostMessage(message: HostToWebview): void {
         commands: p.commands,
         appearance: p.appearance ?? {},
         activeModule: resolvedModule,
+        rightPanelOpen: resolvedRightPanelOpen,
+        rightPanelTab: resolvedRightPanelTab,
         ...(p.preferences ? { preferences: p.preferences } : {}),
         ...(p.providers ? { providers: p.providers } : {}),
         ...(p.extensions ? { extensions: p.extensions } : {}),
@@ -530,7 +612,6 @@ export function applyHostMessage(message: HostToWebview): void {
       set({
         activeModule: 'sessions',
         moduleExplicit: true,
-        historyOpen: false,
         settingsOpen: false,
         markdownPreview: undefined,
         diffContent: undefined,
@@ -546,6 +627,13 @@ export function applyHostMessage(message: HostToWebview): void {
       set({ commands: message.payload });
       return;
     case 'fileCandidates':
+      if (pendingPanelSearchIds.has(message.payload.requestId)) {
+        pendingPanelSearchIds.delete(message.payload.requestId);
+        if (message.payload.requestId >= state.panelFiles.requestId) {
+          set({ panelFiles: { requestId: message.payload.requestId, items: message.payload.items, loading: false } });
+        }
+        return;
+      }
       if (message.payload.requestId >= state.fileCandidates.requestId) {
         set({ fileCandidates: message.payload });
       }
@@ -571,7 +659,7 @@ export function applyHostMessage(message: HostToWebview): void {
       return;
     }
     case 'focusComposer':
-      set({ activeModule: 'sessions', moduleExplicit: true, historyOpen: false, settingsOpen: false, focusRequests: state.focusRequests + 1 });
+      set({ activeModule: 'sessions', moduleExplicit: true, settingsOpen: false, focusRequests: state.focusRequests + 1 });
       return;
     case 'attachImages': {
       const nextImages = { ...state.images };
@@ -593,4 +681,5 @@ export function applyHostMessage(message: HostToWebview): void {
 /** 仅供测试：恢复初始状态。 */
 export function resetStoreForTests(): void {
   state = initialState;
+  pendingPanelSearchIds.clear();
 }

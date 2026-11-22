@@ -10,7 +10,7 @@ import { TASK_COLUMNS, type TaskColumn } from '@harness-deck/shared/limits';
 import type { KanbanTask } from '@harness-deck/shared';
 import { useT, type MessageKey } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
-import { useView } from '../../store.ts';
+import { consumePendingCreateTask, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import {
   PlayIcon,
@@ -32,6 +32,7 @@ export function TasksView() {
   const providers = useView((s) => s.providers.items);
   const models = useView((s) => s.models);
   const projects = useView((s) => s.projects);
+  const pendingCreateTask = useView((s) => s.pendingCreateTask);
 
   const defaultProject = projects.currentPath ?? projects.recent[0]?.path ?? '';
   const [prompt, setPrompt] = useState('');
@@ -47,6 +48,18 @@ export function TasksView() {
       setProjectPath(defaultProject);
     }
   }, [projectPath, defaultProject]);
+
+  useEffect(() => {
+    if (!pendingCreateTask) return;
+    consumePendingCreateTask();
+    setTitle('');
+    setPrompt('');
+    setProjectPath(defaultProject);
+    setBackendId(backends.active || 'dsh');
+    setModelKey('');
+    setAgentId('');
+    setCreateOpen(true);
+  }, [pendingCreateTask, defaultProject, backends.active]);
 
   const openCreateModal = () => {
     setTitle('');

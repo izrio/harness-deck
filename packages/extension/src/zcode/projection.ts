@@ -174,6 +174,15 @@ export class ZcodeSessionProjection {
       case 'model.streaming':
       case 'assistant.streaming': {
         if (this.runningSince === undefined) this.runningSince = now;
+        if (typeof payload.delta === 'string') {
+          const kind = typeof payload.kind === 'string' ? payload.kind : '';
+          if (kind === 'reasoning_delta') {
+            this.appendAssistant(payload.delta, 'reasoning');
+          } else if (kind === 'text_delta' || !kind) {
+            this.appendAssistant(payload.delta, 'markdown');
+          }
+          break;
+        }
         const delta = payload.delta && typeof payload.delta === 'object' ? (payload.delta as Record<string, unknown>) : payload;
         const reasoning =
           typeof delta.reasoning_content === 'string'
@@ -236,7 +245,11 @@ export class ZcodeSessionProjection {
       case 'turn.completed':
       case 'turn/end': {
         this.applyMetadata(payload);
-        const aborted = payload.aborted === true || payload.stopReason === 'cancelled' || payload.reason === 'aborted';
+        const aborted =
+          payload.aborted === true ||
+          payload.stopReason === 'cancelled' ||
+          payload.reason === 'aborted' ||
+          payload.resultType === 'cancelled';
         this.endTurn(now, aborted ? 'cancelled' : 'completed');
         return;
       }
@@ -263,7 +276,22 @@ export class ZcodeSessionProjection {
   applySnapshot(readState?: Record<string, unknown> | null, messagesResult?: unknown): void {
     if (readState) {
       this.applyMetadata(readState);
-      const status = typeof readState.status === 'string' ? readState.status : '';
+      const proj =
+        readState.projection && typeof readState.projection === 'object'
+          ? (readState.projection as Record<string, unknown>)
+          : undefined;
+      const sess =
+        readState.session && typeof readState.session === 'object'
+          ? (readState.session as Record<string, unknown>)
+          : undefined;
+      const status =
+        typeof readState.status === 'string'
+          ? readState.status
+          : typeof proj?.status === 'string'
+            ? proj.status
+            : typeof sess?.status === 'string'
+              ? sess.status
+              : '';
       if (status === 'running' || status === 'active_turn' || status === 'in_progress') {
         this.runningSince ??= Date.now();
       } else {
@@ -329,8 +357,11 @@ export class ZcodeSessionProjection {
   }
 
   applyMetadata(meta: Record<string, unknown>): void {
-    if (typeof meta.title === 'string' && meta.title.trim()) {
-      this.title = meta.title.trim();
+    const sess = meta.session && typeof meta.session === 'object' ? (meta.session as Record<string, unknown>) : undefined;
+    const proj = meta.projection && typeof meta.projection === 'object' ? (meta.projection as Record<string, unknown>) : undefined;
+    const rawTitle = typeof meta.title === 'string' ? meta.title : typeof sess?.title === 'string' ? sess.title : undefined;
+    if (rawTitle?.trim()) {
+      this.title = rawTitle.trim();
     }
     const settings = meta.settings && typeof meta.settings === 'object' ? (meta.settings as Record<string, unknown>) : undefined;
     const modeObj = settings?.mode && typeof settings.mode === 'object' ? (settings.mode as { current?: unknown }) : undefined;
@@ -339,12 +370,21 @@ export class ZcodeSessionProjection {
         ? meta.mode
         : typeof meta.permissionMode === 'string'
           ? meta.permissionMode
-          : typeof modeObj?.current === 'string'
-            ? modeObj.current
-            : undefined;
+          : typeof proj?.mode === 'string'
+            ? proj.mode
+            : typeof sess?.mode === 'string'
+              ? sess.mode
+              : typeof modeObj?.current === 'string'
+                ? modeObj.current
+                : undefined;
     if (nextMode) this.mode = nextMode;
 
-    const usageObj = meta.usage && typeof meta.usage === 'object' ? (meta.usage as Record<string, unknown>) : meta;
+    const usageObj =
+      meta.usage && typeof meta.usage === 'object'
+        ? (meta.usage as Record<string, unknown>)
+        : proj && typeof proj.contextWindow === 'number'
+          ? proj
+          : meta;
     const used =
       typeof usageObj.contextUsed === 'number'
         ? usageObj.contextUsed
@@ -547,16 +587,17 @@ function normalizeToolEvent(
           ? raw.tool
           : (prev?.toolName ?? 'tool');
   const rawStatus = typeof raw.status === 'string' ? raw.status.toLowerCase() : typeof raw.state === 'string' ? raw.state.toLowerCase() : '';
+  const rawKind = typeof raw.kind === 'string' ? raw.kind.toLowerCase() : '';
   const status: 'running' | 'ok' | 'error' =
-    raw.isError === true || rawStatus === 'failed' || rawStatus === 'error' || rawStatus === 'denied' || rawStatus === 'rejected'
+    raw.isError === true || rawStatus === 'failed' || rawStatus === 'error' || rawStatus === 'denied' || rawStatus === 'rejected' || rawKind === 'error'
       ? 'error'
-      : rawStatus === 'success' || rawStatus === 'completed' || rawStatus === 'done' || rawStatus === 'ok'
+      : rawStatus === 'success' || rawStatus === 'completed' || rawStatus === 'done' || rawStatus === 'ok' || rawKind === 'result'
         ? 'ok'
-        : rawStatus === 'pending' || rawStatus === 'scheduled' || rawStatus === 'running' || rawStatus === 'in_progress'
+        : rawStatus === 'pending' || rawStatus === 'scheduled' || rawStatus === 'running' || rawStatus === 'in_progress' || rawKind === 'scheduled' || rawKind === 'started' || rawKind === 'progress'
           ? 'running'
           : defaultStatus;
   const input = parseArguments(raw.input ?? raw.arguments ?? raw.args ?? raw.rawInput);
-  const output = raw.output ?? raw.result ?? raw.rawOutput;
+  const output = raw.output ?? raw.result ?? raw.rawOutput ?? (rawKind === 'error' ? raw.error : undefined);
   const diffs = extractDiffs(raw, input, output, toolName);
   return {
     toolCallId,

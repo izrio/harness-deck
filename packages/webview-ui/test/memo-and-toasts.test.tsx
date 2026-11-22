@@ -8,11 +8,10 @@ import { TurnDone } from '../src/components/RunStatus.tsx';
 import { translator } from '../src/i18n.ts';
 import {
   applyHostMessage,
-  closeHistoryPage,
   closeSettingsPage,
-  openHistoryPage,
   openSettingsPage,
   setActiveModule,
+  toggleRightPanel,
 } from '../src/store.ts';
 import { makeSnapshot, mockVsCodeApi } from './setup.ts';
 
@@ -23,7 +22,7 @@ beforeEach(() => {
 });
 
 describe('Toasts 挂载稳定性与 TurnDone memo', () => {
-  it('切换聊天、设置、历史记录与工作台模块时保持同一个 .toast DOM 节点不卸载重挂载', () => {
+  it('切换聊天、设置、右侧面板与工作台模块时保持同一个 .toast DOM 节点不卸载重挂载', () => {
     const { container } = render(<App />);
 
     act(() => {
@@ -50,12 +49,12 @@ describe('Toasts 挂载稳定性与 TurnDone memo', () => {
     expect(initialToast?.parentElement?.parentElement?.className).toContain('bottom-32');
 
     act(() => {
-      openHistoryPage();
+      toggleRightPanel();
     });
     expect(container.querySelector('.toast')).toBe(initialToast);
 
     act(() => {
-      closeHistoryPage();
+      toggleRightPanel();
       setActiveModule('overview');
     });
     expect(container.querySelector('.toast')).toBe(initialToast);

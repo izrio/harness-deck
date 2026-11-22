@@ -6,6 +6,7 @@ import type { HostToWebview, Item } from '@harness-deck/shared';
 import { UnattendedRunner } from '../src/hub/UnattendedRunner.ts';
 import { setLocale } from '../src/i18n.ts';
 import { ZcodeConnection, ZcodeError, type ZcodeLink } from '../src/zcode/connection.ts';
+import { defaultRuntimePreferences, extractZcodeSessionId } from '../src/zcode/interactions.ts';
 import { locateZcode } from '../src/zcode/locate.ts';
 import { ZcodeSessionProjection } from '../src/zcode/projection.ts';
 import { ZcodeController } from '../src/zcode/ZcodeController.ts';
@@ -220,6 +221,49 @@ describe('ZCode 会话投影与控制器', () => {
     expect(p.fileChanges()).toMatchObject([{ path: '/repo/src/index.ts', additions: 2, deletions: 1 }]);
   });
 
+  it('兼容 ZCode Protocol v1 字符串 delta 流式帧、tool.updated kind 状态与嵌套快照', () => {
+    setLocale('zh');
+    expect(defaultRuntimePreferences(false)).toEqual({
+      nativeSearchEnhancementsEnabled: true,
+      memoryEnabled: true,
+      askUserQuestionAutoResolutionEnabled: false,
+      modelContextBudgetStrategy: 'preflight-v1',
+    });
+    expect(defaultRuntimePreferences(true).askUserQuestionAutoResolutionEnabled).toBe(true);
+    expect(extractZcodeSessionId({ session: { sessionId: 'sess_v1' } })).toBe('sess_v1');
+    expect(extractZcodeSessionId({ sessionId: 'sess_flat' })).toBe('sess_flat');
+
+    const p = new ZcodeSessionProjection('/repo');
+    p.applyMetadata({
+      session: { title: '实时任务', mode: 'build' },
+      projection: { contextUsed: 1_500, contextWindow: 200_000, mode: 'build', status: 'idle' },
+    });
+    expect(p.title).toBe('实时任务');
+    expect(p.mode).toBe('build');
+    expect(p.usage).toEqual({ used: 1_500, size: 200_000 });
+
+    p.addUserMessage('检查状态');
+    p.applyEvent({ type: 'turn.started', executionStartedAt: 1000 });
+    p.applyEvent({ type: 'model.streaming', payload: { kind: 'reasoning_delta', delta: '思考中…' } });
+    p.applyEvent({ type: 'model.streaming', payload: { kind: 'text_delta', delta: '开始检查' } });
+    p.applyEvent({
+      type: 'tool.updated',
+      payload: { kind: 'scheduled', toolCallId: 'tc_bash', toolName: 'Bash', input: { command: 'git status' } },
+    });
+    p.applyEvent({
+      type: 'tool.updated',
+      payload: { kind: 'result', toolCallId: 'tc_bash', result: { stdout: 'clean' }, duration: 12 },
+    });
+    p.applyEvent({ type: 'turn.completed', payload: { resultType: 'success', response: '开始检查' } }, 2500);
+
+    const items = p.snapshotItems().filter((i) => i.kind !== 'turnDone');
+    expect(items).toMatchObject([
+      { kind: 'user', text: '检查状态' },
+      { kind: 'assistant', reasoning: '思考中…', markdown: '开始检查', streaming: false },
+      { kind: 'activity', variant: 'command', tool: 'Bash', status: 'ok', output: 'clean' },
+    ]);
+  });
+
   it('控制器支持空闲逐出自动恢复（-32004 -> session/resume）、未保存文件审批保护、提问卡片与运行中插队（steer）', async () => {
     setLocale('zh');
     const posted: HostToWebview[] = [];
@@ -230,7 +274,12 @@ describe('ZCode 会话投影与控制器', () => {
     const link: ZcodeLink = {
       request: async <T,>(method: string, params?: Record<string, unknown>): Promise<T> => {
         rpcCalls.push({ method, params });
-        if (method === 'session/create') return { sessionId: 'sess_z1' } as T;
+        if (method === 'session/create') {
+          return {
+            session: { sessionId: 'sess_z1', mode: 'build' },
+            projection: { contextUsed: 0, contextWindow: 200_000, mode: 'build', status: 'idle' },
+          } as T;
+        }
         if (method === 'session/subscribe') return { subscribed: true } as T;
         if (method === 'model/list') {
           return {
@@ -288,8 +337,12 @@ describe('ZCode 会话投影与控制器', () => {
     controller.setLink(link);
     await new Promise((r) => setTimeout(r, 15));
 
-    // 1. 发送首条消息：触发 session/create -> session/send 遇到 -32004 -> 自动 session/resume + subscribe 并重试成功
+    // 1. 发送首条消息：触发 session/create -> session/subscribe（含 deliveryKind）-> session/send 遇到 -32004 -> 自动 session/resume + subscribe 并重试成功
     await controller.handle({ type: 'sendMessage', payload: { text: '你好 ZCode', includeActive: false } });
+    expect(rpcCalls).toContainEqual({
+      method: 'session/subscribe',
+      params: { sessionId: 'sess_z1', deliveryKind: 'desktop-continuous' },
+    });
     expect(rpcCalls.filter((c) => c.method === 'session/send')).toHaveLength(2);
     expect(rpcCalls.some((c) => c.method === 'session/resume')).toBe(true);
 
@@ -301,14 +354,16 @@ describe('ZCode 会话投影与控制器', () => {
     await controller.handle({ type: 'queueAction', payload: { action: 'steer', itemId: queuedItem!.queue!.itemId } });
     expect(rpcCalls).toContainEqual({ method: 'session/steer', params: { sessionId: 'sess_z1', content: '顺便加个日志' } });
 
-    // 3. 审批请求：目标文件有未保存内容时拦截放行，保存后放行
+    // 3. 审批请求：目标文件有未保存内容时拦截放行，保存后放行（严格遵循 ZCode V4 响应 schema）
     dirtyList = ['/repo/src/app.ts'];
+    const suggestedRules = [{ type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Edit' }] }];
     const permPromise = controller.onAgentRequest('interaction/requestPermission', {
       sessionId: 'sess_z1',
       toolCallId: 'tc_edit_1',
       toolName: 'Edit',
       input: { file_path: '/repo/src/app.ts' },
       reason: '修改应用入口',
+      suggestedPermissionUpdates: suggestedRules,
     });
     const permSnap = controller.snapshot();
     expect(permSnap.interactions).toHaveLength(1);
@@ -321,9 +376,9 @@ describe('ZCode 会话投影与控制器', () => {
     // 保存后点击 allowAlways 放行
     dirtyList = [];
     await controller.handle({ type: 'respondApproval', payload: { id: permId, decision: 'allowAlways' } });
-    await expect(permPromise).resolves.toEqual({ decision: 'allow', remember: true, scope: 'session' });
+    await expect(permPromise).resolves.toEqual({ decision: 'allow', permissionUpdates: suggestedRules });
 
-    // 4. 提问卡片交互（interaction/requestUserInput）
+    // 4. 提问卡片交互（interaction/requestUserInput，严格遵循 ZCode jLe 响应 schema）
     const questionPromise = controller.onAgentRequest('interaction/requestUserInput', {
       sessionId: 'sess_z1',
       requestId: 'req_q1',
@@ -341,9 +396,14 @@ describe('ZCode 会话投影与控制器', () => {
       type: 'answerQuestion',
       payload: { id: qSnap.interactions[0]!.id, answers: [{ id: 'db', selected: ['SQLite'] }] },
     });
-    await expect(questionPromise).resolves.toMatchObject({
-      action: 'submit',
+    await expect(questionPromise).resolves.toEqual({
+      action: 'accept',
       content: { answer: 'SQLite', answers: { db: 'SQLite' } },
+    });
+
+    // 5. 反向请求 session/requestRuntimePreferences 返回合法 modelContextBudgetStrategy
+    await expect(controller.onAgentRequest('session/requestRuntimePreferences', {})).resolves.toMatchObject({
+      modelContextBudgetStrategy: 'preflight-v1',
     });
 
     controller.dispose();
@@ -358,20 +418,39 @@ describe('ZCode 会话投影与控制器', () => {
       `
 const readline = require('node:readline');
 const rl = readline.createInterface({ input: process.stdin });
+let pendingCreateId = null;
 rl.on('line', (line) => {
   const msg = JSON.parse(line);
   if (msg.method === 'session/create') {
+    const ws = msg.params?.workspace;
+    if (!ws || typeof ws.workspacePath !== 'string' || typeof ws.workspaceKey !== 'string' || 'path' in ws) {
+      process.stdout.write(JSON.stringify({ id: msg.id, error: { code: -32602, message: 'invalid workspace payload' } }) + '\\n');
+      return;
+    }
+    pendingCreateId = msg.id;
     process.stdout.write(JSON.stringify({ id: 'p1', method: 'session/requestRuntimePreferences', params: {} }) + '\\n');
-    process.stdout.write(JSON.stringify({ id: msg.id, result: { sessionId: 'sess_cron_1' } }) + '\\n');
-  } else if (msg.method === 'session/subscribe' || msg.method === 'session/setMode') {
+  } else if (msg.id === 'p1' && msg.result) {
+    const strategy = msg.result.modelContextBudgetStrategy;
+    if (strategy !== 'legacy' && strategy !== 'preflight-v1') {
+      process.stdout.write(JSON.stringify({ id: pendingCreateId, error: { code: -32602, message: 'invalid modelContextBudgetStrategy' } }) + '\\n');
+      return;
+    }
+    process.stdout.write(JSON.stringify({ id: pendingCreateId, result: { session: { sessionId: 'sess_cron_1' } } }) + '\\n');
+  } else if (msg.method === 'session/subscribe') {
+    if (msg.params?.deliveryKind !== 'desktop-continuous') {
+      process.stdout.write(JSON.stringify({ id: msg.id, error: { code: -32602, message: 'missing deliveryKind' } }) + '\\n');
+      return;
+    }
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { ok: true } }) + '\\n');
+  } else if (msg.method === 'session/setMode') {
     process.stdout.write(JSON.stringify({ id: msg.id, result: { ok: true } }) + '\\n');
   } else if (msg.method === 'session/send') {
     process.stdout.write(JSON.stringify({ id: msg.id, result: { ok: true } }) + '\\n');
     process.stdout.write(JSON.stringify({ method: 'session/event', params: { sessionId: 'sess_cron_1', event: { type: 'turn.started' } } }) + '\\n');
     process.stdout.write(JSON.stringify({ id: 'perm1', method: 'interaction/requestPermission', params: { sessionId: 'sess_cron_1', toolName: 'Read', input: { path: 'README.md' } } }) + '\\n');
   } else if (msg.id === 'perm1' && msg.result) {
-    process.stdout.write(JSON.stringify({ method: 'session/event', params: { sessionId: 'sess_cron_1', event: { type: 'model.streaming', delta: { content: '巡检报告：一切正常。' } } } }) + '\\n');
-    process.stdout.write(JSON.stringify({ method: 'session/event', params: { sessionId: 'sess_cron_1', event: { type: 'turn.completed' } } }) + '\\n');
+    process.stdout.write(JSON.stringify({ method: 'session/event', params: { sessionId: 'sess_cron_1', event: { type: 'model.streaming', payload: { kind: 'text_delta', delta: '巡检报告：一切正常。' } } } }) + '\\n');
+    process.stdout.write(JSON.stringify({ method: 'session/event', params: { sessionId: 'sess_cron_1', event: { type: 'turn.completed', payload: { resultType: 'success' } } } }) + '\\n');
   }
 });
 `,

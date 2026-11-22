@@ -30,7 +30,7 @@ function post(message: Parameters<typeof postToHost>[0]): void {
   postToHost(message);
 }
 
-export function ChangesView() {
+export function ChangesView({ compact = false }: { readonly compact?: boolean } = {}) {
   const t = useT();
   const state = useView((s) => s.workbench.sourceControl);
   const session = useView((s) => s.session);
@@ -128,11 +128,16 @@ export function ChangesView() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3.5 py-3" data-testid="workbench-changes">
+    <div
+      className={compact ? 'flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-2.5' : 'flex min-h-0 flex-1 flex-col overflow-y-auto px-3.5 py-3'}
+      data-testid="workbench-changes"
+    >
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="m-0 text-[15px] font-semibold tracking-tight text-ink">{t('wb.changes.title')}</h2>
-          <p className="mt-0.5 mb-0 text-[12px] text-ink-3">{t('wb.changes.subtitle')}</p>
+          <h2 className={compact ? 'm-0 text-[13px] font-semibold tracking-tight text-ink' : 'm-0 text-[15px] font-semibold tracking-tight text-ink'}>
+            {t('wb.changes.title')}
+          </h2>
+          {!compact ? <p className="mt-0.5 mb-0 text-[12px] text-ink-3">{t('wb.changes.subtitle')}</p> : null}
         </div>
         <Button type="button" variant="outline" size="xs" onClick={refresh} disabled={busy}>
           <RefreshIcon className="size-3" />

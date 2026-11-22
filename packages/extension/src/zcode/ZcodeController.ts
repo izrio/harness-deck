@@ -58,7 +58,7 @@ import { TabsModel } from '../vm/TabsModel.ts';
 import { ViewPublisher, type ControllerView } from '../vm/ViewPublisher.ts';
 import { noWorkbench, type Workbench } from '../vm/workbench.ts';
 import { ZcodeError, type ZcodeLink } from './connection.ts';
-import { defaultRuntimePreferences, ZcodeInteractionManager } from './interactions.ts';
+import { defaultRuntimePreferences, extractZcodeSessionId, ZCODE_DELIVERY_KIND, ZcodeInteractionManager } from './interactions.ts';
 import { ZcodeSessionProjection } from './projection.ts';
 
 export interface ZcodePreferredModel {
@@ -592,7 +592,7 @@ export class ZcodeController implements ChatBackendController {
     this.scheduleRender();
     try {
       await link.request('session/resume', { sessionId }).catch(() => undefined);
-      await link.request('session/subscribe', { sessionId });
+      await link.request('session/subscribe', { sessionId, deliveryKind: ZCODE_DELIVERY_KIND });
       this.subscribed.add(sessionId);
       const [readState, messagesRes] = await Promise.all([
         link.request<Record<string, unknown> | null>('session/read', { sessionId }).catch(() => null),
@@ -615,15 +615,18 @@ export class ZcodeController implements ChatBackendController {
       const mcpServers = toAcpMcpServers(
         mcpServersForBackend(this.options.extensions?.().mcp.servers ?? [], 'zcode'),
       );
-      const created = await link.request<{ sessionId?: string; id?: string }>('session/create', {
+      const created = await link.request<Record<string, unknown> | null>('session/create', {
         workspace: { workspacePath: this.workspacePath, workspaceKey: this.workspacePath },
         ...(mcpServers.length > 0 ? { mcpServers } : {}),
       });
-      const sessionId = created?.sessionId ?? created?.id;
+      const sessionId = extractZcodeSessionId(created);
       if (!sessionId) throw new Error('missing sessionId in session/create');
-      await link.request('session/subscribe', { sessionId });
+      await link.request('session/subscribe', { sessionId, deliveryKind: ZCODE_DELIVERY_KIND });
       this.subscribed.add(sessionId);
       const projection = this.projectionFor(sessionId);
+      if (created && typeof created === 'object') {
+        projection.applyMetadata(created);
+      }
       if (this.draftMode !== 'auto') {
         projection.mode = this.draftMode;
         await this.applyMode(sessionId, this.draftMode, true);
@@ -639,7 +642,7 @@ export class ZcodeController implements ChatBackendController {
   private async ensureSessionActive(link: ZcodeLink, sessionId: string): Promise<void> {
     if (this.subscribed.has(sessionId)) return;
     await link.request('session/resume', { sessionId }).catch(() => undefined);
-    await link.request('session/subscribe', { sessionId });
+    await link.request('session/subscribe', { sessionId, deliveryKind: ZCODE_DELIVERY_KIND });
     this.subscribed.add(sessionId);
   }
 
@@ -653,14 +656,17 @@ export class ZcodeController implements ChatBackendController {
         const id = typeof s?.sessionId === 'string' ? s.sessionId : typeof s?.id === 'string' ? s.id : '';
         if (!id || s?.archived === true) return [];
         const ws = s?.workspace;
+        const wsObj = ws && typeof ws === 'object' ? (ws as { workspacePath?: unknown; path?: unknown }) : undefined;
         const cwd =
           typeof ws === 'string'
             ? ws
-            : ws && typeof ws === 'object' && typeof (ws as { path?: unknown }).path === 'string'
-              ? (ws as { path: string }).path
-              : typeof s?.cwd === 'string'
-                ? s.cwd
-                : undefined;
+            : typeof wsObj?.workspacePath === 'string'
+              ? wsObj.workspacePath
+              : typeof wsObj?.path === 'string'
+                ? wsObj.path
+                : typeof s?.cwd === 'string'
+                  ? s.cwd
+                  : undefined;
         const updatedRaw = s?.updatedAt;
         const updatedAt =
           typeof updatedRaw === 'number'
@@ -777,23 +783,27 @@ export class ZcodeController implements ChatBackendController {
     this.scheduleRender();
 
     const wireText = this.enrichPromptWithSkills(sessionId, text);
-    const content =
+    const attachments =
       images.length > 0
-        ? [
-            ...(wireText.trim() ? [{ type: 'text', text: wireText }] : []),
-            ...images.map((img) => ({ type: 'image', mediaType: img.mediaType, mimeType: img.mediaType, data: img.data })),
-          ]
-        : wireText;
+        ? images.map((img) => ({
+            type: 'image',
+            mediaType: img.mediaType,
+            mimeType: img.mediaType,
+            data: img.data,
+            ...(img.name ? { name: img.name } : {}),
+          }))
+        : undefined;
 
     const sendParams: Record<string, unknown> = {
       sessionId,
-      content,
+      content: wireText,
+      ...(attachments ? { attachments } : {}),
       ...(this.selectedModel
         ? {
             modelSelection: {
               providerId: this.selectedModel.provider,
               modelId: this.selectedModel.model,
-              ...(this.selectedModel.effort ? { reasoningEffort: this.selectedModel.effort } : {}),
+              ...(this.selectedModel.effort ? { options: { reasoningLevel: this.selectedModel.effort } } : {}),
             },
           }
         : {}),
@@ -931,9 +941,11 @@ export class ZcodeController implements ChatBackendController {
       await this.link
         .request('session/setModel', {
           sessionId: this.activeId,
-          providerId: provider,
-          modelId: model,
-          ...(effort ? { reasoningEffort: effort } : {}),
+          model: {
+            providerId: provider,
+            modelId: model,
+            ...(effort ? { options: { reasoningLevel: effort } } : {}),
+          },
         })
         .catch(() => undefined);
     }

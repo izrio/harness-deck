@@ -261,8 +261,8 @@ afterEach(() => {
   posted.length = 0;
 });
 
-describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 / 会话）', () => {
-  it('改动模块：展示分支与文件，点击打开 Diff，推送二次确认，PR 失败保留草稿并解除忙碌', () => {
+describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目）与右侧文件/Git 面板', () => {
+  it('右侧面板：点击展开后支持「文件」树浏览与「Git」改动提交、推送确认与 PR 保留草稿', () => {
     const snapshot = workbenchSnapshot();
     const workbench = snapshot.workbench!;
     const sc = {
@@ -295,7 +295,34 @@ describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 
     });
     render(createElement(App));
 
-    fireEvent.click(screen.getByTestId('workbench-tab-changes'));
+    // 左侧不再显示「改动」菜单
+    expect(screen.queryByTestId('workbench-tab-changes')).toBeNull();
+    // 默认收起右侧面板，点击顶栏按钮展开
+    expect(screen.queryByTestId('workbench-right-panel')).toBeNull();
+    fireEvent.click(screen.getByTestId('toggle-right-panel'));
+    expect(screen.getByTestId('workbench-right-panel')).toBeTruthy();
+
+    // 默认进入「文件」标签页并请求工作区文件列表
+    expect(screen.getByTestId('right-panel-files')).toBeTruthy();
+    const searchMsg = posted.find((m) => (m as { type?: string }).type === 'searchFiles') as
+      | { type: 'searchFiles'; payload: { requestId: number; query: string } }
+      | undefined;
+    expect(searchMsg).toBeTruthy();
+    host({
+      type: 'fileCandidates',
+      payload: {
+        requestId: searchMsg!.payload.requestId,
+        items: [
+          { path: 'src/a.ts', kind: 'file' },
+          { path: 'README.md', kind: 'file' },
+        ],
+      },
+    });
+    fireEvent.click(screen.getByTestId('right-panel-file-src/a.ts'));
+    expect(posted).toContainEqual({ type: 'openFile', payload: { path: 'src/a.ts' } });
+
+    // 切换到「Git」标签页展示分支与未提交改动
+    fireEvent.click(screen.getByTestId('right-panel-tab-git'));
     const view = screen.getByTestId('workbench-changes');
     expect(view.textContent).toContain('feature/changes');
     expect(view.textContent).toContain('src/a.ts');
@@ -340,6 +367,11 @@ describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 
     expect(screen.getByTestId('changes-pr-dialog')).toBeTruthy();
     expect((screen.getByLabelText('说明（可选）') as HTMLTextAreaElement).value).toBe('Keep my draft');
     expect((screen.getByTestId('changes-pr-confirm') as HTMLButtonElement).disabled).toBe(false);
+
+    // 关闭弹窗并收起右侧面板
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('right-panel-close'));
+    expect(screen.queryByTestId('workbench-right-panel')).toBeNull();
   });
 
   it('会话模块：最后一轮结束时提供文件恢复入口', () => {
@@ -597,8 +629,9 @@ describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 
     expect(s1Button.textContent).toContain('DeepSeek R1');
     expect(s2Button.textContent).toContain('Claude Sonnet 4.5');
 
-    // 搜索框过滤并支持一键清除
+    // 点击左侧搜索图标展开搜索框，过滤并支持一键清除
     const sidebar = screen.getByTestId('project-sessions-sidebar');
+    fireEvent.click(screen.getByTestId('sidebar-search-toggle'));
     const searchInput = sidebar.querySelector('input[aria-label="搜索会话"]') as HTMLInputElement;
     expect(searchInput).toBeTruthy();
     fireEvent.change(searchInput, { target: { value: 'Claude' } });
@@ -606,6 +639,18 @@ describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 
     expect(screen.getByTestId('grouped-session-s2')).toBeTruthy();
     fireEvent.click(sidebar.querySelector('button[aria-label="关闭"]') as HTMLElement);
     expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
+
+    // 左侧工作台导航与会话树在切换模块时持久保留，点击任务右侧 + 直接跳转任务并打开新增弹窗
+    fireEvent.click(screen.getByTestId('workbench-tab-overview'));
+    expect(screen.getByTestId('workbench-overview')).toBeTruthy();
+    expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
+    expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('sidebar-new-task-btn'));
+    expect(screen.getByTestId('workbench-tasks')).toBeTruthy();
+    expect(screen.getByTestId('kanban-task-creator')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
 
     // 删除会话：先弹出确认，确认后通知宿主移除（不立即删除）
     fireEvent.click(screen.getByTestId('delete-session-s2'));
@@ -632,85 +677,38 @@ describe('工作台六大模块（总览 / 改动 / 定时 / 智能体 / 任务 
     expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
   });
 
-  it('顶栏移除左侧会话下拉选择，在设置按钮左侧展示历史按钮并跳转独立会话列表页', () => {
+  it('左侧栏「项目」菜单、左下角设置按钮，移除历史记录按钮/面板与会话状态点标识', () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
-    fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
 
-    // 1. 顶部左侧不再出现会话选择下拉按钮
-    expect(document.querySelector('.header__title')).toBeNull();
-    expect(document.querySelector('.sessions-menu')).toBeNull();
+    // 1. 左侧会话菜单已更名为「项目」，且不再包含「改动」菜单
+    expect(screen.getByTestId('workbench-tab-sessions').textContent).toContain('项目');
+    expect(screen.queryByTestId('workbench-tab-changes')).toBeNull();
 
-    // 2. 历史按钮位于设置按钮紧邻左侧
+    // 2. 移除历史记录按钮与面板，且顶部右侧不再有设置按钮
+    expect(screen.queryByTestId('history-button')).toBeNull();
+    expect(screen.queryByTestId('session-history-page')).toBeNull();
     const actions = screen.getByTestId('header-actions');
-    const buttons: HTMLElement[] = [...actions.querySelectorAll('button')];
-    const historyBtn = screen.getByTestId('history-button');
-    const settingsBtn = screen.getByTestId('settings-button');
-    expect(buttons.indexOf(historyBtn)).toBe(buttons.indexOf(settingsBtn) - 1);
+    expect(actions.querySelector('[data-testid="settings-button"]')).toBeNull();
 
-    // 3. 在会话输入草稿后点击历史按钮，跳转独立会话列表页，且保留输入框草稿
+    // 3. 设置按钮位于左侧菜单面板左下角，点击进入设置页并保留对话草稿
+    const sidebar = screen.getByTestId('project-sessions-sidebar');
+    const settingsBtn = sidebar.querySelector('[data-testid="settings-button"]') as HTMLElement;
+    expect(settingsBtn).toBeTruthy();
+
+    // 4. 项目会话条目不再展示右侧状态圆点
+    const s2Button = screen.getByTestId('grouped-session-s2');
+    expect(s2Button.querySelector('.bg-orange')).toBeNull();
+    expect(s2Button.querySelector('.bg-brand')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
     const textarea = screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: '历史页返回后仍在的草稿', selectionStart: 11 } });
+    fireEvent.change(textarea, { target: { value: '设置页返回后仍在的草稿', selectionStart: 11 } });
 
-    fireEvent.click(historyBtn);
-    expect(screen.getByTestId('session-history-page')).toBeTruthy();
-    expect(historyBtn.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByTestId('history-grouped-list')).toBeTruthy();
-    expect(screen.getByTestId('history-session-s1')).toBeTruthy();
-    expect(screen.getByTestId('history-session-s2')).toBeTruthy();
-
-    // 4. 搜索过滤会话
-    const search = screen.getByTestId('history-search') as HTMLInputElement;
-    fireEvent.change(search, { target: { value: 'Beta' } });
-    expect(screen.queryByTestId('history-session-s1')).toBeNull();
-    expect(screen.getByTestId('history-session-s2')).toBeTruthy();
-
-    // 5. 返回按钮关闭会话列表页并保留草稿
-    fireEvent.click(screen.getByTestId('history-back'));
-    expect(screen.queryByTestId('session-history-page')).toBeNull();
-    expect((screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).value).toBe('历史页返回后仍在的草稿');
-
-    // 6. 再次进入历史页并点击会话，打开会话并自动切回对话界面
-    fireEvent.click(historyBtn);
-    fireEvent.click(screen.getByTestId('history-session-s2'));
-    expect(screen.queryByTestId('session-history-page')).toBeNull();
-    expect(posted).toContainEqual({
-      type: 'openProjectSession',
-      payload: { projectPath: '/repo/beta', sessionId: 's2', backendId: 'claude' },
-    });
-
-    // 7. 与设置页互斥，且支持 Escape 关闭
-    fireEvent.click(historyBtn);
-    expect(screen.getByTestId('session-history-page')).toBeTruthy();
     fireEvent.click(settingsBtn);
-    expect(screen.queryByTestId('session-history-page')).toBeNull();
     expect(screen.getByTestId('settings-page')).toBeTruthy();
-    fireEvent.click(historyBtn);
-    expect(screen.queryByTestId('settings-page')).toBeNull();
-    expect(screen.getByTestId('session-history-page')).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByTestId('session-history-page')).toBeNull();
-  });
-
-  it('无工作台分组（纯会话模式）时历史页展示扁平会话列表并发送 switchSession', () => {
-    const snap = workbenchSnapshot();
-    const { workbench: _w, ...standalone } = snap;
-    render(createElement(App));
-    host({
-      type: 'snapshot',
-      payload: {
-        ...standalone,
-        sessions: [
-          { id: 's1', title: '性能优化分析', updatedAt: Date.now() - 5_000, running: false },
-          { id: 's2', title: '修复测试断言', updatedAt: Date.now() - 20_000, running: false },
-        ],
-      },
-    });
-
-    fireEvent.click(screen.getByTestId('history-button'));
-    expect(screen.getByTestId('history-flat-list')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('history-session-s2'));
-    expect(screen.queryByTestId('session-history-page')).toBeNull();
-    expect(posted).toContainEqual({ type: 'switchSession', payload: { sessionId: 's2' } });
+    expect(screen.queryByTestId('settings-page')).toBeNull();
+    expect((screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).value).toBe('设置页返回后仍在的草稿');
   });
 });

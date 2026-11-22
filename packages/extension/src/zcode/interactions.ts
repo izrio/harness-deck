@@ -13,11 +13,15 @@ import { canonicalTool } from '../vm/toolNames.ts';
 import { parseArguments, toolVariant } from '../vm/toolRows.ts';
 import type { ZcodeToolState } from './projection.ts';
 
+export type ModelContextBudgetStrategy = 'legacy' | 'preflight-v1';
+
+export const ZCODE_DELIVERY_KIND = 'desktop-continuous' as const;
+
 export interface RuntimePreferencesResponse {
   readonly nativeSearchEnhancementsEnabled: boolean;
   readonly memoryEnabled: boolean;
   readonly askUserQuestionAutoResolutionEnabled: boolean;
-  readonly modelContextBudgetStrategy: string;
+  readonly modelContextBudgetStrategy: ModelContextBudgetStrategy;
 }
 
 export function defaultRuntimePreferences(unattended = false): RuntimePreferencesResponse {
@@ -25,8 +29,23 @@ export function defaultRuntimePreferences(unattended = false): RuntimePreference
     nativeSearchEnhancementsEnabled: true,
     memoryEnabled: true,
     askUserQuestionAutoResolutionEnabled: unattended,
-    modelContextBudgetStrategy: 'auto',
+    modelContextBudgetStrategy: 'preflight-v1',
   };
+}
+
+/** 从 `session/create` 返回值中提取会话 ID（兼容扁平与 ZCode Protocol v1 快照结构）。 */
+export function extractZcodeSessionId(created: unknown): string | undefined {
+  if (!created || typeof created !== 'object') return undefined;
+  const obj = created as Record<string, unknown>;
+  if (typeof obj.sessionId === 'string' && obj.sessionId) return obj.sessionId;
+  if (typeof obj.id === 'string' && obj.id) return obj.id;
+  const nested = obj.session;
+  if (nested && typeof nested === 'object') {
+    const rec = nested as Record<string, unknown>;
+    if (typeof rec.sessionId === 'string' && rec.sessionId) return rec.sessionId;
+    if (typeof rec.id === 'string' && rec.id) return rec.id;
+  }
+  return undefined;
 }
 
 export type QuestionAnswerPayload =
@@ -71,7 +90,7 @@ export class ZcodeInteractionManager {
     for (const [id, entry] of this.entries) {
       if (sessionId !== undefined && entry.sessionId !== sessionId) continue;
       const cancelResult =
-        entry.kind === 'approval' ? { decision: 'deny', cancelled: true } : { action: 'cancel', cancelled: true };
+        entry.kind === 'approval' ? { decision: 'deny', reason: 'cancelled' } : { action: 'cancel' };
       for (const resolveFn of entry.resolvers) resolveFn(cancelResult);
       this.entries.delete(id);
     }
@@ -147,7 +166,11 @@ export class ZcodeInteractionManager {
         toolName,
         input,
         reason,
-        ...(params.permissionUpdates !== undefined ? { permissionUpdates: params.permissionUpdates } : {}),
+        ...(params.permissionUpdates !== undefined
+          ? { permissionUpdates: params.permissionUpdates }
+          : params.suggestedPermissionUpdates !== undefined
+            ? { permissionUpdates: params.suggestedPermissionUpdates }
+            : {}),
         resolvers: [resolvePermission],
       });
       this.onChange();
@@ -157,7 +180,7 @@ export class ZcodeInteractionManager {
   requestUserInput(rawParams: unknown, fallbackSessionId: string | undefined): Promise<unknown> {
     const params = rawParams && typeof rawParams === 'object' ? (rawParams as Record<string, unknown>) : {};
     const sessionId = typeof params.sessionId === 'string' && params.sessionId ? params.sessionId : (fallbackSessionId ?? '');
-    if (!sessionId) return Promise.resolve({ action: 'cancel', cancelled: true });
+    if (!sessionId) return Promise.resolve({ action: 'cancel' });
 
     const reqId = typeof params.requestId === 'string' ? params.requestId : typeof params.toolCallId === 'string' ? params.toolCallId : undefined;
     const dedupeKey = reqId ? `q:${sessionId}:${reqId}` : undefined;
@@ -172,7 +195,7 @@ export class ZcodeInteractionManager {
 
     const questions = parseQuestions(params);
     if (questions.length === 0) {
-      return Promise.resolve({ action: 'cancel', cancelled: true });
+      return Promise.resolve({ action: 'cancel' });
     }
 
     return new Promise((resolveQuestion) => {
@@ -203,9 +226,9 @@ export class ZcodeInteractionManager {
         : decision === 'allowAlways'
           ? {
               decision: 'allow',
-              remember: true,
-              scope: 'session',
-              ...(entry.permissionUpdates !== undefined ? { permissionUpdates: entry.permissionUpdates } : {}),
+              ...(Array.isArray(entry.permissionUpdates) && entry.permissionUpdates.length > 0
+                ? { permissionUpdates: entry.permissionUpdates }
+                : {}),
             }
           : { decision: 'allow' };
     for (const resolveFn of entry.resolvers) resolveFn(payload);
@@ -218,7 +241,7 @@ export class ZcodeInteractionManager {
     if (!entry || entry.kind !== 'question') return false;
     this.entries.delete(payload.id);
     if ('cancelled' in payload) {
-      for (const resolveFn of entry.resolvers) resolveFn({ action: 'cancel', cancelled: true });
+      for (const resolveFn of entry.resolvers) resolveFn({ action: 'cancel' });
     } else {
       const answerMap: Record<string, string> = {};
       for (const a of payload.answers) {
@@ -227,8 +250,7 @@ export class ZcodeInteractionManager {
       }
       const firstAnswer = Object.values(answerMap)[0] ?? '';
       const response = {
-        action: 'submit',
-        answers: payload.answers,
+        action: 'accept',
         content: {
           answer: firstAnswer,
           answers: answerMap,

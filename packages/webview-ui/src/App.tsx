@@ -1,15 +1,24 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { applyHostMessage, requestPrefill, setActiveModule, useView } from './store.ts';
 import { cn } from './lib/utils.ts';
 import { applyThemeMode } from './theme.ts';
-import { postToHost, startHostBridge, useTransportState } from './vscode.ts';
+import { loadState, postToHost, saveState, startHostBridge, useTransportState } from './vscode.ts';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import { LoaderGrid, Shimmer } from './components/beautifului/index.ts';
 import { BackendLogo } from './components/BackendLogo.tsx';
 import { DiffViewerModal } from './components/DiffViewerModal.tsx';
@@ -19,17 +28,17 @@ import { Header } from './components/Header.tsx';
 import { MarkdownPreviewModal } from './components/MarkdownPreviewModal.tsx';
 import { MobilePairingGate } from './components/MobilePairingGate.tsx';
 import { RuntimeBanner } from './components/RuntimeBanner.tsx';
-import { SessionHistoryPage } from './components/SessionHistoryPage.tsx';
 import { SettingsPage } from './components/SettingsPage.tsx';
 import { TabBar } from './components/TabBar.tsx';
 import { Thread } from './components/Thread.tsx';
 import { Toasts } from './components/Toasts.tsx';
 import { AgentsView } from './components/workbench/AgentsView.tsx';
-import { ChangesView } from './components/workbench/ChangesView.tsx';
 import { OverviewView } from './components/workbench/OverviewView.tsx';
 import { SchedulesView } from './components/workbench/SchedulesView.tsx';
 import { SessionsView } from './components/workbench/SessionsView.tsx';
 import { TasksView } from './components/workbench/TasksView.tsx';
+import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel.tsx';
+import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar.tsx';
 import { BeakerIcon, BookIcon, BugIcon, CheckIcon, ChevronDownIcon, DiffIcon, FolderIcon, GlobeIcon, KeyIcon } from './components/icons.tsx';
 import type { MessageKey } from './i18n.ts';
 import { useT } from './i18n.ts';
@@ -43,7 +52,6 @@ export function App() {
   const connection = useView((s) => s.connection);
   const clientSurface = useView((s) => s.clientSurface);
   const clientScope = useView((s) => s.clientScope);
-  const historyOpen = useView((s) => s.historyOpen);
   const settingsOpen = useView((s) => s.settingsOpen);
   const hasPreview = useView((s) => s.markdownPreview !== undefined);
   const hasDiff = useView((s) => s.diffContent !== undefined);
@@ -55,6 +63,37 @@ export function App() {
   const appearance = useView((s) => s.appearance);
   const sessionGroups = useView((s) => s.workbench.sessionGroups);
   const deepLinkedRef = useRef(false);
+  const isMobileRemote = clientSurface === 'mobile-web';
+
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try {
+      return loadState().sessionsSidebarOpen ?? true;
+    } catch {
+      return true;
+    }
+  });
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [worktreeBranch, setWorktreeBranch] = useState('');
+
+  const toggleSidebar = () => {
+    const next = !sidebarOpen;
+    setSidebarOpen(next);
+    try {
+      saveState({ sessionsSidebarOpen: next });
+    } catch {
+      // ignore in test env
+    }
+  };
+
+  const openNewWorktree = () => {
+    if (isMobileRemote) {
+      setWorktreeBranch('');
+      setWorktreeDialogOpen(true);
+      return;
+    }
+    postToHost({ type: 'newWorktreeSession', payload: {} });
+  };
 
   // 手机端 PWA 从推送通知点开 `/?session=<id>` 时，首屏快照到达后自动跳到对应会话（支持跨项目/跨底层）
   useEffect(() => {
@@ -145,12 +184,17 @@ export function App() {
     }
   }
 
-  const overlayOpen = settingsOpen || historyOpen || hasPreview || hasDiff;
+  const overlayOpen = settingsOpen || hasPreview || hasDiff;
   const hideChat = overlayOpen || activeModule !== 'sessions';
 
   return (
     <div className="app" style={{ paddingBottom: 'var(--hd-keyboard-inset, 0px)' }}>
-      <Header />
+      <Header
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={toggleSidebar}
+        onOpenMobileDrawer={() => setMobileDrawerOpen(true)}
+        onNewWorktree={openNewWorktree}
+      />
       {transport.mode === 'mobile-web' && transport.status !== 'connected' && transport.suggestedRoute ? (
         <a
           href={transport.suggestedRoute.url}
@@ -174,28 +218,117 @@ export function App() {
         <MarkdownPreviewModal />
       ) : settingsOpen ? (
         <SettingsPage />
-      ) : historyOpen ? (
-        <SessionHistoryPage />
       ) : null}
-      {!overlayOpen && activeModule === 'overview' ? <OverviewView /> : null}
-      {!overlayOpen && activeModule === 'changes' ? <ChangesView /> : null}
-      {!overlayOpen && activeModule === 'schedules' ? <SchedulesView /> : null}
-      {!overlayOpen && activeModule === 'agents' ? <AgentsView /> : null}
-      {!overlayOpen && activeModule === 'tasks' ? <TasksView /> : null}
-      <SessionsView hidden={hideChat}>
-        <TabBar />
-        {ready ? <RuntimeBanner status={runtime} connection={connection} /> : null}
-        {failure ? (
-          <div className="content-column mt-2">
-            <div className="banner flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12.5px] text-ink-2 shadow-card">
-              <span className="size-2 shrink-0 rounded-full bg-orange" />
-              <span>{t('session.failed', failure)}</span>
+
+      <SidebarProvider
+        keyboardShortcut={false}
+        persistCookie={false}
+        className={cn('min-h-0 flex-1 flex-row overflow-hidden', overlayOpen && 'hidden')}
+        aria-hidden={overlayOpen || undefined}
+        data-testid="workbench-shell"
+      >
+        <WorkbenchSidebar
+          open={sidebarOpen}
+          mobileOpen={mobileDrawerOpen}
+          onMobileOpenChange={setMobileDrawerOpen}
+          onNewWorktree={openNewWorktree}
+        />
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {!overlayOpen && activeModule === 'overview' ? (
+            <div
+              id="workbench-panel-overview"
+              role="tabpanel"
+              aria-labelledby="workbench-tab-overview"
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              <OverviewView />
             </div>
-          </div>
-        ) : null}
-        {opening ? <SessionLoading /> : empty ? <EmptyState /> : <Thread />}
-        <Composer />
-      </SessionsView>
+          ) : null}
+          {!overlayOpen && activeModule === 'schedules' ? (
+            <div
+              id="workbench-panel-schedules"
+              role="tabpanel"
+              aria-labelledby="workbench-tab-schedules"
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              <SchedulesView />
+            </div>
+          ) : null}
+          {!overlayOpen && activeModule === 'agents' ? (
+            <div
+              id="workbench-panel-agents"
+              role="tabpanel"
+              aria-labelledby="workbench-tab-agents"
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              <AgentsView />
+            </div>
+          ) : null}
+          {!overlayOpen && activeModule === 'tasks' ? (
+            <div
+              id="workbench-panel-tasks"
+              role="tabpanel"
+              aria-labelledby="workbench-tab-tasks"
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              <TasksView />
+            </div>
+          ) : null}
+          <SessionsView hidden={hideChat}>
+            <TabBar />
+            {ready ? <RuntimeBanner status={runtime} connection={connection} /> : null}
+            {failure ? (
+              <div className="content-column mt-2">
+                <div className="banner flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12.5px] text-ink-2 shadow-card">
+                  <span className="size-2 shrink-0 rounded-full bg-orange" />
+                  <span>{t('session.failed', failure)}</span>
+                </div>
+              </div>
+            ) : null}
+            {opening ? <SessionLoading /> : empty ? <EmptyState /> : <Thread />}
+            <Composer />
+          </SessionsView>
+        </main>
+        {!overlayOpen ? <WorkbenchRightPanel /> : null}
+      </SidebarProvider>
+
+      <Dialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen}>
+        <DialogContent data-testid="mobile-worktree-session-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.confirm.worktreeTitle')}</DialogTitle>
+          </DialogHeader>
+          <Input
+            size="sm"
+            data-testid="mobile-worktree-session-input"
+            value={worktreeBranch}
+            placeholder={t('mobile.confirm.worktreePlaceholder')}
+            onChange={(e) => setWorktreeBranch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                postToHost({ type: 'newWorktreeSession', payload: { branch: worktreeBranch.trim() } });
+                setWorktreeDialogOpen(false);
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setWorktreeDialogOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="mobile-worktree-session-confirm"
+              onClick={() => {
+                postToHost({ type: 'newWorktreeSession', payload: { branch: worktreeBranch.trim() } });
+                setWorktreeDialogOpen(false);
+              }}
+            >
+              {t('wb.sessions.worktreeSession')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div
         className={cn(
           'pointer-events-none fixed inset-x-0 z-40 [&_.toast]:pointer-events-auto',

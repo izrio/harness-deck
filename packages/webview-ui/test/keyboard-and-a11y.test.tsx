@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { WORKBENCH_MODULES } from '@harness-deck/shared/limits';
-import { Header } from '../src/components/Header.tsx';
+import { App } from '../src/App.tsx';
 import { SettingsPage } from '../src/components/SettingsPage.tsx';
-import { SessionsView } from '../src/components/workbench/SessionsView.tsx';
+import { SidebarProvider } from '../src/components/ui/sidebar.tsx';
+import { SIDEBAR_MODULES, WorkbenchSidebar } from '../src/components/workbench/WorkbenchSidebar.tsx';
 import * as store from '../src/store.ts';
 import { makeSnapshot, mockVsCodeApi } from './setup.ts';
 
@@ -14,18 +14,22 @@ describe('keyboard navigation, Escape precedence, and sidebar shortcut cleanup',
     document.cookie = 'sidebar_state=; path=/; max-age=0';
   });
 
-  it('Header tablist moves focus on ArrowLeft/ArrowRight/Home/End and keeps roving tabIndex when an overlay opens', () => {
+  it('WorkbenchSidebar tablist moves focus on ArrowUp/ArrowDown/ArrowLeft/ArrowRight/Home/End and keeps roving tabIndex when an overlay opens', () => {
     act(() => {
       store.applyHostMessage({ type: 'snapshot', payload: makeSnapshot() });
       store.setActiveModule('overview');
     });
 
-    render(<Header />);
+    render(
+      <SidebarProvider keyboardShortcut={false} persistCookie={false}>
+        <WorkbenchSidebar />
+      </SidebarProvider>,
+    );
 
     const overviewTab = screen.getByTestId('workbench-tab-overview');
-    const secondModule = WORKBENCH_MODULES[1]!;
+    const secondModule = SIDEBAR_MODULES[1]!;
     const secondTab = screen.getByTestId(`workbench-tab-${secondModule}`);
-    const lastModule = WORKBENCH_MODULES[WORKBENCH_MODULES.length - 1]!;
+    const lastModule = SIDEBAR_MODULES[SIDEBAR_MODULES.length - 1]!;
     const lastTab = screen.getByTestId(`workbench-tab-${lastModule}`);
 
     expect(overviewTab.id).toBe('workbench-tab-overview');
@@ -36,11 +40,19 @@ describe('keyboard navigation, Escape precedence, and sidebar shortcut cleanup',
     overviewTab.focus();
     expect(document.activeElement).toBe(overviewTab);
 
-    fireEvent.keyDown(overviewTab, { key: 'ArrowRight' });
+    fireEvent.keyDown(overviewTab, { key: 'ArrowDown' });
     expect(store.getState().activeModule).toBe(secondModule);
     expect(document.activeElement).toBe(secondTab);
     expect(secondTab.getAttribute('tabindex')).toBe('0');
     expect(overviewTab.getAttribute('tabindex')).toBe('-1');
+
+    fireEvent.keyDown(secondTab, { key: 'ArrowUp' });
+    expect(store.getState().activeModule).toBe('overview');
+    expect(document.activeElement).toBe(overviewTab);
+
+    fireEvent.keyDown(overviewTab, { key: 'ArrowRight' });
+    expect(store.getState().activeModule).toBe(secondModule);
+    expect(document.activeElement).toBe(secondTab);
 
     fireEvent.keyDown(secondTab, { key: 'ArrowLeft' });
     expect(store.getState().activeModule).toBe('overview');
@@ -105,7 +117,7 @@ describe('keyboard navigation, Escape precedence, and sidebar shortcut cleanup',
     expect(store.getState().settingsOpen).toBe(false);
   });
 
-  it('SessionsView and SettingsPage do not intercept Ctrl/Cmd+B or persist sidebar_state cookie', () => {
+  it('App workbench sidebar and SettingsPage do not intercept Ctrl/Cmd+B or persist sidebar_state cookie', () => {
     act(() => {
       store.applyHostMessage({
         type: 'snapshot',
@@ -136,17 +148,9 @@ describe('keyboard navigation, Escape precedence, and sidebar shortcut cleanup',
           },
         }),
       });
-      store.openSettingsPage('appearance');
     });
 
-    render(
-      <>
-        <SessionsView>
-          <div>chat-body</div>
-        </SessionsView>
-        <SettingsPage />
-      </>,
-    );
+    render(<App />);
 
     expect(screen.getByTestId('workbench-sessions')).toBeTruthy();
 
@@ -159,6 +163,11 @@ describe('keyboard navigation, Escape precedence, and sidebar shortcut cleanup',
     expect(cmdB.defaultPrevented).toBe(false);
 
     fireEvent.click(screen.getByTestId('toggle-project-groups'));
+    expect(document.cookie).not.toContain('sidebar_state');
+
+    act(() => {
+      store.openSettingsPage('appearance');
+    });
     expect(document.cookie).not.toContain('sidebar_state');
   });
 });

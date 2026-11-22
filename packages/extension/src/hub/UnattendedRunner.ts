@@ -38,7 +38,7 @@ import { checkVersionSupport, MINIMUM_DSH_VERSION } from '../runtime/version.ts'
 import { canonicalTool } from '../vm/toolNames.ts';
 import { parseArguments, toolVariant } from '../vm/toolRows.ts';
 import { ZcodeConnection, ZcodeError, ZcodeTimeoutError } from '../zcode/connection.ts';
-import { defaultRuntimePreferences } from '../zcode/interactions.ts';
+import { defaultRuntimePreferences, extractZcodeSessionId, ZCODE_DELIVERY_KIND } from '../zcode/interactions.ts';
 import { locateZcode } from '../zcode/locate.ts';
 import { ZcodeSessionProjection } from '../zcode/projection.ts';
 
@@ -488,7 +488,7 @@ export class UnattendedRunner {
           return resolveZcodeUnattendedPermission(params, req.permission, req.projectPath);
         }
         if (method === 'interaction/requestUserInput' || method === 'session/requestUserInput' || method === 'askUserQuestion') {
-          return { action: 'cancel', cancelled: true };
+          return { action: 'cancel' };
         }
         if (method === 'provider/updateAccountConfig') {
           return { ok: true };
@@ -512,15 +512,15 @@ export class UnattendedRunner {
 
     try {
       await conn.start();
-      const created = await conn.request<{ sessionId?: string; id?: string }>(
+      const created = await conn.request<Record<string, unknown> | null>(
         'session/create',
-        { workspace: { path: req.projectPath } },
+        { workspace: { workspacePath: req.projectPath, workspaceKey: req.projectPath } },
         INITIALIZE_TIMEOUT_MS,
       );
-      sessionId = created?.sessionId ?? created?.id;
+      sessionId = extractZcodeSessionId(created);
       if (!sessionId) throw new Error('missing sessionId in session/create');
       req.onSessionCreated(sessionId);
-      await conn.request('session/subscribe', { sessionId });
+      await conn.request('session/subscribe', { sessionId, deliveryKind: ZCODE_DELIVERY_KIND });
 
       const desiredMode =
         req.permission === 'danger-full-access'
