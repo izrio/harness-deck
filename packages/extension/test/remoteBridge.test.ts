@@ -1,5 +1,5 @@
 import { createDecipheriv, createECDH, hkdfSync } from 'node:crypto';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +9,14 @@ import type { HostSnapshot, HostToWebview, WebviewToHost } from '@harness-deck/s
 import { ClientHub } from '../src/host/ClientHub.ts';
 import type { KeyValueStore } from '../src/host/HostPlatform.ts';
 import { DeviceAuthStore, parseCookieHeader } from '../src/remote/DeviceAuthStore.ts';
-import { listLanInterfaces } from '../src/remote/NetworkInterfaces.ts';
+import {
+  buildWslPortProxyCommand,
+  hasMatchingPortProxyRule,
+  listLanInterfaces,
+  mergeLanInterfaces,
+  parseWindowsIpconfigOutput,
+  parseWindowsPortProxyV4,
+} from '../src/remote/NetworkInterfaces.ts';
 import { PairingManager } from '../src/remote/PairingManager.ts';
 import {
   buildVapidAuthorizationHeader,
@@ -219,6 +226,162 @@ describe('HD-23 PairingManager / DeviceAuthStore / ScopeGuard / NetworkInterface
     });
     expect(result.preferredAddress).toBe('192.168.1.88');
     expect(result.candidates).toEqual([{ name: 'eth0', address: '192.168.1.88' }]);
+  });
+
+  it('WSL 环境下解析 Windows ipconfig（中英文）与 portproxy，并优先使用 Windows 宿主机局域网 IP', () => {
+    const zhIpconfig = `
+Windows IP 配置
+
+以太网适配器 以太网:
+
+   连接特定的 DNS 后缀 . . . . . . . :
+   本地链接 IPv6 地址. . . . . . . . : fe80::59ac:2662:993f:619a%6
+   IPv4 地址 . . . . . . . . . . . . : 192.168.100.32
+   子网掩码  . . . . . . . . . . . . : 255.255.255.0
+   默认网关. . . . . . . . . . . . . : 192.168.100.251
+
+以太网适配器 vEthernet (WSL (Hyper-V firewall)):
+
+   IPv4 地址 . . . . . . . . . . . . : 172.21.144.1
+   子网掩码  . . . . . . . . . . . . : 255.255.240.0
+   默认网关. . . . . . . . . . . . . :
+`;
+    const winIfaces = parseWindowsIpconfigOutput(zhIpconfig);
+    expect(winIfaces).toEqual([{ name: '以太网', address: '192.168.100.32', hasGateway: true }]);
+
+    const enIpconfig = `
+Windows IP Configuration
+
+Ethernet adapter HostOnly:
+   IPv4 Address. . . . . . . . . . . : 10.0.50.2
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . :
+
+Wireless LAN adapter Wi-Fi:
+   IPv4 Address. . . . . . . . . . . : 192.168.1.45
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : 192.168.1.1
+`;
+    expect(parseWindowsIpconfigOutput(enIpconfig)[0]).toEqual({
+      name: 'Wi-Fi',
+      address: '192.168.1.45',
+      hasGateway: true,
+    });
+
+    // WSL2 NAT 模式：Windows LAN IP 优先于 WSL 内部 eth0
+    const natMerged = mergeLanInterfaces(
+      {
+        eth0: [{ address: '172.21.154.63', netmask: '255.255.240.0', family: 'IPv4', mac: '00:15:5d:28:71:c9', internal: false, cidr: null }],
+      },
+      winIfaces,
+    );
+    expect(natMerged.preferredAddress).toBe('192.168.100.32');
+    expect(natMerged.candidates).toEqual([
+      { name: 'Windows · 以太网', address: '192.168.100.32' },
+      { name: 'WSL · eth0', address: '172.21.154.63' },
+    ]);
+    expect(natMerged.localAddresses.has('192.168.100.32')).toBe(false);
+    expect(natMerged.wslAddress).toBe('172.21.154.63');
+
+    // WSL2 Mirrored 模式：Windows LAN IP 已在 Linux 网卡中，自动去重且直接作为本机地址
+    const mirroredMerged = mergeLanInterfaces(
+      {
+        eth0: [{ address: '192.168.100.32', netmask: '255.255.255.0', family: 'IPv4', mac: '00:15:5d:28:71:c9', internal: false, cidr: null }],
+      },
+      winIfaces,
+    );
+    expect(mirroredMerged.candidates).toEqual([{ name: '以太网', address: '192.168.100.32' }]);
+    expect(mirroredMerged.localAddresses.has('192.168.100.32')).toBe(true);
+
+    // portproxy 规则解析与匹配
+    const rules = parseWindowsPortProxyV4(`
+Listen on ipv4:             Connect to ipv4:
+
+Address         Port        Address         Port
+--------------- ----------  --------------- ----------
+0.0.0.0         37890       172.21.154.63   37890
+`);
+    expect(rules).toEqual([
+      { listenAddress: '0.0.0.0', listenPort: 37890, connectAddress: '172.21.154.63', connectPort: 37890 },
+    ]);
+    expect(hasMatchingPortProxyRule(rules, 37890, '172.21.154.63', '192.168.100.32')).toBe(true);
+    expect(hasMatchingPortProxyRule(rules, 37891, '172.21.154.63', '192.168.100.32')).toBe(false);
+    expect(buildWslPortProxyCommand(37890, '172.21.154.63')).toContain('connectaddress=172.21.154.63');
+  });
+
+  it('RemoteBridgeServer 在 WSL2 NAT 下生成 Windows LAN 配对地址、放行对应 Host 并支持刷新 portproxy 状态', async () => {
+    const kv = new MemoryKVStore();
+    const hub = new ClientHub({
+      hostKind: 'vscode',
+      postToIde: () => undefined,
+      isIdeVisible: () => false,
+    });
+    const deviceAuth = new DeviceAuthStore(kv);
+    const pushService = new PushService(kv, deviceAuth, { isWindowFocused: () => false, log: () => undefined });
+
+    let portProxyReady = false;
+    let listeningPort = 37890;
+    const bridge: RemoteBridgeServer = new RemoteBridgeServer({
+      hostKind: 'vscode',
+      globalState: kv,
+      clientHub: hub,
+      deviceAuth,
+      pushService,
+      port: 0,
+      bindHost: '0.0.0.0',
+      locale: () => 'zh',
+      onWebviewMessage: () => undefined,
+      onStateChange: () => undefined,
+      log: () => undefined,
+      wslNetworkProbe: async () => ({
+        windowsInterfaces: [{ name: '以太网', address: '192.168.100.32', hasGateway: true }],
+        portProxyRules: portProxyReady
+          ? [
+              {
+                listenAddress: '0.0.0.0',
+                listenPort: listeningPort,
+                connectAddress: '127.0.0.1',
+                connectPort: listeningPort,
+              },
+            ]
+          : [],
+      }),
+    });
+
+    const getHealthStatus = (hostHeader: string, port: number): Promise<number> =>
+      new Promise((resolve, reject) => {
+        const req = httpRequest(
+          { hostname: '127.0.0.1', port, path: '/api/health', method: 'GET', headers: { Host: hostHeader } },
+          (res) => {
+            res.resume();
+            resolve(res.statusCode ?? 0);
+          },
+        );
+        req.once('error', reject);
+        req.end();
+      });
+
+    try {
+      const state = await bridge.generatePairing({ routeKind: 'lan', scope: 'operate' });
+      listeningPort = state.port ?? 37890;
+      expect(state.selectedHost).toBe('192.168.100.32');
+      expect(state.pairing?.url).toMatch(/^http:\/\/192\.168\.100\.32:\d+\/pair#code=/u);
+      expect(state.wslNat?.active).toBe(true);
+      expect(state.wslNat?.windowsAddress).toBe('192.168.100.32');
+      expect(state.wslNat?.portProxyConfigured).toBe(false);
+      expect(state.wslNat?.setupCommand).toContain(`listenport=${state.port}`);
+
+      // Host 校验必须放行 Windows 宿主机 LAN IP，且仍拒绝伪造 Host
+      expect(await getHealthStatus(`192.168.100.32:${listeningPort}`, listeningPort)).toBe(200);
+      expect(await getHealthStatus(`evil.example.com:${listeningPort}`, listeningPort)).toBe(403);
+
+      // 配置完 portproxy 后点击刷新，状态转为就绪
+      portProxyReady = true;
+      const refreshed = await bridge.refreshNetwork(false);
+      expect(refreshed.wslNat?.portProxyConfigured).toBe(true);
+    } finally {
+      await bridge.stop();
+    }
   });
 });
 

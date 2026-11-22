@@ -585,6 +585,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('clearRemotePairing'), payload: empty }),
   z.object({ type: z.literal('revokeRemoteDevice'), payload: z.object({ deviceId: z.string().min(1).max(120) }) }),
   z.object({ type: z.literal('disconnectAllRemote'), payload: empty }),
+  z.object({ type: z.literal('refreshRemoteNetwork'), payload: empty }),
   z.object({ type: z.literal('probeTailscale'), payload: empty }),
   z.object({ type: z.literal('configureTailscaleServe'), payload: z.object({ enabled: z.boolean() }) }),
   z.object({

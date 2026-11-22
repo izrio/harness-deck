@@ -17,17 +17,26 @@ import {
   type RemoteScope,
   type RemoteState,
   type RemoteTailscaleView,
+  type RemoteWslNatInfo,
   type WebviewToHost,
 } from '@harness-deck/shared';
 import type { ClientHub } from '../host/ClientHub.ts';
 import type { KeyValueStore } from '../host/HostPlatform.ts';
+import { isWslEnvironment } from '../runtime/wsl.ts';
 import {
   DeviceAuthStore,
   parseCookieHeader,
   REMOTE_COOKIE_NAME,
   REMOTE_SESSION_MAX_AGE_SEC,
 } from './DeviceAuthStore.ts';
-import { listLanInterfaces } from './NetworkInterfaces.ts';
+import {
+  buildWslPortProxyCommand,
+  hasMatchingPortProxyRule,
+  mergeLanInterfaces,
+  probeWslHostNetwork,
+  type WslHostNetworkProbe,
+  type WslHostNetworkSnapshot,
+} from './NetworkInterfaces.ts';
 import { PairingManager } from './PairingManager.ts';
 import type { PushService } from './PushService.ts';
 import { authorizeRemoteMessage, isAllowedHostHeader, isAllowedOriginHeader } from './ScopeGuard.ts';
@@ -210,6 +219,7 @@ export interface RemoteBridgeServerOptions {
   readonly onStateChange: () => void;
   readonly log: (line: string) => void;
   readonly tailscaleExec?: TailscaleExec;
+  readonly wslNetworkProbe?: WslHostNetworkProbe;
   readonly now?: () => number;
 }
 
@@ -220,12 +230,20 @@ export class RemoteBridgeServer {
   private wss: WebSocketServer | undefined;
   private listeningPort: number | undefined;
   private tailscale: RemoteTailscaleView | undefined;
+  private wslHostNetwork: WslHostNetworkSnapshot | undefined;
+  private wslProbeInFlight: Promise<void> | undefined;
   private errorMessage: string | undefined;
   private pairingExpiryTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly options: RemoteBridgeServerOptions) {
     this.pairing = new PairingManager(options.now);
     this.config = parseRemoteConfig(options.globalState.get<unknown>(REMOTE_CONFIG_KEY));
+    // WSL 环境下后台静默预探测一次 Windows 宿主机局域网网卡（不阻塞扩展激活；单测绑定 loopback 时跳过）
+    const bindHost = this.options.bindHost;
+    const isLoopbackBind = bindHost === '127.0.0.1' || bindHost === '::1';
+    if (!isLoopbackBind && (this.options.wslNetworkProbe || (process.platform === 'linux' && isWslEnvironment()))) {
+      void this.refreshNetwork(true);
+    }
   }
 
   get isRunning(): boolean {
@@ -299,12 +317,42 @@ export class RemoteBridgeServer {
     } else if (!this.isRunning) {
       await this.start();
     }
+    await this.refreshNetwork(false);
     const routeKind = options.routeKind ?? 'lan';
     const scope = options.scope ?? this.config.scope;
     const baseUrl = this.resolvePairingBaseUrl(routeKind);
     const view = this.pairing.generate({ scope, baseUrl, routeKind });
     this.schedulePairingExpiry(view.expiresAt);
     this.options.onStateChange();
+    return this.getState();
+  }
+
+  /** 重新探测 WSL 宿主机局域网网卡与 Windows portproxy 状态。 */
+  async refreshNetwork(notify = true): Promise<RemoteState> {
+    const bindHost = this.options.bindHost;
+    const isLoopbackBind = bindHost === '127.0.0.1' || bindHost === '::1';
+    if (!this.options.wslNetworkProbe && isLoopbackBind) {
+      return this.getState();
+    }
+    const probe = this.options.wslNetworkProbe ?? probeWslHostNetwork;
+    if (!this.wslProbeInFlight) {
+      this.wslProbeInFlight = (async () => {
+        try {
+          const snapshot = await probe();
+          if (snapshot) {
+            this.wslHostNetwork = snapshot;
+          }
+        } catch {
+          // 探测失败时保留已有本机网卡，不影响服务运行
+        } finally {
+          this.wslProbeInFlight = undefined;
+        }
+      })();
+    }
+    await this.wslProbeInFlight;
+    if (notify) {
+      this.options.onStateChange();
+    }
     return this.getState();
   }
 
@@ -362,10 +410,33 @@ export class RemoteBridgeServer {
     return result;
   }
 
+  private resolveLanInterfaces() {
+    return mergeLanInterfaces(undefined, this.wslHostNetwork?.windowsInterfaces ?? []);
+  }
+
+  private buildWslNatInfo(
+    selectedHost: string,
+    localAddresses: ReadonlySet<string>,
+    wslAddress: string | undefined,
+  ): RemoteWslNatInfo | undefined {
+    const snapshot = this.wslHostNetwork;
+    if (!snapshot || !wslAddress) return undefined;
+    const isWindowsHostIp = snapshot.windowsInterfaces.some((item) => item.address === selectedHost);
+    if (!isWindowsHostIp || localAddresses.has(selectedHost)) return undefined;
+    const port = this.listeningPort ?? this.options.port ?? this.config.port ?? DEFAULT_REMOTE_PORT;
+    return {
+      active: true,
+      wslAddress,
+      windowsAddress: selectedHost,
+      portProxyConfigured: hasMatchingPortProxyRule(snapshot.portProxyRules, port, wslAddress, selectedHost),
+      setupCommand: buildWslPortProxyCommand(port, wslAddress),
+    };
+  }
+
   getRoutes(): readonly { readonly kind: RemoteRouteKind; readonly url: string }[] {
     const routes: { kind: RemoteRouteKind; url: string }[] = [];
     if (this.listeningPort) {
-      const { candidates, preferredAddress } = listLanInterfaces();
+      const { candidates, preferredAddress } = this.resolveLanInterfaces();
       const host =
         this.config.selectedHost && candidates.some((c) => c.address === this.config.selectedHost)
           ? this.config.selectedHost
@@ -382,11 +453,12 @@ export class RemoteBridgeServer {
   }
 
   getState(): RemoteState {
-    const { candidates, preferredAddress } = listLanInterfaces();
+    const { candidates, preferredAddress, localAddresses, wslAddress } = this.resolveLanInterfaces();
     const selectedHost =
       this.config.selectedHost && candidates.some((c) => c.address === this.config.selectedHost)
         ? this.config.selectedHost
         : preferredAddress;
+    const wslNat = this.buildWslNatInfo(selectedHost, localAddresses, wslAddress);
     const connectedDevices = this.options.clientHub.connectedDeviceIds();
     const pairing = this.pairing.current();
     return {
@@ -403,6 +475,7 @@ export class RemoteBridgeServer {
       ...(this.tailscale ? { tailscale: this.tailscale } : {}),
       ...(this.config.tunnelUrl ? { tunnelUrl: this.config.tunnelUrl } : {}),
       push: this.options.pushService.getConfig(),
+      ...(wslNat ? { wslNat } : {}),
       ...(this.errorMessage ? { error: this.errorMessage } : {}),
     };
   }
@@ -410,7 +483,10 @@ export class RemoteBridgeServer {
   async start(): Promise<void> {
     if (this.server?.listening) return;
     this.errorMessage = undefined;
-    await this.options.pushService.ensureVapidKeys();
+    await Promise.all([
+      this.options.pushService.ensureVapidKeys(),
+      this.refreshNetwork(false),
+    ]);
 
     const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
     const server = createServer((req, res) => {
@@ -513,7 +589,7 @@ export class RemoteBridgeServer {
       const host = bindHost.includes(':') ? `[${bindHost}]` : bindHost;
       return `http://${host}:${port}`;
     }
-    const { candidates, preferredAddress } = listLanInterfaces();
+    const { candidates, preferredAddress } = this.resolveLanInterfaces();
     const host =
       this.config.selectedHost && candidates.some((c) => c.address === this.config.selectedHost)
         ? this.config.selectedHost
@@ -538,7 +614,7 @@ export class RemoteBridgeServer {
     readonly origins: Set<string>;
   } {
     const hosts = new Set<string>(['localhost', '127.0.0.1', '::1']);
-    const { candidates } = listLanInterfaces();
+    const { candidates } = this.resolveLanInterfaces();
     for (const c of candidates) {
       hosts.add(c.address.toLowerCase());
     }

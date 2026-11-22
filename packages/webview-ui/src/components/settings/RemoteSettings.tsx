@@ -172,9 +172,17 @@ function IdeRemoteSettingsPanel() {
   const [tunnelDraft, setTunnelDraft] = useState(remote?.tunnelUrl ?? '');
   const [webhookUrlDraft, setWebhookUrlDraft] = useState(remote?.push?.webhook.url ?? '');
   const [copiedPairing, setCopiedPairing] = useState(false);
+  const [copiedWslCmd, setCopiedWslCmd] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const copyWslTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  useEffect(() => () => clearTimeout(copyTimerRef.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(copyTimerRef.current);
+      clearTimeout(copyWslTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (remote?.scope) setPairScope(remote.scope);
@@ -205,6 +213,15 @@ function IdeRemoteSettingsPanel() {
     setCopiedPairing(true);
     clearTimeout(copyTimerRef.current);
     copyTimerRef.current = setTimeout(() => setCopiedPairing(false), 1_500);
+  };
+
+  const copyWslSetupCommand = () => {
+    const cmd = remote?.wslNat?.setupCommand;
+    if (!cmd) return;
+    void navigator.clipboard?.writeText(cmd).catch(() => undefined);
+    setCopiedWslCmd(true);
+    clearTimeout(copyWslTimerRef.current);
+    copyWslTimerRef.current = setTimeout(() => setCopiedWslCmd(false), 1_500);
   };
 
   return (
@@ -258,10 +275,25 @@ function IdeRemoteSettingsPanel() {
       {/* 2. 局域网接口、作用域、Tailscale 与自定义隧道 */}
       <SettingsSection title={t('remote.networkTitle')} testId="remote-network-section">
         <div className="primitive-card-pad flex flex-col gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[12.5px] font-medium text-ink">{t('remote.lanHost')}</span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="remote-lan-select" className="text-[12.5px] font-medium text-ink">
+                {t('remote.lanHost')}
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                data-testid="remote-refresh-network-btn"
+                onClick={() => postToHost({ type: 'refreshRemoteNetwork', payload: {} })}
+              >
+                <RefreshIcon className="size-3" />
+                <span>{t('remote.refreshNetwork')}</span>
+              </Button>
+            </div>
             <span className="text-[11.5px] text-ink-3">{t('remote.lanHostHint')}</span>
             <NativeSelect
+              id="remote-lan-select"
               size="sm"
               data-testid="remote-lan-select"
               value={remote?.selectedHost ?? ''}
@@ -277,7 +309,53 @@ function IdeRemoteSettingsPanel() {
                 ))
               )}
             </NativeSelect>
-          </label>
+          </div>
+
+          {remote?.wslNat?.active ? (
+            <div
+              data-testid="remote-wsl-nat-card"
+              className="flex flex-col gap-2 rounded-control bg-field px-2.5 py-2 shadow-hairline"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[12px] font-medium text-ink">{t('remote.wslNatTitle')}</span>
+                <ValuePill tone={remote.wslNat.portProxyConfigured ? 'green' : 'neutral'}>
+                  {remote.wslNat.portProxyConfigured ? t('remote.wslNatReady') : t('remote.wslNatNeeded')}
+                </ValuePill>
+              </div>
+              <p className="m-0 text-[11.5px] text-ink-3">
+                {remote.wslNat.portProxyConfigured
+                  ? t(
+                      'remote.wslNatReadyHint',
+                      remote.wslNat.windowsAddress,
+                      remote.port ?? 37890,
+                      remote.wslNat.wslAddress,
+                    )
+                  : t('remote.wslNatNeededHint', remote.wslNat.windowsAddress, remote.wslNat.wslAddress)}
+              </p>
+              {!remote.wslNat.portProxyConfigured ? (
+                <>
+                  <code
+                    data-testid="remote-wsl-nat-cmd"
+                    className="block rounded-control bg-surface px-2 py-1.5 font-mono text-[11px] break-all text-ink shadow-hairline"
+                  >
+                    {remote.wslNat.setupCommand}
+                  </code>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      data-testid="remote-copy-wsl-cmd-btn"
+                      onClick={copyWslSetupCommand}
+                    >
+                      {copiedWslCmd ? <CheckIcon className="size-3 text-green" /> : <CopyIcon className="size-3" />}
+                      <span>{t('remote.wslNatCopyCmd')}</span>
+                    </Button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : null}
 
           <label className="flex flex-col gap-1">
             <span className="text-[12.5px] font-medium text-ink">{t('remote.defaultScope')}</span>

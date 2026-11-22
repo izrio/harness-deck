@@ -1,5 +1,16 @@
 # 更新记录 / Changelog
 
+## 0.9.2
+
+**WSL 环境下自动识别 Windows 宿主机局域网地址与 WSL2 NAT 端口转发引导**：在 WSL 中运行 VS Code 时，远程互通不再默认暴露手机无法直连的 WSL 内部虚拟 NAT IP（`172.x.x.x`），而是自动探测并优先使用 Windows 宿主机的物理局域网网卡 IP，放行对应 `Host / Origin` 校验，并在 WSL2 NAT 模式下自动检测 Windows `netsh portproxy` 规则及提供一键复制的 PowerShell 转发命令。
+
+**Windows host LAN IP auto-detection & WSL2 NAT port-forwarding guidance in WSL**: When running VS Code inside WSL, Mobile Remote Access now probes and prefers the Windows host's physical LAN IP instead of WSL's unreachable virtual NAT IP (`172.x.x.x`), allows that IP in `Host / Origin` checks, checks Windows `netsh portproxy` rules in WSL2 NAT mode, and provides a one-click copyable Administrator PowerShell forwarding command.
+
+- **Windows 宿主机物理网卡优先识别**：WSL 环境下通过只读调用 `ipconfig.exe`（兼容 UTF-8 / GB18030 及多语言输出）过滤 `vEthernet (WSL)`、Docker、VPN 等虚拟网卡，优先选择带默认网关的 Windows 物理局域网 IP 作为配对地址，并自动兼容 WSL2 镜像网络（`networkingMode=mirrored`）。
+  **Windows host physical NIC priority**: Probes `ipconfig.exe` read-only from WSL (supporting UTF-8 / GB18030 and localized Windows outputs), filters out `vEthernet (WSL)`, Docker, and VPN virtual adapters, prefers gateway-backed Windows LAN IPs for pairing URLs, and handles WSL2 mirrored networking (`networkingMode=mirrored`) seamlessly.
+- **WSL2 NAT 转发状态检测与一键命令**：在设置页「网络入口与默认权限」新增「刷新网卡」入口；处于 WSL2 NAT 模式时只读检查 `netsh interface portproxy show v4tov4` 并展示转发状态与可直接复制的 PowerShell 端口转发及防火墙放行命令。
+  **WSL2 NAT forwarding status & setup command**: Added a Refresh button in Settings -> Remote Access; in WSL2 NAT mode, checks `netsh interface portproxy show v4tov4` read-only and displays forwarding readiness along with a copyable PowerShell command for portproxy and Windows Firewall setup.
+
 ## 0.9.1
 
 **修复 VS Code 插件面板空白（重复调用 `acquireVsCodeApi()`）**：修复 0.9.0 在启动 Webview 宿主通信桥接时清空 `acquireVsCodeApi()` 缓存导致同一页面二次获取 VS Code API 抛错、进而引发界面空白的严重回归，并同步加固单测与 E2E 的 `acquireVsCodeApi` 单次调用约束。

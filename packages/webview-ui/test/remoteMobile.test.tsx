@@ -327,6 +327,46 @@ describe('HD-23 本地 QR 编码与远程互通设置页', () => {
 
     fireEvent.click(screen.getByTestId('remote-test-push-btn'));
     expect(vscode.posted).toContainEqual({ type: 'testRemotePush', payload: {} });
+
+    fireEvent.click(screen.getByTestId('remote-refresh-network-btn'));
+    expect(vscode.posted).toContainEqual({ type: 'refreshRemoteNetwork', payload: {} });
+  });
+
+  it('RemoteSettings 在 WSL2 NAT 模式下展示 Windows 端口转发命令与刷新入口', () => {
+    act(() =>
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          remote: {
+            enabled: true,
+            running: true,
+            port: 37890,
+            bindHost: '0.0.0.0',
+            interfaces: [
+              { name: 'Windows · 以太网', address: '192.168.100.32' },
+              { name: 'WSL · eth0', address: '172.21.154.63' },
+            ],
+            selectedHost: '192.168.100.32',
+            scope: 'operate',
+            connectedClients: 0,
+            devices: [],
+            wslNat: {
+              active: true,
+              wslAddress: '172.21.154.63',
+              windowsAddress: '192.168.100.32',
+              portProxyConfigured: false,
+              setupCommand:
+                'netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=37890 connectaddress=172.21.154.63 connectport=37890',
+            },
+          },
+        }),
+      }),
+    );
+
+    render(<RemoteSettings />);
+    expect(screen.getByTestId('remote-wsl-nat-card')).toBeTruthy();
+    expect(screen.getByTestId('remote-wsl-nat-cmd').textContent).toContain('172.21.154.63');
+    expect(screen.getByTestId('remote-copy-wsl-cmd-btn')).toBeTruthy();
   });
 
   it('MobilePairingGate 可提交配对码并在错误时展示提示', async () => {

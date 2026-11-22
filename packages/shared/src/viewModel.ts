@@ -1135,6 +1135,19 @@ export interface RemotePushConfig {
   readonly webhook: RemoteWebhookConfig;
 }
 
+export interface RemoteWslNatInfo {
+  /** 当前运行在 WSL2 NAT 模式（选中的 Windows 宿主机局域网 IP 未直接绑定在 WSL 网卡上）。 */
+  readonly active: boolean;
+  /** WSL 虚拟网卡 IPv4（如 172.21.154.63）。 */
+  readonly wslAddress: string;
+  /** Windows 宿主机局域网 IPv4（如 192.168.100.32）。 */
+  readonly windowsAddress: string;
+  /** 是否已在 Windows 宿主机上检测到匹配的 netsh portproxy 转发规则。 */
+  readonly portProxyConfigured: boolean;
+  /** 供用户在 Windows 管理员 PowerShell 中一次性配置端口转发与防火墙放行的命令。 */
+  readonly setupCommand: string;
+}
+
 export interface RemoteState {
   readonly enabled: boolean;
   readonly running: boolean;
@@ -1149,6 +1162,7 @@ export interface RemoteState {
   readonly tailscale?: RemoteTailscaleView;
   readonly tunnelUrl?: string;
   readonly push?: RemotePushConfig;
+  readonly wslNat?: RemoteWslNatInfo;
   readonly error?: string;
 }
 

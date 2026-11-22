@@ -3195,6 +3195,10 @@ export function createHarnessHostRuntime(
       });
       return;
     }
+    if (message.type === 'refreshRemoteNetwork') {
+      void remoteBridge.refreshNetwork(true);
+      return;
+    }
     if (message.type === 'probeTailscale') {
       void remoteBridge.probeTailscale();
       return;

@@ -72,6 +72,7 @@ export type {
   RemoteTailscaleView,
   RemoteWebhookConfig,
   RemoteWebhookPreset,
+  RemoteWslNatInfo,
   ScheduleFrequency,
   ScheduleRule,
   ScheduleRunRecord,

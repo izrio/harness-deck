@@ -62,6 +62,7 @@ const REMOTE_BLOCKED_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'clearRemotePairing',
   'revokeRemoteDevice',
   'disconnectAllRemote',
+  'refreshRemoteNetwork',
   'probeTailscale',
   'configureTailscaleServe',
   'setRemotePushConfig',
