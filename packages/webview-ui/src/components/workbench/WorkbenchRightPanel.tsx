@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useIsMobile } from '../../hooks/use-mobile.ts';
+import { usePanelPresence } from '../../hooks/usePanelPresence.ts';
 import { useT } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
 import { requestPanelFiles, setRightPanelOpen, setRightPanelTab, useView, type RightPanelTab } from '../../store.ts';
@@ -99,6 +100,7 @@ export function WorkbenchRightPanel() {
   const t = useT();
   const isMobile = useIsMobile();
   const open = useView((s) => s.rightPanelOpen);
+  const panelPresence = usePanelPresence(open);
   const tab = useView((s) => s.rightPanelTab);
   const sourceControl = useView((s) => s.workbench.sourceControl);
   const dirtyFiles = useView((s) => s.workspace.dirtyFiles);
@@ -174,15 +176,26 @@ export function WorkbenchRightPanel() {
     );
   }
 
-  if (!open) return null;
+  if (!panelPresence.mounted) return null;
 
   return (
     <aside
       aria-label={t('wb.rightPanel.title')}
       data-testid="workbench-right-panel"
-      className="flex h-full w-80 shrink-0 flex-col border-l border-sidebar-border bg-sidebar min-[1180px]:w-[360px]"
+      data-state={panelPresence.shown ? 'expanded' : 'collapsed'}
+      className={cn(
+        'flex h-full shrink-0 flex-col overflow-hidden bg-sidebar transition-[width] duration-[260ms] ease-[var(--ease-drawer)]',
+        panelPresence.shown ? 'w-80 border-l border-sidebar-border min-[1180px]:w-[360px]' : 'w-0',
+      )}
     >
-      {panelBody}
+      <div
+        className={cn(
+          'flex h-full w-80 flex-col transition-transform duration-[260ms] ease-[var(--ease-drawer)] min-[1180px]:w-[360px]',
+          panelPresence.shown ? 'translate-x-0' : 'translate-x-full',
+        )}
+      >
+        {panelBody}
+      </div>
     </aside>
   );
 }

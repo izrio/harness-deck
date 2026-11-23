@@ -11,7 +11,7 @@ export function NodeEnvBanner({ nodeEnv }: { readonly nodeEnv?: NodeEnvState }) 
   const t = useT();
   if (!nodeEnv || !nodeEnv.checked) {
     return (
-      <div className="flex items-center gap-2 rounded-control bg-field px-3 py-2 text-[12px] text-ink-2 shadow-hairline" data-testid="node-env-checking">
+      <div className="flex items-center gap-2 border-b border-line/60 bg-inset/40 px-3.5 py-2 text-[12px] text-ink-2" data-testid="node-env-checking">
         <SpinnerIcon className="size-3.5" />
         <span>{t('settings.node.checking')}</span>
       </div>
@@ -25,28 +25,28 @@ export function NodeEnvBanner({ nodeEnv }: { readonly nodeEnv?: NodeEnvState }) 
           ? 'settings.node.missingNode'
           : 'settings.node.missingNpm';
     return (
-      <div className="flex flex-col gap-2 rounded-card bg-orange-tint px-3 py-2.5 text-[12px] shadow-[0_0_0_1px_color-mix(in_srgb,var(--orange)_28%,transparent)]" role="alert" data-testid="node-env-missing">
-        <div className="flex items-start gap-2 leading-snug text-ink">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange/25 bg-orange-tint px-3.5 py-2.5 text-[12px]" role="alert" data-testid="node-env-missing">
+        <div className="flex min-w-0 flex-1 items-start gap-2 leading-snug text-ink">
           <ErrorIcon className="mt-0.5 size-3.5 shrink-0 text-orange" />
           <span>{t(msgKey)}</span>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap gap-1.5">
           <Button
             type="button"
-            size="default"
+            size="sm"
             data-testid="install-node-btn"
             onClick={() => postToHost({ type: 'openExternal', payload: { url: NODE_DOWNLOAD_URL } })}
           >
-            <GlobeIcon className="size-3" />
+            <GlobeIcon className="size-3.5" />
             <span>{t('settings.node.install')}</span>
           </Button>
           <Button
             type="button"
             variant="outline"
-            size="default"
+            size="sm"
             onClick={() => postToHost({ type: 'checkBackendEnv', payload: {} })}
           >
-            <RefreshIcon className="size-3" />
+            <RefreshIcon className="size-3.5" />
             <span>{t('settings.refresh')}</span>
           </Button>
         </div>
@@ -54,7 +54,7 @@ export function NodeEnvBanner({ nodeEnv }: { readonly nodeEnv?: NodeEnvState }) 
     );
   }
   return (
-    <div className="flex items-center gap-2 rounded-control bg-field px-2.5 py-1.5 text-[12px] text-ink-2 shadow-hairline" data-testid="node-env-ok">
+    <div className="flex items-center gap-2 border-b border-line/60 bg-inset/40 px-3.5 py-2 text-[12px] text-ink-2" data-testid="node-env-ok">
       <span className="size-1.5 rounded-full bg-green" />
       <span className="font-mono text-[11.5px]">{t('settings.node.ready', nodeEnv.nodeVersion ?? '', nodeEnv.npmVersion ?? '')}</span>
     </div>

@@ -23,10 +23,10 @@ export function SettingsSection({
   return (
     <div className="flex flex-col gap-2" id={id} data-testid={testId}>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-0.5">
-        <h3 className="m-0 truncate text-[13px] font-semibold text-ink">{title}</h3>
+        <h3 className="m-0 truncate text-[13px] font-semibold tracking-tight text-ink">{title}</h3>
         {actions ? <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div> : null}
       </div>
-      <section className={cn('flex flex-col overflow-hidden rounded-card bg-surface shadow-card', className)}>
+      <section className={cn('flex flex-col overflow-hidden rounded-xl border border-line/75 bg-surface/80 shadow-xs dark:bg-surface/75', className)}>
         {children}
       </section>
     </div>

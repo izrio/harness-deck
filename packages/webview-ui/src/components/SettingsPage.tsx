@@ -157,7 +157,7 @@ export function SettingsPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-canvas" data-testid="settings-page">
       {/* 顶部标题栏 + 面包屑 */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-1.5">
+      <div className="surface-glass flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           <Button type="button" variant="ghost" size="xs" data-testid="settings-back" onClick={closeSettingsPage}>
             <ArrowLeftIcon className="size-3.5" />

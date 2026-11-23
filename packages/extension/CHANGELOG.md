@@ -1,5 +1,20 @@
 # 更新记录 / Changelog
 
+## 0.12.0
+
+**界面视觉体系重构与官方登录授权码回填**：全面重做面板视觉语言，引入 t3code-ui-style 的 Quiet Zinc 浅色 / Cool Slate 深色配色、玻璃质感浮层与抽屉式滑入动效，统一品牌色、阴影与排版层级；「设置 → Agent」中的后端安装 / 切换版本改为弹窗式管理；官方账号登录支持在浏览器授权后回填授权码（如 Antigravity 的 `agy acp --login`）。
+
+**Visual system refresh & authorization-code paste for official sign-in**: The panel adopts a rebuilt visual language based on t3code-ui-style — Quiet Zinc light / Cool Slate dark palettes, glass-surface overlays and drawer-style slide-in motion, with a unified brand color, shadows and typographic hierarchy. Backend install / version switching in Settings → Agent now runs through dialogs, and official sign-in can accept a pasted authorization code after browser authorization (e.g. Antigravity `agy acp --login`).
+
+- **设计令牌与玻璃质感**：浅色主题改为 Quiet Zinc 中性灰阶、深色主题改为 Cool Slate 冷色调并收紧描边；新增玻璃模糊 / 饱和度 / 滚动条与浮层阴影令牌，统一 shadcn 语义变量到主色，重做状态坞、模型选择器与各类下拉浮层的玻璃外观，并细化代码块的层级样式。
+  **Design tokens & glass surfaces**: The light theme moves to a Quiet Zinc neutral scale and the dark theme to a Cool Slate palette with tighter hairlines; added glass blur/saturation, scrollbar and overlay-shadow tokens, bridged shadcn semantic variables to the brand color, restyled the status dock, model picker and dropdown overlays with glass surfaces, and refined code-block layering.
+- **抽屉滑入动效与细节交互**：新增 `usePanelPresence` 让浮层在进出动画结束后再卸载；统一更多操作菜单、后端卡片与设置页的交互细节，并修复登录进度残留时无法关闭弹窗的问题。
+  **Drawer motion & interaction polish**: Added `usePanelPresence` so overlays unmount only after enter/exit animations finish; unified more-actions menus, backend cards and settings-page interactions, and fixed login dialogs that could not be dismissed when stale progress remained.
+- **后端版本管理弹窗**：「设置 → Agent → 底层」的安装与切换版本操作改为独立弹窗，展示当前版本并支持选择版本安装；非 npm 托管与未安装底层分别给出复制安装命令 / 安装提示，中英文案同步更新。
+  **Backend version dialogs**: Install and version-switch actions under Settings → Agent → Backends now open dedicated dialogs showing the current version and a version picker; non-npm-managed and missing backends show copyable install commands or hints, with Chinese/English strings updated in sync.
+- **授权码回填登录**：官方 CLI 在浏览器授权后要求粘贴授权码 / 回调网址时（如 `agy acp --login`），登录弹窗会提示输入并把内容写入登录子进程；新增 `submitAccountLoginCode` 与 `cancelAccountLogin.dismiss` 契约、`needsAuthCode` 进度字段及取消 / 提交分支的单测覆盖，浏览器授权流程与仅在成功后同步账号状态的行为保持不变。
+  **Authorization-code paste**: When an official CLI asks for a pasted authorization code / callback URL after browser authorization (e.g. `agy acp --login`), the sign-in dialog now prompts for it and forwards it to the login subprocess; added the `submitAccountLoginCode` and `cancelAccountLogin.dismiss` contract messages, a `needsAuthCode` progress field and unit tests for the cancel/submit branches. Browser authorization flows and syncing account state only on success are unchanged.
+
 ## 0.11.0
 
 **官方账号与渠道管理**：在「设置 → Agent → 账号」中可为 Claude Code、Codex、CodeBuddy、Antigravity、Pi、OpenCode、DeepSeek 等智能体登录并管理多个官方账号，支持配置目录隔离、凭据槽位快照与官方 API Key，可选独立会话历史与按账号查询订阅额度；并可在设置页、模型选择器顶部或命令面板随时将智能体在「官方渠道（指定账号）」与「第三方服务商」之间一键切换，无需重启或手动改配置。

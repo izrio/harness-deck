@@ -1170,6 +1170,8 @@ export interface AccountLoginProgress {
   readonly deviceCode?: string;
   readonly command?: string;
   readonly message?: string;
+  /** 官方 CLI 正在等待用户粘贴浏览器授权后得到的授权码（或回调页完整网址），例如 `agy acp --login`。 */
+  readonly needsAuthCode?: boolean;
 }
 
 export interface AccountsState {

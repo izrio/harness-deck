@@ -44,6 +44,7 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { useIsMobile } from '../../hooks/use-mobile.ts';
+import { usePanelPresence } from '../../hooks/usePanelPresence.ts';
 import { useT, type MessageKey } from '../../i18n.ts';
 import { relativeTime } from '../../lib/time.ts';
 import { cn } from '../../lib/utils.ts';
@@ -89,6 +90,7 @@ export function WorkbenchSidebar({
 }) {
   const t = useT();
   const isMobile = useIsMobile();
+  const panelPresence = usePanelPresence(open);
   const clientSurface = useView((s) => s.clientSurface);
   const clientScope = useView((s) => s.clientScope);
   const isMobileRemote = clientSurface === 'mobile-web';
@@ -528,7 +530,7 @@ export function WorkbenchSidebar({
           className={cn(
             'flex w-full items-center gap-2.5 rounded-control px-2.5 py-2 text-left text-[13px] leading-5 transition-colors duration-100',
             settingsOpen
-              ? 'bg-surface font-medium text-ink shadow-hairline'
+              ? 'bg-surface font-medium text-ink shadow-hairline dark:bg-white/[0.07]'
               : 'text-ink-2 hover:bg-hover hover:text-ink',
           )}
         >
@@ -555,14 +557,25 @@ export function WorkbenchSidebar({
             {renderSidebarInner(() => onMobileOpenChange?.(false))}
           </SheetContent>
         </Sheet>
-      ) : open ? (
+      ) : panelPresence.mounted ? (
         <Sidebar
           collapsible="none"
           aria-label={t('wb.sidebar.title')}
           data-testid="project-sessions-sidebar"
-          className="h-full w-64 shrink-0 border-r border-sidebar-border"
+          data-state={panelPresence.shown ? 'expanded' : 'collapsed'}
+          className={cn(
+            'h-full shrink-0 overflow-hidden transition-[width] duration-[260ms] ease-[var(--ease-drawer)]',
+            panelPresence.shown ? 'w-64 border-r border-sidebar-border' : 'w-0',
+          )}
         >
-          {renderSidebarInner()}
+          <div
+            className={cn(
+              'h-full w-64 transition-transform duration-[260ms] ease-[var(--ease-drawer)]',
+              panelPresence.shown ? 'translate-x-0' : '-translate-x-full',
+            )}
+          >
+            {renderSidebarInner()}
+          </div>
         </Sidebar>
       ) : null}
 
@@ -758,7 +771,7 @@ function SessionListItemRow({
       className={cn(
         'h-auto items-start gap-2.5 rounded-control px-2.5 py-1.5 transition-colors duration-100 group-has-data-[sidebar=menu-action]/menu-item:pr-2.5',
         isActiveRow
-          ? 'bg-surface text-ink shadow-hairline hover:bg-surface data-[active=true]:bg-surface data-[active=true]:text-ink'
+          ? 'bg-surface text-ink shadow-hairline hover:bg-surface data-[active=true]:bg-surface data-[active=true]:text-ink dark:bg-white/[0.07] dark:hover:bg-white/[0.08] dark:data-[active=true]:bg-white/[0.07]'
           : 'text-ink-2 hover:bg-hover hover:text-ink',
       )}
       onClick={openSession}
@@ -840,7 +853,10 @@ function SessionListItemRow({
           title={deleteTitle}
           aria-label={deleteTitle}
           data-testid={`delete-session-${session.id}`}
-          className="top-1.5 right-1.5 text-ink-3 hover:bg-hover-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+          className={cn(
+            'top-1.5 right-1.5 text-ink-3 opacity-0 hover:bg-hover-2 hover:text-ink focus-visible:opacity-100 group-focus-within/menu-item:opacity-100 disabled:pointer-events-none disabled:opacity-40',
+            canDelete && 'group-hover/menu-item:opacity-100',
+          )}
           onClick={() => onRequestDelete(session)}
         >
           <TrashIcon />

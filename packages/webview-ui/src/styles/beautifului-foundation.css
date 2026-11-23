@@ -24,27 +24,37 @@
   --terminal-font-size: 12px;
   --terminal-line-height: 1.6;
 
-  /* Light Theme */
-  --page: oklch(0.985 0.002 252);
-  --canvas: oklch(0.961 0.004 252);
-  --surface: oklch(1 0 0);
-  --inset: oklch(0.978 0.003 252);
-  --hover: oklch(0.969 0.004 252);
-  --hover-2: oklch(0.934 0.006 252);
-  --field: oklch(0.962 0.003 255);
+  /* Panel slide motion (drawer reveal curve) */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
-  --ink: oklch(0.242 0.012 258);
-  --ink-2: oklch(0.502 0.014 260);
-  --ink-3: oklch(0.685 0.012 260);
-  --ink-4: oklch(0.755 0.01 260);
+  /* Glass & surface elevation (t3code-ui-style) */
+  --app-scrollbar-width: 6px;
+  --glass-blur: 12px;
+  --glass-opacity: 82%;
+  --glass-saturation: 1.14;
+  --shadow-composer: 0 1px 2px rgb(0 0 0 / 5%);
 
-  --line: oklch(0.932 0.006 255);
-  --line-strong: oklch(0.892 0.009 255);
-  --line-soft: oklch(0.956 0.004 255);
+  /* Light Theme — Quiet Zinc (t3code-ui-style) */
+  --page: #fcfcfc;
+  --canvas: #fcfcfc;
+  --surface: #ffffff;
+  --inset: #fafafa;
+  --hover: #f4f4f5;
+  --hover-2: #e4e4e7;
+  --field: #f4f4f5;
 
-  --accent: oklch(0.585 0.195 255);
-  --accent-ink: oklch(0.515 0.185 255);
-  --accent-tint: oklch(0.955 0.022 253);
+  --ink: #27272a;
+  --ink-2: #71717b;
+  --ink-3: #a1a1aa;
+  --ink-4: #d4d4d8;
+
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --line-soft: #f4f4f5;
+
+  --accent: oklch(0.488 0.217 264);
+  --accent-ink: oklch(0.44 0.2 264);
+  --accent-tint: oklch(0.488 0.217 264 / 0.1);
 
   /* Semantic feedback */
   --green: oklch(0.603 0.155 150.883);
@@ -57,10 +67,10 @@
   /* Layered shadows */
   --shadow-hairline: 0 0 0 1px var(--line);
   --shadow-btn: 0 0 0 1px var(--line-strong), var(--shadow-xs);
-  --shadow-card: 0 0 0 1px var(--line), var(--shadow-sm);
+  --shadow-card: 0 0 0 1px var(--line), var(--shadow-xs);
   --shadow-raised: 0 0 0 1px var(--line), var(--shadow-md);
-  --shadow-overlay: 0 0 0 1px var(--line), var(--shadow-lg);
-  --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.1);
+  --shadow-overlay: 0 0 0 1px var(--line), 0 16px 40px -18px rgb(0 0 0 / 45%);
+  --shadow-inset-field: inset 0 1px 2px rgb(0 0 0 / 8%);
 
   /* shadcn/ui semantic variables bridged to active theme */
   --radius: 0.5rem;
@@ -70,8 +80,8 @@
   --card-foreground: var(--ink);
   --popover: var(--surface);
   --popover-foreground: var(--ink);
-  --primary: var(--ink);
-  --primary-foreground: var(--canvas);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
   --secondary: var(--field);
   --secondary-foreground: var(--ink);
   --muted: var(--inset);
@@ -79,7 +89,7 @@
   --shadcn-accent: var(--hover);
   --accent-foreground: var(--ink);
   --brand: var(--accent);
-  --brand-foreground: var(--surface);
+  --brand-foreground: #ffffff;
   --destructive: var(--red);
   --destructive-foreground: #ffffff;
   --border: var(--line);
@@ -100,7 +110,11 @@
 .dark {
   color-scheme: dark;
 
-  /* Dark Theme */
+  --glass-blur: 16px;
+  --glass-saturation: 1.08;
+  --shadow-composer: 0 14px 32px -18px rgb(0 0 0 / 55%);
+
+  /* Dark Theme — Cool Slate + Soft Hairlines */
   --page: oklch(0.198 0.007 264);
   --canvas: oklch(0.222 0.008 264);
   --surface: oklch(0.258 0.01 266);
@@ -118,9 +132,9 @@
   --line-strong: oklch(0.362 0.012 264);
   --line-soft: oklch(0.282 0.009 262);
 
-  --accent: oklch(0.69 0.165 253);
-  --accent-ink: oklch(0.79 0.115 248);
-  --accent-tint: oklch(0.69 0.165 253 / 0.16);
+  --accent: oklch(0.571 0.21 264);
+  --accent-ink: oklch(0.74 0.14 260);
+  --accent-tint: oklch(0.571 0.21 264 / 0.16);
 
   --green: oklch(0.705 0.154 153.814);
   --green-tint: oklch(0.705 0.154 153.814 / 0.14);
@@ -137,14 +151,16 @@
   --shadow-raised:
     0 0 0 1px var(--line-strong), 0 2px 10px oklch(0 0 0 / 0.26);
   --shadow-overlay:
-    0 0 0 1px var(--line-strong), 0 8px 28px oklch(0 0 0 / 0.38);
+    0 0 0 1px var(--line-strong), 0 14px 36px -14px rgb(0 0 0 / 60%);
   --shadow-inset-field: inset 0 1px 2px oklch(0 0 0 / 0.4);
 
   /* shadcn/ui semantic hover & brand overrides */
   --shadcn-accent: var(--hover);
   --accent-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
   --brand: var(--accent);
-  --brand-foreground: var(--page);
+  --brand-foreground: #ffffff;
 }
 
 @theme inline {
@@ -175,6 +191,12 @@
   --color-red: var(--red);
   --color-red-tint: var(--red-tint);
 
+  /* micro-typography (t3code-ui-style) */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: calc(1 / 0.6875);
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: calc(0.875 / 0.625);
+
   /* shadows */
   --shadow-hairline: var(--shadow-hairline);
   --shadow-btn: var(--shadow-btn);
@@ -182,6 +204,7 @@
   --shadow-card: var(--shadow-card);
   --shadow-raised: var(--shadow-raised);
   --shadow-overlay: var(--shadow-overlay);
+  --shadow-composer: var(--shadow-composer);
 
   /* type (respecting VS Code workbench & editor font fallbacks) */
   --font-sans: var(--hd-font-family, var(--vscode-font-family, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif));
@@ -325,41 +348,140 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-/* ── Custom Scrollbars (modern pill thumb, no native arrows/track box) ── */
+@utility surface-glass {
+  background: color-mix(in srgb, var(--surface) var(--glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
 
-*::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--surface) !important;
+  }
 }
 
-*::-webkit-scrollbar-button {
+@utility dialog-glass {
+  background: color-mix(in srgb, var(--surface) var(--glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border-color: color-mix(in srgb, var(--ink) 10%, transparent);
+  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 60%);
+
+  @variant dark {
+    border-color: rgb(255 255 255 / 8%);
+    box-shadow:
+      inset 0 1px rgb(255 255 255 / 4%),
+      0 24px 72px -20px rgb(0 0 0 / 90%);
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--popover) !important;
+  }
+}
+
+@utility dialog-backdrop {
+  background: color-mix(in srgb, var(--canvas) 60%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+
+  @variant dark {
+    background: color-mix(in srgb, var(--page) 64%, transparent);
+  }
+}
+
+@utility dropdown-glass {
+  background: color-mix(
+    in srgb,
+    var(--popover) 18%,
+    color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+  );
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border-color: color-mix(in srgb, var(--ink) 10%, transparent);
+
+  @variant dark {
+    border-color: rgb(255 255 255 / 9%);
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--popover) !important;
+  }
+}
+
+@utility topbar-scroll-fade {
+  -webkit-mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(0 0 0 / 18%) 16%,
+      rgb(0 0 0 / 62%) 48%,
+      black 100%
+    ),
+    linear-gradient(black, black), linear-gradient(black, black);
+  -webkit-mask-position: top, bottom, right;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size:
+    100% 1.25rem,
+    100% calc(100% - 1.25rem),
+    var(--app-scrollbar-width) 100%;
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(0 0 0 / 18%) 16%,
+      rgb(0 0 0 / 62%) 48%,
+      black 100%
+    ),
+    linear-gradient(black, black), linear-gradient(black, black);
+  mask-position: top, bottom, right;
+  mask-repeat: no-repeat;
+  mask-size:
+    100% 1.25rem,
+    100% calc(100% - 1.25rem),
+    var(--app-scrollbar-width) 100%;
+}
+
+/* ── Custom Scrollbars (modern pill thumb, iframe excluded) ── */
+
+:where(:not(iframe))::-webkit-scrollbar {
+  width: var(--app-scrollbar-width);
+  height: var(--app-scrollbar-width);
+}
+
+:where(:not(iframe))::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-*::-webkit-scrollbar-track,
-*::-webkit-scrollbar-corner {
+:where(:not(iframe))::-webkit-scrollbar-track,
+:where(:not(iframe))::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-*::-webkit-scrollbar-thumb {
+:where(:not(iframe))::-webkit-scrollbar-thumb {
   border-radius: 9999px;
   border: 1px solid transparent;
   background-clip: padding-box;
-  background-color: color-mix(in srgb, var(--ink-3) 28%, transparent);
+  background-color: rgb(0 0 0 / 16%);
 }
 
-*:hover::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--ink-3) 45%, transparent);
+:where(:not(iframe)):hover::-webkit-scrollbar-thumb {
+  background-color: rgb(0 0 0 / 26%);
 }
 
-*::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--ink-3) 65%, transparent);
+:where(:not(iframe))::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(0 0 0 / 38%);
 }
 
-*::-webkit-scrollbar-thumb:active {
-  background-color: color-mix(in srgb, var(--ink-3) 80%, transparent);
+.dark :where(:not(iframe))::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 32%);
+}
+
+.dark :where(:not(iframe)):hover::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 42%);
+}
+
+.dark :where(:not(iframe))::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(255 255 255 / 54%);
 }
 
 /* ── Primitive spacing & layout alignment ─────────────── */
@@ -441,11 +563,18 @@ select:focus-visible,
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  40% {
     opacity: 1;
+    animation-timing-function: steps(6);
   }
-  50% {
-    opacity: 0.38;
+  50%,
+  90% {
+    opacity: 0.45;
+    animation-timing-function: steps(6);
+  }
+  100% {
+    opacity: 1;
   }
 }
 

@@ -37,7 +37,7 @@ export function ActivityRow({ item }: { item: Of<'activity'> }) {
     <div className={cn('activity -my-1.5 text-[12.5px]', `activity--${item.status}`, command && 'activity--command')}>
       <button
         type="button"
-        className="activity__row group/row flex h-7 w-full min-w-0 items-center gap-2 text-left transition-colors duration-100 disabled:cursor-default"
+        className="activity__row group/row -mx-1 flex h-7 w-[calc(100%+0.5rem)] min-w-0 items-center gap-2 rounded-md px-1 text-left transition-colors duration-100 hover:bg-hover/60 disabled:cursor-default disabled:hover:bg-transparent"
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
         onClick={() => setOpen(!open)}
@@ -61,13 +61,13 @@ export function ActivityRow({ item }: { item: Of<'activity'> }) {
         <span
           className={cn(
             'activity__name shrink-0 font-medium',
-            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink',
+            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink-2',
           )}
         >
           {command ? commandVerb : name}
         </span>
         {chipText ? (
-          <span className="activity__detail inline-flex h-5.5 min-w-0 items-center truncate rounded-chip bg-surface px-1.5 font-mono text-[11.5px] text-ink-2 shadow-hairline">
+          <span className="activity__detail inline-flex h-5 min-w-0 items-center truncate rounded-chip bg-field px-1.5 font-mono text-[11px] text-ink-2 shadow-hairline">
             {chipText}
           </span>
         ) : null}
@@ -104,7 +104,7 @@ export function EditRow({ item }: { item: Of<'activity'> }) {
     <div className={cn('activity activity--edit -my-1.5 text-[12.5px]', `activity--${item.status}`)}>
       <button
         type="button"
-        className="activity__row group/row flex h-7 w-full min-w-0 items-center gap-2 text-left transition-colors duration-100 disabled:cursor-default"
+        className="activity__row group/row -mx-1 flex h-7 w-[calc(100%+0.5rem)] min-w-0 items-center gap-2 rounded-md px-1 text-left transition-colors duration-100 hover:bg-hover/60 disabled:cursor-default disabled:hover:bg-transparent"
         disabled={!diff && !item.output}
         aria-expanded={expandable ? open : undefined}
         onClick={onClick}
@@ -128,7 +128,7 @@ export function EditRow({ item }: { item: Of<'activity'> }) {
         <span
           className={cn(
             'activity__name shrink-0 font-medium',
-            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink',
+            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink-2',
           )}
         >
           {verb}
@@ -136,7 +136,7 @@ export function EditRow({ item }: { item: Of<'activity'> }) {
         <FilePath
           path={item.label}
           className={cn(
-            'activity__detail activity__file inline-flex h-5.5 min-w-0 items-center rounded-chip bg-surface px-1.5 font-mono text-[11.5px] shadow-hairline',
+            'activity__detail activity__file inline-flex h-5 min-w-0 items-center rounded-chip bg-field px-1.5 font-mono text-[11px] shadow-hairline',
             diff ? 'activity__file--link text-accent-ink group-hover/row:underline' : 'text-ink-2',
           )}
         />
@@ -160,7 +160,7 @@ export function ExploreRow({ item }: { item: Of<'explore'> }) {
     <div className={cn('activity -my-1.5 text-[12.5px]', `activity--${item.status}`)}>
       <button
         type="button"
-        className="activity__row group/row flex h-7 w-full min-w-0 items-center gap-2 text-left transition-colors duration-100"
+        className="activity__row group/row -mx-1 flex h-7 w-[calc(100%+0.5rem)] min-w-0 items-center gap-2 rounded-md px-1 text-left transition-colors duration-100 hover:bg-hover/60"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
@@ -180,7 +180,7 @@ export function ExploreRow({ item }: { item: Of<'explore'> }) {
         <span
           className={cn(
             'activity__name shrink-0 font-medium',
-            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink',
+            item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink-2',
           )}
         >
           {item.status === 'running' ? t('explore.running') : t('explore.done')}

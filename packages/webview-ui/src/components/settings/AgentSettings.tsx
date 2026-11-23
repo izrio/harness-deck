@@ -168,243 +168,29 @@ export function AgentSettings() {
   };
 
   return (
-    <SettingsSection
-      title={t('settings.backends')}
-      testId="settings-backends"
-      actions={
-        <>
-          <Button type="button" variant="outline" size="default" data-testid="agent-registry-btn" onClick={() => { setRegistryUrl(backends.registryUrl ?? ''); setRegistryOpen(true); }}>
-            <GlobeIcon className="size-3" />
-            <span>{t('settings.agents.registry')}</span>
-          </Button>
-          <Button type="button" variant="outline" size="default" data-testid="agent-add-btn" onClick={openAdd}>
-            <PlusIcon className="size-3" />
-            <span>{t('settings.agents.add')}</span>
-          </Button>
-          <Button type="button" variant="ghost" size="icon" data-testid="settings-refresh-env" title={t('settings.refresh')} aria-label={t('settings.refresh')} onClick={refreshAll}>
-            <RefreshIcon className="size-3.5 text-ink-2" />
-          </Button>
-        </>
-      }
-    >
-      <div className="primitive-card-pad flex flex-col gap-2.5">
+    <>
+      <SettingsSection
+        title={t('settings.backends')}
+        testId="settings-backends"
+        actions={
+          <>
+            <Button type="button" variant="outline" size="sm" data-testid="agent-registry-btn" onClick={() => { setRegistryUrl(backends.registryUrl ?? ''); setRegistryOpen(true); }}>
+              <GlobeIcon className="size-3.5" />
+              <span>{t('settings.agents.registry')}</span>
+            </Button>
+            <Button type="button" variant="outline" size="sm" data-testid="agent-add-btn" onClick={openAdd}>
+              <PlusIcon className="size-3.5" />
+              <span>{t('settings.agents.add')}</span>
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" data-testid="settings-refresh-env" title={t('settings.refresh')} aria-label={t('settings.refresh')} onClick={refreshAll}>
+              <RefreshIcon className="size-3.5 text-ink-2" />
+            </Button>
+          </>
+        }
+      >
         <NodeEnvBanner nodeEnv={nodeEnv} />
 
-        <Dialog open={Boolean(form)} onOpenChange={(open) => !open && closeForm()}>
-          {form ? (
-            <DialogContent data-testid="agent-form" aria-modal="true" className="sm:max-w-[520px]">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-[14px]">
-                  <AgentIcon className="size-4 text-accent-ink" />
-                  <span>
-                    {form.isNew
-                      ? t('settings.agents.form.addTitle')
-                      : t('settings.agents.form.editTitle', form.name || form.id)}
-                  </span>
-                </DialogTitle>
-                <DialogDescription className="sr-only">{t('settings.backendsHint')}</DialogDescription>
-              </DialogHeader>
-
-              <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.name')}</span>
-                    <Input
-                      size="default"
-                      data-testid="agent-form-name"
-                      value={form.name}
-                      placeholder={t('settings.agents.form.namePlaceholder')}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.id')}</span>
-                    <Input
-                      size="default"
-                      data-testid="agent-form-id"
-                      disabled={!form.isNew}
-                      className="font-mono text-[12px]"
-                      value={form.id}
-                      placeholder={t('settings.agents.form.idPlaceholder')}
-                      onChange={(e) => setForm({ ...form, id: e.target.value })}
-                    />
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.command')}</span>
-                    <Input
-                      size="default"
-                      data-testid="agent-form-command"
-                      className="font-mono text-[12px]"
-                      value={form.command}
-                      placeholder={t('settings.agents.form.commandPlaceholder')}
-                      onChange={(e) => setForm({ ...form, command: e.target.value })}
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.args')}</span>
-                    <Input
-                      size="default"
-                      data-testid="agent-form-args"
-                      className="font-mono text-[12px]"
-                      value={form.argsText}
-                      placeholder={t('settings.agents.form.argsPlaceholder')}
-                      onChange={(e) => setForm({ ...form, argsText: e.target.value })}
-                    />
-                  </label>
-                </div>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.env')}</span>
-                  <Textarea
-                    data-testid="agent-form-env"
-                    rows={2}
-                    className="py-1.5 font-mono text-[12px]"
-                    value={form.envText}
-                    placeholder={t('settings.agents.form.envPlaceholder')}
-                    onChange={(e) => setForm({ ...form, envText: e.target.value })}
-                  />
-                </label>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.installHint')}</span>
-                  <Input
-                    size="default"
-                    data-testid="agent-form-install-hint"
-                    className="text-[12px]"
-                    value={form.installHint}
-                    placeholder={t('settings.agents.form.installHintPlaceholder')}
-                    onChange={(e) => setForm({ ...form, installHint: e.target.value })}
-                  />
-                </label>
-
-                <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-field/60 px-3 py-2">
-                  <span className="flex flex-col text-[12px]">
-                    <span className="font-medium text-ink">{t('settings.agents.form.singleSession')}</span>
-                    <span className="text-[11px] text-ink-3">{t('settings.agents.form.singleSessionHint')}</span>
-                  </span>
-                  <Switch
-                    data-testid="agent-form-single-session"
-                    aria-label={t('settings.agents.form.singleSession')}
-                    checked={form.singleSession}
-                    onCheckedChange={(checked) => setForm({ ...form, singleSession: checked })}
-                  />
-                </div>
-
-                {formError ? (
-                  <div className="text-[11.5px] text-red" role="alert">
-                    {formError}
-                  </div>
-                ) : null}
-              </div>
-
-              <DialogFooter>
-                <Button type="button" variant="outline" size="default" data-testid="agent-form-cancel" onClick={closeForm}>
-                  {t('common.cancel')}
-                </Button>
-                <Button type="button" size="default" data-testid="agent-form-save" onClick={submitForm}>
-                  {t('settings.agents.form.save')}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          ) : null}
-        </Dialog>
-
-        <Dialog open={registryOpen} onOpenChange={setRegistryOpen}>
-          <DialogContent data-testid="agent-registry-dialog" className="sm:max-w-[560px]">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-[14px]">
-                <GlobeIcon className="size-4 text-accent-ink" />
-                <span>{t('settings.agents.registry')}</span>
-              </DialogTitle>
-              <DialogDescription>{t('settings.agents.registryHint')}</DialogDescription>
-            </DialogHeader>
-
-            <div className="flex items-center gap-1.5">
-              <Input
-                size="sm"
-                value={registryUrl}
-                onChange={(event) => setRegistryUrl(event.target.value)}
-                placeholder="https://example.com/acp-registry.json"
-                aria-label={t('settings.agents.registryUrl')}
-                className="font-mono text-[12px]"
-              />
-              <Button
-                type="button"
-                size="sm"
-                disabled={registryLoading || !/^https:\/\//u.test(registryUrl.trim())}
-                onClick={() => {
-                  setRegistryLoading(true);
-                  postToHost({ type: 'fetchAcpRegistry', payload: { url: registryUrl.trim() } });
-                }}
-              >
-                {t('settings.agents.registryLoad')}
-              </Button>
-            </div>
-
-            {registry?.error ? <div className="text-[11.5px] text-red">{registry.error}</div> : null}
-
-            <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
-              {(registry?.entries ?? []).map((entry) => {
-                const exists = backends.items.some((backend) => backend.id === entry.id);
-                return (
-                  <div key={entry.id} className="rounded-control border border-line bg-field/60 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-[12.5px] font-medium text-ink">{entry.name}</div>
-                        <div className="truncate font-mono text-[11px] text-ink-3">
-                          {[entry.command, ...(entry.args ?? [])].join(' ')}
-                        </div>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={exists}
-                        onClick={() =>
-                          postToHost({
-                            type: 'upsertBackendProfile',
-                            payload: {
-                              id: entry.id,
-                              name: entry.name,
-                              command: entry.command,
-                              args: [...(entry.args ?? [])],
-                              env: {},
-                              ...(entry.install ? { installHint: entry.install } : {}),
-                            },
-                          })
-                        }
-                      >
-                        {exists ? t('settings.agents.registryAdded') : t('settings.agents.registryAdd')}
-                      </Button>
-                    </div>
-                    {entry.description ? <p className="mt-1 mb-0 text-[11.5px] text-ink-3">{entry.description}</p> : null}
-                    {entry.install ? (
-                      <p className="mt-0.5 mb-0 truncate font-mono text-[11px] text-ink-3">
-                        {t('settings.agents.registryInstall', entry.install)}
-                      </p>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {registry && registry.entries.length === 0 && !registry.error ? (
-                <div className="text-[12px] text-ink-3">{t('settings.agents.registryEmpty')}</div>
-              ) : null}
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" size="sm" onClick={() => setRegistryOpen(false)}>
-                {t('common.close')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <div className="flex flex-col gap-2">
+        <div className="divide-y divide-line/60">
           {backends.items.map((backend) => {
             const channel = accounts.channels[backend.id] ?? backend.activeChannel;
             const boundProvider =
@@ -439,7 +225,221 @@ export function AgentSettings() {
             );
           })}
         </div>
-      </div>
-    </SettingsSection>
+      </SettingsSection>
+
+      <Dialog open={Boolean(form)} onOpenChange={(open) => !open && closeForm()}>
+        {form ? (
+          <DialogContent data-testid="agent-form" aria-modal="true" className="sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-[14px]">
+                <AgentIcon className="size-4 text-accent-ink" />
+                <span>
+                  {form.isNew
+                    ? t('settings.agents.form.addTitle')
+                    : t('settings.agents.form.editTitle', form.name || form.id)}
+                </span>
+              </DialogTitle>
+              <DialogDescription className="sr-only">{t('settings.backendsHint')}</DialogDescription>
+            </DialogHeader>
+
+            <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.name')}</span>
+                  <Input
+                    size="sm"
+                    data-testid="agent-form-name"
+                    value={form.name}
+                    placeholder={t('settings.agents.form.namePlaceholder')}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.id')}</span>
+                  <Input
+                    size="sm"
+                    data-testid="agent-form-id"
+                    disabled={!form.isNew}
+                    className="font-mono text-[12px]"
+                    value={form.id}
+                    placeholder={t('settings.agents.form.idPlaceholder')}
+                    onChange={(e) => setForm({ ...form, id: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.command')}</span>
+                  <Input
+                    size="sm"
+                    data-testid="agent-form-command"
+                    className="font-mono text-[12px]"
+                    value={form.command}
+                    placeholder={t('settings.agents.form.commandPlaceholder')}
+                    onChange={(e) => setForm({ ...form, command: e.target.value })}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.args')}</span>
+                  <Input
+                    size="sm"
+                    data-testid="agent-form-args"
+                    className="font-mono text-[12px]"
+                    value={form.argsText}
+                    placeholder={t('settings.agents.form.argsPlaceholder')}
+                    onChange={(e) => setForm({ ...form, argsText: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.env')}</span>
+                <Textarea
+                  data-testid="agent-form-env"
+                  rows={2}
+                  className="py-1.5 font-mono text-[12px]"
+                  value={form.envText}
+                  placeholder={t('settings.agents.form.envPlaceholder')}
+                  onChange={(e) => setForm({ ...form, envText: e.target.value })}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] font-medium text-ink-2">{t('settings.agents.form.installHint')}</span>
+                <Input
+                  size="sm"
+                  data-testid="agent-form-install-hint"
+                  className="text-[12px]"
+                  value={form.installHint}
+                  placeholder={t('settings.agents.form.installHintPlaceholder')}
+                  onChange={(e) => setForm({ ...form, installHint: e.target.value })}
+                />
+              </label>
+
+              <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-field/60 px-3 py-2">
+                <span className="flex flex-col text-[12px]">
+                  <span className="font-medium text-ink">{t('settings.agents.form.singleSession')}</span>
+                  <span className="text-[11px] text-ink-3">{t('settings.agents.form.singleSessionHint')}</span>
+                </span>
+                <Switch
+                  data-testid="agent-form-single-session"
+                  aria-label={t('settings.agents.form.singleSession')}
+                  checked={form.singleSession}
+                  onCheckedChange={(checked) => setForm({ ...form, singleSession: checked })}
+                />
+              </div>
+
+              {formError ? (
+                <div className="text-[11.5px] text-red" role="alert">
+                  {formError}
+                </div>
+              ) : null}
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" size="sm" data-testid="agent-form-cancel" onClick={closeForm}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="button" size="sm" data-testid="agent-form-save" onClick={submitForm}>
+                {t('settings.agents.form.save')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+
+      <Dialog open={registryOpen} onOpenChange={setRegistryOpen}>
+        <DialogContent data-testid="agent-registry-dialog" className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[14px]">
+              <GlobeIcon className="size-4 text-accent-ink" />
+              <span>{t('settings.agents.registry')}</span>
+            </DialogTitle>
+            <DialogDescription>{t('settings.agents.registryHint')}</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center gap-1.5">
+            <Input
+              size="sm"
+              value={registryUrl}
+              onChange={(event) => setRegistryUrl(event.target.value)}
+              placeholder="https://example.com/acp-registry.json"
+              aria-label={t('settings.agents.registryUrl')}
+              className="font-mono text-[12px]"
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={registryLoading || !/^https:\/\//u.test(registryUrl.trim())}
+              onClick={() => {
+                setRegistryLoading(true);
+                postToHost({ type: 'fetchAcpRegistry', payload: { url: registryUrl.trim() } });
+              }}
+            >
+              {t('settings.agents.registryLoad')}
+            </Button>
+          </div>
+
+          {registry?.error ? <div className="text-[11.5px] text-red">{registry.error}</div> : null}
+
+          <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+            {(registry?.entries ?? []).map((entry) => {
+              const exists = backends.items.some((backend) => backend.id === entry.id);
+              return (
+                <div key={entry.id} className="rounded-control border border-line bg-field/60 px-2.5 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[12.5px] font-medium text-ink">{entry.name}</div>
+                      <div className="truncate font-mono text-[11px] text-ink-3">
+                        {[entry.command, ...(entry.args ?? [])].join(' ')}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={exists}
+                      onClick={() =>
+                        postToHost({
+                          type: 'upsertBackendProfile',
+                          payload: {
+                            id: entry.id,
+                            name: entry.name,
+                            command: entry.command,
+                            args: [...(entry.args ?? [])],
+                            env: {},
+                            ...(entry.install ? { installHint: entry.install } : {}),
+                          },
+                        })
+                      }
+                    >
+                      {exists ? t('settings.agents.registryAdded') : t('settings.agents.registryAdd')}
+                    </Button>
+                  </div>
+                  {entry.description ? <p className="mt-1 mb-0 text-[11.5px] text-ink-3">{entry.description}</p> : null}
+                  {entry.install ? (
+                    <p className="mt-0.5 mb-0 truncate font-mono text-[11px] text-ink-3">
+                      {t('settings.agents.registryInstall', entry.install)}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+            {registry && registry.entries.length === 0 && !registry.error ? (
+              <div className="text-[12px] text-ink-3">{t('settings.agents.registryEmpty')}</div>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setRegistryOpen(false)}>
+              {t('common.close')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

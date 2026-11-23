@@ -3120,7 +3120,13 @@ export function createHarnessHostRuntime(
       return;
     }
     if (message.type === 'cancelAccountLogin') {
-      accountAuthFlow.cancel(message.payload.id);
+      accountAuthFlow.cancel(message.payload.id, { dismiss: message.payload.dismiss === true });
+      return;
+    }
+    if (message.type === 'submitAccountLoginCode') {
+      if (!accountAuthFlow.submitAuthCode(message.payload.id, message.payload.code)) {
+        post({ type: 'toast', payload: { level: 'error', text: t('account.loginCodeNotAccepted') } });
+      }
       return;
     }
     if (message.type === 'logoutAccount') {

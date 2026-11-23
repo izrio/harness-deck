@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 
 describe('TabBar 跨智能体标签与图标渲染', () => {
-  it('单个标签时隐藏顶部标签栏', () => {
+  it('单个标签时也展示顶部标签栏', () => {
     render(<TabBar />);
     act(() => {
       applyHostMessage({
@@ -26,7 +26,9 @@ describe('TabBar 跨智能体标签与图标渲染', () => {
         }),
       });
     });
-    expect(screen.queryByTestId('tabs')).toBeNull();
+    const tabBar = screen.getByTestId('tabs');
+    expect(tabBar).not.toBeNull();
+    expect(tabBar.querySelectorAll('[role="tab"]')).toHaveLength(1);
   });
 
   it('同时展示 DeepSeek 与 Claude 标签，并在每个标题前显示对应智能体图标', () => {

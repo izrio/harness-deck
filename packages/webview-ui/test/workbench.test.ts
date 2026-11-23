@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
 import type { HostSnapshot, HostToWebview, WorkbenchState } from '@harness-deck/shared';
 import { backendCapabilities } from '@harness-deck/shared';
@@ -253,6 +253,7 @@ beforeAll(() => {
     setState: () => undefined,
   });
   globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => (callback(0), 0)) as typeof requestAnimationFrame;
+  Element.prototype.scrollIntoView ??= () => undefined;
 });
 
 afterEach(() => {
@@ -262,7 +263,7 @@ afterEach(() => {
 });
 
 describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目）与右侧文件/Git 面板', () => {
-  it('右侧面板：点击展开后支持「文件」树浏览与「Git」改动提交、推送确认与 PR 保留草稿', () => {
+  it('右侧面板：点击展开后支持「文件」树浏览与「Git」改动提交、推送确认与 PR 保留草稿', async () => {
     const snapshot = workbenchSnapshot();
     const workbench = snapshot.workbench!;
     const sc = {
@@ -371,7 +372,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     // 关闭弹窗并收起右侧面板
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(screen.getByTestId('right-panel-close'));
-    expect(screen.queryByTestId('workbench-right-panel')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('workbench-right-panel')).toBeNull());
   });
 
   it('会话模块：最后一轮结束时提供文件恢复入口', () => {
@@ -596,7 +597,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(posted).toContainEqual({ type: 'updateTaskStatus', payload: { id: 'task-r1', status: 'done' } });
   });
 
-  it('会话模块：按项目分组展示会话列表，支持按项目新建分组会话与切换跨项目会话', () => {
+  it('会话模块：按项目分组展示会话列表，支持按项目新建分组会话与切换跨项目会话', async () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
     fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
@@ -672,7 +673,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
 
     // 收起与重新展开侧边栏
     fireEvent.click(screen.getByTestId('toggle-project-groups'));
-    expect(screen.queryByTestId('project-sessions-sidebar')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('project-sessions-sidebar')).toBeNull());
     fireEvent.click(screen.getByTestId('toggle-project-groups'));
     expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
   });

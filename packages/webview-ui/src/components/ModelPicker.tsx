@@ -7,7 +7,7 @@ import { openSettingsPage, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import { GlideMenu } from './beautifului/index.ts';
-import { CheckIcon, ChevronDownIcon, KeyIcon, SpinnerIcon, UsersIcon } from './icons.tsx';
+import { CheckIcon, ChevronDownIcon, KeyIcon, RouteIcon, SettingsIcon, SpinnerIcon, UsersIcon } from './icons.tsx';
 import { ModelVendorLogo } from './ModelVendorLogo.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -115,10 +115,10 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
           align="start"
           sideOffset={6}
           aria-label={t('model.select')}
-          className="model-menu flex max-h-96 w-auto min-w-[260px] max-w-[min(360px,calc(100vw-16px))] flex-col overflow-hidden rounded-card p-0 shadow-raised"
+          className="model-menu flex max-h-96 w-auto min-w-[260px] max-w-[min(360px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-0 shadow-overlay"
         >
           {showChannelSwitcher && activeBackend ? (
-            <div className="border-b border-line bg-inset/45 px-2 py-1.5" data-testid="model-channel-switcher">
+            <div className="border-b border-line px-2 py-1.5" data-testid="model-channel-switcher">
               <button
                 type="button"
                 data-testid="model-channel-toggle"
@@ -126,10 +126,12 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
                 className="flex w-full items-center justify-between gap-2 rounded-[6px] px-1.5 py-1 text-left text-[11.5px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"
               >
                 <span className="flex min-w-0 items-center gap-1.5 truncate">
-                  {activeChannel?.mode === 'provider' ? (
-                    <KeyIcon className="size-3 shrink-0 text-accent-ink" />
+                  {!channelSummary ? (
+                    <RouteIcon className="size-3.5 shrink-0 text-ink-3" />
+                  ) : activeChannel?.mode === 'provider' ? (
+                    <KeyIcon className="size-3 shrink-0 text-ink-3" />
                   ) : (
-                    <UsersIcon className="size-3 shrink-0 text-accent-ink" />
+                    <UsersIcon className="size-3 shrink-0 text-ink-3" />
                   )}
                   <span className="truncate">{channelSummary ?? t('model.channel.label')}</span>
                 </span>
@@ -150,36 +152,57 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
                           (activeChannel?.mode ?? 'official') === 'official' &&
                           (activeChannel?.mode === 'official' ? (activeChannel.accountId ?? `system:${activeBackend.id}`) : `system:${activeBackend.id}`) === acc.id;
                         return (
-                          <button
+                          <div
                             key={acc.id}
-                            type="button"
-                            data-testid={`quick-channel-official-${acc.id}`}
-                            onClick={() => {
-                              postToHost({
-                                type: 'setBackendChannel',
-                                payload: { backendId: activeBackend.id, mode: 'official', accountId: acc.id },
-                              });
-                              close();
-                            }}
-                            className={cn(
-                              'flex w-full items-center gap-1.5 rounded-[6px] px-1.5 py-1 text-left text-[12px] transition-colors hover:bg-hover',
-                              isCur ? 'font-medium text-ink' : 'text-ink-2',
-                            )}
+                            className="group/channel flex w-full items-center gap-0.5 rounded-[6px] transition-colors hover:bg-hover"
                           >
-                            <span
+                            <button
+                              type="button"
+                              data-testid={`quick-channel-official-${acc.id}`}
+                              onClick={() => {
+                                postToHost({
+                                  type: 'setBackendChannel',
+                                  payload: { backendId: activeBackend.id, mode: 'official', accountId: acc.id },
+                                });
+                                close();
+                              }}
                               className={cn(
-                                'size-1.5 shrink-0 rounded-full',
-                                acc.status === 'authenticated'
-                                  ? 'bg-green'
-                                  : acc.status === 'expired'
-                                    ? 'bg-orange'
-                                    : 'bg-ink-3/40',
+                                'flex min-w-0 flex-1 items-center gap-1.5 rounded-[6px] px-1.5 py-1 text-left text-[12px]',
+                                isCur ? 'font-medium text-ink' : 'text-ink-2',
                               )}
-                            />
-                            <span className="min-w-0 flex-1 truncate">{acc.label}</span>
-                            {acc.plan ? <span className="text-[10.5px] text-ink-3">{acc.plan}</span> : null}
-                            {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
-                          </button>
+                            >
+                              <span
+                                className={cn(
+                                  'size-1.5 shrink-0 rounded-full',
+                                  acc.status === 'authenticated'
+                                    ? 'bg-green'
+                                    : acc.status === 'expired'
+                                      ? 'bg-orange'
+                                      : 'bg-ink-3/40',
+                                )}
+                              />
+                              <span className="min-w-0 flex-1 truncate">{acc.label}</span>
+                              {acc.plan ? <span className="shrink-0 text-[10.5px] text-ink-3">{acc.plan}</span> : null}
+                              {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
+                            </button>
+                            <div className="flex shrink-0 items-center pr-0.5 opacity-0 transition-opacity duration-100 group-focus-within/channel:opacity-100 group-hover/channel:opacity-100">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                data-testid={`quick-channel-official-manage-${acc.id}`}
+                                aria-label={t('model.channel.manageAccounts')}
+                                title={t('model.channel.manageAccounts')}
+                                className="text-ink-3 hover:bg-hover-2 hover:text-ink"
+                                onClick={() => {
+                                  close();
+                                  openSettingsPage('accounts');
+                                }}
+                              >
+                                <SettingsIcon className="size-3" />
+                              </Button>
+                            </div>
+                          </div>
                         );
                       })}
                     </>
@@ -193,55 +216,51 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
                       {compatibleProviders.map((p) => {
                         const isCur = activeChannel?.mode === 'provider' && activeChannel.providerId === p.id;
                         return (
-                          <button
+                          <div
                             key={p.id}
-                            type="button"
-                            data-testid={`quick-channel-provider-${p.id}`}
-                            onClick={() => {
-                              postToHost({
-                                type: 'setBackendChannel',
-                                payload: { backendId: activeBackend.id, mode: 'provider', providerId: p.id },
-                              });
-                              close();
-                            }}
-                            className={cn(
-                              'flex w-full items-center gap-1.5 rounded-[6px] px-1.5 py-1 text-left text-[12px] transition-colors hover:bg-hover',
-                              isCur ? 'font-medium text-ink' : 'text-ink-2',
-                            )}
+                            className="group/channel flex w-full items-center gap-0.5 rounded-[6px] transition-colors hover:bg-hover"
                           >
-                            <KeyIcon className="size-3 shrink-0 text-ink-3" />
-                            <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                            {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
-                          </button>
+                            <button
+                              type="button"
+                              data-testid={`quick-channel-provider-${p.id}`}
+                              onClick={() => {
+                                postToHost({
+                                  type: 'setBackendChannel',
+                                  payload: { backendId: activeBackend.id, mode: 'provider', providerId: p.id },
+                                });
+                                close();
+                              }}
+                              className={cn(
+                                'flex min-w-0 flex-1 items-center gap-1.5 rounded-[6px] px-1.5 py-1 text-left text-[12px]',
+                                isCur ? 'font-medium text-ink' : 'text-ink-2',
+                              )}
+                            >
+                              <KeyIcon className="size-3 shrink-0 text-ink-3" />
+                              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                              {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
+                            </button>
+                            <div className="flex shrink-0 items-center pr-0.5 opacity-0 transition-opacity duration-100 group-focus-within/channel:opacity-100 group-hover/channel:opacity-100">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                data-testid={`quick-channel-provider-manage-${p.id}`}
+                                aria-label={t('model.channel.manageProviders')}
+                                title={t('model.channel.manageProviders')}
+                                className="text-ink-3 hover:bg-hover-2 hover:text-ink"
+                                onClick={() => {
+                                  close();
+                                  openSettingsPage('providers');
+                                }}
+                              >
+                                <SettingsIcon className="size-3" />
+                              </Button>
+                            </div>
+                          </div>
                         );
                       })}
                     </>
                   ) : null}
-
-                  <div className="mt-1 flex items-center justify-between gap-1 border-t border-line/70 pt-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => {
-                        close();
-                        openSettingsPage('accounts');
-                      }}
-                    >
-                      {t('model.channel.manageAccounts')}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => {
-                        close();
-                        openSettingsPage('providers');
-                      }}
-                    >
-                      {t('model.channel.manageProviders')}
-                    </Button>
-                  </div>
                 </div>
               ) : null}
             </div>
@@ -315,7 +334,7 @@ function EffortSlider({
   const maxIdx = Math.max(1, efforts.length - 1);
   const ratio = displayIndex / maxIdx;
   const fillWidth =
-    displayIndex <= 0 ? '0%' : displayIndex >= maxIdx ? '100%' : `calc(14px + (100% - 28px) * ${ratio})`;
+    displayIndex <= 0 ? '0%' : displayIndex >= maxIdx ? '100%' : `calc(7px + (100% - 14px) * ${ratio})`;
 
   useEffect(() => {
     setDragIndex(undefined);
@@ -323,8 +342,8 @@ function EffortSlider({
 
   const indexForClientX = (clientX: number): number => {
     const rect = trackRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 28) return resolvedIndex;
-    const norm = Math.min(1, Math.max(0, (clientX - rect.left - 14) / (rect.width - 28)));
+    if (!rect || rect.width <= 14) return resolvedIndex;
+    const norm = Math.min(1, Math.max(0, (clientX - rect.left - 7) / (rect.width - 14)));
     return Math.round(norm * maxIdx);
   };
 
@@ -375,30 +394,29 @@ function EffortSlider({
     <div
       role="group"
       aria-label={t('model.effort')}
-      className="model-menu__efforts border-t border-line bg-inset/45 px-3 pt-2.5 pb-3"
+      className="model-menu__efforts border-t border-line px-3 pt-2 pb-2.5"
       data-testid="effort-menu"
     >
-      <div className="flex flex-col items-center text-center leading-tight">
-        <span className="text-[13px] font-semibold text-accent-ink" data-testid="effort-active-label">
-          {displayEffort.name}
-        </span>
-        <span className="mt-0.5 text-[11px] text-ink-3">{t('model.effort')}</span>
+      <div className="flex items-center justify-between px-0.5">
+        <span className="text-[11px] font-medium text-ink-3">{t('model.effort')}</span>
       </div>
 
       <div
         ref={trackRef}
         onPointerDown={onTrackPointerDown}
-        className="relative mt-2.5 h-7 w-full cursor-pointer overflow-hidden rounded-full bg-field shadow-inset-field select-none touch-none"
+        className="relative mt-2 flex h-5 w-full cursor-pointer items-center select-none touch-none"
       >
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-brand transition-[width] duration-150 ease-out"
-          style={{ width: fillWidth }}
-        />
+        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-field shadow-inset-field">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-accent-ink/80 transition-[width] duration-150 ease-out"
+            style={{ width: fillWidth }}
+          />
+        </div>
         {efforts.map((e, i) => {
           const active = i === displayIndex;
           const filled = i < displayIndex;
-          const left = `calc(14px + (100% - 28px) * ${i / maxIdx})`;
+          const left = `calc(7px + (100% - 14px) * ${i / maxIdx})`;
           return (
             <button
               key={e.id}
@@ -407,19 +425,19 @@ function EffortSlider({
               aria-label={e.name}
               onClick={() => onSelectEffort(e.id)}
               style={{ left }}
-              className="absolute top-1/2 z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
+              className="absolute top-1/2 z-10 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
             >
               {active ? (
-                <span className="size-5 rounded-full bg-surface shadow-raised ring-1 ring-line-strong transition-transform duration-150" />
+                <span className="size-3.5 rounded-full bg-brand-foreground shadow-xs ring-1 ring-line-strong transition-transform duration-150" />
               ) : (
-                <span className={cn('size-1.5 rounded-full transition-colors duration-150', filled ? 'bg-surface/80' : 'bg-ink-3/50')} />
+                <span className={cn('size-1 rounded-full transition-colors duration-150', filled ? 'bg-brand-foreground/85' : 'bg-ink-3/45')} />
               )}
             </button>
           );
         })}
       </div>
 
-      <div role="menu" className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${efforts.length}, minmax(0, 1fr))` }}>
+      <div role="menu" className="mt-1.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${efforts.length}, minmax(0, 1fr))` }}>
         {efforts.map((e) => {
           const active = e.id === displayEffort.id;
           return (
@@ -433,11 +451,13 @@ function EffortSlider({
               className={cn(
                 'model-effort-option flex h-6 min-w-0 items-center justify-center rounded-[6px] px-1 text-[11px] transition-colors duration-100',
                 active
-                  ? 'menu-item--active bg-accent-tint font-medium text-accent-ink'
+                  ? 'menu-item--active bg-field font-medium text-ink'
                   : 'text-ink-3 hover:bg-hover hover:text-ink',
               )}
             >
-              <span className="menu-item__label truncate">{e.name}</span>
+              <span className="menu-item__label truncate" data-testid={active ? 'effort-active-label' : undefined}>
+                {e.name}
+              </span>
             </button>
           );
         })}

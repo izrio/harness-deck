@@ -41,4 +41,11 @@ describe('beautifului-foundation 设计令牌', () => {
     expect(theme).toContain('--color-accent-ink: var(--accent-ink);');
     expect(theme).toContain('--color-accent-tint: var(--accent-tint);');
   });
+
+  it('暗色主题保留偏灰的层级底色，不使用纯黑 #000000 / #0a0a0a', () => {
+    expect(dark).not.toContain('#000000');
+    expect(dark).not.toContain('#0a0a0a');
+    expect(dark).toContain('--canvas: oklch(0.222 0.008 264);');
+    expect(dark).toContain('--surface: oklch(0.258 0.01 266);');
+  });
 });

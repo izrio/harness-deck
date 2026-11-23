@@ -286,8 +286,13 @@ try {
   check('设置页列出 dsh、Pi、CodeBuddy、Claude Code', (await settingsPage.locator('[data-testid^="settings-backend-"]').count()) === 4);
   const current = settingsPage.locator(`[data-testid="settings-backend-${activeBackend}"]`);
   check('智能体标为「默认」并显示已安装', (await current.innerText()).includes('默认') && (await current.innerText()).includes('已安装'), await current.innerText());
-  check('没装的智能体显示安装按钮', (await settingsPage.locator('[data-testid="install-backend-dsh"]').count()) === 1);
   await shot('00-settings');
+  await settingsPage.locator('[data-testid="backend-actions-dsh"]').click();
+  await page.locator('[data-testid="install-backend-menu-dsh"]').waitFor({ timeout: 5_000 }).then(
+    () => check('没装的智能体在更多操作中显示安装入口', true),
+    () => check('没装的智能体在更多操作中显示安装入口', false),
+  );
+  await page.keyboard.press('Escape');
   await page.getByTestId('settings-back').click();
   await page.locator('.empty').waitFor({ timeout: 5_000 });
 

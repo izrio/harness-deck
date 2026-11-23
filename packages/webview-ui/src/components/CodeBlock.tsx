@@ -48,8 +48,8 @@ export const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string;
   const rawLines = code.split('\n');
 
   return (
-    <div className="code-block my-2.5 w-full overflow-hidden rounded-card bg-surface shadow-card">
-      <div className="flex h-9 items-center gap-2 border-b border-line px-3.5 text-[12px]">
+    <div className="code-block my-2.5 w-full overflow-hidden rounded-xl border border-line bg-inset/70 dark:bg-surface">
+      <div className="flex h-8 items-center gap-2 border-b border-line/70 px-3 text-[12px]">
         <span className="inline-flex min-w-0 items-center gap-2 text-ink">
           <CodeIcon width={14} height={14} strokeWidth={1.8} className="shrink-0 text-ink-3" />
           <span className="truncate font-mono leading-none text-ink-2">{lang ?? t('code.plainLabel')}</span>

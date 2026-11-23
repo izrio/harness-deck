@@ -118,6 +118,16 @@ function baseSnapshot(overrides: Partial<HostSnapshot> = {}): HostSnapshot {
 
 const host = (message: HostToWebview) => act(() => store.applyHostMessage(message));
 
+function openActionsMenu(testId: string) {
+  const trigger = screen.getByTestId(testId);
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+  return trigger;
+}
+
+function closeActionsMenu() {
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+}
+
 beforeAll(() => {
   (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
     postMessage: (message: unknown) => posted.push(message),
@@ -294,8 +304,12 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     fireEvent.click(screen.getByTestId('settings-tab-agents'));
 
     expect(screen.getByTestId('node-env-missing')).toBeTruthy();
-    expect((screen.getByTestId('install-backend-claude') as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId('uninstall-backend-dsh') as HTMLButtonElement).disabled).toBe(true);
+    openActionsMenu('backend-actions-claude');
+    expect(screen.getByTestId('install-backend-menu-claude').getAttribute('aria-disabled')).toBe('true');
+    closeActionsMenu();
+    openActionsMenu('backend-actions-dsh');
+    expect(screen.getByTestId('uninstall-backend-dsh').getAttribute('aria-disabled')).toBe('true');
+    closeActionsMenu();
 
     fireEvent.click(screen.getByTestId('install-node-btn'));
     expect(posted).toContainEqual({ type: 'openExternal', payload: { url: 'https://nodejs.org/' } });
@@ -307,16 +321,24 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     fireEvent.click(screen.getByTestId('settings-refresh-env'));
     expect(posted).toContainEqual({ type: 'checkBackendEnv', payload: {} });
 
+    openActionsMenu('backend-actions-claude');
+    fireEvent.click(screen.getByTestId('install-backend-menu-claude'));
+    expect(screen.getByTestId('version-dialog-claude')).toBeTruthy();
     fireEvent.change(screen.getByTestId('version-select-claude'), { target: { value: '0.10.0' } });
     fireEvent.click(screen.getByTestId('install-backend-claude'));
     expect(posted).toContainEqual({ type: 'installBackend', payload: { id: 'claude', version: '0.10.0' } });
+    expect(screen.queryByTestId('version-dialog-claude')).toBeNull();
 
+    openActionsMenu('backend-actions-dsh');
+    fireEvent.click(screen.getByTestId('switch-version-menu-dsh'));
+    expect(screen.getByTestId('version-dialog-dsh')).toBeTruthy();
     const switchBtn = screen.getByTestId('switch-version-dsh') as HTMLButtonElement;
     expect(switchBtn.disabled).toBe(true);
     fireEvent.change(screen.getByTestId('version-select-dsh'), { target: { value: '0.2.1-rc.5' } });
     expect(switchBtn.disabled).toBe(false);
     fireEvent.click(switchBtn);
     expect(posted).toContainEqual({ type: 'installBackend', payload: { id: 'dsh', version: '0.2.1-rc.5' } });
+    expect(screen.queryByTestId('version-dialog-dsh')).toBeNull();
 
     // 通过 Modal 弹窗新建与编辑外部智能体（支持 Escape / 遮罩关闭）
     fireEvent.click(screen.getByTestId('agent-add-btn'));
@@ -345,6 +367,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
       },
     });
 
+    openActionsMenu('backend-actions-claude');
     fireEvent.click(screen.getByTestId('edit-backend-claude'));
     const editAgentDialog = screen.getByTestId('agent-form');
     expect(editAgentDialog.getAttribute('aria-modal')).toBe('true');
@@ -449,6 +472,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     // 回到设置页测试「填入输入框」、编辑和删除命令
     fireEvent.click(screen.getByTestId('settings-button'));
     fireEvent.click(screen.getByTestId('settings-tab-commands'));
+    openActionsMenu('chat-command-actions-review');
     fireEvent.click(screen.getByTestId('edit-chat-command-review'));
     fireEvent.change(screen.getByTestId('chat-command-form-prompt'), { target: { value: '更新后的审查提示词：' } });
     fireEvent.click(screen.getByTestId('chat-command-form-save'));
@@ -461,12 +485,14 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
       },
     });
 
+    openActionsMenu('chat-command-actions-review');
     fireEvent.click(screen.getByTestId('use-chat-command-review'));
     expect(screen.queryByTestId('settings-page')).toBeNull();
     expect((screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).value).toBe('更新后的审查提示词：');
 
     fireEvent.click(screen.getByTestId('settings-button'));
     fireEvent.click(screen.getByTestId('settings-tab-commands'));
+    openActionsMenu('chat-command-actions-review');
     fireEvent.click(screen.getByTestId('delete-chat-command-review'));
     expect(posted).toContainEqual({ type: 'setPreferences', payload: { chatCommands: [] } });
     expect(screen.getByTestId('chat-commands-empty')).toBeTruthy();
@@ -820,6 +846,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     expect(screen.getByTestId('skill-item-frontend-design').textContent).toContain('/frontend-design');
 
     // 在设置内点击「预览 SKILL.md」直接弹出 Markdown 预览，关闭后回到设置技能页
+    openActionsMenu('skill-actions-frontend-design');
     fireEvent.click(screen.getByTestId('preview-skill-frontend-design'));
     expect(posted).toContainEqual({
       type: 'previewMarkdown',
@@ -844,6 +871,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
       payload: { id: 'frontend-design', agents: null },
     });
 
+    openActionsMenu('skill-actions-frontend-design');
     fireEvent.click(screen.getByTestId('sync-skill-frontend-design'));
     expect(posted).toContainEqual({ type: 'syncSkill', payload: { id: 'frontend-design' } });
 
@@ -853,6 +881,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
       payload: { id: 'frontend-design', enabled: false },
     });
 
+    openActionsMenu('skill-actions-frontend-design');
     fireEvent.click(screen.getByTestId('delete-skill-frontend-design'));
     expect(posted).toContainEqual({ type: 'deleteSkill', payload: { id: 'frontend-design' } });
   });
@@ -971,6 +1000,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     });
 
     // 删除服务器
+    openActionsMenu('mcp-actions-filesystem');
     fireEvent.click(screen.getByTestId('delete-mcp-filesystem'));
     expect(posted).toContainEqual({ type: 'deleteMcpServer', payload: { id: 'filesystem' } });
   });

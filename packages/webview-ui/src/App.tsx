@@ -438,7 +438,7 @@ function Home() {
           <button
             key={key}
             type="button"
-            className="suggestion flex items-start gap-2.5 rounded-card bg-surface p-3 text-left text-ink shadow-card transition-[transform,background-color,box-shadow] duration-150 hover:-translate-y-px hover:bg-inset hover:shadow-raised active:translate-y-0"
+            className="suggestion flex items-start gap-2.5 rounded-xl border border-line/80 bg-surface p-3 text-left text-ink shadow-xs transition-[transform,border-color,background-color,box-shadow] duration-150 hover:-translate-y-px hover:border-line-strong hover:bg-inset hover:shadow-raised active:translate-y-0"
             onClick={() => requestPrefill(t(`empty.suggest.${key}Prompt` as MessageKey))}
           >
             <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-control bg-field text-ink-2">

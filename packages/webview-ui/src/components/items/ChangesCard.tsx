@@ -44,8 +44,8 @@ export function ChangesCard({ item }: { item: Of<'changes'> }) {
     { additions: 0, deletions: 0 },
   );
   return (
-    <section className="changes overflow-hidden rounded-card bg-surface shadow-card" aria-label={t('changes.label')}>
-      <header className="changes__header primitive-card-bar flex items-center gap-2 border-b border-line text-[12.5px] font-medium text-ink">
+    <section className="changes overflow-hidden rounded-xl border border-line/80 bg-surface shadow-xs" aria-label={t('changes.label')}>
+      <header className="changes__header primitive-card-bar flex items-center gap-2 border-b border-line/70 text-[12.5px] font-medium text-ink">
         <DiffIcon className="size-3.5 shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1">{t('changes.title', item.total)}</span>
         <Stats stats={total} />

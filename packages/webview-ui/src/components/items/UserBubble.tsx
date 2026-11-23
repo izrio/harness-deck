@@ -22,9 +22,9 @@ export function UserBubble({ item }: { item: Of<'user'> }) {
       {item.text ? (
         <div
           className={cn(
-            'user__bubble max-w-full rounded-window bg-surface px-3.5 py-2 font-[family-name:var(--prose-font-family)] text-[length:var(--prose-font-size)] leading-[1.52] text-ink shadow-card whitespace-pre-wrap [overflow-wrap:anywhere]',
+            'user__bubble max-w-full rounded-2xl border border-black/[0.04] bg-field px-3.5 py-2.5 font-[family-name:var(--prose-font-family)] text-[length:var(--prose-font-size)] leading-[1.55] text-ink whitespace-pre-wrap [overflow-wrap:anywhere] dark:border-white/[0.05]',
             (item.pending === 'sending' || item.pending === 'queued') && 'opacity-75',
-            item.pending === 'failed' && 'shadow-[0_0_0_1px_var(--red)]',
+            item.pending === 'failed' && 'border-red/60 shadow-[0_0_0_1px_var(--red)]',
           )}
         >
           <UserText text={item.text} />

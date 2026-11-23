@@ -592,7 +592,21 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       backendId: z.string().min(1).max(100).optional(),
     }),
   }),
-  z.object({ type: z.literal('cancelAccountLogin'), payload: z.object({ id: z.string().max(120).optional() }) }),
+  z.object({
+    type: z.literal('cancelAccountLogin'),
+    payload: z.object({
+      id: z.string().max(120).optional(),
+      /** 为 true 时同时清除登录进度（关闭弹窗），否则仅取消进行中的登录并保留「已取消」提示。 */
+      dismiss: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('submitAccountLoginCode'),
+    payload: z.object({
+      id: z.string().max(120).optional(),
+      code: z.string().trim().min(1).max(8192),
+    }),
+  }),
   z.object({ type: z.literal('logoutAccount'), payload: z.object({ id: z.string().min(1).max(120) }) }),
   z.object({
     type: z.literal('refreshAccounts'),

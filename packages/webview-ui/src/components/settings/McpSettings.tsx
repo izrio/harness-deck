@@ -247,49 +247,47 @@ export function McpSettings() {
             <Button
               type="button"
               variant="outline"
-              size="default"
+              size="sm"
               data-testid="mcp-import-btn"
               onClick={openImportDialog}
             >
-              <DownloadIcon className="size-3" />
+              <DownloadIcon className="size-3.5" />
               <span>{t('settings.mcp.importBtn')}</span>
             </Button>
             <Button
               type="button"
               variant="outline"
-              size="default"
+              size="sm"
               data-testid="mcp-add-btn"
               onClick={openAdd}
             >
-              <PlusIcon className="size-3" />
+              <PlusIcon className="size-3.5" />
               <span>{t('settings.mcp.addBtn')}</span>
             </Button>
           </>
         }
       >
-        <div className="primitive-card-pad flex flex-col gap-2.5">
-          {/* 新增 / 编辑 MCP 服务器弹窗 */}
-          <McpFormDialog agents={agents} form={form} setForm={setForm} formError={formError} showJsonPaste={showJsonPaste} setShowJsonPaste={setShowJsonPaste} jsonText={jsonText} setJsonText={setJsonText} closeForm={closeForm} applyPastedJson={applyPastedJson} toggleFormAgent={toggleFormAgent} submitForm={submitForm} />
-
-          {/* 从各 Agent 配置导入弹窗 */}
-          <McpImportDialog agents={agents} mcp={mcp} importOpen={importOpen} setImportOpen={setImportOpen} selectedCandidateKeys={selectedCandidateKeys} setSelectedCandidateKeys={setSelectedCandidateKeys} importAgents={importAgents} toggleCandidate={toggleCandidate} toggleImportAgent={toggleImportAgent} candidates={candidates} selectedCandidates={selectedCandidates} submitImport={submitImport} />
-
-          {mcp.servers.length === 0 ? (
-            <div
-              className="rounded-control bg-field px-3 py-5 text-center text-[12px] text-ink-3 shadow-hairline"
-              data-testid="mcp-empty"
-            >
-              {t('settings.mcp.empty')}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {mcp.servers.map((server) => (
-                <McpServerCard key={server.id} agents={agents} openEdit={openEdit} toggleServerEnabled={toggleServerEnabled} toggleServerAgent={toggleServerAgent} deleteServer={deleteServer} server={server} />
-              ))}
-            </div>
-          )}
-        </div>
+        {mcp.servers.length === 0 ? (
+          <div
+            className="px-4 py-6 text-center text-[12px] text-ink-3"
+            data-testid="mcp-empty"
+          >
+            {t('settings.mcp.empty')}
+          </div>
+        ) : (
+          <div className="divide-y divide-line/60">
+            {mcp.servers.map((server) => (
+              <McpServerCard key={server.id} agents={agents} openEdit={openEdit} toggleServerEnabled={toggleServerEnabled} toggleServerAgent={toggleServerAgent} deleteServer={deleteServer} server={server} />
+            ))}
+          </div>
+        )}
       </SettingsSection>
+
+      {/* 新增 / 编辑 MCP 服务器弹窗 */}
+      <McpFormDialog agents={agents} form={form} setForm={setForm} formError={formError} showJsonPaste={showJsonPaste} setShowJsonPaste={setShowJsonPaste} jsonText={jsonText} setJsonText={setJsonText} closeForm={closeForm} applyPastedJson={applyPastedJson} toggleFormAgent={toggleFormAgent} submitForm={submitForm} />
+
+      {/* 从各 Agent 配置导入弹窗 */}
+      <McpImportDialog agents={agents} mcp={mcp} importOpen={importOpen} setImportOpen={setImportOpen} selectedCandidateKeys={selectedCandidateKeys} setSelectedCandidateKeys={setSelectedCandidateKeys} importAgents={importAgents} toggleCandidate={toggleCandidate} toggleImportAgent={toggleImportAgent} candidates={candidates} selectedCandidates={selectedCandidates} submitImport={submitImport} />
     </div>
   );
 }

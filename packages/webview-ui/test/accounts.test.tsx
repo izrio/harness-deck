@@ -2,12 +2,18 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { backendCapabilities, type HostSnapshot } from '@harness-deck/shared';
-import { applyHostMessage, resetStoreForTests } from '../src/store.ts';
+import { applyHostMessage, getState, resetStoreForTests } from '../src/store.ts';
 import { AccountSettings } from '../src/components/settings/AccountSettings.tsx';
 import { ModelPicker } from '../src/components/ModelPicker.tsx';
 import { mockVsCodeApi } from './setup.ts';
 
 const vscodeMock = mockVsCodeApi();
+
+function openActionsMenu(testId: string) {
+  const trigger = screen.getByTestId(testId);
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+  return trigger;
+}
 
 function makeSnapshot(): HostSnapshot {
   return {
@@ -117,6 +123,7 @@ describe('AccountSettings & ModelPicker channel switching', () => {
     expect(agyProviderBtn.disabled).toBe(true);
 
     // 切换 Claude Code 到另一个官方账号
+    openActionsMenu('account-actions-claude-work');
     fireEvent.click(screen.getByTestId('account-use-claude-work'));
     expect(vscodeMock.posted).toContainEqual({
       type: 'setBackendChannel',
@@ -151,6 +158,7 @@ describe('AccountSettings & ModelPicker channel switching', () => {
     });
 
     // 删除独立账号弹出二次确认
+    openActionsMenu('account-actions-claude-work');
     fireEvent.click(screen.getByTestId('account-delete-claude-work'));
     expect(screen.getByTestId('account-delete-dialog')).toBeTruthy();
     fireEvent.click(screen.getByTestId('account-delete-confirm'));
@@ -163,6 +171,25 @@ describe('AccountSettings & ModelPicker channel switching', () => {
   it('supports quick official/provider channel switching inside ModelPicker', () => {
     render(<ModelPicker disabled={false} />);
     vscodeMock.reset();
+
+    fireEvent.click(screen.getByTestId('model-picker'));
+    fireEvent.click(screen.getByTestId('model-channel-toggle'));
+    expect(screen.queryByText('管理账号')).toBeNull();
+    expect(screen.queryByText('管理服务商')).toBeNull();
+
+    const manageOfficial = screen.getByTestId('quick-channel-official-manage-system:claude');
+    expect(manageOfficial.parentElement?.className).toContain('group-hover/channel:opacity-100');
+    fireEvent.click(manageOfficial);
+    expect(getState().settingsOpen).toBe(true);
+    expect(getState().settingsTab).toBe('accounts');
+
+    fireEvent.click(screen.getByTestId('model-picker'));
+    fireEvent.click(screen.getByTestId('model-channel-toggle'));
+    const manageProvider = screen.getByTestId('quick-channel-provider-manage-volc');
+    expect(manageProvider.parentElement?.className).toContain('group-hover/channel:opacity-100');
+    fireEvent.click(manageProvider);
+    expect(getState().settingsOpen).toBe(true);
+    expect(getState().settingsTab).toBe('providers');
 
     fireEvent.click(screen.getByTestId('model-picker'));
     fireEvent.click(screen.getByTestId('model-channel-toggle'));

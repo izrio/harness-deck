@@ -18,7 +18,7 @@ export function RuntimeBanner({ status, connection }: { status: RuntimeStatus; c
   return (
     <div className="content-column mt-2 mb-1">
       <section
-        className="banner overflow-hidden rounded-card bg-surface shadow-card"
+        className="banner surface-glass overflow-hidden rounded-xl border border-line shadow-xs"
         role="status"
         style={{ animation: 'fade-up 240ms var(--ease-out-strong) both' }}
       >

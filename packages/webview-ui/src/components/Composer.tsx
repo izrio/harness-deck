@@ -401,7 +401,7 @@ export function Composer() {
         />
       ) : null}
       <div
-        className="composer relative mb-2.5 flex flex-col rounded-window bg-surface p-1.5 shadow-card transition-shadow duration-150 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--ink)_24%,var(--line-strong)),var(--shadow-md)]"
+        className="composer surface-glass relative mb-2.5 flex flex-col rounded-2xl border border-black/8 p-1.5 shadow-[var(--shadow-composer)] transition-[border-color,box-shadow] duration-150 focus-within:border-ring/45 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--accent)_30%,transparent),var(--shadow-composer)] dark:border-white/[0.07] dark:inset-shadow-[0_1px_rgb(255_255_255/3%)]"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes('Files')) event.preventDefault();
         }}
@@ -528,7 +528,7 @@ export function Composer() {
             <button
               type="button"
               className={cn(
-                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-full bg-red-tint text-red shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--red)_28%,transparent)] transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red hover:text-white active:scale-[0.94] max-md:size-11',
+                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-full bg-red-tint text-red shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--red)_28%,transparent)] transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red hover:text-white active:scale-[0.94] max-md:size-8',
                 showSend && 'send-button--secondary',
               )}
               onClick={() => postToHost({ type: 'interrupt', payload: {} })}
@@ -542,9 +542,9 @@ export function Composer() {
             <button
               type="button"
               className={cn(
-                'send-button inline-flex size-7 items-center justify-center rounded-full transition-[background-color,color,box-shadow,transform,opacity] duration-150 enabled:active:scale-[0.94] disabled:cursor-default max-md:size-11',
+                'send-button inline-flex size-7 items-center justify-center rounded-full transition-[background-color,color,box-shadow,transform,opacity] duration-150 enabled:active:scale-[0.94] disabled:cursor-default max-md:size-8',
                 canSend
-                  ? 'bg-ink text-surface shadow-xs hover:opacity-88'
+                  ? 'bg-brand text-brand-foreground shadow-xs inset-shadow-[0_1px_rgb(255_255_255/16%)] hover:bg-brand/90'
                   : 'bg-field text-ink-3 shadow-hairline',
               )}
               disabled={!canSend}

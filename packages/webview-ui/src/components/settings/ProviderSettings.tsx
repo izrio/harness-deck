@@ -401,11 +401,11 @@ export function ProviderSettings() {
             <Button
               type="button"
               variant="outline"
-              size="default"
+              size="sm"
               data-testid="provider-gateway-logs-btn"
               onClick={() => setLogsOpen(true)}
             >
-              <LogIcon className="size-3" />
+              <LogIcon className="size-3.5" />
               <span>{t('settings.providers.gatewayLogsBtn')}</span>
               {gatewayLogs.length > 0 ? (
                 <ValuePill
@@ -430,22 +430,22 @@ export function ProviderSettings() {
       <SettingsSection
         title={t('settings.providers.title')}
         actions={
-          <Button type="button" variant="outline" size="default" data-testid="provider-add-btn" onClick={() => openAdd()}>
-            <PlusIcon className="size-3" />
+          <Button type="button" variant="outline" size="sm" data-testid="provider-add-btn" onClick={() => openAdd()}>
+            <PlusIcon className="size-3.5" />
             <span>{t('settings.providers.add')}</span>
           </Button>
         }
       >
-        <div className="primitive-card-pad flex flex-col gap-2">
-          {providers.length === 0 ? (
-            <div
-              className="rounded-control bg-field px-3 py-4 text-center text-[12px] text-ink-3 shadow-hairline"
-              data-testid="providers-empty"
-            >
-              {t('settings.providers.empty')}
-            </div>
-          ) : (
-            providers.map((item) => (
+        {providers.length === 0 ? (
+          <div
+            className="px-4 py-6 text-center text-[12px] text-ink-3"
+            data-testid="providers-empty"
+          >
+            {t('settings.providers.empty')}
+          </div>
+        ) : (
+          <div className="divide-y divide-line/60">
+            {providers.map((item) => (
               <SavedProviderCard
                 key={item.id}
                 provider={item}
@@ -456,9 +456,9 @@ export function ProviderSettings() {
                 onEdit={() => openEdit(item)}
                 onDelete={() => deleteProvider(item.id)}
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </SettingsSection>
 
       {/* 服务商新增 / 编辑表单 */}

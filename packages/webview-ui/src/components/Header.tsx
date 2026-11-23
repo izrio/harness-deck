@@ -69,8 +69,8 @@ export function Header({
     : t(`wb.nav.${activeModule}` as MessageKey);
 
   return (
-    <header className="header flex shrink-0 flex-col border-b border-line bg-surface">
-      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+    <header className="header surface-glass flex shrink-0 flex-col border-b border-line">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
         <div className="flex min-w-0 items-center gap-1.5">
           {isMobile ? (
             <Button

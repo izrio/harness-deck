@@ -319,6 +319,7 @@ describe('HD-23 本地 QR 编码与远程互通设置页', () => {
     fireEvent.click(screen.getByTestId('remote-generate-pairing-btn'));
     expect(vscode.posted.some((m) => m.type === 'generateRemotePairing')).toBe(true);
 
+    fireEvent.keyDown(screen.getByTestId('remote-device-actions-dev-1'), { key: 'Enter' });
     fireEvent.click(screen.getByTestId('remote-revoke-dev-1'));
     expect(vscode.posted).toContainEqual({ type: 'revokeRemoteDevice', payload: { deviceId: 'dev-1' } });
 

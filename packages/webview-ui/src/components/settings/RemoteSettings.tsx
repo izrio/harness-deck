@@ -6,6 +6,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RemoteRouteKind, RemoteScope, RemoteWebhookPreset } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
@@ -27,6 +33,7 @@ import {
   GlobeIcon,
   LinkIcon,
   LogOutIcon,
+  MoreIcon,
   QrCodeIcon,
   RefreshIcon,
   ShieldOffIcon,
@@ -515,17 +522,17 @@ function IdeRemoteSettingsPanel() {
 
       {/* 4. 已授权设备列表 */}
       <SettingsSection title={t('remote.devicesTitle', devices.length)} testId="remote-devices-section">
-        <div className="primitive-card-pad flex flex-col gap-1.5">
-          {devices.length === 0 ? (
-            <div className="rounded-control bg-field px-3 py-4 text-center text-[12px] text-ink-3 shadow-hairline">
-              {t('remote.devicesEmpty')}
-            </div>
-          ) : (
-            devices.map((dev) => (
+        {devices.length === 0 ? (
+          <div className="px-4 py-6 text-center text-[12px] text-ink-3">
+            {t('remote.devicesEmpty')}
+          </div>
+        ) : (
+          <div className="divide-y divide-line/60">
+            {devices.map((dev) => (
               <div
                 key={dev.id}
                 data-testid={`remote-device-${dev.id}`}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-card bg-field px-2.5 py-2 shadow-hairline"
+                className="flex items-center justify-between gap-2 px-3.5 py-2.5 transition-colors hover:bg-hover/35"
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -541,20 +548,38 @@ function IdeRemoteSettingsPanel() {
                     {t('remote.deviceLastSeen', relativeTime(dev.lastSeenAt, t))}
                   </span>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  data-testid={`remote-revoke-${dev.id}`}
-                  onClick={() => postToHost({ type: 'revokeRemoteDevice', payload: { deviceId: dev.id } })}
-                >
-                  <TrashIcon className="size-3" />
-                  <span>{t('remote.revokeDevice')}</span>
-                </Button>
+                <div className="shrink-0">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0 text-ink-2 hover:text-ink"
+                        data-testid={`remote-device-actions-${dev.id}`}
+                        aria-label={t('common.moreActions')}
+                        title={t('common.moreActions')}
+                      >
+                        <MoreIcon className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-36">
+                      <DropdownMenuItem
+                        variant="destructive"
+                        className="gap-2 text-[12.5px]"
+                        data-testid={`remote-revoke-${dev.id}`}
+                        onSelect={() => postToHost({ type: 'revokeRemoteDevice', payload: { deviceId: dev.id } })}
+                      >
+                        <TrashIcon className="size-3.5" />
+                        <span>{t('remote.revokeDevice')}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </SettingsSection>
 
       {/* 5. 推送通知（Web Push + Webhook） */}

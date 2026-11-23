@@ -139,7 +139,7 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
   const title = item.subjectKind === 'command' ? t('approval.command') : item.subjectKind === 'file' ? t('approval.file') : t('approval.tool', item.toolName);
   return (
     <section
-      className="interaction interaction--approval overflow-hidden rounded-card bg-surface shadow-card"
+      className="interaction interaction--approval overflow-hidden rounded-xl border border-line/85 bg-surface shadow-xs"
       aria-label={t('approval.label')}
       data-testid="approval-card"
       style={{ animation: 'fade-up 340ms cubic-bezier(0.23,1,0.32,1) both' }}
@@ -218,7 +218,7 @@ function PlanReviewCard({ id, question }: { id: string; question: QuestionView }
   const keep = intent.keepPlanning ?? question.options.find((o) => o.label !== intent.approve)?.label ?? t('plan.keep');
   return (
     <section
-      className="interaction overflow-hidden rounded-card bg-surface shadow-card"
+      className="interaction overflow-hidden rounded-xl border border-line/85 bg-surface shadow-xs"
       aria-label={t('plan.label')}
       data-testid="plan-review-card"
       style={{ animation: 'fade-up 340ms var(--ease-out-strong) both' }}
@@ -369,7 +369,7 @@ function QuestionCard({ item }: { item: Of<'question'> }) {
 
   return (
     <section
-      className="interaction interaction--question overflow-hidden rounded-card bg-surface shadow-card"
+      className="interaction interaction--question overflow-hidden rounded-xl border border-line/85 bg-surface shadow-xs"
       aria-label={t('question.label')}
       data-testid="question-card"
       style={{ animation: 'fade-up 340ms cubic-bezier(0.23,1,0.32,1) both' }}

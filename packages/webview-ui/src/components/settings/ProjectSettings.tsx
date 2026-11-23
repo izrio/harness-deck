@@ -9,7 +9,7 @@ import { useT } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
 import { setProjectsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { FolderIcon, GitBranchIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
+import { FolderIcon, FolderOpenIcon, GitBranchIcon, MoreIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
 import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,6 +20,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -102,11 +109,11 @@ export function ProjectSettings() {
                 <Button
                   type="button"
                   variant="outline"
-                  size="default"
+                  size="sm"
                   data-testid="project-switch-folder-btn"
                   onClick={() => postToHost({ type: 'selectFolder', payload: {} })}
                 >
-                  <FolderIcon className="size-3 text-ink-3" />
+                  <FolderIcon className="size-3.5 text-ink-3" />
                   <span>{t('header.folder')}</span>
                   <span className="text-[11px] text-ink-3">{folder}</span>
                 </Button>
@@ -114,37 +121,37 @@ export function ProjectSettings() {
               <Button
                 type="button"
                 variant="outline"
-                size="default"
+                size="sm"
                 data-testid="project-add-btn"
                 onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
               >
-                <PlusIcon className="size-3" />
+                <PlusIcon className="size-3.5" />
                 <span>{t('settings.projects.add')}</span>
               </Button>
             </>
           ) : undefined
         }
       >
-        <div className="primitive-card-pad flex flex-col gap-1.5">
-          {projects.recent.length === 0 ? (
-            <div className="rounded-control bg-field px-3 py-4 text-center text-[12px] text-ink-3 shadow-hairline" data-testid="projects-empty">
-              {t('settings.projects.empty')}
-            </div>
-          ) : (
-            projects.recent.map((project, index) => {
+        {projects.recent.length === 0 ? (
+          <div className="px-4 py-6 text-center text-[12px] text-ink-3" data-testid="projects-empty">
+            {t('settings.projects.empty')}
+          </div>
+        ) : (
+          <div className="divide-y divide-line/60">
+            {projects.recent.map((project, index) => {
               const selected = project.path === activePath;
               return (
                 <div
                   key={project.path}
                   data-testid={`recent-project-${index}`}
                   className={cn(
-                    'flex items-center gap-2 rounded-card px-2.5 py-2 transition-colors duration-150',
-                    selected ? 'bg-inset shadow-[inset_0_0_0_1.5px_var(--accent)]' : 'bg-field shadow-hairline hover:bg-hover',
+                    'flex items-center gap-2.5 px-3.5 py-2.5 transition-colors duration-150',
+                    selected ? 'bg-accent-tint/45 shadow-[inset_2px_0_0_0_var(--accent)]' : 'hover:bg-hover/35',
                   )}
                 >
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                     onClick={() => setSelectedPath(project.path)}
                   >
                     <FolderIcon className={cn('size-4 shrink-0', selected ? 'text-accent-ink' : 'text-ink-3')} />
@@ -157,36 +164,53 @@ export function ProjectSettings() {
                     </span>
                   </button>
                   {!isMobileRemote ? (
-                    <div className="flex shrink-0 items-center gap-1">
-                      {!project.isCurrent ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="default"
-                          data-testid={`project-open-${index}`}
-                          onClick={() => postToHost({ type: 'openProject', payload: { path: project.path } })}
-                        >
-                          {t('settings.projects.open')}
-                        </Button>
-                      ) : null}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t('settings.projects.remove')}
-                        title={t('settings.projects.remove')}
-                        data-testid={`project-remove-${index}`}
-                        onClick={() => postToHost({ type: 'removeRecentProject', payload: { path: project.path } })}
-                      >
-                        <TrashIcon className="size-3.5 text-ink-3" />
-                      </Button>
+                    <div className="shrink-0">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0 text-ink-2 hover:text-ink"
+                            data-testid={`project-actions-${index}`}
+                            aria-label={t('common.moreActions')}
+                            title={t('common.moreActions')}
+                          >
+                            <MoreIcon className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-36">
+                          {!project.isCurrent ? (
+                            <>
+                              <DropdownMenuItem
+                                className="gap-2 text-[12.5px]"
+                                data-testid={`project-open-${index}`}
+                                onSelect={() => postToHost({ type: 'openProject', payload: { path: project.path } })}
+                              >
+                                <FolderOpenIcon className="size-3.5 text-ink-2" />
+                                <span>{t('settings.projects.open')}</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </>
+                          ) : null}
+                          <DropdownMenuItem
+                            variant="destructive"
+                            className="gap-2 text-[12.5px]"
+                            data-testid={`project-remove-${index}`}
+                            onSelect={() => postToHost({ type: 'removeRecentProject', payload: { path: project.path } })}
+                          >
+                            <TrashIcon className="size-3.5" />
+                            <span>{t('settings.projects.remove')}</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   ) : null}
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </SettingsSection>
 
       {activePath ? (
@@ -198,7 +222,7 @@ export function ProjectSettings() {
               <Button
                 type="button"
                 variant="outline"
-                size="default"
+                size="sm"
                 data-testid="project-create-wt-btn"
                 onClick={() => {
                   if (isMobileRemote) {
@@ -209,13 +233,13 @@ export function ProjectSettings() {
                   }
                 }}
               >
-                <GitBranchIcon className="size-3" />
+                <GitBranchIcon className="size-3.5" />
                 <span>{t('settings.projects.createWorktree')}</span>
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                size="default"
+                size="sm"
                 data-testid="project-remove-wt-btn"
                 onClick={() => {
                   if (isMobileRemote) {
@@ -225,17 +249,17 @@ export function ProjectSettings() {
                   }
                 }}
               >
-                <TrashIcon className="size-3" />
+                <TrashIcon className="size-3.5" />
                 <span>{t('settings.projects.removeWorktree')}</span>
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                size="default"
+                size="sm"
                 data-testid="project-run-verify-btn"
                 onClick={() => postToHost({ type: 'runProjectVerify', payload: { path: activePath } })}
               >
-                <TerminalIcon className="size-3" />
+                <TerminalIcon className="size-3.5" />
                 <span>{t('settings.projects.runVerify')}</span>
               </Button>
             </>

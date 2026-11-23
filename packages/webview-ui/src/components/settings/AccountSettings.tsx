@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   backendCapabilities,
   isProviderReadyForBackend,
+  type AccountLoginProgress,
   type AccountRegion,
   type AccountView,
   type BackendView,
@@ -15,7 +16,15 @@ import {
 } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
 import { useT } from '../../i18n.ts';
@@ -31,6 +40,7 @@ import {
   KeyIcon,
   LogInIcon,
   LogOutIcon,
+  MoreIcon,
   PencilIcon,
   PlusIcon,
   RefreshIcon,
@@ -235,9 +245,35 @@ export function AccountSettings() {
   };
 
   const loginProgress = accountsState.loginProgress;
-  const loginOpen = Boolean(loginProgress);
+  // 本地记住已关闭的进度对象：点击关闭后立即隐藏弹窗，Host 推送新的进度时再自动打开
+  const [dismissedProgress, setDismissedProgress] = useState<AccountLoginProgress | undefined>();
+  const [authCode, setAuthCode] = useState('');
+  const loginOpen = Boolean(loginProgress) && loginProgress !== dismissedProgress;
   const loginFinished =
     loginProgress?.phase === 'succeeded' || loginProgress?.phase === 'failed' || loginProgress?.phase === 'cancelled';
+  const needsAuthCode = loginProgress?.phase === 'waiting-browser' && loginProgress.needsAuthCode === true;
+
+  useEffect(() => {
+    if (!needsAuthCode) setAuthCode('');
+  }, [needsAuthCode, loginProgress?.accountId]);
+
+  const dismissLogin = () => {
+    setDismissedProgress(loginProgress);
+    postToHost({
+      type: 'cancelAccountLogin',
+      payload: { ...(loginProgress ? { id: loginProgress.accountId } : {}), dismiss: true },
+    });
+    if (loginFinished) {
+      postToHost({ type: 'refreshAccounts', payload: { includeQuota: false } });
+    }
+  };
+
+  const submitAuthCode = () => {
+    const code = authCode.trim();
+    if (!code || !loginProgress) return;
+    postToHost({ type: 'submitAccountLoginCode', payload: { id: loginProgress.accountId, code } });
+    setAuthCode('');
+  };
 
   return (
     <>
@@ -272,7 +308,7 @@ export function AccountSettings() {
           </div>
         }
       >
-        <div className="flex flex-col gap-3 p-3.5">
+        <div className="flex flex-col gap-2 border-b border-line/60 bg-inset/35 px-3.5 py-2.5">
           <p className="m-0 text-[12px] leading-relaxed text-ink-2">{t('settings.accounts.desc')}</p>
 
           {backends.length > 1 ? (
@@ -298,22 +334,22 @@ export function AccountSettings() {
               ))}
             </div>
           ) : null}
+        </div>
 
-          <div className="flex flex-col gap-2.5">
-            {visibleBackends.map((backend) => (
-              <BackendAccountCard
-                key={backend.id}
-                backend={backend}
-                accounts={accountsByBackend.get(backend.id) ?? []}
-                providers={providers}
-                protocolGatewayEnabled={protocolGatewayEnabled}
-                channel={accountsState.channels[backend.id] ?? backend.activeChannel}
-                onAdd={() => openAdd(backend.id)}
-                onEdit={openEdit}
-                onDelete={(acc) => setPendingDelete(acc)}
-              />
-            ))}
-          </div>
+        <div className="divide-y divide-line/60">
+          {visibleBackends.map((backend) => (
+            <BackendAccountCard
+              key={backend.id}
+              backend={backend}
+              accounts={accountsByBackend.get(backend.id) ?? []}
+              providers={providers}
+              protocolGatewayEnabled={protocolGatewayEnabled}
+              channel={accountsState.channels[backend.id] ?? backend.activeChannel}
+              onAdd={() => openAdd(backend.id)}
+              onEdit={openEdit}
+              onDelete={(acc) => setPendingDelete(acc)}
+            />
+          ))}
         </div>
       </SettingsSection>
 
@@ -523,9 +559,7 @@ export function AccountSettings() {
       <Dialog
         open={loginOpen}
         onOpenChange={(open) => {
-          if (!open) {
-            postToHost({ type: 'cancelAccountLogin', payload: { ...(loginProgress ? { id: loginProgress.accountId } : {}) } });
-          }
+          if (!open) dismissLogin();
         }}
       >
         <DialogContent className="sm:max-w-md" data-testid="account-login-dialog">
@@ -544,7 +578,9 @@ export function AccountSettings() {
               {loginProgress?.phase === 'starting'
                 ? t('settings.accounts.loginModal.starting')
                 : loginProgress?.phase === 'waiting-browser'
-                  ? t('settings.accounts.loginModal.waitingBrowser')
+                  ? needsAuthCode
+                    ? t('settings.accounts.loginModal.waitingAuthCode')
+                    : t('settings.accounts.loginModal.waitingBrowser')
                   : loginProgress?.phase === 'waiting-terminal'
                     ? t('settings.accounts.loginModal.waitingTerminal')
                     : loginProgress?.phase === 'verifying'
@@ -605,6 +641,45 @@ export function AccountSettings() {
                 </div>
               ) : null}
 
+              {needsAuthCode ? (
+                <form
+                  className="flex flex-col gap-1.5"
+                  data-testid="account-login-code-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    submitAuthCode();
+                  }}
+                >
+                  <Label htmlFor="account-login-code" className="text-[11px] text-ink-3">
+                    {t('settings.accounts.loginModal.authCodeLabel')}
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id="account-login-code"
+                      size="sm"
+                      autoFocus
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="min-w-0 flex-1 font-mono"
+                      data-testid="account-login-code-input"
+                      placeholder={t('settings.accounts.loginModal.authCodePlaceholder')}
+                      value={authCode}
+                      onChange={(event) => setAuthCode(event.target.value)}
+                    />
+                    <Button
+                      type="submit"
+                      variant="default"
+                      size="sm"
+                      disabled={!authCode.trim()}
+                      data-testid="account-login-code-submit"
+                    >
+                      <LogInIcon className="size-3.5" />
+                      <span>{t('settings.accounts.loginModal.submitCode')}</span>
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
+
               {loginProgress.command ? (
                 <div className="flex flex-col gap-1.5 rounded-control border border-line bg-inset/45 p-2.5">
                   <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
@@ -651,13 +726,14 @@ export function AccountSettings() {
               variant={loginFinished ? 'default' : 'outline'}
               size="sm"
               onClick={() => {
+                if (loginFinished) {
+                  dismissLogin();
+                  return;
+                }
                 postToHost({
                   type: 'cancelAccountLogin',
                   payload: { ...(loginProgress ? { id: loginProgress.accountId } : {}) },
                 });
-                if (loginFinished) {
-                  postToHost({ type: 'refreshAccounts', payload: { includeQuota: false } });
-                }
               }}
             >
               {loginFinished ? t('settings.accounts.loginModal.close') : t('settings.accounts.loginModal.cancel')}
@@ -738,12 +814,9 @@ function BackendAccountCard({
   };
 
   return (
-    <div
-      className="flex flex-col gap-2.5 rounded-card bg-field p-3 shadow-hairline"
-      data-testid={`account-backend-card-${backend.id}`}
-    >
+    <div className="flex flex-col" data-testid={`account-backend-card-${backend.id}`}>
       {/* 顶部：智能体信息 + 渠道模式切换（官方 ↔ 服务商） */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <BackendLogo backend={backend} />
           <div className="min-w-0">
@@ -803,162 +876,180 @@ function BackendAccountCard({
 
       {/* 第三方服务商选择栏（当支持服务商时展示） */}
       {!supportsProvider ? (
-        <p className="m-0 text-[11.5px] text-ink-3">{t('settings.accounts.accountOnlyHint')}</p>
+        <div className="px-3.5 pb-2.5">
+          <p className="m-0 text-[11.5px] text-ink-3">{t('settings.accounts.accountOnlyHint')}</p>
+        </div>
       ) : activeMode === 'provider' ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-surface/75 px-2.5 py-2">
-          <KeyIcon className="size-3.5 shrink-0 text-accent-ink" />
-          {compatibleProviders.length > 0 ? (
-            <NativeSelect
-              size="sm"
-              className="min-w-44 flex-1"
-              data-testid={`channel-provider-select-${backend.id}`}
-              value={activeProviderId ?? ''}
-              onChange={(e) => switchToProvider(e.target.value)}
-            >
-              <NativeSelectOption value="" disabled>
-                {t('settings.accounts.providerSelectPlaceholder')}
-              </NativeSelectOption>
-              {compatibleProviders.map((p) => (
-                <NativeSelectOption key={p.id} value={p.id}>
-                  {p.name}
+        <div className="px-3.5 pb-2.5">
+          <div className="flex flex-wrap items-center gap-2 rounded-control bg-inset/45 px-2.5 py-2">
+            <KeyIcon className="size-3.5 shrink-0 text-accent-ink" />
+            {compatibleProviders.length > 0 ? (
+              <NativeSelect
+                size="sm"
+                className="min-w-44 flex-1"
+                data-testid={`channel-provider-select-${backend.id}`}
+                value={activeProviderId ?? ''}
+                onChange={(e) => switchToProvider(e.target.value)}
+              >
+                <NativeSelectOption value="" disabled>
+                  {t('settings.accounts.providerSelectPlaceholder')}
                 </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          ) : (
-            <span className="flex-1 text-[12px] text-ink-3">{t('settings.accounts.noCompatibleProvider')}</span>
-          )}
-          <Button type="button" variant="outline" size="sm" onClick={() => setSettingsTab('providers')}>
-            {t('settings.accounts.gotoProviders')}
-          </Button>
+                {compatibleProviders.map((p) => (
+                  <NativeSelectOption key={p.id} value={p.id}>
+                    {p.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            ) : (
+              <span className="flex-1 text-[12px] text-ink-3">{t('settings.accounts.noCompatibleProvider')}</span>
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={() => setSettingsTab('providers')}>
+              {t('settings.accounts.gotoProviders')}
+            </Button>
+          </div>
         </div>
       ) : null}
 
       {/* 官方账号列表 */}
-      <div className="flex flex-col gap-1.5">
-        {accounts.map((acc) => {
-          const isCurrent = activeMode === 'official' && activeAccountId === acc.id;
-          const canEdit = !acc.isSystemDefault || accountCap?.supportsRegion === true;
-          const statusKey = `settings.accounts.status.${acc.status}` as const;
-          return (
-            <div
-              key={acc.id}
-              data-testid={`account-row-${acc.id}`}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-line bg-surface/65 px-2.5 py-2"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[12.5px] font-medium text-ink">{acc.label}</span>
-                  {acc.isSystemDefault ? (
-                    <ValuePill className="text-[10.5px]">{t('settings.accounts.systemBadge')}</ValuePill>
-                  ) : null}
-                  {isCurrent ? (
-                    <ValuePill tone="accent" className="text-[10.5px]" data-testid={`account-active-${acc.id}`}>
-                      <CheckIcon className="size-2.5" />
-                      <span>{t('settings.accounts.activeBadge')}</span>
+      {accounts.length > 0 ? (
+        <div className="divide-y divide-line/40 border-t border-line/40 bg-inset/20">
+          {accounts.map((acc) => {
+            const isCurrent = activeMode === 'official' && activeAccountId === acc.id;
+            const canEdit = !acc.isSystemDefault || accountCap?.supportsRegion === true;
+            const statusKey = `settings.accounts.status.${acc.status}` as const;
+            const showUse = !isCurrent;
+            const showLogin = accountCap?.loginKind !== 'api-key' || acc.isSystemDefault;
+            const showLogout = acc.status === 'authenticated' || acc.status === 'expired';
+            const showDelete = !acc.isSystemDefault;
+            const hasPrimary = showUse || showLogin || canEdit;
+            const hasSecondary = showLogout || showDelete;
+            return (
+              <div
+                key={acc.id}
+                data-testid={`account-row-${acc.id}`}
+                className="flex items-center justify-between gap-2 px-3.5 py-2 transition-colors hover:bg-hover/35"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[12.5px] font-medium text-ink">{acc.label}</span>
+                    {acc.isSystemDefault ? (
+                      <ValuePill className="text-[10.5px]">{t('settings.accounts.systemBadge')}</ValuePill>
+                    ) : null}
+                    {isCurrent ? (
+                      <ValuePill tone="accent" className="text-[10.5px]" data-testid={`account-active-${acc.id}`}>
+                        <CheckIcon className="size-2.5" />
+                        <span>{t('settings.accounts.activeBadge')}</span>
+                      </ValuePill>
+                    ) : null}
+                    <ValuePill tone={statusTone(acc.status)} className="text-[10.5px]">
+                      {acc.status === 'logging-in' ? <SpinnerIcon className="size-2.5" /> : null}
+                      <span>{t(statusKey)}</span>
                     </ValuePill>
-                  ) : null}
-                  <ValuePill tone={statusTone(acc.status)} className="text-[10.5px]">
-                    {acc.status === 'logging-in' ? <SpinnerIcon className="size-2.5" /> : null}
-                    <span>{t(statusKey)}</span>
-                  </ValuePill>
-                  {acc.plan ? <ValuePill className="text-[10.5px]">{acc.plan}</ValuePill> : null}
-                  {acc.isolateSessions ? (
-                    <ValuePill className="text-[10.5px]">{t('settings.accounts.isolatedSessionBadge')}</ValuePill>
+                    {acc.plan ? <ValuePill className="text-[10.5px]">{acc.plan}</ValuePill> : null}
+                    {acc.isolateSessions ? (
+                      <ValuePill className="text-[10.5px]">{t('settings.accounts.isolatedSessionBadge')}</ValuePill>
+                    ) : null}
+                  </div>
+
+                  {acc.identity || (acc.quota && acc.quota.windows.length > 0) ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-ink-3">
+                      {acc.identity ? <span className="truncate font-mono">{acc.identity}</span> : null}
+                      {acc.quota?.windows.slice(0, 3).map((win, idx) => (
+                        <span
+                          key={`${win.kind}:${win.label}:${idx}`}
+                          className="rounded bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
+                        >
+                          {formatQuotaChip(win, t)}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
 
-                {acc.identity || (acc.quota && acc.quota.windows.length > 0) ? (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-ink-3">
-                    {acc.identity ? <span className="truncate font-mono">{acc.identity}</span> : null}
-                    {acc.quota?.windows.slice(0, 3).map((win, idx) => (
-                      <span
-                        key={`${win.kind}:${win.label}:${idx}`}
-                        className="rounded bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
-                      >
-                        {formatQuotaChip(win, t)}
-                      </span>
-                    ))}
+                {hasPrimary || hasSecondary ? (
+                  <div className="shrink-0">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-ink-2 hover:text-ink"
+                          data-testid={`account-actions-${acc.id}`}
+                          aria-label={t('common.moreActions')}
+                          title={t('common.moreActions')}
+                        >
+                          <MoreIcon className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-40">
+                        {showUse ? (
+                          <DropdownMenuItem
+                            className="gap-2 text-[12.5px]"
+                            data-testid={`account-use-${acc.id}`}
+                            onSelect={() => switchToOfficial(acc.id)}
+                          >
+                            <CheckIcon className="size-3.5 text-ink-2" />
+                            <span>{t('settings.accounts.use')}</span>
+                          </DropdownMenuItem>
+                        ) : null}
+                        {showLogin ? (
+                          <DropdownMenuItem
+                            className="gap-2 text-[12.5px]"
+                            data-testid={`account-login-${acc.id}`}
+                            onSelect={() =>
+                              postToHost({ type: 'loginAccount', payload: { id: acc.id, backendId: acc.backendId } })
+                            }
+                          >
+                            <LogInIcon className="size-3.5 text-ink-2" />
+                            <span>
+                              {acc.status === 'authenticated'
+                                ? t('settings.accounts.relogin')
+                                : t('settings.accounts.login')}
+                            </span>
+                          </DropdownMenuItem>
+                        ) : null}
+                        {canEdit ? (
+                          <DropdownMenuItem
+                            className="gap-2 text-[12.5px]"
+                            data-testid={`account-edit-${acc.id}`}
+                            onSelect={() => onEdit(acc)}
+                          >
+                            <PencilIcon className="size-3.5 text-ink-2" />
+                            <span>{t('settings.accounts.edit')}</span>
+                          </DropdownMenuItem>
+                        ) : null}
+                        {hasPrimary && hasSecondary ? <DropdownMenuSeparator /> : null}
+                        {showLogout ? (
+                          <DropdownMenuItem
+                            className="gap-2 text-[12.5px]"
+                            data-testid={`account-logout-${acc.id}`}
+                            onSelect={() => postToHost({ type: 'logoutAccount', payload: { id: acc.id } })}
+                          >
+                            <LogOutIcon className="size-3.5 text-ink-2" />
+                            <span>{t('settings.accounts.logout')}</span>
+                          </DropdownMenuItem>
+                        ) : null}
+                        {showDelete ? (
+                          <DropdownMenuItem
+                            variant="destructive"
+                            className="gap-2 text-[12.5px]"
+                            data-testid={`account-delete-${acc.id}`}
+                            onSelect={() => onDelete(acc)}
+                          >
+                            <TrashIcon className="size-3.5" />
+                            <span>{t('settings.accounts.delete')}</span>
+                          </DropdownMenuItem>
+                        ) : null}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 ) : null}
               </div>
-
-              <div className="flex shrink-0 flex-wrap items-center gap-1">
-                {!isCurrent ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    data-testid={`account-use-${acc.id}`}
-                    onClick={() => switchToOfficial(acc.id)}
-                  >
-                    <CheckIcon className="size-3" />
-                    <span>{t('settings.accounts.use')}</span>
-                  </Button>
-                ) : null}
-
-                {accountCap?.loginKind !== 'api-key' || acc.isSystemDefault ? (
-                  <Button
-                    type="button"
-                    variant={acc.status === 'authenticated' ? 'ghost' : 'secondary'}
-                    size="xs"
-                    data-testid={`account-login-${acc.id}`}
-                    onClick={() =>
-                      postToHost({ type: 'loginAccount', payload: { id: acc.id, backendId: acc.backendId } })
-                    }
-                  >
-                    <LogInIcon className="size-3" />
-                    <span>
-                      {acc.status === 'authenticated'
-                        ? t('settings.accounts.relogin')
-                        : t('settings.accounts.login')}
-                    </span>
-                  </Button>
-                ) : null}
-
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    data-testid={`account-edit-${acc.id}`}
-                    onClick={() => onEdit(acc)}
-                  >
-                    <PencilIcon className="size-3" />
-                    <span>{t('settings.accounts.edit')}</span>
-                  </Button>
-                ) : null}
-
-                {acc.status === 'authenticated' || acc.status === 'expired' ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    data-testid={`account-logout-${acc.id}`}
-                    onClick={() => postToHost({ type: 'logoutAccount', payload: { id: acc.id } })}
-                  >
-                    <LogOutIcon className="size-3" />
-                    <span>{t('settings.accounts.logout')}</span>
-                  </Button>
-                ) : null}
-
-                {!acc.isSystemDefault ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    className="text-red hover:bg-red-tint hover:text-red"
-                    data-testid={`account-delete-${acc.id}`}
-                    onClick={() => onDelete(acc)}
-                  >
-                    <TrashIcon className="size-3" />
-                    <span>{t('settings.accounts.delete')}</span>
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

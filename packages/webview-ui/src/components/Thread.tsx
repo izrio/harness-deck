@@ -229,7 +229,7 @@ export function Thread() {
   return (
     <div className="thread-wrap relative flex min-h-0 flex-1 flex-col">
       <div
-        className="thread"
+        className="thread topbar-scroll-fade"
         ref={scrollerRef}
         role="region"
         aria-label={t('thread.label')}
@@ -237,7 +237,7 @@ export function Thread() {
         tabIndex={-1}
       >
         {session.sync === 'disconnected' ? (
-          <div className="thread__sync flex items-center justify-center gap-2 self-center rounded-full bg-surface px-3 py-1.5 text-[12px] shadow-card" role="status">
+          <div className="thread__sync surface-glass flex items-center justify-center gap-2 self-center rounded-full border border-line px-3 py-1.5 text-[12px] shadow-card" role="status">
             <LoaderGrid />
             <Shimmer>{t('thread.reconnecting')}</Shimmer>
           </div>
@@ -282,7 +282,7 @@ export function Thread() {
           variant="outline"
           size="icon-sm"
           className={cn(
-            'to-bottom absolute right-3.5 bottom-3 z-10 rounded-full bg-surface shadow-raised text-ink',
+            'to-bottom surface-glass absolute right-3.5 bottom-3 z-10 rounded-full border-line-strong/80 text-ink shadow-raised',
             unseen && 'to-bottom--unseen',
           )}
           style={{ animation: 'to-bottom-in 160ms cubic-bezier(0.23,1,0.32,1) both' }}

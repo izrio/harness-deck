@@ -216,6 +216,7 @@ describe('输入框上方的状态栏', () => {
     render(createElement(Composer));
     host({ type: 'snapshot', payload: snapshot({ session: { ...running, todos, changes }, workspace: { dirtyFiles: 2 } }) });
     const dock = screen.getByTestId('dock');
+    expect(dock.className).toContain('w-full');
     expect(screen.getByTestId('status-strip').textContent).toContain('改实现');
     expect(screen.getByTestId('status-strip').textContent).toContain('1/3');
     expect(screen.getByTestId('session-changes').textContent).toContain('1 个文件');
@@ -224,12 +225,28 @@ describe('输入框上方的状态栏', () => {
 
     fireEvent.click(screen.getByTestId('status-strip'));
     expect(dock.querySelectorAll('.todo')).toHaveLength(3);
+    const todoPanel = dock.querySelector('#dock-panel');
+    expect(todoPanel?.className).toContain('absolute');
+    expect(dock.querySelector('.dock__card')?.contains(todoPanel!)).toBe(false);
+
     fireEvent.click(dock.querySelector('.session-changes__toggle')!);
     expect(dock.querySelectorAll('.todo')).toHaveLength(0);
     expect(dock.querySelectorAll('.session-changes__file')).toHaveLength(1);
+    const changesPanel = dock.querySelector('#dock-panel');
+    expect(changesPanel?.className).toContain('absolute');
+    expect(dock.querySelector('.dock__card')?.contains(changesPanel!)).toBe(false);
 
     fireEvent.click(screen.getByRole('button', { name: '全部保存' }));
     expect(posted.at(-1)).toMatchObject({ type: 'saveAll' });
+    expect(dock.querySelector('#dock-panel')).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(dock.querySelector('#dock-panel')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('status-strip'));
+    expect(dock.querySelectorAll('.todo')).toHaveLength(3);
+    fireEvent.pointerDown(document.body);
+    expect(dock.querySelector('#dock-panel')).toBeNull();
   });
 
   it('隐藏改动后不再显示，有新的改动时重新出现', () => {

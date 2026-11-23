@@ -13,7 +13,7 @@
   min-height: 0;
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 12px max(14px, calc((100% - var(--content-width)) / 2)) 16px;
+  padding: 16px max(14px, calc((100% - var(--content-width)) / 2)) 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -111,13 +111,17 @@
   text-decoration: none;
 }
 
-.markdown a:hover {
-  text-decoration: underline;
+.markdown a:hover,
+.markdown a:focus-visible {
+  background-image: radial-gradient(circle, currentColor 0.75px, transparent 1px);
+  background-position: left bottom;
+  background-repeat: repeat-x;
+  background-size: 4px 2px;
 }
 
 .markdown blockquote {
   padding-left: 12px;
-  border-left: 2px solid var(--line-strong);
+  border-left: 2px solid color-mix(in srgb, currentColor 35%, transparent);
   color: var(--ink-2);
 }
 
@@ -128,19 +132,18 @@
 }
 
 .inline-code {
-  padding: 1px 5px;
+  padding: 0.1em 0.35em;
   border-radius: 5px;
-  background: var(--inset);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   color: var(--ink);
-  box-shadow: var(--shadow-hairline);
   font-family: var(--font-mono);
-  font-size: 0.87em;
+  font-size: 0.86em;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
 
 button.inline-code--link {
-  font-size: 0.87em;
+  font-size: 0.86em;
   line-height: inherit;
   color: var(--accent-ink);
   cursor: pointer;
@@ -155,9 +158,6 @@ button.inline-code--link:hover {
 .table-wrap {
   overflow-x: auto;
   margin: var(--prose-paragraph-spacing) 0;
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
 }
 
 .markdown table {
@@ -168,19 +168,36 @@ button.inline-code--link:hover {
 
 .markdown th,
 .markdown td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   text-align: left;
+  vertical-align: top;
+  text-wrap: pretty;
 }
 
-.markdown tr:last-child td {
-  border-bottom: 0;
+.markdown :is(th, td):first-child {
+  padding-inline-start: 0;
+}
+
+.markdown :is(th, td):last-child {
+  padding-inline-end: 0;
 }
 
 .markdown th {
-  font-weight: 500;
-  color: var(--ink-3);
+  padding-block: 8px;
+  font-weight: 600;
+  color: var(--ink-2);
   font-size: 0.88em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .assistant--streaming .markdown > * {
+    transition: opacity 600ms ease-out;
+
+    @starting-style {
+      opacity: 0;
+    }
+  }
 }
 
 .md-image-placeholder {

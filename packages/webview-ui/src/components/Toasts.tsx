@@ -19,8 +19,8 @@ export function Toasts() {
             role={isError ? 'alert' : 'status'}
             style={{ animation: 'pop-in 200ms cubic-bezier(0.23,1,0.32,1) both' }}
             className={cn(
-              'toast flex items-center gap-2.5 rounded-card bg-surface px-3 py-2 text-left text-[12.5px] text-ink shadow-overlay',
-              isError && 'toast--error',
+              'toast surface-glass flex items-center gap-2.5 rounded-xl border border-line px-3 py-2 text-left text-[12.5px] text-ink shadow-overlay',
+              isError && 'toast--error border-red/30',
             )}
           >
             <span

@@ -28,8 +28,16 @@ import {
 import { inspectOfficialAccount } from './AccountInspector.ts';
 
 const DEVICE_CODE_RE = /\b([A-Z0-9]{4}-[A-Z0-9]{4,5})\b/u;
+/** 官方 CLI 提示用户粘贴授权码 / 回调地址（如 `agy acp --login` 的 "paste the authorization code"）。 */
+const AUTH_CODE_PROMPT_RE =
+  /paste\s+(?:the\s+|your\s+)?(?:authori[sz]ation|auth|verification)\s+code|enter\s+(?:the\s+|your\s+)?(?:authori[sz]ation|auth)\s+code|full\s+url\s+of\s+the\s+page\s+you\s+land\s+on/iu;
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 const TERMINAL_POLL_INTERVAL_MS = 2_000;
+
+/** 判断官方 CLI 输出是否在等待用户粘贴授权码。 */
+export function detectAuthCodePrompt(output: string): boolean {
+  return AUTH_CODE_PROMPT_RE.test(output);
+}
 
 export interface AccountLoginHostDeps {
   readonly storageRoot: string;
@@ -53,6 +61,8 @@ interface ActiveLoginSession {
   readonly accountId: string;
   readonly backendId: string;
   cancel: () => void;
+  /** 把用户粘贴的授权码写入登录子进程 stdin；仅托管 OAuth 子进程提供。 */
+  submitCode?: (code: string) => boolean;
 }
 
 function shellQuote(value: string): string {
@@ -87,17 +97,40 @@ export class AccountAuthFlowManager {
     this.deps.onProgress(progress);
   }
 
-  cancel(accountId?: string): void {
-    if (!this.active) return;
+  /**
+   * 取消进行中的登录；`dismiss` 为 true 时同时清除进度（关闭弹窗）。
+   * 登录已结束（成功 / 失败 / 已取消）时没有活动会话，此时直接清除残留进度，保证弹窗能关闭。
+   */
+  cancel(accountId?: string, options?: { readonly dismiss?: boolean }): void {
+    if (!this.active) {
+      if (this.currentProgress && (!accountId || this.currentProgress.accountId === accountId)) {
+        this.emit(undefined);
+      }
+      return;
+    }
     if (accountId && this.active.accountId !== accountId) return;
     const prev = this.active;
     this.active = undefined;
     prev.cancel();
+    if (options?.dismiss) {
+      this.emit(undefined);
+      return;
+    }
     this.emit({
       accountId: prev.accountId,
       backendId: prev.backendId,
       phase: 'cancelled',
     });
+  }
+
+  /** 提交用户从浏览器授权页拿到的授权码（或回调页完整网址）。返回是否已交给登录进程。 */
+  submitAuthCode(accountId: string | undefined, code: string): boolean {
+    const session = this.active;
+    if (!session?.submitCode) return false;
+    if (accountId && session.accountId !== accountId) return false;
+    const trimmed = code.trim();
+    if (!trimmed) return false;
+    return session.submitCode(trimmed);
   }
 
   dispose(): void {
@@ -247,17 +280,24 @@ export class AccountAuthFlowManager {
     let openedUrl = false;
     let latestAuthUrl: string | undefined;
     let latestDeviceCode: string | undefined;
+    let awaitingCode = false;
+    let outputTail = '';
+
+    const emitWaitingBrowser = (): void => {
+      this.emit({
+        accountId,
+        backendId,
+        phase: 'waiting-browser',
+        ...(latestAuthUrl ? { authUrl: latestAuthUrl } : {}),
+        ...(latestDeviceCode ? { deviceCode: latestDeviceCode } : {}),
+        ...(awaitingCode ? { needsAuthCode: true } : {}),
+      });
+    };
 
     const handleUrl = (url: string): void => {
       if (latestAuthUrl !== url) {
         latestAuthUrl = url;
-        this.emit({
-          accountId,
-          backendId,
-          phase: 'waiting-browser',
-          authUrl: url,
-          ...(latestDeviceCode ? { deviceCode: latestDeviceCode } : {}),
-        });
+        emitWaitingBrowser();
       }
       if (!openedUrl) {
         openedUrl = true;
@@ -282,12 +322,14 @@ export class AccountAuthFlowManager {
     }
 
     const args = normalized === 'codex' ? ['login'] : ['acp', '--login'];
+    // stdin 保持为管道：部分官方 CLI（如 `agy acp --login`）在浏览器授权后需要用户粘贴授权码 / 回调地址
     const child: ChildProcess = spawn(resolved.command, args, {
       cwd: this.deps.workspacePath(),
       env: launchEnv as NodeJS.ProcessEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    child.stdin?.on('error', () => undefined);
 
     let finished = false;
     let cancelled = false;
@@ -295,6 +337,7 @@ export class AccountAuthFlowManager {
 
     const cleanup = () => {
       if (timer) clearTimeout(timer);
+      if (child.stdin && !child.stdin.destroyed) child.stdin.end();
       void bridge?.dispose();
     };
 
@@ -322,6 +365,14 @@ export class AccountAuthFlowManager {
         child.kill();
         cleanup();
       },
+      submitCode: (code: string) => {
+        if (finished || !awaitingCode || !child.stdin || child.stdin.destroyed || !child.stdin.writable) return false;
+        child.stdin.write(`${code}\n`);
+        awaitingCode = false;
+        outputTail = '';
+        this.emit({ accountId, backendId, phase: 'verifying' });
+        return true;
+      },
     };
 
     this.emit({
@@ -337,13 +388,13 @@ export class AccountAuthFlowManager {
       const codeMatch = DEVICE_CODE_RE.exec(raw);
       if (codeMatch?.[1] && latestDeviceCode !== codeMatch[1]) {
         latestDeviceCode = codeMatch[1];
-        this.emit({
-          accountId,
-          backendId,
-          phase: 'waiting-browser',
-          ...(latestAuthUrl ? { authUrl: latestAuthUrl } : {}),
-          deviceCode: latestDeviceCode,
-        });
+        emitWaitingBrowser();
+      }
+      // 输出可能被拆分成多个 chunk，拼接尾部后再识别「粘贴授权码」提示
+      outputTail = `${outputTail}${raw}`.slice(-4_000);
+      if (!awaitingCode && detectAuthCodePrompt(outputTail)) {
+        awaitingCode = true;
+        emitWaitingBrowser();
       }
     };
 

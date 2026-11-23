@@ -136,7 +136,7 @@ export function PermissionPicker({ disabled }: { disabled: boolean }) {
           align="end"
           sideOffset={6}
           aria-label={t('permission.select')}
-          className="model-menu permission-menu max-h-80 w-[304px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-card p-1 shadow-raised"
+          className="model-menu permission-menu max-h-80 w-[304px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl p-1 shadow-overlay"
         >
           <div role="menu">
             <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[8px] bg-hover">

@@ -36,7 +36,7 @@ export function Completion({
   }, [selected]);
   return (
     <div
-      className="completion absolute right-2.5 bottom-[calc(100%+4px)] left-2.5 z-15 max-h-64 overflow-y-auto rounded-[10px] bg-surface p-1 text-ink shadow-raised"
+      className="completion dropdown-glass absolute right-2.5 bottom-[calc(100%+4px)] left-2.5 z-20 max-h-64 overflow-y-auto rounded-xl border p-1 text-ink shadow-overlay"
       ref={list}
       role="listbox"
       aria-label={label}

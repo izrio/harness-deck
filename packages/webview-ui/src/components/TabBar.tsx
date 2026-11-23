@@ -36,7 +36,7 @@ export function TabBar() {
     strip.current?.querySelector<HTMLElement>('.tab--active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [tabs.active, tabs.items.length]);
 
-  if (tabs.items.length < 2) return null;
+  if (tabs.items.length === 0) return null;
   const close = (key: string) => postToHost({ type: 'closeTab', payload: { key } });
   const closeMany = (key: string, scope: CloseScope) => postToHost({ type: 'closeTabs', payload: { key, scope } });
 
@@ -44,7 +44,7 @@ export function TabBar() {
 
   return (
     <div
-      className="tabs flex shrink-0 touch-pan-x items-center gap-0.5 overflow-x-auto border-b border-line bg-surface px-2 py-1"
+      className="tabs flex shrink-0 touch-pan-x items-center gap-0.5 overflow-x-auto border-b border-line bg-canvas px-2 py-1"
       role="tablist"
       aria-label={t('tabs.label')}
       ref={strip}
@@ -84,10 +84,10 @@ export function TabBar() {
             <ContextMenuTrigger asChild>
               <div
                 className={cn(
-                  'tab group/tab relative flex min-w-[72px] max-w-[184px] flex-none items-center gap-1.5 rounded-[6px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,opacity] duration-100 max-md:min-h-11',
+                  'tab group/tab relative flex min-w-[72px] max-w-[184px] flex-none items-center gap-1.5 rounded-[7px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,color,opacity] duration-100 max-md:min-h-11',
                   active
-                    ? 'tab--active cursor-default bg-field font-medium text-ink opacity-100'
-                    : 'cursor-pointer text-ink opacity-55 hover:bg-hover hover:opacity-85',
+                    ? 'tab--active cursor-default bg-surface font-medium text-ink shadow-hairline dark:bg-field'
+                    : 'cursor-pointer text-ink-2 hover:bg-hover hover:text-ink',
                   dragging && 'opacity-40',
                 )}
                 role="tab"
