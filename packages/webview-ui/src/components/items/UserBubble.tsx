@@ -4,22 +4,67 @@ import { requestMarkdownPreview, requestPrefill, useView } from '../../store.ts'
 import { postToHost } from '../../vscode.ts';
 import { cn } from '../../lib/utils.ts';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { attachmentLabel, openAttachment } from '../ContextChips.tsx';
 import { isMarkdownPath } from '../MarkdownPreviewModal.tsx';
 import { IconAction } from '../RunStatus.tsx';
 import { ImageThumb } from '../Images.tsx';
-import { CheckIcon, CloseIcon, CopyIcon, EyeIcon, FastForwardIcon, FileIcon, PencilIcon, RefreshIcon, SelectionIcon, SendIcon, SpinnerIcon, TrashIcon } from '../icons.tsx';
+import { CheckIcon, CloseIcon, CopyIcon, EyeIcon, FastForwardIcon, FileIcon, GitForkIcon, PencilIcon, RefreshIcon, SelectionIcon, SendIcon, SpinnerIcon, TrashIcon } from '../icons.tsx';
 import { useT } from '../../i18n.ts';
 import type { Of } from './types.ts';
 
-export function UserBubble({ item }: { item: Of<'user'> }) {
+export function UserBubble({ item, turnSeq }: { item: Of<'user'>; turnSeq?: number }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
+  const [forkEditing, setForkEditing] = useState(false);
+  const [forkText, setForkText] = useState(item.text);
+  const [rollbackFiles, setRollbackFiles] = useState(false);
+  const checkpoints = useView((s) => s.session.checkpoints);
+  const running = useView((s) => s.session.running);
+  const remoteReadOnly = useView((s) => s.clientSurface === 'mobile-web' && s.clientScope === 'read-only');
   if (editing && item.queue) return <QueueEditor item={item} onDone={() => setEditing(false)} />;
+  const canRollbackPrev = Boolean(turnSeq && turnSeq > 1 && checkpoints?.includes(turnSeq - 1));
   return (
     <div className={cn('user group/user flex flex-col items-end pl-[14%]', item.pending && `user--${item.pending}`)}>
-      {item.text ? (
+      {forkEditing && turnSeq !== undefined ? (
+        <div className="flex w-full max-w-full flex-col gap-2 rounded-2xl border border-line-strong bg-surface p-3 shadow-card" data-testid="user-fork-editor">
+          <Textarea
+            value={forkText}
+            onChange={(e) => setForkText(e.target.value)}
+            rows={3}
+            className="min-h-16 text-[13px]"
+            autoFocus
+          />
+          {canRollbackPrev ? (
+            <label className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-ink-2">
+              <Checkbox checked={rollbackFiles} onCheckedChange={(v) => setRollbackFiles(v === true)} />
+              <span>{t('user.editForkRollback')}</span>
+            </label>
+          ) : null}
+          <div className="flex items-center justify-end gap-1.5">
+            <Button type="button" variant="outline" size="xs" onClick={() => setForkEditing(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              disabled={!forkText.trim()}
+              data-testid="user-fork-submit"
+              onClick={() => {
+                setForkEditing(false);
+                postToHost({
+                  type: 'editAndResendTurn',
+                  payload: { turnSeq, text: forkText.trim(), ...(rollbackFiles ? { rollbackFiles: true } : {}) },
+                });
+              }}
+            >
+              <GitForkIcon className="size-3" />
+              <span>{t('user.editForkSubmit')}</span>
+            </Button>
+          </div>
+        </div>
+      ) : item.text ? (
         <div
           className={cn(
             'user__bubble max-w-full rounded-2xl border border-black/[0.04] bg-field px-3.5 py-2.5 font-[family-name:var(--prose-font-family)] text-[length:var(--prose-font-size)] leading-[1.55] text-ink whitespace-pre-wrap [overflow-wrap:anywhere] dark:border-white/[0.05]',
@@ -60,7 +105,20 @@ export function UserBubble({ item }: { item: Of<'user'> }) {
         </div>
       ) : null}
       {item.pending === 'queued' ? <QueuedMeta item={item} onEdit={() => setEditing(true)} /> : null}
-      {!item.pending && item.text ? <UserActions text={item.text} /> : null}
+      {!item.pending && item.text && !forkEditing ? (
+        <UserActions
+          text={item.text}
+          {...(turnSeq !== undefined && !running && !remoteReadOnly
+            ? {
+                onEditFork: () => {
+                  setForkText(item.text);
+                  setRollbackFiles(false);
+                  setForkEditing(true);
+                },
+              }
+            : {})}
+        />
+      ) : null}
       {item.pending === 'failed' ? (
         <div className="user__meta user__meta--error mt-1 flex flex-wrap items-center justify-end gap-2 text-[12px] text-red">
           <span>{item.error ? t('user.failedWith', item.error) : t('user.failed')}</span>
@@ -86,7 +144,7 @@ export function UserBubble({ item }: { item: Of<'user'> }) {
   );
 }
 
-export function UserActions({ text }: { text: string }) {
+export function UserActions({ text, onEditFork }: { text: string; onEditFork?: () => void }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -111,6 +169,11 @@ export function UserActions({ text }: { text: string }) {
       <IconAction label={t('user.editResend')} title={t('user.editResendTitle')} onClick={() => requestPrefill(text)}>
         <PencilIcon className="size-3.5" />
       </IconAction>
+      {onEditFork ? (
+        <IconAction label={t('user.editFork')} title={t('user.editForkTitle')} onClick={onEditFork}>
+          <GitForkIcon className="size-3.5" />
+        </IconAction>
+      ) : null}
     </div>
   );
 }

@@ -88,13 +88,13 @@ describe('订阅用量标识', () => {
     expect(screen.queryByTestId('usage-badge')).toBeNull();
   });
 
-  it('拿到额度后显示最低剩余百分比，悬浮展开只展示剩余与进度条，不展示已用', async () => {
+  it('拿到额度后徽标优先展示 5 小时窗口剩余百分比，悬浮展开展示全部窗口且不展示已用', async () => {
     vi.useFakeTimers();
     const requestId = mount();
     act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId, quota } }));
 
     const badge = screen.getByTestId('usage-badge');
-    expect(badge.textContent).toContain('9%'); // 取剩余最少的窗口
+    expect(badge.textContent).toContain('58%'); // 只取 5 小时窗口，不被每周/单模型窗口拉低
     expect(screen.queryByTestId('usage-popover')).toBeNull();
 
     fireEvent.pointerEnter(badge);
@@ -126,6 +126,9 @@ describe('订阅用量标识', () => {
     vi.useFakeTimers();
     const requestId = mount();
     act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId, quota: poolQuota } }));
+
+    // 徽标只展示 5 小时（gemini）剩余 88%，不被每周 3p(8%) 或单模型(9%) 拉低
+    expect(screen.getByTestId('usage-badge').textContent).toContain('88%');
 
     fireEvent.pointerEnter(screen.getByTestId('usage-badge'));
     await act(async () => {

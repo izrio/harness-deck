@@ -7,7 +7,7 @@
  * 4. 语言：界面显示语言（跟随 VS Code / 简体中文 / English）
  */
 import { useEffect, useState } from 'react';
-import type { AppearanceState, PreferencesState } from '@harness-deck/shared';
+import type { AppearanceState, PreferencesState, ThemePreset } from '@harness-deck/shared';
 import { useT, type MessageKey } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
 import { setAppearanceLocal, setPreferencesLocal, useView } from '../../store.ts';
@@ -17,6 +17,7 @@ import { AppearancePanel } from '../AppearancePanel.tsx';
 import { SettingsSection } from './SettingsSection.tsx';
 import {
   CheckIcon,
+  ContrastIcon,
   MonitorIcon,
   MoonIcon,
   SunIcon,
@@ -25,7 +26,16 @@ import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import { NumberStepper } from '../NumberStepper.tsx';
 import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+
+const THEME_PRESETS: readonly { readonly id: ThemePreset; readonly swatch: string; readonly labelKey: MessageKey }[] = [
+  { id: 'default', swatch: 'oklch(0.571 0.21 264)', labelKey: 'settings.appearance.preset.default' },
+  { id: 'grove', swatch: 'oklch(0.64 0.15 152)', labelKey: 'settings.appearance.preset.grove' },
+  { id: 'ocean', swatch: 'oklch(0.63 0.155 226)', labelKey: 'settings.appearance.preset.ocean' },
+  { id: 'ember', swatch: 'oklch(0.66 0.175 42)', labelKey: 'settings.appearance.preset.ember' },
+  { id: 'iris', swatch: 'oklch(0.62 0.195 292)', labelKey: 'settings.appearance.preset.iris' },
+];
 
 const THEME_CARDS: readonly {
   readonly mode: ThemeMode;
@@ -38,21 +48,21 @@ const THEME_CARDS: readonly {
 ];
 
 const LIGHT_PREVIEW = {
-  canvas: '#f1f4f8',
+  canvas: '#fcfcfc',
   surface: '#ffffff',
-  ink: '#1b212c',
-  inkMuted: '#687385',
-  accent: '#2b74eb',
-  line: '#e3e8ef',
+  ink: '#18181b',
+  inkMuted: '#71717a',
+  accent: '#1b4ed8',
+  line: '#e4e4e7',
 } as const;
 
 const DARK_PREVIEW = {
-  canvas: '#191b22',
+  canvas: '#1b1d24',
   surface: '#22252f',
   ink: '#eef1f7',
   inkMuted: '#8f98a8',
-  accent: '#579cf9',
-  line: '#2f3441',
+  accent: '#346bf1',
+  line: '#2e3240',
 } as const;
 
 const MIN_TERM_SIZE = 10;
@@ -70,6 +80,8 @@ export function AppearanceSettings() {
   const preferences = useView((s) => s.preferences);
 
   const currentTheme: ThemeMode = appearance.theme ?? 'dark';
+  const currentPreset: ThemePreset = appearance.preset ?? 'default';
+  const highContrast = Boolean(appearance.highContrast);
 
   const termSize = appearance.terminalFontSize ?? DEFAULT_TERM_SIZE;
   const termLineHeight = appearance.terminalLineHeight ?? DEFAULT_TERM_LH;
@@ -83,6 +95,18 @@ export function AppearanceSettings() {
     const next: Record<string, unknown> = { ...appearance, theme };
     setAppearanceLocal(next as AppearanceState);
     postToHost({ type: 'setAppearance', payload: { theme } });
+  };
+
+  const selectPreset = (preset: ThemePreset) => {
+    const next: Record<string, unknown> = { ...appearance, preset };
+    setAppearanceLocal(next as AppearanceState);
+    postToHost({ type: 'setAppearance', payload: { preset } });
+  };
+
+  const toggleHighContrast = (enabled: boolean) => {
+    const next: Record<string, unknown> = { ...appearance, highContrast: enabled };
+    setAppearanceLocal(next as AppearanceState);
+    postToHost({ type: 'setAppearance', payload: { highContrast: enabled } });
   };
 
   const updateTerminal = (patch: {
@@ -159,6 +183,53 @@ export function AppearanceSettings() {
               );
             })}
           </div>
+
+          <div className="mt-4 flex flex-col gap-3 border-t border-line pt-3.5">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.preset')}</span>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('settings.appearance.preset')}>
+                {THEME_PRESETS.map(({ id, swatch, labelKey }) => {
+                  const active = currentPreset === id;
+                  return (
+                    <Button
+                      key={id}
+                      type="button"
+                      size="xs"
+                      variant={active ? 'secondary' : 'outline'}
+                      role="radio"
+                      aria-checked={active}
+                      data-testid={`theme-preset-${id}`}
+                      className={cn(active && 'border-brand ring-1 ring-brand/40')}
+                      onClick={() => selectPreset(id)}
+                    >
+                      <span
+                        className="inline-block size-2.5 rounded-full"
+                        style={{ backgroundColor: swatch }}
+                        aria-hidden="true"
+                      />
+                      <span>{t(labelKey)}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-2">
+                <ContrastIcon className="mt-0.5 size-3.5 shrink-0 text-ink-3" />
+                <div className="min-w-0">
+                  <div className="text-[12.5px] font-medium text-ink">{t('settings.appearance.highContrast')}</div>
+                  <div className="text-[11px] text-ink-3">{t('settings.appearance.highContrastDesc')}</div>
+                </div>
+              </div>
+              <Switch
+                checked={highContrast}
+                data-testid="theme-high-contrast-switch"
+                aria-label={t('settings.appearance.highContrast')}
+                onCheckedChange={toggleHighContrast}
+              />
+            </div>
+          </div>
         </div>
       </SettingsSection>
 
@@ -183,7 +254,7 @@ export function AppearanceSettings() {
           <label className="flex flex-col gap-1">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalFont')}</span>
             <Input
-              size="default"
+              size="sm"
               data-testid="terminal-font-family"
               className="font-mono text-[12px]"
               value={codeFamily}
@@ -199,7 +270,7 @@ export function AppearanceSettings() {
             <div className="flex items-center gap-2">
               {appearance.terminalFontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
               <NumberStepper
-                size="default"
+                size="sm"
                 decLabel={t('settings.appearance.terminalSizeSmaller')}
                 incLabel={t('settings.appearance.terminalSizeLarger')}
                 decDisabled={termSize <= MIN_TERM_SIZE}
@@ -218,7 +289,7 @@ export function AppearanceSettings() {
             <div className="flex items-center gap-2">
               {appearance.terminalLineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
               <NumberStepper
-                size="default"
+                size="sm"
                 decLabel={t('settings.appearance.terminalLineHeightSmaller')}
                 incLabel={t('settings.appearance.terminalLineHeightLarger')}
                 decDisabled={termLineHeight <= MIN_TERM_LH + 0.01}
@@ -240,7 +311,7 @@ export function AppearanceSettings() {
           </pre>
 
           <div className="flex items-center justify-end">
-            <Button type="button" variant="ghost" size="default" data-testid="terminal-reset" onClick={resetTerminal}>
+            <Button type="button" variant="ghost" size="sm" data-testid="terminal-reset" onClick={resetTerminal}>
               {t('settings.appearance.resetTerminal')}
             </Button>
           </div>
@@ -255,20 +326,27 @@ export function AppearanceSettings() {
       >
         <div className="primitive-card-pad flex items-center justify-between gap-3">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.language')}</span>
-          <div className="w-44 [&_[data-slot=native-select-wrapper]]:w-full">
-            <NativeSelect
-              size="default"
-              data-testid="pref-language"
-              aria-label={t('settings.language')}
+          <div className="w-44">
+            <Select
               value={preferences.language}
-              onChange={(e) => updateLanguage(e.target.value as PreferencesState['language'])}
+              onValueChange={(value) => updateLanguage(value as PreferencesState['language'])}
             >
-              <NativeSelectOption value="auto">
-                {t(hostKind === 'jetbrains' ? 'settings.language.autoIde' : 'settings.language.auto')}
-              </NativeSelectOption>
-              <NativeSelectOption value="zh">{t('settings.language.zh')}</NativeSelectOption>
-              <NativeSelectOption value="en">{t('settings.language.en')}</NativeSelectOption>
-            </NativeSelect>
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                data-testid="pref-language"
+                aria-label={t('settings.language')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">
+                  {t(hostKind === 'jetbrains' ? 'settings.language.autoIde' : 'settings.language.auto')}
+                </SelectItem>
+                <SelectItem value="zh">{t('settings.language.zh')}</SelectItem>
+                <SelectItem value="en">{t('settings.language.en')}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </SettingsSection>

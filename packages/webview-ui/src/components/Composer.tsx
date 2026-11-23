@@ -2,7 +2,7 @@
  * 输入框（Beautiful UI PromptBar / ChatComposer 卡片）：
  * 上面是上下文标签和图片缩略图、中间是多行输入、下面是工具条（模型、权限、上下文用量、发送/停止）。
  */
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { CommandView, PromptImage } from '@harness-deck/shared';
 import { IMAGE_MEDIA_TYPES, MAX_IMAGES, type ImageMediaType } from '@harness-deck/shared/limits';
 import { registerLocalImage, showToast, useView } from '../store.ts';
@@ -103,6 +103,7 @@ export function Composer() {
   const [requestId, setRequestId] = useState(-1);
   const [toggledKey, setToggledKey] = useState<string | undefined>();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [inputHeight, setInputHeight] = useState<number | undefined>(() => loadState().inputHeight);
 
@@ -123,13 +124,30 @@ export function Composer() {
     setCaret(next.length);
   }, [tabKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const composerEl = composerRef.current;
     const max = Math.max(MAX_HEIGHT, inputHeight ?? 0);
     el.style.maxHeight = `${max}px`;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, inputHeight ?? 0), max)}px`;
+    const prevComposerHeight = composerEl?.offsetHeight ?? 0;
+    const prevTextareaScrollTop = el.scrollTop;
+    // 测量期间锁定外层输入卡片最小高度，避免 height:auto 临时收缩导致上方对话流滚动条被钳位上跳
+    if (composerEl && prevComposerHeight > 0) {
+      composerEl.style.minHeight = `${prevComposerHeight}px`;
+    }
+    try {
+      el.style.height = 'auto';
+      const nextHeight = Math.min(Math.max(el.scrollHeight, inputHeight ?? 0), max);
+      el.style.height = `${nextHeight}px`;
+      if (el.scrollTop !== prevTextareaScrollTop) {
+        el.scrollTop = prevTextareaScrollTop;
+      }
+    } finally {
+      if (composerEl && prevComposerHeight > 0) {
+        composerEl.style.minHeight = '';
+      }
+    }
   }, [text, inputHeight]);
 
   const commitHeight = (height: number | undefined) => {
@@ -401,6 +419,7 @@ export function Composer() {
         />
       ) : null}
       <div
+        ref={composerRef}
         className="composer surface-glass relative mb-2.5 flex flex-col rounded-2xl border border-black/8 p-1.5 shadow-[var(--shadow-composer)] transition-[border-color,box-shadow] duration-150 focus-within:border-ring/45 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--accent)_30%,transparent),var(--shadow-composer)] dark:border-white/[0.07] dark:inset-shadow-[0_1px_rgb(255_255_255/3%)]"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes('Files')) event.preventDefault();

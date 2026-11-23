@@ -192,7 +192,16 @@ export function UsageBadge() {
   // 宿主查不到额度、或查询期间用户切到了别的底层/账号：标识彻底消失。
   if (!quota || unavailable || (fetchedForScope.current !== undefined && fetchedForScope.current !== quotaScope)) return null;
 
-  const lowestRemaining = quota.windows.reduce((min, w) => Math.min(min, w.remainingPercent), 100);
+  // 徽标优先只展示 5 小时（session）窗口的剩余百分比（且排除 Antigravity 3p 池干扰）；无 5 小时窗口时（如按计费周期计量的后端）再回退到全部窗口最小值。
+  const sessionWindows = quota.windows.filter((w) => w.kind === 'session');
+  const primarySessionWindows = sessionWindows.filter((w) => w.label.trim().toLowerCase() !== '3p');
+  const badgeWindows =
+    primarySessionWindows.length > 0
+      ? primarySessionWindows
+      : sessionWindows.length > 0
+        ? sessionWindows
+        : quota.windows;
+  const lowestRemaining = badgeWindows.reduce((min, w) => Math.min(min, w.remainingPercent), 100);
   const level = lowestRemaining <= 10 ? 'high' : lowestRemaining <= 30 ? 'medium' : 'low';
   const sections = buildSections(quota.windows);
   const clearTimers = () => {

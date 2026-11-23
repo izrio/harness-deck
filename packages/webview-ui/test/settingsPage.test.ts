@@ -9,6 +9,12 @@ import * as store from '../src/store.ts';
 
 const posted: unknown[] = [];
 
+function chooseSelectOption(testId: string, optionName: string | RegExp) {
+  const trigger = screen.getByTestId(testId);
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
+
 function baseSnapshot(overrides: Partial<HostSnapshot> = {}): HostSnapshot {
   return {
     runtime: { kind: 'connected', version: '0.2.2-alpha.3', newerThanTested: false },
@@ -249,7 +255,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     expect(document.documentElement.style.getPropertyValue('--terminal-font-size')).toBe('13px');
 
     // 语言配置（位于外观 -> 语言模块）
-    fireEvent.change(screen.getByTestId('pref-language'), { target: { value: 'en' } });
+    chooseSelectOption('pref-language', 'English');
     expect(posted).toContainEqual({ type: 'setPreferences', payload: { language: 'en' } });
 
     // 通知配置（界面 -> 通知）
@@ -329,7 +335,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     openActionsMenu('backend-actions-claude');
     fireEvent.click(screen.getByTestId('install-backend-menu-claude'));
     expect(screen.getByTestId('version-dialog-claude')).toBeTruthy();
-    fireEvent.change(screen.getByTestId('version-select-claude'), { target: { value: '0.10.0' } });
+    chooseSelectOption('version-select-claude', 'v0.10.0');
     fireEvent.click(screen.getByTestId('install-backend-claude'));
     expect(posted).toContainEqual({ type: 'installBackend', payload: { id: 'claude', version: '0.10.0' } });
     expect(screen.queryByTestId('version-dialog-claude')).toBeNull();
@@ -339,7 +345,7 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     expect(screen.getByTestId('version-dialog-dsh')).toBeTruthy();
     const switchBtn = screen.getByTestId('switch-version-dsh') as HTMLButtonElement;
     expect(switchBtn.disabled).toBe(true);
-    fireEvent.change(screen.getByTestId('version-select-dsh'), { target: { value: '0.2.1-rc.5' } });
+    chooseSelectOption('version-select-dsh', 'v0.2.1-rc.5');
     expect(switchBtn.disabled).toBe(false);
     fireEvent.click(switchBtn);
     expect(posted).toContainEqual({ type: 'installBackend', payload: { id: 'dsh', version: '0.2.1-rc.5' } });

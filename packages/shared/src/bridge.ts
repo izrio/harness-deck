@@ -29,6 +29,7 @@ import type {
   SessionListItem,
   BackendsState,
   TabsState,
+  TerminalState,
   WorkbenchModule,
   WorkbenchState,
   WorkspaceState,
@@ -136,6 +137,108 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('sourceControlCreatePr'),
     payload: z.object({ title: z.string().min(1).max(500), body: z.string().max(20_000) }),
   }),
+  /** 单文件暂存 / 取消暂存 / 撤销改动（P0-2）。 */
+  z.object({
+    type: z.literal('sourceControlStageFile'),
+    payload: z.object({ path: z.string().min(1).max(4_096) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlUnstageFile'),
+    payload: z.object({ path: z.string().min(1).max(4_096) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlDiscardFile'),
+    payload: z.object({
+      path: z.string().min(1).max(4_096),
+      untracked: z.boolean().optional(),
+      confirmed: z.boolean().optional(),
+    }),
+  }),
+  /** 按 Hunk 暂存或撤销改动（P0-1 / P0-2）。 */
+  z.object({
+    type: z.literal('sourceControlStageHunk'),
+    payload: z.object({ patch: z.string().min(1).max(500_000) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlDiscardHunk'),
+    payload: z.object({ patch: z.string().min(1).max(500_000), confirmed: z.boolean().optional() }),
+  }),
+  /** 分支切换 / 新建分支 / 拉取 / 抓取（P0-2）。 */
+  z.object({
+    type: z.literal('sourceControlCheckoutBranch'),
+    payload: z.object({ branch: z.string().min(1).max(200) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlCreateBranch'),
+    payload: z.object({ branch: z.string().min(1).max(200) }),
+  }),
+  z.object({ type: z.literal('sourceControlPull'), payload: empty }),
+  z.object({ type: z.literal('sourceControlFetch'), payload: empty }),
+  /** AI / 规则生成提交信息与 PR 描述草稿（P0-2）。 */
+  z.object({
+    type: z.literal('sourceControlGenerateCommitMessage'),
+    payload: z.object({ requestId: z.number().int() }),
+  }),
+  z.object({
+    type: z.literal('sourceControlGeneratePrDraft'),
+    payload: z.object({ requestId: z.number().int() }),
+  }),
+  /** PR 合并后一键结单（归档关联任务 / 可选清理 worktree，P1-7）。 */
+  z.object({
+    type: z.literal('sourceControlSettlePr'),
+    payload: z.object({
+      removeWorktree: z.boolean().optional(),
+      completeLinkedTask: z.boolean().optional(),
+    }),
+  }),
+  /** 保存内置 CodeMirror 6 编辑器修改的工作区文件（P0-1）。 */
+  z.object({
+    type: z.literal('saveWorkspaceFile'),
+    payload: z.object({ path: z.string().min(1).max(4_096), content: z.string().max(2_000_000) }),
+  }),
+  /** 跨底层多回合 Git 检查点回滚 / 会话分叉 / 编辑历史消息重发（P0-3）。 */
+  z.object({
+    type: z.literal('rollbackToTurn'),
+    payload: z.object({ turnSeq: z.number().int().positive(), confirmed: z.boolean().optional() }),
+  }),
+  z.object({
+    type: z.literal('forkSessionAtTurn'),
+    payload: z.object({ turnSeq: z.number().int().positive() }),
+  }),
+  z.object({
+    type: z.literal('editAndResendTurn'),
+    payload: z.object({
+      turnSeq: z.number().int().positive(),
+      text: z.string().min(1).max(200_000),
+      rollbackFiles: z.boolean().optional(),
+    }),
+  }),
+  /** 右侧栏内置终端会话管理（P1-4）。 */
+  z.object({
+    type: z.literal('terminalCreate'),
+    payload: z.object({
+      cwd: z.string().max(4_096).optional(),
+      title: z.string().max(120).optional(),
+      cols: z.number().int().min(20).max(400).optional(),
+      rows: z.number().int().min(5).max(200).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('terminalInput'),
+    payload: z.object({ id: z.string().min(1).max(100), data: z.string().max(64_000) }),
+  }),
+  z.object({
+    type: z.literal('terminalResize'),
+    payload: z.object({
+      id: z.string().min(1).max(100),
+      cols: z.number().int().min(20).max(400),
+      rows: z.number().int().min(5).max(200),
+    }),
+  }),
+  z.object({ type: z.literal('terminalClose'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({ type: z.literal('terminalRestart'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({ type: z.literal('terminalClear'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  z.object({ type: z.literal('terminalSelect'), payload: z.object({ id: z.string().min(1).max(100) }) }),
   z.object({
     type: z.literal('sendMessage'),
     ...commandMeta,
@@ -257,6 +360,8 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('setAppearance'),
     payload: z.object({
       theme: z.enum(['system', 'light', 'dark']).nullable().optional(),
+      preset: z.enum(['default', 'grove', 'ocean', 'ember', 'iris']).nullable().optional(),
+      highContrast: z.boolean().nullable().optional(),
       fontSize: z.number().int().min(8).max(32).nullable().optional(),
       fontFamily: z.string().max(500).nullable().optional(),
       lineHeight: z.number().min(1.2).max(2.4).nullable().optional(),
@@ -588,7 +693,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     payload: z.object({
       id: z.string().max(120).optional(),
       backendId: z.string().min(1).max(100),
-      label: z.string().min(1).max(120),
+      label: z.string().max(120),
       isolateSessions: z.boolean().optional(),
       region: z.enum(['cn', 'ai', 'internal']).optional(),
       /** 仅 dsh 官方 API Key 账号使用：undefined 保留原密钥，空串清除，非空写入 SecretStorage。 */
@@ -723,6 +828,7 @@ export interface HostSnapshot {
   readonly extensions?: ExtensionsState;
   readonly workbench?: WorkbenchState;
   readonly remote?: RemoteState;
+  readonly terminal?: TerminalState;
 }
 
 /**
@@ -791,7 +897,22 @@ export type HostToWebview =
     }
   /** 消息没能发出去（没连上、建不了会话…）：输入框发送时已经清空，把文字放回去。 */
   | { readonly type: 'restoreDraft'; readonly payload: { readonly text: string } }
-  | { readonly type: 'focusComposer'; readonly payload: Record<string, never> };
+  | { readonly type: 'focusComposer'; readonly payload: Record<string, never> }
+  | { readonly type: 'fileSaved'; readonly payload: { readonly path: string; readonly ok: boolean; readonly error?: string } }
+  | {
+      readonly type: 'sourceControlDraftGenerated';
+      readonly payload: {
+        readonly requestId: number;
+        readonly kind: 'commit' | 'pr';
+        readonly message?: string;
+        readonly title?: string;
+        readonly body?: string;
+        readonly error?: string;
+      };
+    }
+  | { readonly type: 'terminalState'; readonly payload: TerminalState }
+  | { readonly type: 'terminalOutput'; readonly payload: { readonly id: string; readonly data: string; readonly reset?: boolean } }
+  | { readonly type: 'sessionCheckpoints'; readonly payload: { readonly sessionId: string; readonly turns: readonly number[] } };
 
 /**
  * 解析来自 Webview 的消息；格式不对时返回 undefined，由调用方记录日志并丢弃。

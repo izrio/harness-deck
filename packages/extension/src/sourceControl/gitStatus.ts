@@ -11,6 +11,8 @@ import type {
   SourceControlFileStatus,
   SourceControlFileView,
   SourceControlGhStatus,
+  SourceControlPrChecks,
+  SourceControlPrStatus,
   SourceControlState,
 } from '@harness-deck/shared';
 
@@ -139,6 +141,89 @@ export async function detectGhStatus(cwd: string): Promise<SourceControlGhStatus
   }
 }
 
+/** 列出当前仓库本地分支列表（P0-2）。 */
+export async function listLocalBranches(cwd: string): Promise<string[]> {
+  try {
+    const out = await git(['branch', '--format=%(refname:short)'], cwd);
+    return out
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** 解析 `gh pr view --json ...` 的输出为 PR 状态与 CI checks 摘要（P1-7）。 */
+export function parseGhPrViewJson(raw: string): SourceControlPrStatus | undefined {
+  try {
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const number = typeof data.number === 'number' ? data.number : undefined;
+    const title = typeof data.title === 'string' ? data.title : undefined;
+    const url = typeof data.url === 'string' ? data.url : undefined;
+    const state = data.state === 'OPEN' || data.state === 'MERGED' || data.state === 'CLOSED' ? data.state : undefined;
+    if (!number || !title || !url || !state) return undefined;
+    let checks: SourceControlPrChecks | undefined;
+    if (Array.isArray(data.statusCheckRollup) && data.statusCheckRollup.length > 0) {
+      let passed = 0;
+      let failed = 0;
+      let pending = 0;
+      for (const item of data.statusCheckRollup) {
+        if (!item || typeof item !== 'object') continue;
+        const rec = item as Record<string, unknown>;
+        const conclusion = String(rec.conclusion ?? rec.state ?? '').toUpperCase();
+        const status = String(rec.status ?? '').toUpperCase();
+        if (conclusion === 'SUCCESS' || conclusion === 'NEUTRAL' || conclusion === 'SKIPPED') {
+          passed += 1;
+        } else if (
+          conclusion === 'FAILURE' ||
+          conclusion === 'ERROR' ||
+          conclusion === 'TIMED_OUT' ||
+          conclusion === 'CANCELLED' ||
+          conclusion === 'ACTION_REQUIRED'
+        ) {
+          failed += 1;
+        } else if (status === 'IN_PROGRESS' || status === 'QUEUED' || status === 'PENDING' || !conclusion) {
+          pending += 1;
+        } else {
+          passed += 1;
+        }
+      }
+      checks = { total: passed + failed + pending, passed, failed, pending };
+    }
+    return {
+      number,
+      title,
+      url,
+      state,
+      ...(typeof data.mergeStateStatus === 'string' && data.mergeStateStatus ? { mergeStateStatus: data.mergeStateStatus } : {}),
+      ...(typeof data.reviewDecision === 'string' && data.reviewDecision ? { reviewDecision: data.reviewDecision } : {}),
+      ...(checks ? { checks } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** 读取当前分支关联的 PR 状态；未登录 gh 或无 PR 时静默返回 undefined（P1-7）。 */
+export async function readCurrentPrStatus(cwd: string): Promise<SourceControlPrStatus | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['pr', 'view', '--json', 'number,title,url,state,mergeStateStatus,reviewDecision,statusCheckRollup'],
+      {
+        cwd,
+        timeout: GH_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      },
+    );
+    return parseGhPrViewJson(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
 /** 读取某个文件在 HEAD（或 index）中的文本内容，用于工作台点击改动行时打开 Diff；不存在时返回 undefined。 */
 export async function readGitFileAtRef(root: string, relPath: string, ref: 'HEAD' | '' = 'HEAD'): Promise<string | undefined> {
   const normalized = relPath.replace(/\\/gu, '/');
@@ -181,14 +266,16 @@ export async function readGitStatus(
   }
 
   try {
-    const [statusOut, stagedStats, unstagedStats, branchOut, remoteOut, gh] = await Promise.all([
+    const [statusOut, stagedStats, unstagedStats, branchOut, branches, remoteOut, gh] = await Promise.all([
       git(['status', '--porcelain=v1', '-z', '--untracked-files=all'], root),
       git(['diff', '--cached', '--numstat', '-z'], root).catch(() => ''),
       git(['diff', '--numstat', '-z'], root).catch(() => ''),
       git(['rev-parse', '--abbrev-ref', 'HEAD'], root).catch(() => ''),
+      listLocalBranches(root),
       git(['remote', 'get-url', 'origin'], root).catch(() => ''),
       options?.checkGh === false ? Promise.resolve(undefined) : detectGhStatus(root),
     ]);
+    const pr = gh?.authenticated ? await readCurrentPrStatus(root) : undefined;
 
     const stats = new Map<string, { additions: number; deletions: number }>();
     for (const source of [stagedStats, unstagedStats]) {
@@ -222,12 +309,14 @@ export async function readGitStatus(
       available: true,
       root,
       ...(branch ? { branch } : {}),
+      ...(branches.length > 0 ? { branches } : {}),
       ...(remote ? { remote } : {}),
       files,
       additions,
       deletions,
       ...(allFiles.length > MAX_FILES ? { truncated: true } : {}),
       ...(gh ? { gh } : {}),
+      ...(pr ? { pr } : {}),
       ...(options?.lastAction ? { lastAction: options.lastAction } : {}),
       updatedAt,
     };

@@ -15,7 +15,7 @@ import {
 import { useView } from '../store.ts';
 import { cn } from '../lib/utils.ts';
 import { LoadingState } from './beautifului/index.ts';
-import { CheckIcon, CopyIcon } from './icons.tsx';
+import { CheckIcon, CopyIcon, GitForkIcon, UndoIcon } from './icons.tsx';
 import { useT, type Translate } from '../i18n.ts';
 import { postToHost } from '../vscode.ts';
 
@@ -139,24 +139,30 @@ export function AssistantActions({ text, inline = false }: { text: string; inlin
   );
 }
 
-/** 一轮结束时的用时（可合并上一条助手消息的操作栏到同一行）。 */
+/** 一轮结束时的用时（可合并上一条助手消息的操作栏到同一行，并挂接跨底层检查点回滚与会话分叉）。 */
 export const TurnDone = memo(function TurnDone({
   item,
   copyText,
   turnSeq,
   canRollback = false,
+  hasCheckpoint = false,
+  canFork = false,
 }: {
   item: Extract<Item, { kind: 'turnDone' }>;
   copyText?: string;
   turnSeq?: number;
   canRollback?: boolean;
+  hasCheckpoint?: boolean;
+  canFork?: boolean;
 }) {
   const t = useT();
   const clientSurface = useView((s) => s.clientSurface);
+  const remoteReadOnly = useView((s) => s.clientSurface === 'mobile-web' && s.clientScope === 'read-only');
   const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false);
+  const [checkpointConfirmOpen, setCheckpointConfirmOpen] = useState(false);
   const hasActions = copyText !== undefined;
   return (
-    <div className={cn('turn-done flex items-center gap-2 text-[12px] text-ink-3', hasActions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
+    <div className={cn('turn-done flex flex-wrap items-center gap-2 text-[12px] text-ink-3', hasActions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
       {hasActions ? <AssistantActions text={copyText} inline /> : null}
       {turnSeq !== undefined ? <span className="text-ink-3">{t('run.turn', turnSeq)}</span> : null}
       <span className="flex items-center gap-1.5">
@@ -167,7 +173,7 @@ export const TurnDone = memo(function TurnDone({
         ) : null}
         <span>{item.completed ? t('run.done', formatDuration(item.durationMs, t)) : t('run.took', formatDuration(item.durationMs, t))}</span>
       </span>
-      {canRollback ? (
+      {canRollback && !remoteReadOnly ? (
         <button
           type="button"
           className="rounded px-1 text-[11.5px] text-ink-3 underline-offset-2 hover:text-ink hover:underline"
@@ -180,6 +186,30 @@ export const TurnDone = memo(function TurnDone({
           }}
         >
           {t('run.rollback')}
+        </button>
+      ) : null}
+      {hasCheckpoint && turnSeq !== undefined && !remoteReadOnly ? (
+        <button
+          type="button"
+          data-testid={`turn-checkpoint-rollback-${turnSeq}`}
+          title={t('turn.rollbackCheckpointTitle', turnSeq)}
+          className="inline-flex items-center gap-1 rounded px-1 text-[11.5px] text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+          onClick={() => setCheckpointConfirmOpen(true)}
+        >
+          <UndoIcon className="size-3" />
+          <span>{t('turn.rollbackCheckpoint')}</span>
+        </button>
+      ) : null}
+      {canFork && turnSeq !== undefined && !remoteReadOnly ? (
+        <button
+          type="button"
+          data-testid={`turn-fork-${turnSeq}`}
+          title={t('turn.forkTitle', turnSeq)}
+          className="inline-flex items-center gap-1 rounded px-1 text-[11.5px] text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+          onClick={() => postToHost({ type: 'forkSessionAtTurn', payload: { turnSeq } })}
+        >
+          <GitForkIcon className="size-3" />
+          <span>{t('turn.fork')}</span>
         </button>
       ) : null}
       <Dialog open={rollbackConfirmOpen} onOpenChange={setRollbackConfirmOpen}>
@@ -203,6 +233,33 @@ export const TurnDone = memo(function TurnDone({
               }}
             >
               {t('mobile.confirm.rollbackAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={checkpointConfirmOpen} onOpenChange={setCheckpointConfirmOpen}>
+        <DialogContent data-testid="checkpoint-rollback-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('turn.rollbackCheckpointConfirm', turnSeq ?? 1)}</DialogTitle>
+            <DialogDescription>{t('turn.rollbackCheckpointDesc', turnSeq ?? 1)}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setCheckpointConfirmOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="checkpoint-rollback-confirm"
+              onClick={() => {
+                setCheckpointConfirmOpen(false);
+                if (turnSeq !== undefined) {
+                  postToHost({ type: 'rollbackToTurn', payload: { turnSeq, confirmed: true } });
+                }
+              }}
+            >
+              {t('turn.rollbackCheckpoint')}
             </Button>
           </DialogFooter>
         </DialogContent>

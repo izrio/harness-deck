@@ -29,6 +29,8 @@ export const UNICAST_HOST_MESSAGE_TYPES: ReadonlySet<HostToWebview['type']> = ne
   'quotaFetched',
   'providerModelsFetched',
   'restoreDraft',
+  'fileSaved',
+  'sourceControlDraftGenerated',
 ]);
 
 export class ClientHub {

@@ -2,8 +2,10 @@ import { PROVIDER_PRESETS, isProviderReadyForBackend, type AgentProfile, type Ba
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '../../../lib/utils.ts';
+
+const MODEL_UNSET_VALUE = '__unset__';
 import { ChevronDownIcon, ChevronRightIcon, CloseIcon } from '../../icons.tsx';
 import { ProviderModelTable } from './ProviderModelTable.tsx';
 import type { Dispatch, SetStateAction } from 'react';
@@ -22,7 +24,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
           <Button
             type="button"
             variant="ghost"
-            size="icon"
+            size="icon-sm"
             aria-label={t('common.close')}
             data-testid="provider-editor-close"
             onClick={closeEditor}
@@ -76,7 +78,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
         <label className="flex flex-col gap-1">
           <span className="text-[12px] font-medium text-ink-2">{t('settings.providers.name')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="provider-form-name"
             value={editor.name}
             placeholder={t('settings.providers.namePlaceholder')}
@@ -93,7 +95,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <Button
                   type="button"
                   variant="link"
-                  size="default"
+                  size="sm"
                   className="h-auto p-0 text-[11.5px]"
                   data-testid="provider-restore-apikey"
                   onClick={() => setEditor({ ...editor, clearApiKey: false })}
@@ -104,7 +106,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <Button
                   type="button"
                   variant="link"
-                  size="default"
+                  size="sm"
                   className="h-auto p-0 text-[11.5px] text-destructive"
                   data-testid="provider-clear-apikey"
                   onClick={() => setEditor({ ...editor, clearApiKey: true, apiKey: '' })}
@@ -115,7 +117,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
             ) : null}
           </div>
           <Input
-            size="default"
+            size="sm"
             type="password"
             autoComplete="off"
             data-testid="provider-form-apikey"
@@ -152,7 +154,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlAnthropic')}</span>
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="provider-url-anthropic"
                     className="font-mono text-[12px]"
                     placeholder="https://api.anthropic.com"
@@ -163,7 +165,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                 <label className="flex flex-col gap-1">
                   <span className="text-[11.5px] font-medium text-ink-2">{t('settings.providers.urlOpenaiChat')}</span>
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="provider-url-openai-chat"
                     className="font-mono text-[12px]"
                     placeholder="https://api.openai.com/v1"
@@ -176,7 +178,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                     {t('settings.providers.urlOpenaiResponses')}
                   </span>
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="provider-url-openai-responses"
                     className="font-mono text-[12px]"
                     placeholder="https://api.openai.com/v1"
@@ -205,44 +207,62 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
               <ProviderModelTable editor={editor} batchOpen={batchOpen} setBatchOpen={setBatchOpen} batchText={batchText} setBatchText={setBatchText} pendingFetchId={pendingFetchId} fetchError={fetchError} updateModelRow={updateModelRow} addModelRow={addModelRow} removeModelRow={removeModelRow} applyBatchPaste={applyBatchPaste} triggerFetchModels={triggerFetchModels} hasAnyUrl={hasAnyUrl} />
               {/* 默认模型 & 小模型 */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">
                     {t('settings.providers.defaultModel')}
                   </span>
-                  <NativeSelect
-                    size="default"
-                    className="w-full"
-                    data-testid="provider-default-model"
-                    value={editor.defaultModel}
-                    onChange={(e) => setEditor({ ...editor, defaultModel: e.target.value })}
+                  <Select
+                    value={editor.defaultModel || MODEL_UNSET_VALUE}
+                    onValueChange={(value) =>
+                      setEditor({ ...editor, defaultModel: value === MODEL_UNSET_VALUE ? '' : value })
+                    }
                   >
-                    <NativeSelectOption value="">{t('settings.providers.modelUnset')}</NativeSelectOption>
-                    {validModelOptions.map((opt) => (
-                      <NativeSelectOption key={opt.id} value={opt.id}>
-                        {opt.label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="provider-default-model"
+                      aria-label={t('settings.providers.defaultModel')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={MODEL_UNSET_VALUE}>{t('settings.providers.modelUnset')}</SelectItem>
+                      {validModelOptions.map((opt) => (
+                        <SelectItem key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">
                     {t('settings.providers.smallModel')}
                   </span>
-                  <NativeSelect
-                    size="default"
-                    className="w-full"
-                    data-testid="provider-small-model"
-                    value={editor.smallModel}
-                    onChange={(e) => setEditor({ ...editor, smallModel: e.target.value })}
+                  <Select
+                    value={editor.smallModel || MODEL_UNSET_VALUE}
+                    onValueChange={(value) =>
+                      setEditor({ ...editor, smallModel: value === MODEL_UNSET_VALUE ? '' : value })
+                    }
                   >
-                    <NativeSelectOption value="">{t('settings.providers.modelUnset')}</NativeSelectOption>
-                    {validModelOptions.map((opt) => (
-                      <NativeSelectOption key={opt.id} value={opt.id}>
-                        {opt.label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="provider-small-model"
+                      aria-label={t('settings.providers.smallModel')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={MODEL_UNSET_VALUE}>{t('settings.providers.modelUnset')}</SelectItem>
+                      {validModelOptions.map((opt) => (
+                        <SelectItem key={opt.id} value={opt.id}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.smallModelHint')}</p>
                 </div>
               </div>
@@ -354,14 +374,14 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
             <Button
               type="button"
               variant="outline"
-              size="default"
+              size="sm"
               data-testid="provider-cancel-btn"
               onClick={closeEditor}
             >
               {t('common.cancel')}
             </Button>
           ) : null}
-          <Button type="button" size="default" data-testid="provider-save-btn" onClick={saveProvider}>
+          <Button type="button" size="sm" data-testid="provider-save-btn" onClick={saveProvider}>
             {t('settings.providers.save')}
           </Button>
         </div>

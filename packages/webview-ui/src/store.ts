@@ -36,6 +36,7 @@ import type {
   SessionListItem,
   BackendsState,
   TabsState,
+  TerminalState,
   WorkbenchModule,
   WorkbenchState,
   WorkspaceState,
@@ -55,7 +56,7 @@ export type SettingsTab =
   | 'projects'
   | 'other';
 
-export type RightPanelTab = 'files' | 'git';
+export type RightPanelTab = 'files' | 'git' | 'terminal';
 
 export interface Toast {
   readonly id: number;
@@ -146,6 +147,16 @@ export interface ViewState {
   readonly markdownPreview?: MarkdownPreviewData & { readonly loading?: boolean };
   readonly diffContent?: DiffContentData;
   readonly remote?: RemoteState;
+  readonly terminal: TerminalState;
+  readonly fileSavedResult?: { readonly path: string; readonly ok: boolean; readonly error?: string; readonly n: number };
+  readonly draftGeneratedResult?: {
+    readonly requestId: number;
+    readonly kind: 'commit' | 'pr';
+    readonly message?: string;
+    readonly title?: string;
+    readonly body?: string;
+    readonly error?: string;
+  };
   /** 图片内容缓存：`local:<localId>` 或 attachmentId → data URL；'loading' 读取中，'error' 读不到。 */
   readonly images: Readonly<Record<string, string>>;
   /** 正在打开的 Diff：`key` 是 DiffRef 的 JSON，对应的行显示加载中。 */
@@ -261,11 +272,26 @@ const initialState: ViewState = {
   rightPanelExplicit: false,
   settingsOpen: false,
   settingsTab: 'appearance',
+  terminal: { sessions: [] },
   images: {},
 };
 
 let state: ViewState = initialState;
 const listeners = new Set<() => void>();
+const terminalOutputListeners = new Set<(event: { readonly id: string; readonly data: string; readonly reset?: boolean }) => void>();
+const terminalBuffers = new Map<string, string>();
+const MAX_LOCAL_TERM_BUF = 128 * 1024;
+
+export function subscribeTerminalOutput(
+  listener: (event: { readonly id: string; readonly data: string; readonly reset?: boolean }) => void,
+): () => void {
+  terminalOutputListeners.add(listener);
+  return () => terminalOutputListeners.delete(listener);
+}
+
+export function getTerminalBuffer(id: string): string {
+  return terminalBuffers.get(id) ?? '';
+}
 let toastId = 0;
 let nextPanelSearchId = 1_000_000;
 const pendingPanelSearchIds = new Set<number>();
@@ -554,6 +580,7 @@ export function applyHostMessage(message: HostToWebview): void {
         ...(p.projects ? { projects: p.projects } : {}),
         ...(p.workbench ? { workbench: p.workbench } : {}),
         ...(p.remote !== undefined ? { remote: p.remote } : {}),
+        ...(p.terminal ? { terminal: p.terminal } : {}),
       });
       return;
     }
@@ -731,6 +758,41 @@ export function applyHostMessage(message: HostToWebview): void {
     case 'restoreDraft':
       requestPrefill(message.payload.text, 'restore');
       return;
+    case 'fileSaved':
+      set({
+        fileSavedResult: {
+          ...message.payload,
+          n: (state.fileSavedResult?.n ?? 0) + 1,
+        },
+      });
+      return;
+    case 'sourceControlDraftGenerated':
+      set({ draftGeneratedResult: message.payload });
+      return;
+    case 'terminalState':
+      set({ terminal: message.payload });
+      return;
+    case 'terminalOutput': {
+      const { id, data, reset } = message.payload;
+      if (reset) {
+        terminalBuffers.set(id, data);
+      } else {
+        const next = (terminalBuffers.get(id) ?? '') + data;
+        terminalBuffers.set(id, next.length > MAX_LOCAL_TERM_BUF ? next.slice(next.length - MAX_LOCAL_TERM_BUF) : next);
+      }
+      for (const listener of terminalOutputListeners) listener(message.payload);
+      return;
+    }
+    case 'sessionCheckpoints':
+      if (state.session.id === message.payload.sessionId) {
+        set({
+          session: {
+            ...state.session,
+            checkpoints: message.payload.turns,
+          },
+        });
+      }
+      return;
   }
 }
 
@@ -738,4 +800,5 @@ export function applyHostMessage(message: HostToWebview): void {
 export function resetStoreForTests(): void {
   state = initialState;
   pendingPanelSearchIds.clear();
+  terminalBuffers.clear();
 }

@@ -1,3 +1,6 @@
+import { useRef } from 'react';
+import { useOffscreenPause } from '../../hooks/useOffscreenPause.ts';
+
 export type LoaderGridVariant = 'Drive' | 'Dots' | 'Orbit';
 
 const CHEVRON_DELAYS: readonly (number | null)[] = Array.from({ length: 9 }, (_, i) => {
@@ -31,12 +34,16 @@ export function LoaderGrid({
   readonly round?: boolean;
   readonly className?: string;
 }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const offscreen = useOffscreenPause(ref);
   const resolvedVariant: LoaderGridVariant = variant ?? (round ? 'Dots' : 'Drive');
   const pattern = PATTERNS[resolvedVariant];
   return (
     <span
+      ref={ref}
       aria-hidden
       data-variant={resolvedVariant}
+      data-offscreen={offscreen ? 'true' : undefined}
       className={`grid shrink-0 grid-cols-[repeat(3,4px)] gap-[1.5px] ${className}`}
     >
       {pattern.delays.map((delay, index) => (

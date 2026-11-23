@@ -89,19 +89,24 @@ export function Thread() {
   const rows = useMemo(() => buildThreadRows(items), [items]);
   // 回合模型：优先消费宿主快照与增量推送中的 session.turns，旧快照时兜底推导。
   const turns = useMemo(() => session.turns ?? deriveTurns(items, session.running), [session.turns, items, session.running]);
-  // 回合编号：把每个回合的 seq 挂在对应的 turnDone 上。
-  const turnSeqById = useMemo(() => {
-    const map = new Map<string, number>();
+  // 回合编号：把每个回合的 seq 挂在对应的 user 消息与 turnDone 上（供检查点回滚、分叉与编辑重跑使用）。
+  const { turnSeqById, userTurnSeqById } = useMemo(() => {
+    const doneMap = new Map<string, number>();
+    const userMap = new Map<string, number>();
     let turnIndex = 0;
     for (const item of items) {
-      if (item.kind === 'user' && item.pending !== 'queued' && !item.queue) turnIndex += 1;
-      else if (item.kind === 'turnDone' && turnIndex > 0) {
+      if (item.kind === 'user' && item.pending !== 'queued' && !item.queue) {
+        turnIndex += 1;
         const seq = turns[turnIndex - 1]?.seq ?? turnIndex;
-        map.set(item.id, seq);
+        userMap.set(item.id, seq);
+      } else if (item.kind === 'turnDone' && turnIndex > 0) {
+        const seq = turns[turnIndex - 1]?.seq ?? turnIndex;
+        doneMap.set(item.id, seq);
       }
     }
-    return map;
+    return { turnSeqById: doneMap, userTurnSeqById: userMap };
   }, [items, turns]);
+  const checkpointSet = useMemo(() => new Set(session.checkpoints ?? []), [session.checkpoints]);
   // 只有最后一轮、该轮实际改过文件、且底层支持按工具片段恢复文件时才显示回滚入口（对话不回退）。
   const lastTurnDoneId = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i -= 1) {
@@ -211,15 +216,25 @@ export function Thread() {
               ))}
             </ThinkingTrace>
           ) : (
-            <ItemView
-              item={row.items[0]!}
-              hideAssistantActions={mergeTurnDone}
-              {...(turnDoneCopyText !== undefined ? { turnDoneCopyText } : {})}
-              {...(turnSeqById.get(row.items[0]!.id) !== undefined ? { turnSeq: turnSeqById.get(row.items[0]!.id) } : {})}
-              {...(canRollbackFiles && lastTurnHasChanges && !session.running && row.items[0]!.id === lastTurnDoneId
-                ? { canRollback: true }
-                : {})}
-            />
+            (() => {
+              const item = row.items[0]!;
+              const seq = turnSeqById.get(item.id) ?? userTurnSeqById.get(item.id);
+              const hasCheckpoint = item.kind === 'turnDone' && seq !== undefined && checkpointSet.has(seq);
+              const canFork = item.kind === 'turnDone' && seq !== undefined && !session.running;
+              return (
+                <ItemView
+                  item={item}
+                  hideAssistantActions={mergeTurnDone}
+                  {...(turnDoneCopyText !== undefined ? { turnDoneCopyText } : {})}
+                  {...(seq !== undefined ? { turnSeq: seq } : {})}
+                  {...(canRollbackFiles && lastTurnHasChanges && !session.running && item.id === lastTurnDoneId
+                    ? { canRollback: true }
+                    : {})}
+                  {...(hasCheckpoint && !session.running ? { hasCheckpoint: true } : {})}
+                  {...(canFork ? { canFork: true } : {})}
+                />
+              );
+            })()
           )}
         </VirtualRow>,
       );

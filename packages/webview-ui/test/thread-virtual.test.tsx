@@ -673,4 +673,44 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
 
     expect(metrics.getScrollTop()).toBeCloseTo(targetScrollTop, 0);
   });
+
+  it('贴底状态下因输入框增高导致视口 clientHeight 缩小并触发 scroll 事件时，保持贴底不向上偏移', () => {
+    const items = makeItems(40, 'shrink-vp', 0);
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          session: { id: 'sess-shrink-vp', title: '视口缩小', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+          items,
+        }),
+      });
+    });
+
+    const { container } = render(<Thread />);
+    const scroller = container.querySelector('.thread') as HTMLDivElement;
+    const layout = computeVirtualLayout(buildThreadRows(items), new Map(), THREAD_GAP);
+    const totalHeight = layout.totalHeight + 40;
+    const initialClientHeight = 600;
+
+    const metrics = mockScrollMetrics(scroller, {
+      scrollHeight: totalHeight,
+      clientHeight: initialClientHeight,
+      scrollTop: totalHeight - initialClientHeight,
+    });
+
+    // 在底部建立基线（stickRef=true）
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+
+    // 模拟下方输入框增高 120px，导致视口 clientHeight 缩小且 scroll 事件早于 ResizeObserver 到达
+    const shrunkClientHeight = initialClientHeight - 120;
+    metrics.setClientHeight(shrunkClientHeight);
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+
+    expect(metrics.getScrollTop()).toBe(totalHeight - shrunkClientHeight);
+    expect(screen.queryByTestId('to-bottom')).toBeNull();
+  });
 });

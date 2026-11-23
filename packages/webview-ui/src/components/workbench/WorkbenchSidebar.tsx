@@ -58,8 +58,8 @@ import {
   FolderIcon,
   FolderTreeIcon,
   GitBranchIcon,
-  KanbanIcon,
-  ListIcon,
+  LayoutDashboardIcon,
+  ListTodoIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -232,11 +232,11 @@ export function WorkbenchSidebar({
   const renderModuleIcon = (mod: SidebarModule) => {
     switch (mod) {
       case 'overview':
-        return <ListIcon className="size-4 shrink-0" />;
+        return <LayoutDashboardIcon className="size-4 shrink-0" />;
       case 'agents':
         return <UsersIcon className="size-4 shrink-0" />;
       case 'tasks':
-        return <KanbanIcon className="size-4 shrink-0" />;
+        return <ListTodoIcon className="size-4 shrink-0" />;
       case 'sessions':
         return <FolderTreeIcon className="size-4 shrink-0" />;
     }

@@ -143,12 +143,19 @@ export async function checkNpmOwnership(input: NpmOwnershipInput): Promise<boole
   const root = npmGlobalModulesRoot(input.npmGlobalBin, platform);
   const executable = input.executable;
   if (executable && root) {
-    const real = await realpath(executable).catch(() => executable);
-    if (isPathInside(real, root, platform)) return true;
+    const [real, realRoot, realGlobalBin] = await Promise.all([
+      realpath(executable).catch(() => executable),
+      realpath(root).catch(() => root),
+      input.npmGlobalBin ? realpath(input.npmGlobalBin).catch(() => input.npmGlobalBin) : Promise.resolve(undefined),
+    ]);
+    if (isPathInside(real, root, platform) || isPathInside(real, realRoot, platform)) return true;
     if (platform === 'win32') {
       const shimTarget = await resolveWindowsShimTarget(real);
-      if (shimTarget && isPathInside(shimTarget, root, platform)) return true;
+      if (shimTarget && (isPathInside(shimTarget, root, platform) || isPathInside(shimTarget, realRoot, platform))) {
+        return true;
+      }
       if (input.npmGlobalBin && isPathInside(real, input.npmGlobalBin, platform)) return true;
+      if (realGlobalBin && isPathInside(real, realGlobalBin, platform)) return true;
     }
     return false;
   }

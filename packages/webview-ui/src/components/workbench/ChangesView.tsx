@@ -1,11 +1,9 @@
 /**
- * 工作台 · Git 改动面板（ChangesView）
- *
- * 参考 IntelliJ IDEA Git / Commit 工具窗口的紧凑图标化布局：
- * - 顶部单行图标工具栏：分支与增删统计 + 刷新 / 按目录分组 / 仅看本会话改动 / 创建 PR 图标操作
- * - 中部可折叠变更列表（已暂存 / 更改 / 未跟踪）：支持按目录树分组或 IDEA 风格「文件名 + 淡化目录路径」，按状态着色
- * - 底部固定提交区：多行提交信息输入（支持 Ctrl/Cmd+Enter）+ 提交与推送操作
- * 推送与创建 PR 均需二次确认，不做 force push，不切换分支，不保存任何 token（HD-09 / HD-10）。
+ * 工作台 · Git 改动面板（ChangesView，HD-09 / HD-10 / P0-2 / P1-7）：
+ * - 顶部单行 IDEA 风格工具栏：分支切换 Popover（切换/新建分支）+ 增删统计 + 抓取/拉取/刷新/按目录树分组/仅看本会话改动/创建 PR
+ * - PR 状态追踪横幅：展示当前分支关联 PR 的状态（OPEN / MERGED / CLOSED）、CI checks 汇总、外链与「一键结单」
+ * - 中部可折叠变更列表（已暂存 / 更改 / 未跟踪）：每行支持单文件暂存（+）、取消暂存（-）、撤销更改（↩ 二次确认）
+ * - 底部固定提交区：多行提交信息输入（支持 Ctrl/Cmd+Enter）+ AI 一键生成提交信息 + 提交与推送操作
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { deriveTurns, type SourceControlFileView } from '@harness-deck/shared';
@@ -16,8 +14,11 @@ import { cn } from '../../lib/utils.ts';
 import { setRightPanelOpen, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
   FileTypeIcon,
   FilterIcon,
   FolderTreeIcon,
@@ -25,7 +26,11 @@ import {
   GitCommitIcon,
   GitPullRequestIcon,
   ListIcon,
+  MinusIcon,
+  PlusIcon,
   RefreshIcon,
+  SparklesIcon,
+  UndoIcon,
   UploadIcon,
   VscodeFolderIcon,
   VscodeFolderOpenIcon,
@@ -42,6 +47,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 
 function post(message: Parameters<typeof postToHost>[0]): void {
@@ -76,12 +82,15 @@ interface ChangeGroup {
   readonly files: readonly SourceControlFileView[];
 }
 
+let draftRequestSeq = 1;
+
 export function ChangesView({ compact = false }: { readonly compact?: boolean } = {}) {
   const t = useT();
   const isMobile = useIsMobile();
   const state = useView((s) => s.workbench.sourceControl);
   const session = useView((s) => s.session);
   const items = useView((s) => s.items);
+  const draftResult = useView((s) => s.draftGeneratedResult);
   const activeDiffPath = useView((s) =>
     s.diffContent && s.diffContent.kind !== 'file' ? s.diffContent.path.replace(/\\/gu, '/') : undefined,
   );
@@ -93,11 +102,20 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [collapsedDirs, setCollapsedDirs] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
+  const [generatingCommit, setGeneratingCommit] = useState(false);
+  const [generatingPr, setGeneratingPr] = useState(false);
+  const [branchPopoverOpen, setBranchPopoverOpen] = useState(false);
+  const [newBranchName, setNewBranchName] = useState('');
   const [pushOpen, setPushOpen] = useState(false);
   const [prOpen, setPrOpen] = useState(false);
   const [prTitle, setPrTitle] = useState('');
   const [prBody, setPrBody] = useState('');
+  const [discardTarget, setDiscardTarget] = useState<SourceControlFileView | null>(null);
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [settleRemoveWorktree, setSettleRemoveWorktree] = useState(false);
   const lastActionAtRef = useRef<number | undefined>(undefined);
+  const pendingCommitReqRef = useRef<number | undefined>(undefined);
+  const pendingPrReqRef = useRef<number | undefined>(undefined);
 
   const sessionPaths = useMemo(() => {
     const turns = session.turns ?? deriveTurns(items, session.running);
@@ -117,7 +135,6 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
     refresh();
   }, []);
 
-  // 宿主每次刷新（含 commit / push / pr 完成或失败）都会更新 updatedAt：解除本地忙碌状态，并根据 lastAction 决定清空或保留草稿。
   useEffect(() => {
     setBusy(false);
     const action = state?.lastAction;
@@ -129,8 +146,28 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
       setPrOpen(false);
       setPrTitle('');
       setPrBody('');
+    } else if ((action.kind === 'checkout' || action.kind === 'branch') && action.ok) {
+      setBranchPopoverOpen(false);
+      setNewBranchName('');
+    } else if (action.kind === 'settle' && action.ok) {
+      setSettleOpen(false);
     }
   }, [state?.updatedAt, state?.lastAction]);
+
+  // 接收 AI / 启发式生成的 Commit Message 或 PR 草稿
+  useEffect(() => {
+    if (!draftResult) return;
+    if (draftResult.kind === 'commit' && draftResult.requestId === pendingCommitReqRef.current) {
+      pendingCommitReqRef.current = undefined;
+      setGeneratingCommit(false);
+      if (draftResult.message) setCommitMessage(draftResult.message);
+    } else if (draftResult.kind === 'pr' && draftResult.requestId === pendingPrReqRef.current) {
+      pendingPrReqRef.current = undefined;
+      setGeneratingPr(false);
+      if (draftResult.title) setPrTitle(draftResult.title);
+      if (draftResult.body) setPrBody(draftResult.body);
+    }
+  }, [draftResult]);
 
   const hasStaged = Boolean(state?.files.some((file) => file.staged));
   const hasUnstaged = Boolean(state?.files.some((file) => !file.staged));
@@ -182,7 +219,6 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
   };
 
   const openPr = (): void => {
-    // 保留未提交成功时的草稿；仅当标题为空时填充默认建议
     if (!prTitle.trim()) {
       setPrTitle(commitMessage.trim().split('\n')[0] || session.title || state?.branch || '');
     }
@@ -192,8 +228,59 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
   const createPr = (): void => {
     if (!prTitle.trim()) return;
     setBusy(true);
-    // 失败时弹窗保持打开并保留草稿；成功后由 lastAction 统一关闭并清空
     post({ type: 'sourceControlCreatePr', payload: { title: prTitle.trim(), body: prBody } });
+  };
+
+  const requestAiCommit = (): void => {
+    if (generatingCommit || busy || remoteReadOnly || !state?.available || state.files.length === 0) return;
+    const reqId = ++draftRequestSeq;
+    pendingCommitReqRef.current = reqId;
+    setGeneratingCommit(true);
+    post({ type: 'sourceControlGenerateCommitMessage', payload: { requestId: reqId } });
+  };
+
+  const requestAiPr = (): void => {
+    if (generatingPr || busy || remoteReadOnly) return;
+    const reqId = ++draftRequestSeq;
+    pendingPrReqRef.current = reqId;
+    setGeneratingPr(true);
+    post({ type: 'sourceControlGeneratePrDraft', payload: { requestId: reqId } });
+  };
+
+  const stageOne = (file: SourceControlFileView): void => {
+    if (busy || remoteReadOnly) return;
+    setBusy(true);
+    post({ type: 'sourceControlStageFile', payload: { path: file.path } });
+  };
+
+  const unstageOne = (file: SourceControlFileView): void => {
+    if (busy || remoteReadOnly) return;
+    setBusy(true);
+    post({ type: 'sourceControlUnstageFile', payload: { path: file.path } });
+  };
+
+  const confirmDiscard = (): void => {
+    if (!discardTarget) return;
+    const target = discardTarget;
+    setDiscardTarget(null);
+    setBusy(true);
+    post({
+      type: 'sourceControlDiscardFile',
+      payload: { path: target.path, untracked: target.status === 'untracked', confirmed: true },
+    });
+  };
+
+  const checkoutBranch = (branch: string): void => {
+    if (busy || remoteReadOnly || branch === state?.branch) return;
+    setBusy(true);
+    post({ type: 'sourceControlCheckoutBranch', payload: { branch } });
+  };
+
+  const createNewBranch = (): void => {
+    const trimmed = newBranchName.trim();
+    if (!trimmed || busy || remoteReadOnly) return;
+    setBusy(true);
+    post({ type: 'sourceControlCreateBranch', payload: { branch: trimmed } });
   };
 
   const openDiff = (file: SourceControlFileView): void => {
@@ -233,18 +320,99 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
       })`
     : t('wb.changes.createPr');
 
+  const pr = state?.pr;
+
   return (
     <div
       className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', !compact && 'bg-canvas')}
       data-testid="workbench-changes"
     >
-      {/* 顶部单行 IDEA 风格工具栏：分支/统计 + 图标操作 */}
+      {/* 顶部单行 IDEA 风格工具栏：分支切换 + 统计 + 抓取/拉取/刷新/分组/筛选/PR */}
       <div className="flex h-9 shrink-0 items-center justify-between gap-1.5 border-b border-sidebar-border px-2.5">
         <div className="flex min-w-0 items-center gap-1.5" title={branchTooltip}>
-          <GitBranchIcon className="size-3.5 shrink-0 text-accent-ink" />
-          <span className="truncate text-[12px] font-medium text-ink">
-            {state?.available ? (state.branch ?? 'HEAD') : t('wb.changes.title')}
-          </span>
+          {state?.available && !remoteReadOnly ? (
+            <Popover open={branchPopoverOpen} onOpenChange={setBranchPopoverOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="changes-branch-trigger"
+                  className="inline-flex min-w-0 items-center gap-1 rounded-control px-1 py-0.5 text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                >
+                  <GitBranchIcon className="size-3.5 shrink-0 text-accent-ink" />
+                  <span className="truncate">{state.branch ?? 'HEAD'}</span>
+                  <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-64 p-2">
+                <div className="mb-1.5 text-[11px] font-medium text-ink-3">{t('wb.changes.switchBranch')}</div>
+                <div className="max-h-44 overflow-y-auto">
+                  {(state.branches ?? []).map((b) => {
+                    const current = b === state.branch;
+                    return (
+                      <button
+                        key={b}
+                        type="button"
+                        onClick={() => checkoutBranch(b)}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors hover:bg-hover',
+                          current && 'bg-field font-medium text-ink',
+                        )}
+                      >
+                        <span className="truncate font-mono text-[11.5px]">{b}</span>
+                        {current ? <CheckIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex items-center gap-1 border-t border-line pt-2">
+                  <Input
+                    size="xs"
+                    value={newBranchName}
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    placeholder={t('wb.changes.newBranchPlaceholder')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') createNewBranch();
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="xs"
+                    aria-label={t('wb.changes.createBranch')}
+                    title={t('wb.changes.createBranch')}
+                    disabled={!newBranchName.trim() || busy}
+                    onClick={createNewBranch}
+                  >
+                    <PlusIcon className="size-3" />
+                  </Button>
+                </div>
+                {state.remote ? (
+                  <div className="mt-1.5 flex items-center justify-end border-t border-line pt-1.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      disabled={busy}
+                      onClick={() => {
+                        setBranchPopoverOpen(false);
+                        setBusy(true);
+                        post({ type: 'sourceControlFetch', payload: {} });
+                      }}
+                    >
+                      <RefreshIcon className="size-3" />
+                      <span>{t('wb.changes.fetch')}</span>
+                    </Button>
+                  </div>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <>
+              <GitBranchIcon className="size-3.5 shrink-0 text-accent-ink" />
+              <span className="truncate text-[12px] font-medium text-ink">
+                {state?.available ? (state.branch ?? 'HEAD') : t('wb.changes.title')}
+              </span>
+            </>
+          )}
           {state?.available && (state.additions > 0 || state.deletions > 0) ? (
             <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums">
               {state.additions > 0 ? <span className="text-green">+{state.additions}</span> : null}
@@ -254,6 +422,24 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
+          {state?.available && state.remote && !remoteReadOnly ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              data-testid="changes-pull-btn"
+              onClick={() => {
+                setBusy(true);
+                post({ type: 'sourceControlPull', payload: {} });
+              }}
+              disabled={busy}
+              aria-label={t('wb.changes.pull')}
+              title={t('wb.changes.pull')}
+              className="text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <DownloadIcon className="size-3.5" />
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="ghost"
@@ -320,6 +506,68 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
         </div>
       </div>
 
+      {/* PR 状态追踪与一键结单横幅（P1-7） */}
+      {pr ? (
+        <div
+          className="flex shrink-0 flex-wrap items-center justify-between gap-1.5 border-b border-sidebar-border bg-inset/70 px-2.5 py-1.5 text-[11.5px]"
+          data-testid="changes-pr-status"
+        >
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={cn(
+                'inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10.5px] font-medium',
+                pr.state === 'MERGED'
+                  ? 'bg-accent-tint text-accent-ink'
+                  : pr.state === 'OPEN'
+                    ? 'bg-green-tint text-green'
+                    : 'bg-field text-ink-3',
+              )}
+            >
+              {t(
+                pr.state === 'MERGED'
+                  ? 'wb.changes.prMerged'
+                  : pr.state === 'OPEN'
+                    ? 'wb.changes.prOpen'
+                    : 'wb.changes.prClosed',
+                pr.number,
+              )}
+            </span>
+            {pr.checks ? (
+              <span className="truncate font-mono text-[10.5px] text-ink-3 tabular-nums">
+                {t('wb.changes.prChecks', pr.checks.passed, pr.checks.total)}
+                {pr.checks.failed > 0 ? ` · ${t('wb.changes.prChecksFailed', pr.checks.failed)}` : ''}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={pr.title}
+              title={pr.title}
+              onClick={() => post({ type: 'openExternal', payload: { url: pr.url } })}
+            >
+              <ExternalLinkIcon className="size-3" />
+            </Button>
+            {pr.state === 'MERGED' && !remoteReadOnly ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="secondary"
+                data-testid="changes-pr-settle-btn"
+                onClick={() => {
+                  setSettleRemoveWorktree(Boolean(session.worktreePath));
+                  setSettleOpen(true);
+                }}
+              >
+                {t('wb.changes.prSettle')}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {/* 中部可滚动变更树/列表 */}
       {!state ? (
         <div className="flex flex-1 items-center justify-center px-3 py-6 text-[12px] text-ink-3">
@@ -364,8 +612,12 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                             files={group.files}
                             activeDiffPath={activeDiffPath}
                             collapsedDirs={collapsedDirs}
+                            canMutate={!remoteReadOnly && !busy}
                             onToggleDir={toggleDir}
                             onOpenDiff={openDiff}
+                            onStage={stageOne}
+                            onUnstage={unstageOne}
+                            onDiscard={setDiscardTarget}
                           />
                         ) : (
                           <div className="flex flex-col gap-0.5 pl-2">
@@ -375,7 +627,11 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                                 file={file}
                                 showDir
                                 activeDiffPath={activeDiffPath}
+                                canMutate={!remoteReadOnly && !busy}
                                 onOpenDiff={openDiff}
+                                onStage={stageOne}
+                                onUnstage={unstageOne}
+                                onDiscard={setDiscardTarget}
                               />
                             ))}
                           </div>
@@ -397,21 +653,36 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
 
           {/* 底部固定 IDEA 风格 Commit 区 */}
           <div className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border bg-sidebar px-2.5 py-2">
-            <Textarea
-              rows={3}
-              className="min-h-16 resize-none bg-surface/90 text-[12px] leading-snug"
-              value={commitMessage}
-              onChange={(event) => setCommitMessage(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                  event.preventDefault();
-                  commit();
-                }
-              }}
-              placeholder={t('wb.changes.commitPlaceholder')}
-              aria-label={t('wb.changes.commitPlaceholder')}
-              disabled={busy || remoteReadOnly || state.files.length === 0}
-            />
+            <div className="relative">
+              <Textarea
+                rows={3}
+                className="min-h-16 resize-none bg-surface/90 pr-8 text-[12px] leading-snug"
+                value={commitMessage}
+                onChange={(event) => setCommitMessage(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    commit();
+                  }
+                }}
+                placeholder={t('wb.changes.commitPlaceholder')}
+                aria-label={t('wb.changes.commitPlaceholder')}
+                disabled={busy || remoteReadOnly || state.files.length === 0}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid="changes-ai-commit-btn"
+                aria-label={t('wb.changes.aiCommit')}
+                title={generatingCommit ? t('wb.changes.generating') : t('wb.changes.aiCommit')}
+                disabled={generatingCommit || busy || remoteReadOnly || state.files.length === 0}
+                onClick={requestAiCommit}
+                className="absolute top-1.5 right-1.5 text-ink-3 hover:text-accent-ink"
+              >
+                <SparklesIcon className={cn('size-3.5', generatingCommit && 'spin')} />
+              </Button>
+            </div>
             <div className="flex items-center justify-between gap-2">
               {showStageToggle ? (
                 <label
@@ -475,6 +746,66 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(discardTarget)} onOpenChange={(open) => !open && setDiscardTarget(null)}>
+        <DialogContent data-testid="changes-discard-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('wb.changes.discardConfirmTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('wb.changes.discardConfirmDesc', discardTarget?.path ?? '')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setDiscardTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="changes-discard-confirm"
+              onClick={confirmDiscard}
+            >
+              {t('wb.changes.discardFile')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={settleOpen} onOpenChange={setSettleOpen}>
+        <DialogContent data-testid="changes-settle-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('wb.changes.prSettleTitle')}</DialogTitle>
+            <DialogDescription>{t('wb.changes.prSettleDesc')}</DialogDescription>
+          </DialogHeader>
+          <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-ink">
+            <Checkbox
+              checked={settleRemoveWorktree}
+              onCheckedChange={(v) => setSettleRemoveWorktree(v === true)}
+            />
+            <span>{t('wb.changes.prSettleRemoveWorktree')}</span>
+          </label>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setSettleOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="changes-settle-confirm"
+              onClick={() => {
+                setBusy(true);
+                post({
+                  type: 'sourceControlSettlePr',
+                  payload: { completeLinkedTask: true, removeWorktree: settleRemoveWorktree },
+                });
+              }}
+            >
+              {t('wb.changes.prSettle')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={prOpen} onOpenChange={setPrOpen}>
         <DialogContent data-testid="changes-pr-dialog">
           <DialogHeader>
@@ -482,7 +813,20 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
             <DialogDescription>{t('wb.changes.prHint')}</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="pr-title">{t('wb.changes.prTitleLabel')}</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="pr-title">{t('wb.changes.prTitleLabel')}</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                data-testid="changes-ai-pr-btn"
+                disabled={generatingPr || busy}
+                onClick={requestAiPr}
+              >
+                <SparklesIcon className={cn('size-3.5', generatingPr && 'spin')} />
+                <span>{generatingPr ? t('wb.changes.generating') : t('wb.changes.aiPr')}</span>
+              </Button>
+            </div>
             <Input id="pr-title" size="sm" value={prTitle} onChange={(event) => setPrTitle(event.target.value)} disabled={busy} />
             <Label htmlFor="pr-body">{t('wb.changes.prBodyLabel')}</Label>
             <Textarea id="pr-body" value={prBody} onChange={(event) => setPrBody(event.target.value)} rows={5} disabled={busy} />
@@ -509,12 +853,20 @@ function ChangeFileRow({
   file,
   showDir,
   activeDiffPath,
+  canMutate,
   onOpenDiff,
+  onStage,
+  onUnstage,
+  onDiscard,
 }: {
   readonly file: SourceControlFileView;
   readonly showDir: boolean;
   readonly activeDiffPath?: string;
+  readonly canMutate: boolean;
   readonly onOpenDiff: (file: SourceControlFileView) => void;
+  readonly onStage: (file: SourceControlFileView) => void;
+  readonly onUnstage: (file: SourceControlFileView) => void;
+  readonly onDiscard: (file: SourceControlFileView) => void;
 }) {
   const t = useT();
   const { normalized, name, dir } = splitFilePath(file.path);
@@ -523,38 +875,230 @@ function ChangeFileRow({
   const statusLabel = t(`wb.changes.status.${file.status}` as MessageKey);
 
   return (
-    <button
-      type="button"
-      data-testid={`changes-file-${normalized}`}
+    <div
       className={cn(
-        'flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left transition-colors duration-100 hover:bg-hover',
+        'group/file flex w-full items-center gap-1 rounded-control pr-1 transition-colors duration-100 hover:bg-hover',
         isSelected && 'bg-hover',
       )}
-      onClick={() => onOpenDiff(file)}
-      title={`${normalized} (${statusLabel})`}
     >
-      <FileTypeIcon path={file.path} className="size-4 shrink-0" />
-      <span className={cn('shrink-0 truncate text-[12px] font-medium', showDir ? 'max-w-[55%]' : 'min-w-0 flex-1', style.nameCls)}>
-        {name}
-      </span>
-      {showDir && dir ? (
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">{dir}</span>
-      ) : (
-        <span className="flex-1" />
-      )}
-      {file.additions !== undefined && file.additions > 0 ? (
-        <span className="shrink-0 font-mono text-[10.5px] text-green tabular-nums">+{file.additions}</span>
+      <button
+        type="button"
+        data-testid={`changes-file-${normalized}`}
+        className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left"
+        onClick={() => onOpenDiff(file)}
+        title={`${normalized} (${statusLabel})`}
+      >
+        <FileTypeIcon path={file.path} className="size-4 shrink-0" />
+        <span className={cn('shrink-0 truncate text-[12px] font-medium', showDir ? 'max-w-[55%]' : 'min-w-0 flex-1', style.nameCls)}>
+          {name}
+        </span>
+        {showDir && dir ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">{dir}</span>
+        ) : (
+          <span className="flex-1" />
+        )}
+        {file.additions !== undefined && file.additions > 0 ? (
+          <span className="shrink-0 font-mono text-[10.5px] text-green tabular-nums">+{file.additions}</span>
+        ) : null}
+        {file.deletions !== undefined && file.deletions > 0 ? (
+          <span className="shrink-0 font-mono text-[10.5px] text-red tabular-nums">−{file.deletions}</span>
+        ) : null}
+      </button>
+
+      {canMutate ? (
+        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/file:opacity-100 focus-within:opacity-100">
+          {!file.staged ? (
+            <button
+              type="button"
+              data-testid={`changes-discard-${normalized}`}
+              aria-label={t('wb.changes.discardFile')}
+              title={t('wb.changes.discardFile')}
+              className="inline-flex size-5 items-center justify-center rounded text-ink-3 hover:bg-hover-2 hover:text-red"
+              onClick={() => onDiscard(file)}
+            >
+              <UndoIcon className="size-3" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            data-testid={`${file.staged ? 'changes-unstage' : 'changes-stage'}-${normalized}`}
+            aria-label={file.staged ? t('wb.changes.unstageFile') : t('wb.changes.stageFile')}
+            title={file.staged ? t('wb.changes.unstageFile') : t('wb.changes.stageFile')}
+            className="inline-flex size-5 items-center justify-center rounded text-ink-3 hover:bg-hover-2 hover:text-ink"
+            onClick={() => (file.staged ? onUnstage(file) : onStage(file))}
+          >
+            {file.staged ? <MinusIcon className="size-3" /> : <PlusIcon className="size-3" />}
+          </button>
+        </div>
       ) : null}
-      {file.deletions !== undefined && file.deletions > 0 ? (
-        <span className="shrink-0 font-mono text-[10.5px] text-red tabular-nums">−{file.deletions}</span>
-      ) : null}
+
       <span
         className={cn('w-3 shrink-0 text-center font-mono text-[11px] font-semibold', style.badgeCls)}
         aria-label={statusLabel}
       >
         {style.letter}
       </span>
-    </button>
+    </div>
+  );
+}
+
+interface ChangeDirNode {
+  readonly name: string;
+  readonly fullPath: string;
+  readonly dirs: readonly ChangeDirNode[];
+  readonly files: readonly SourceControlFileView[];
+  readonly totalFiles: number;
+}
+
+interface MutableChangeDirNode {
+  name: string;
+  fullPath: string;
+  readonly dirs: Map<string, MutableChangeDirNode>;
+  readonly files: SourceControlFileView[];
+}
+
+function finalizeChangeDirNode(raw: MutableChangeDirNode): ChangeDirNode {
+  let dirs = [...raw.dirs.values()]
+    .map(finalizeChangeDirNode)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  let files = [...raw.files].sort((a, b) => splitFilePath(a.path).name.localeCompare(splitFilePath(b.path).name));
+  let name = raw.name;
+  let fullPath = raw.fullPath;
+
+  while (files.length === 0 && dirs.length === 1) {
+    const only = dirs[0]!;
+    name = `${name}/${only.name}`;
+    fullPath = only.fullPath;
+    dirs = [...only.dirs];
+    files = [...only.files];
+  }
+
+  const totalFiles = files.length + dirs.reduce((sum, child) => sum + child.totalFiles, 0);
+  return { name, fullPath, dirs, files, totalFiles };
+}
+
+export function buildChangeDirTree(files: readonly SourceControlFileView[]): {
+  readonly dirs: readonly ChangeDirNode[];
+  readonly rootFiles: readonly SourceControlFileView[];
+} {
+  const rootDirs = new Map<string, MutableChangeDirNode>();
+  const rootFiles: SourceControlFileView[] = [];
+
+  for (const file of files) {
+    const { dir } = splitFilePath(file.path);
+    const segments = dir ? dir.split('/').filter(Boolean) : [];
+    if (segments.length === 0) {
+      rootFiles.push(file);
+      continue;
+    }
+    let currentMap = rootDirs;
+    let currentPath = '';
+    let targetNode: MutableChangeDirNode | undefined;
+    for (const seg of segments) {
+      currentPath = currentPath ? `${currentPath}/${seg}` : seg;
+      let next = currentMap.get(seg);
+      if (!next) {
+        next = { name: seg, fullPath: currentPath, dirs: new Map(), files: [] };
+        currentMap.set(seg, next);
+      }
+      targetNode = next;
+      currentMap = next.dirs;
+    }
+    targetNode?.files.push(file);
+  }
+
+  const dirs = [...rootDirs.values()]
+    .map(finalizeChangeDirNode)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  rootFiles.sort((a, b) => splitFilePath(a.path).name.localeCompare(splitFilePath(b.path).name));
+  return { dirs, rootFiles };
+}
+
+function ChangeDirBranch({
+  groupId,
+  node,
+  depth,
+  activeDiffPath,
+  collapsedDirs,
+  canMutate,
+  onToggleDir,
+  onOpenDiff,
+  onStage,
+  onUnstage,
+  onDiscard,
+}: {
+  readonly groupId: string;
+  readonly node: ChangeDirNode;
+  readonly depth: number;
+  readonly activeDiffPath?: string;
+  readonly collapsedDirs: Readonly<Record<string, boolean>>;
+  readonly canMutate: boolean;
+  readonly onToggleDir: (key: string) => void;
+  readonly onOpenDiff: (file: SourceControlFileView) => void;
+  readonly onStage: (file: SourceControlFileView) => void;
+  readonly onUnstage: (file: SourceControlFileView) => void;
+  readonly onDiscard: (file: SourceControlFileView) => void;
+}) {
+  const key = `${groupId}:${node.fullPath}`;
+  const collapsed = Boolean(collapsedDirs[key]);
+  return (
+    <div className="flex flex-col" data-testid={`changes-dir-node-${node.fullPath}`}>
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => onToggleDir(key)}
+        title={node.fullPath}
+        style={{ paddingLeft: `${depth * 12 + 6}px` }}
+        className="flex w-full items-center gap-1.5 rounded-control py-1 pr-1.5 text-left text-[11.5px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
+      >
+        {collapsed ? (
+          <ChevronRightIcon className="size-3 shrink-0 text-ink-3" />
+        ) : (
+          <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+        )}
+        {collapsed ? (
+          <VscodeFolderIcon className="size-4 shrink-0" />
+        ) : (
+          <VscodeFolderOpenIcon className="size-4 shrink-0" />
+        )}
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{node.name}</span>
+        <span className="shrink-0 font-mono text-[10.5px] text-ink-3 tabular-nums">{node.totalFiles}</span>
+      </button>
+      {!collapsed ? (
+        <div className="flex flex-col gap-0.5">
+          {node.dirs.map((childDir) => (
+            <ChangeDirBranch
+              key={childDir.fullPath}
+              groupId={groupId}
+              node={childDir}
+              depth={depth + 1}
+              activeDiffPath={activeDiffPath}
+              collapsedDirs={collapsedDirs}
+              canMutate={canMutate}
+              onToggleDir={onToggleDir}
+              onOpenDiff={onOpenDiff}
+              onStage={onStage}
+              onUnstage={onUnstage}
+              onDiscard={onDiscard}
+            />
+          ))}
+          {node.files.map((file) => (
+            <div key={file.path} style={{ paddingLeft: `${(depth + 1) * 12}px` }}>
+              <ChangeFileRow
+                file={file}
+                showDir={false}
+                activeDiffPath={activeDiffPath}
+                canMutate={canMutate}
+                onOpenDiff={onOpenDiff}
+                onStage={onStage}
+                onUnstage={onUnstage}
+                onDiscard={onDiscard}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -563,81 +1107,57 @@ function DirectoryGroupedFiles({
   files,
   activeDiffPath,
   collapsedDirs,
+  canMutate,
   onToggleDir,
   onOpenDiff,
+  onStage,
+  onUnstage,
+  onDiscard,
 }: {
   readonly groupId: string;
   readonly files: readonly SourceControlFileView[];
   readonly activeDiffPath?: string;
   readonly collapsedDirs: Readonly<Record<string, boolean>>;
+  readonly canMutate: boolean;
   readonly onToggleDir: (key: string) => void;
   readonly onOpenDiff: (file: SourceControlFileView) => void;
+  readonly onStage: (file: SourceControlFileView) => void;
+  readonly onUnstage: (file: SourceControlFileView) => void;
+  readonly onDiscard: (file: SourceControlFileView) => void;
 }) {
-  const buckets = useMemo(() => {
-    const byDir = new Map<string, SourceControlFileView[]>();
-    for (const file of files) {
-      const { dir } = splitFilePath(file.path);
-      const list = byDir.get(dir) ?? [];
-      list.push(file);
-      byDir.set(dir, list);
-    }
-    return [...byDir.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [files]);
+  const tree = useMemo(() => buildChangeDirTree(files), [files]);
 
   return (
-    <div className="flex flex-col gap-0.5 pl-2" data-testid={`changes-dir-tree-${groupId}`}>
-      {buckets.map(([dir, dirFiles]) => {
-        if (!dir) {
-          return dirFiles.map((file) => (
-            <ChangeFileRow
-              key={file.path}
-              file={file}
-              showDir={false}
-              activeDiffPath={activeDiffPath}
-              onOpenDiff={onOpenDiff}
-            />
-          ));
-        }
-        const key = `${groupId}:${dir}`;
-        const collapsed = Boolean(collapsedDirs[key]);
-        return (
-          <div key={key} className="flex flex-col">
-            <button
-              type="button"
-              aria-expanded={!collapsed}
-              onClick={() => onToggleDir(key)}
-              title={dir}
-              className="flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left text-[11.5px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
-            >
-              {collapsed ? (
-                <ChevronRightIcon className="size-3 shrink-0 text-ink-3" />
-              ) : (
-                <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
-              )}
-              {collapsed ? (
-                <VscodeFolderIcon className="size-4 shrink-0" />
-              ) : (
-                <VscodeFolderOpenIcon className="size-4 shrink-0" />
-              )}
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{dir}</span>
-              <span className="shrink-0 font-mono text-[10.5px] text-ink-3 tabular-nums">{dirFiles.length}</span>
-            </button>
-            {!collapsed ? (
-              <div className="flex flex-col gap-0.5 pl-4">
-                {dirFiles.map((file) => (
-                  <ChangeFileRow
-                    key={file.path}
-                    file={file}
-                    showDir={false}
-                    activeDiffPath={activeDiffPath}
-                    onOpenDiff={onOpenDiff}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
+    <div className="flex flex-col gap-0.5 pl-1" data-testid={`changes-dir-tree-${groupId}`}>
+      {tree.dirs.map((dirNode) => (
+        <ChangeDirBranch
+          key={dirNode.fullPath}
+          groupId={groupId}
+          node={dirNode}
+          depth={0}
+          activeDiffPath={activeDiffPath}
+          collapsedDirs={collapsedDirs}
+          canMutate={canMutate}
+          onToggleDir={onToggleDir}
+          onOpenDiff={onOpenDiff}
+          onStage={onStage}
+          onUnstage={onUnstage}
+          onDiscard={onDiscard}
+        />
+      ))}
+      {tree.rootFiles.map((file) => (
+        <ChangeFileRow
+          key={file.path}
+          file={file}
+          showDir={false}
+          activeDiffPath={activeDiffPath}
+          canMutate={canMutate}
+          onOpenDiff={onOpenDiff}
+          onStage={onStage}
+          onUnstage={onUnstage}
+          onDiscard={onDiscard}
+        />
+      ))}
     </div>
   );
 }

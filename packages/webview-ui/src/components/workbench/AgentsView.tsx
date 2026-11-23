@@ -30,8 +30,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+
+const MODEL_DEFAULT_VALUE = '__default__';
 
 const DEFAULT_TOOLS: AgentToolConfig = {
   permissionPreset: 'workspace-write',
@@ -200,58 +202,79 @@ export function AgentsView() {
                 />
               </label>
 
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 [&_[data-slot=native-select-wrapper]]:w-full">
-                <label className="flex flex-col gap-1">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldBackend')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="agent-select-backend"
-                    value={backendId}
-                    onChange={(e) => setBackendId(e.target.value)}
-                  >
-                    {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
-                      <NativeSelectOption key={b.id} value={b.id}>
-                        {b.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
+                  <Select value={backendId} onValueChange={setBackendId}>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="agent-select-backend"
+                      aria-label={t('wb.agents.fieldBackend')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldModel')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="agent-select-model"
-                    value={modelKey}
-                    onChange={(e) => setModelKey(e.target.value)}
+                  <Select
+                    value={modelKey || MODEL_DEFAULT_VALUE}
+                    onValueChange={(value) => setModelKey(value === MODEL_DEFAULT_VALUE ? '' : value)}
                   >
-                    <NativeSelectOption value="">{t('wb.agents.modelDefault')}</NativeSelectOption>
-                    {mergedModels.map((m) => (
-                      <NativeSelectOption key={m.key} value={m.key}>
-                        {m.label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="agent-select-model"
+                      aria-label={t('wb.agents.fieldModel')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={MODEL_DEFAULT_VALUE}>{t('wb.agents.modelDefault')}</SelectItem>
+                      {mergedModels.map((m) => (
+                        <SelectItem key={m.key} value={m.key}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldPermission')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="agent-select-permission"
+                  <Select
                     value={tools.permissionPreset}
-                    onChange={(e) =>
+                    onValueChange={(value) =>
                       setTools({
                         ...tools,
-                        permissionPreset: e.target.value as AgentToolConfig['permissionPreset'],
+                        permissionPreset: value as AgentToolConfig['permissionPreset'],
                       })
                     }
                   >
-                    <NativeSelectOption value="read-only">{t('wb.schedules.permRead')}</NativeSelectOption>
-                    <NativeSelectOption value="workspace-write">{t('wb.schedules.permWorkspace')}</NativeSelectOption>
-                    <NativeSelectOption value="danger-full-access">{t('wb.schedules.permFull')}</NativeSelectOption>
-                  </NativeSelect>
-                </label>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="agent-select-permission"
+                      aria-label={t('wb.agents.fieldPermission')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="read-only">{t('wb.schedules.permRead')}</SelectItem>
+                      <SelectItem value="workspace-write">{t('wb.schedules.permWorkspace')}</SelectItem>
+                      <SelectItem value="danger-full-access">{t('wb.schedules.permFull')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {/* 工具配置 */}
@@ -413,18 +436,19 @@ export function AgentsView() {
                       />
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         {projectOptions.length > 0 ? (
-                          <div className="min-w-36 flex-1 [&_[data-slot=native-select-wrapper]]:w-full">
-                            <NativeSelect
-                              size="sm"
-                              value={delegateProject}
-                              onChange={(e) => setDelegateProject(e.target.value)}
-                            >
-                              {projectOptions.map(([path, label]) => (
-                                <NativeSelectOption key={path} value={path}>
-                                  {label}
-                                </NativeSelectOption>
-                              ))}
-                            </NativeSelect>
+                          <div className="min-w-36 flex-1">
+                            <Select value={delegateProject || undefined} onValueChange={setDelegateProject}>
+                              <SelectTrigger size="sm" className="w-full" aria-label={t('wb.tasks.selectProject')}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {projectOptions.map(([path, label]) => (
+                                  <SelectItem key={path} value={path}>
+                                    {label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                         ) : <span />}
                         <Button

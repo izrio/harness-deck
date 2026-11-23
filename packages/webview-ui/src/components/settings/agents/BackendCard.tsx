@@ -37,7 +37,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const LATEST_VERSION_VALUE = '__latest__';
 
 export const DESCRIPTIONS: Readonly<Record<string, MessageKey>> = {
   dsh: 'backend.desc.dsh',
@@ -364,26 +366,36 @@ export function BackendCard({
             </DialogHeader>
 
             <div className="flex flex-col gap-2.5">
-              <div className="[&_[data-slot=native-select-wrapper]]:w-full">
-                <NativeSelect
-                  size="sm"
-                  className="bg-surface text-[12px]"
-                  aria-label={t('settings.backend.versionSelect', backend.name)}
-                  data-testid={`version-select-${backend.id}`}
-                  disabled={!npmReady || isBusy}
-                  value={pickedVersion}
-                  onChange={(e) => setPickedVersion(e.target.value)}
-                >
-                  {!backend.available || (!backend.version && versionOptions.length === 0) ? (
-                    <NativeSelectOption value="">{t('settings.backend.latest')}</NativeSelectOption>
-                  ) : null}
-                  {versionOptions.map((ver) => (
-                    <NativeSelectOption key={ver} value={ver}>
-                      {ver === backend.version ? `v${ver} (${t('backend.current')})` : `v${ver}`}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </div>
+              {(() => {
+                const showLatestOption = !backend.available || (!backend.version && versionOptions.length === 0);
+                const selectValue = pickedVersion || (showLatestOption ? LATEST_VERSION_VALUE : undefined);
+                return (
+                  <Select
+                    disabled={!npmReady || isBusy}
+                    value={selectValue}
+                    onValueChange={(value) => setPickedVersion(value === LATEST_VERSION_VALUE ? '' : value)}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full bg-surface text-[12px]"
+                      aria-label={t('settings.backend.versionSelect', backend.name)}
+                      data-testid={`version-select-${backend.id}`}
+                    >
+                      <SelectValue placeholder={t('settings.backend.latest')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {showLatestOption ? (
+                        <SelectItem value={LATEST_VERSION_VALUE}>{t('settings.backend.latest')}</SelectItem>
+                      ) : null}
+                      {versionOptions.map((ver) => (
+                        <SelectItem key={ver} value={ver}>
+                          {ver === backend.version ? `v${ver} (${t('backend.current')})` : `v${ver}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              })()}
 
               {backend.versionsLoading ? (
                 <div className="flex items-center gap-1.5 text-[11.5px] text-ink-3">
@@ -394,13 +406,15 @@ export function BackendCard({
                 <div className="flex flex-col gap-0.5 text-[11.5px] text-red">
                   <div className="flex items-center gap-1.5">
                     <span>{t('settings.backend.versionsError')}</span>
-                    <button
+                    <Button
                       type="button"
-                      className="font-medium text-ink hover:underline"
+                      variant="link"
+                      size="xs"
+                      className="h-auto p-0 text-[11.5px] font-medium text-ink"
                       onClick={() => postToHost({ type: 'fetchBackendVersions', payload: { id: backend.id } })}
                     >
                       {t('settings.backend.retryVersions')}
-                    </button>
+                    </Button>
                   </div>
                   <span className="break-all font-mono text-[11px] text-ink-3" title={versionsError}>
                     {versionsError}

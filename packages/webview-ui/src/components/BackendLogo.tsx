@@ -63,5 +63,5 @@ export function monogram(name: string): string {
   if (words.length > 1) return words.slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   const word = words[0] ?? '?';
   const capitals = word.match(/\p{Lu}/gu) ?? [];
-  return (capitals.length >= 2 ? capitals.slice(0, 2).join('') : [...word].slice(0, 2).join('')).toUpperCase();
+  return (capitals.length >= 2 ? capitals.slice(0, 2).join('') : Array.from(word).slice(0, 2).join('')).toUpperCase();
 }

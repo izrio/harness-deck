@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { applyHostMessage, requestPrefill, setActiveModule, useView } from './store.ts';
+import {
+  applyHostMessage,
+  requestPrefill,
+  setActiveModule,
+  setRightPanelOpen,
+  setRightPanelTab,
+  useView,
+} from './store.ts';
 import { cn } from './lib/utils.ts';
-import { applyThemeMode } from './theme.ts';
+import { applyHighContrast, applyThemeMode, applyThemePreset } from './theme.ts';
 import { loadState, postToHost, saveState, startHostBridge, useTransportState } from './vscode.ts';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -21,6 +29,7 @@ import { Input } from '@/components/ui/input';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { LoaderGrid, Shimmer } from './components/beautifului/index.ts';
 import { BackendLogo } from './components/BackendLogo.tsx';
+import { CommandPalette } from './components/CommandPalette.tsx';
 import { DiffViewerModal } from './components/DiffViewerModal.tsx';
 import { HarnessDeckLogo } from './components/HarnessDeckLogo.tsx';
 import { Composer } from './components/Composer.tsx';
@@ -72,8 +81,33 @@ export function App() {
     }
   });
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
   const [worktreeBranch, setWorktreeBranch] = useState('');
+  const rightPanelOpen = useView((s) => s.rightPanelOpen);
+  const rightPanelTab = useView((s) => s.rightPanelTab);
+
+  // 全局快捷键：Cmd/Ctrl+K 打开命令面板，Ctrl/Cmd+J 快速切换右侧栏终端
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandPaletteOpen((open) => !open);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        if (rightPanelOpen && rightPanelTab === 'terminal') {
+          setRightPanelOpen(false);
+        } else {
+          setRightPanelTab('terminal');
+          setRightPanelOpen(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [rightPanelOpen, rightPanelTab]);
 
   const toggleSidebar = () => {
     const next = !sidebarOpen;
@@ -159,8 +193,10 @@ export function App() {
     apply('--terminal-font-size', appearance.terminalFontSize ? `${appearance.terminalFontSize}px` : undefined);
     apply('--terminal-line-height', appearance.terminalLineHeight ? String(appearance.terminalLineHeight) : undefined);
 
-    // 主题模式（默认深色，支持浅色 / 深色 / 跟随系统）
+    // 主题模式、OKLCH 预设与高对比度（无闪烁切换，不影响阅读排版参数）
     applyThemeMode(appearance.theme ?? 'dark');
+    applyThemePreset(appearance.preset ?? 'default');
+    applyHighContrast(Boolean(appearance.highContrast));
   }, [appearance]);
 
   if (transport.mode === 'mobile-web') {
@@ -193,6 +229,7 @@ export function App() {
         onToggleSidebar={toggleSidebar}
         onOpenMobileDrawer={() => setMobileDrawerOpen(true)}
         onNewWorktree={openNewWorktree}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
       />
       {transport.mode === 'mobile-web' && transport.status !== 'connected' && transport.suggestedRoute ? (
         <a
@@ -276,10 +313,17 @@ export function App() {
         {!settingsOpen ? <WorkbenchRightPanel /> : null}
       </SidebarProvider>
 
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onNewWorktree={openNewWorktree}
+      />
+
       <Dialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen}>
         <DialogContent data-testid="mobile-worktree-session-dialog">
           <DialogHeader>
             <DialogTitle>{t('mobile.confirm.worktreeTitle')}</DialogTitle>
+            <DialogDescription className="sr-only">{t('mobile.confirm.worktreePlaceholder')}</DialogDescription>
           </DialogHeader>
           <Input
             size="sm"
@@ -340,11 +384,11 @@ function EmptyState() {
         <p className="mt-0 mb-1.5 text-[16px] font-semibold tracking-tight text-ink">{t('apiKey.title')}</p>
         <p className="mx-auto my-0 max-w-72 text-[13px] leading-relaxed text-ink-2">{t('apiKey.hint')}</p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Button type="button" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
+          <Button type="button" size="sm" onClick={() => postToHost({ type: 'configureApiKey', payload: {} })}>
             <KeyIcon className="size-3.5" />
             {t('apiKey.configure')}
           </Button>
-          <Button type="button" variant="outline" onClick={() => postToHost({ type: 'openExternal', payload: { url: 'https://platform.deepseek.com/api_keys' } })}>
+          <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'openExternal', payload: { url: 'https://platform.deepseek.com/api_keys' } })}>
             <GlobeIcon className="size-3.5" />
             {t('apiKey.get')}
           </Button>

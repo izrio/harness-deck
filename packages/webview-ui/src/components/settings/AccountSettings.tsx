@@ -26,8 +26,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+
+const REGION_DEFAULT_VALUE = '__default__';
 import { cn } from '../../lib/utils.ts';
 import { useT } from '../../i18n.ts';
 import { setSettingsTab, useView } from '../../store.ts';
@@ -134,7 +136,7 @@ export function AccountSettings() {
   const [formError, setFormError] = useState<string | undefined>();
   const [pendingDelete, setPendingDelete] = useState<AccountView | undefined>();
   const [pendingLoginAfterCreate, setPendingLoginAfterCreate] = useState<
-    { readonly backendId: string; readonly label: string } | undefined
+    { readonly backendId: string; readonly existingIds: ReadonlySet<string> } | undefined
   >();
   const [copiedKey, setCopiedKey] = useState<string | undefined>();
   const initialRefreshedRef = useRef(false);
@@ -154,7 +156,7 @@ export function AccountSettings() {
         (item) =>
           !item.isSystemDefault &&
           item.backendId === pendingLoginAfterCreate.backendId &&
-          item.label === pendingLoginAfterCreate.label,
+          !pendingLoginAfterCreate.existingIds.has(item.id),
       );
     if (!match) return;
     setPendingLoginAfterCreate(undefined);
@@ -202,16 +204,17 @@ export function AccountSettings() {
   const submitEditor = (andLogin: boolean) => {
     if (!editor) return;
     const label = editor.label.trim();
-    if (!editor.isSystemDefault && !label) {
-      setFormError(t('settings.accounts.form.labelRequired'));
-      return;
-    }
+    const existingIds = new Set(
+      accountsState.items
+        .filter((item) => !item.isSystemDefault && item.backendId === editor.backendId)
+        .map((item) => item.id),
+    );
     postToHost({
       type: 'upsertAccount',
       payload: {
         ...(editor.id ? { id: editor.id } : {}),
         backendId: editor.backendId,
-        label: editor.isSystemDefault ? editor.label : label,
+        label,
         ...(editorAccountCap?.supportsSessionIsolation ? { isolateSessions: editor.isolateSessions } : {}),
         ...(editorAccountCap?.supportsRegion && editor.region ? { region: editor.region } : {}),
         ...((editorAccountCap?.loginKind === 'api-key' || editorAccountCap?.supportsRegion) && editor.apiKey.trim()
@@ -228,7 +231,7 @@ export function AccountSettings() {
       if (editor.id) {
         postToHost({ type: 'loginAccount', payload: { id: editor.id, backendId: editor.backendId } });
       } else {
-        setPendingLoginAfterCreate({ backendId: editor.backendId, label });
+        setPendingLoginAfterCreate({ backendId: editor.backendId, existingIds });
       }
     }
     closeEditor();
@@ -338,55 +341,71 @@ export function AccountSettings() {
           </DialogHeader>
 
           {editor ? (
-            <div className="flex flex-col gap-3 [&_[data-slot=native-select-wrapper]]:w-full">
-              <label className="flex flex-col gap-1">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.backend')}</span>
-                <NativeSelect
-                  size="sm"
+                <Select
                   disabled={!editor.isNew}
-                  data-testid="account-form-backend"
                   value={editor.backendId}
-                  onChange={(e) => setEditor({ ...editor, backendId: e.target.value })}
+                  onValueChange={(value) => setEditor({ ...editor, backendId: value })}
                 >
-                  {(editor.isNew ? multiAccountBackends : backends).map((b) => (
-                    <NativeSelectOption key={b.id} value={b.id}>
-                      {b.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  <SelectTrigger
+                    size="sm"
+                    className="w-full"
+                    data-testid="account-form-backend"
+                    aria-label={t('settings.accounts.form.backend')}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(editor.isNew ? multiAccountBackends : backends).map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.label')}</span>
+                <Input
+                  size="sm"
+                  data-testid="account-form-label"
+                  value={editor.label}
+                  placeholder={t('settings.accounts.form.labelPlaceholder')}
+                  onChange={(e) => {
+                    setFormError(undefined);
+                    setEditor({ ...editor, label: e.target.value });
+                  }}
+                />
               </label>
 
-              {!editor.isSystemDefault ? (
-                <label className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.label')}</span>
-                  <Input
-                    size="sm"
-                    data-testid="account-form-label"
-                    value={editor.label}
-                    placeholder={t('settings.accounts.form.labelPlaceholder')}
-                    onChange={(e) => {
-                      setFormError(undefined);
-                      setEditor({ ...editor, label: e.target.value });
-                    }}
-                  />
-                </label>
-              ) : null}
-
               {editorAccountCap?.supportsRegion && !editor.isSystemDefault ? (
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.region')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="account-form-region"
-                    value={editor.region}
-                    onChange={(e) => setEditor({ ...editor, region: e.target.value as AccountRegion | '' })}
+                  <Select
+                    value={editor.region || REGION_DEFAULT_VALUE}
+                    onValueChange={(value) =>
+                      setEditor({ ...editor, region: (value === REGION_DEFAULT_VALUE ? '' : value) as AccountRegion | '' })
+                    }
                   >
-                    <NativeSelectOption value="">{t('settings.accounts.form.regionDefault')}</NativeSelectOption>
-                    <NativeSelectOption value="cn">{t('settings.accounts.form.regionCn')}</NativeSelectOption>
-                    <NativeSelectOption value="ai">{t('settings.accounts.form.regionAi')}</NativeSelectOption>
-                    <NativeSelectOption value="internal">{t('settings.accounts.form.regionInternal')}</NativeSelectOption>
-                  </NativeSelect>
-                </label>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="account-form-region"
+                      aria-label={t('settings.accounts.form.region')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={REGION_DEFAULT_VALUE}>{t('settings.accounts.form.regionDefault')}</SelectItem>
+                      <SelectItem value="cn">{t('settings.accounts.form.regionCn')}</SelectItem>
+                      <SelectItem value="ai">{t('settings.accounts.form.regionAi')}</SelectItem>
+                      <SelectItem value="internal">{t('settings.accounts.form.regionInternal')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               ) : null}
 
               {(editorAccountCap?.loginKind === 'api-key' || editorAccountCap?.supportsRegion) && !editor.isSystemDefault ? (
@@ -870,22 +889,23 @@ function BackendAccountCard({
           <div className="flex flex-wrap items-center gap-2 rounded-control bg-inset/45 px-2.5 py-2">
             <KeyIcon className="size-3.5 shrink-0 text-accent-ink" />
             {compatibleProviders.length > 0 ? (
-              <NativeSelect
-                size="sm"
-                className="min-w-44 flex-1"
-                data-testid={`channel-provider-select-${backend.id}`}
-                value={activeProviderId ?? ''}
-                onChange={(e) => switchToProvider(e.target.value)}
-              >
-                <NativeSelectOption value="" disabled>
-                  {t('settings.accounts.providerSelectPlaceholder')}
-                </NativeSelectOption>
-                {compatibleProviders.map((p) => (
-                  <NativeSelectOption key={p.id} value={p.id}>
-                    {p.name}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+              <Select value={activeProviderId ?? ''} onValueChange={switchToProvider}>
+                <SelectTrigger
+                  size="sm"
+                  className="min-w-44 flex-1"
+                  data-testid={`channel-provider-select-${backend.id}`}
+                  aria-label={t('settings.accounts.providerSelectPlaceholder')}
+                >
+                  <SelectValue placeholder={t('settings.accounts.providerSelectPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {compatibleProviders.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
               <span className="flex-1 text-[12px] text-ink-3">{t('settings.accounts.noCompatibleProvider')}</span>
             )}
@@ -901,7 +921,7 @@ function BackendAccountCard({
         <div className="divide-y divide-line/40 border-t border-line/40 bg-inset/20">
           {accounts.map((acc) => {
             const isCurrent = activeMode === 'official' && activeAccountId === acc.id;
-            const canEdit = !acc.isSystemDefault || accountCap?.supportsRegion === true;
+            const canEdit = true;
             const statusKey = `settings.accounts.status.${acc.status}` as const;
             const showUse = !isCurrent;
             const showLogin = accountCap?.loginKind !== 'api-key' || acc.isSystemDefault;
@@ -939,19 +959,26 @@ function BackendAccountCard({
                     ) : null}
                   </div>
 
-                  {acc.identity || (acc.quota && acc.quota.windows.length > 0) ? (
-                    <div className="mt-1 flex flex-wrap items-center gap-2 pl-4 text-[11.5px] text-ink-3">
-                      {acc.identity ? <span className="truncate font-mono">{acc.identity}</span> : null}
-                      {acc.quota?.windows.slice(0, 3).map((win, idx) => (
-                        <span
-                          key={`${win.kind}:${win.label}:${idx}`}
-                          className="rounded bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
-                        >
-                          {formatQuotaChip(win, t)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
+                  {(() => {
+                    const visibleQuotaWindows = (acc.quota?.windows ?? []).filter(
+                      (win) => win.label.trim().toLowerCase() !== '3p',
+                    );
+                    const showIdentity = Boolean(acc.identity && acc.identity !== acc.label);
+                    if (!showIdentity && visibleQuotaWindows.length === 0) return null;
+                    return (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 pl-4 text-[11.5px] text-ink-3">
+                        {showIdentity ? <span className="truncate font-mono">{acc.identity}</span> : null}
+                        {visibleQuotaWindows.slice(0, 3).map((win, idx) => (
+                          <span
+                            key={`${win.kind}:${win.label}:${idx}`}
+                            className="rounded bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
+                          >
+                            {formatQuotaChip(win, t)}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {hasPrimary || hasSecondary ? (

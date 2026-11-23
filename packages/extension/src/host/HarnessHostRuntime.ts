@@ -9,10 +9,12 @@
  * - 系统通知调度（NotificationDispatcher）与全部 16 个宿主命令
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
   backendCapabilities,
+  deriveTurns,
   isProviderReadyForBackend,
   type AccountConfig,
   type AccountLoginProgress,
@@ -41,10 +43,17 @@ import {
   type RemoteState,
   type RuntimeStatus,
   type TabsState,
+  type ThemePreset,
   type WebviewToHost,
   type WorkbenchModule,
   type WorkbenchState,
 } from '@harness-deck/shared';
+import {
+  captureTurnCheckpoint,
+  listTurnCheckpoints,
+  restoreTurnCheckpoint,
+} from '../git/CheckpointManager.ts';
+import { EmbeddedTerminalManager } from '../terminal/EmbeddedTerminalManager.ts';
 import { AccountAuthFlowManager } from '../accounts/AccountAuthFlow.ts';
 import { inspectOfficialAccount, type AccountInspectionResult } from '../accounts/AccountInspector.ts';
 import {
@@ -212,6 +221,18 @@ const WORKBENCH_MESSAGE_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'sourceControlCommit',
   'sourceControlPush',
   'sourceControlCreatePr',
+  'sourceControlStageFile',
+  'sourceControlUnstageFile',
+  'sourceControlDiscardFile',
+  'sourceControlStageHunk',
+  'sourceControlDiscardHunk',
+  'sourceControlCheckoutBranch',
+  'sourceControlCreateBranch',
+  'sourceControlPull',
+  'sourceControlFetch',
+  'sourceControlGenerateCommitMessage',
+  'sourceControlGeneratePrDraft',
+  'sourceControlSettlePr',
   'markUnreadRead',
   'upsertSchedule',
   'toggleSchedule',
@@ -345,20 +366,48 @@ export function createHarnessHostRuntime(
       }
     }
     const content = await platform.workbench.readFile(fullPath);
+    const insideWorkspace = (() => {
+      const rel = relative(workspacePath, fullPath);
+      return !rel.startsWith('..') && !isAbsolute(rel);
+    })();
     const fileData = buildMobileFileContent(
       displayInlinePath(rawPath),
       content,
       t('open.failed', basename(fullPath), 'ENOENT'),
+      { editable: insideWorkspace && platform.isWorkspaceTrusted() },
     );
     post({ type: 'diffContent', payload: fileData });
   };
 
-  const sendInlineDiff = async (request: Parameters<Workbench['openDiff']>[0]): Promise<void> => {
+  const sendInlineDiff = async (
+    request: Parameters<Workbench['openDiff']>[0],
+    meta?: { readonly sourceControlPath?: string; readonly staged?: boolean },
+  ): Promise<void> => {
     const diffData = await buildMobileDiffContent(request, platform.workbench.readFile);
     post({
       type: 'diffContent',
-      payload: { ...diffData, path: displayInlinePath(diffData.path) },
+      payload: {
+        ...diffData,
+        path: displayInlinePath(diffData.path),
+        ...(meta?.sourceControlPath ? { sourceControlPath: meta.sourceControlPath } : {}),
+        ...(meta?.staged !== undefined ? { staged: meta.staged } : {}),
+      },
     });
+  };
+
+  const checkpointsBySession = new Map<string, readonly number[]>();
+  const terminalManager = new EmbeddedTerminalManager({
+    onStateChange: (state) => post({ type: 'terminalState', payload: state }),
+    onOutput: (event) => post({ type: 'terminalOutput', payload: event }),
+    log,
+  });
+
+  const refreshSessionCheckpoints = async (cwd: string, sessionId: string | undefined): Promise<readonly number[]> => {
+    if (!sessionId) return [];
+    const turns = await listTurnCheckpoints(cwd, sessionId);
+    checkpointsBySession.set(sessionId, turns);
+    post({ type: 'sessionCheckpoints', payload: { sessionId, turns } });
+    return turns;
   };
 
   const mobileAwareWorkbench: Workbench = {
@@ -634,10 +683,22 @@ export function createHarnessHostRuntime(
     });
   };
 
-  const withUnifiedTabs = (snapshot: HostSnapshot): HostSnapshot => ({
-    ...snapshot,
-    tabs: buildUnifiedTabsState(),
-  });
+  const withUnifiedTabs = (snapshot: HostSnapshot): HostSnapshot => {
+    const curTab = unifiedTabs.current;
+    const sid = snapshot.session.id;
+    const ckpts = sid ? checkpointsBySession.get(sid) : undefined;
+    return {
+      ...snapshot,
+      session: {
+        ...snapshot.session,
+        ...(ckpts && ckpts.length > 0 ? { checkpoints: ckpts } : {}),
+        ...(curTab?.worktreePath ? { worktreePath: curTab.worktreePath } : {}),
+        ...(curTab?.worktreeBranch ? { worktreeBranch: curTab.worktreeBranch } : {}),
+      },
+      tabs: buildUnifiedTabsState(),
+      terminal: terminalManager.getState(),
+    };
+  };
 
   const pushUnifiedTabs = (force = false): void => {
     if (!isAnyClientVisible()) return;
@@ -821,6 +882,12 @@ export function createHarnessHostRuntime(
   const readAppearance = (): AppearanceState => {
     const rawTheme = platform.settings.get<string>('ui.theme', 'dark');
     const theme = rawTheme === 'light' || rawTheme === 'dark' || rawTheme === 'system' ? rawTheme : 'dark';
+    const rawPreset = platform.settings.get<string>('ui.preset', 'default');
+    const preset: ThemePreset | undefined =
+      rawPreset === 'grove' || rawPreset === 'ocean' || rawPreset === 'ember' || rawPreset === 'iris'
+        ? rawPreset
+        : undefined;
+    const highContrast = platform.settings.get<boolean>('ui.highContrast', false);
     const size = platform.settings.get<number>('ui.fontSize', 0);
     const family = platform.settings.get<string>('ui.fontFamily', '').trim();
     const lineHeight = platform.settings.get<number>('ui.lineHeight', 0);
@@ -831,6 +898,8 @@ export function createHarnessHostRuntime(
     const terminalLineHeight = platform.settings.get<number>('ui.terminalLineHeight', 0);
     return {
       ...(theme ? { theme } : {}),
+      ...(preset ? { preset } : {}),
+      ...(highContrast ? { highContrast: true } : {}),
       ...(Number.isFinite(size) && size > 0 ? { fontSize: Math.min(32, Math.max(8, Math.round(size))) } : {}),
       ...(family ? { fontFamily: family } : {}),
       ...(Number.isFinite(lineHeight) && lineHeight > 0
@@ -920,8 +989,57 @@ export function createHarnessHostRuntime(
   const accountInspections = new Map<string, AccountInspectionResult & { readonly checkedAt: number }>();
   const accountRevision = new Map<string, number>();
   let accountsChecking = false;
+  const SYSTEM_ACCOUNT_LABELS_KEY = 'harnessDeck.systemAccountLabels';
+  const readSystemAccountLabels = (): Record<string, string> => {
+    const raw = platform.globalState.get<unknown>(SYSTEM_ACCOUNT_LABELS_KEY);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const out: Record<string, string> = {};
+    for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof val === 'string' && val.trim()) out[key] = val.trim();
+    }
+    return out;
+  };
+  const saveSystemAccountLabel = async (sysId: string, rawLabel: string): Promise<void> => {
+    const next = readSystemAccountLabels();
+    const clean = rawLabel.trim();
+    if (clean && clean !== t('account.systemDefault')) {
+      next[sysId] = clean;
+    } else {
+      delete next[sysId];
+    }
+    await platform.globalState.update(SYSTEM_ACCOUNT_LABELS_KEY, next);
+  };
+  const isAutoAccountLabel = (label: string, backendName: string): boolean => {
+    const escaped = backendName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    return new RegExp(`^${escaped}\\s+#\\d+$`, 'u').test(label.trim());
+  };
+  const nextAutoAccountLabel = (backendId: string, existing: readonly AccountConfig[]): string => {
+    const name = profiles().find((p) => p.id === backendId)?.name ?? backendId;
+    const used = new Set(existing.filter((a) => a.backendId === backendId).map((a) => a.label));
+    let n = existing.filter((a) => a.backendId === backendId).length + 2;
+    while (used.has(`${name} #${n}`)) n += 1;
+    return `${name} #${n}`;
+  };
+
   let lastActiveAntigravityAccountId: string | undefined;
   let lastActiveCodebuddyAccountId: string | undefined;
+
+  const currentSlotOwner = (backendId: string): string | undefined => {
+    const lower = backendId.toLowerCase();
+    if (lower === 'antigravity') {
+      return (
+        lastActiveAntigravityAccountId ??
+        activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts())
+      );
+    }
+    if (lower === 'codebuddy') {
+      return (
+        lastActiveCodebuddyAccountId ??
+        activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts())
+      );
+    }
+    return undefined;
+  };
 
   const bumpAccountRevision = (backendId: string): void => {
     accountRevision.set(backendId, (accountRevision.get(backendId) ?? 0) + 1);
@@ -955,6 +1073,7 @@ export function createHarnessHostRuntime(
   const accountsState = (): AccountsState => {
     const profileList = profiles();
     const configured = readAccounts();
+    const systemLabels = readSystemAccountLabels();
     const providers = readProviders();
     const rawChannels = readBackendChannels();
     const loginProg = accountAuthFlow.progress;
@@ -973,10 +1092,14 @@ export function createHarnessHostRuntime(
           loginProg.phase === 'waiting-browser' ||
           loginProg.phase === 'waiting-terminal' ||
           loginProg.phase === 'verifying');
+      const sysDisplayLabel =
+        systemLabels[sysId] ||
+        (sysInsp?.identity && !sysInsp.identity.includes('…') ? sysInsp.identity : undefined) ||
+        t('account.systemDefault');
       items.push({
         id: sysId,
         backendId: profile.id,
-        label: t('account.systemDefault'),
+        label: sysDisplayLabel,
         isSystemDefault: true,
         status: sysLoggingIn ? 'logging-in' : (sysInsp?.status ?? 'unknown'),
         ...(sysInsp?.identity ? { identity: sysInsp.identity } : {}),
@@ -997,10 +1120,14 @@ export function createHarnessHostRuntime(
             loginProg.phase === 'waiting-browser' ||
             loginProg.phase === 'waiting-terminal' ||
             loginProg.phase === 'verifying');
+        const resolvedLabel =
+          isAutoAccountLabel(acc.label, profile.name) && insp?.identity && !insp.identity.includes('…')
+            ? insp.identity
+            : acc.label;
         items.push({
           id: acc.id,
           backendId: acc.backendId,
-          label: acc.label,
+          label: resolvedLabel,
           ...(acc.isolateSessions ? { isolateSessions: true } : {}),
           ...(acc.region ? { region: acc.region } : {}),
           status: loggingIn ? 'logging-in' : (insp?.status ?? 'unknown'),
@@ -1061,11 +1188,31 @@ export function createHarnessHostRuntime(
       ...(clientVersion ? { clientVersion } : {}),
     });
     const prev = accountInspections.get(accountId);
+    const mergedIdentity = res.identity ?? (!includeQuota && res.status === 'authenticated' ? prev?.identity : undefined);
     accountInspections.set(accountId, {
       ...res,
+      ...(mergedIdentity ? { identity: mergedIdentity } : {}),
       ...(!includeQuota && prev?.quota && res.status === 'authenticated' ? { quota: prev.quota } : {}),
       checkedAt: Date.now(),
     });
+    // 若用户新增账号时留空名称（使用自动占位名），登录识别出真实邮箱/用户名后自动回写，免去手动命名
+    if (account && mergedIdentity && !mergedIdentity.includes('…')) {
+      const profileName = profiles().find((p) => p.id === backendId)?.name ?? backendId;
+      if (isAutoAccountLabel(account.label, profileName)) {
+        const currentAccounts = readAccounts();
+        const existingAcc = currentAccounts.find((a) => a.id === account.id);
+        if (existingAcc && isAutoAccountLabel(existingAcc.label, profileName)) {
+          const { accounts: renamed } = upsertAccountSetting(currentAccounts, {
+            id: existingAcc.id,
+            backendId: existingAcc.backendId,
+            label: mergedIdentity,
+            ...(existingAcc.isolateSessions ? { isolateSessions: true } : {}),
+            ...(existingAcc.region ? { region: existingAcc.region } : {}),
+          });
+          await writeSetting(undefined, 'accounts', renamed);
+        }
+      }
+    }
   };
 
   const refreshAccountInspections = async (options?: {
@@ -1110,11 +1257,37 @@ export function createHarnessHostRuntime(
       pushAccounts();
     },
     onComplete: async (accountId, backendId) => {
+      const lowerBackend = backendId.toLowerCase();
+      const currentBinding = channelFor(backendId);
+      const activeId = currentBinding.mode === 'official' ? (currentBinding.accountId ?? systemAccountId(backendId)) : undefined;
+      if (lowerBackend === 'antigravity') {
+        lastActiveAntigravityAccountId = accountId;
+        if (activeId && activeId !== accountId) {
+          const restored = await switchAntigravityCredentialSlot({
+            targetAccountId: activeId,
+            previousAccountId: accountId,
+            secrets: platform.secrets,
+            env: processEnv(),
+          });
+          if (restored.activated) lastActiveAntigravityAccountId = activeId;
+        }
+      } else if (lowerBackend === 'codebuddy') {
+        lastActiveCodebuddyAccountId = accountId;
+        if (activeId && activeId !== accountId) {
+          const restored = await switchCodebuddyCredentialSlot({
+            targetAccountId: activeId,
+            previousAccountId: accountId,
+            secrets: platform.secrets,
+            env: processEnv(),
+          });
+          if (restored.activated) lastActiveCodebuddyAccountId = activeId;
+        }
+      }
+      clearQuotaCacheFor(quotaProviderFor(profiles().find((p) => p.id === backendId)));
       const acc = readAccounts().find((a) => a.id === accountId);
       await inspectOneAccount(backendId, accountId, acc, true);
       bumpAccountRevision(backendId);
-      const currentBinding = channelFor(backendId);
-      if (currentBinding.mode === 'official' && (currentBinding.accountId ?? systemAccountId(backendId)) === accountId) {
+      if (activeId === accountId) {
         syncManagedBackendsForChannelChange(backendId);
       }
       pushAccounts();
@@ -1467,12 +1640,14 @@ export function createHarnessHostRuntime(
   const applyAppearancePatch = async (
     patch: Extract<WebviewToHost, { type: 'setAppearance' }>['payload'],
   ): Promise<void> => {
-    for (const [key, value] of Object.entries(patch) as [string, number | string | null | undefined][]) {
+    for (const [key, value] of Object.entries(patch) as [string, number | string | boolean | null | undefined][]) {
       if (value === undefined) continue;
       const cleared =
         value === null ||
         value === '' ||
         (key === 'theme' && value === 'dark') ||
+        (key === 'preset' && value === 'default') ||
+        (key === 'highContrast' && value === false) ||
         (key === 'paragraphSpacing' && typeof value === 'number' && value < 0) ||
         (key !== 'paragraphSpacing' && typeof value === 'number' && value <= 0);
       await writeSetting('ui', key, cleared ? undefined : value);
@@ -1563,6 +1738,7 @@ export function createHarnessHostRuntime(
     extensions: extensionsState(),
     ...(hub ? { workbench: hub.state() } : {}),
     ...(remoteBridgeBox.current ? { remote: remoteBridgeBox.current.getState() } : {}),
+    terminal: terminalManager.getState(),
   });
 
   const selectFolderCommand = async (): Promise<void> => {
@@ -1608,13 +1784,38 @@ export function createHarnessHostRuntime(
         const patched = withUnifiedTabs(message.payload);
         lastPostedTabsJson = JSON.stringify(patched.tabs);
         post({ type: 'snapshot', payload: patched });
+        const sid = patched.session.id;
+        if (sid && !checkpointsBySession.has(sid)) {
+          void refreshSessionCheckpoints(active.workspacePath ?? workspacePath, sid);
+        }
       }
+      return;
+    }
+    if (message.type === 'session') {
+      if (active?.backend.profile.id === backendId) {
+        const curTab = unifiedTabs.current;
+        const sid = message.payload.id;
+        const ckpts = sid ? checkpointsBySession.get(sid) : undefined;
+        post({
+          type: 'session',
+          payload: {
+            ...message.payload,
+            ...(ckpts && ckpts.length > 0 ? { checkpoints: ckpts } : {}),
+            ...(curTab?.worktreePath ? { worktreePath: curTab.worktreePath } : {}),
+            ...(curTab?.worktreeBranch ? { worktreeBranch: curTab.worktreeBranch } : {}),
+          },
+        });
+        if (sid && !checkpointsBySession.has(sid)) {
+          void refreshSessionCheckpoints(active.workspacePath ?? workspacePath, sid);
+        }
+      }
+      pushUnifiedTabs();
       return;
     }
     if (active?.backend.profile.id === backendId || message.type === 'toast') {
       post(message);
     }
-    if (message.type === 'session' || message.type === 'sessions' || message.type === 'interactions') {
+    if (message.type === 'sessions' || message.type === 'interactions') {
       pushUnifiedTabs();
     }
   };
@@ -1728,6 +1929,17 @@ export function createHarnessHostRuntime(
         if (prevRunning !== obs.running) {
           lastBackendRunning.set(profile.id, obs.running);
           pushBackends();
+          // 跨底层多回合 Git 检查点（P0-3）：每回合结束后自动快照当前工作区到隐藏 ref
+          if (prevRunning && !obs.running && obs.sessionId) {
+            const snap = entry?.backend.controller.peekSnapshot?.() ?? entry?.backend.controller.snapshot();
+            const turnCount = snap ? (snap.session.turns ?? deriveTurns(snap.items, false)).length : 0;
+            const targetCwd = entry?.workspacePath ?? workspacePath;
+            if (turnCount > 0) {
+              void captureTurnCheckpoint(targetCwd, obs.sessionId, turnCount).then((ok) => {
+                if (ok) void refreshSessionCheckpoints(targetCwd, obs.sessionId);
+              });
+            }
+          }
         }
         pushUnifiedTabs();
         hub?.observeSession(obs, profile.id);
@@ -1806,12 +2018,7 @@ export function createHarnessHostRuntime(
       const accountId = binding.accountId ?? systemAccountId(backendId);
       const acc = isSystemAccountId(accountId) ? undefined : readAccounts().find((a) => a.id === accountId);
       const lowerBackend = backendId.toLowerCase();
-      const prevSlotOwner =
-        lowerBackend === 'antigravity'
-          ? lastActiveAntigravityAccountId
-          : lowerBackend === 'codebuddy'
-            ? lastActiveCodebuddyAccountId
-            : undefined;
+      const prevSlotOwner = currentSlotOwner(backendId);
       const patch = await prepareAccountLaunchPatch({
         backendId,
         accountId,
@@ -2065,16 +2272,28 @@ export function createHarnessHostRuntime(
       ensureUnifiedTabsRestored(active);
       const tab = unifiedTabs.setActive(key);
       if (!tab) return;
+      // 多 worktree 并行标签（P1-5）：切换回绑定了独立 worktree 的标签时自动同步工作区，不中断其他后台标签执行
+      if (tab.worktreePath && tab.worktreePath !== workspacePath) {
+        workspacePath = tab.worktreePath;
+        await platform.workspaceState.update(FOLDER_KEY, workspacePath);
+        pushProjects();
+        void hub?.refreshSourceControl();
+      }
       if (tab.backendId !== active?.backend.profile.id) {
         await activateBackend(
           tab.backendId,
           false,
           tab.sessionId ? { targetSessionId: tab.sessionId } : { openBlank: true },
         );
+        if (tab.sessionId) void refreshSessionCheckpoints(tab.worktreePath ?? workspacePath, tab.sessionId);
         log(`已通过标签切换到底层 ${active?.backend.profile.name ?? tab.backendId}`);
         return;
       }
       if (active) {
+        if (tab.worktreePath && active.workspacePath !== tab.worktreePath) {
+          active.workspacePath = tab.worktreePath;
+          active.backend.controller.setWorkspace(tab.worktreePath);
+        }
         await withSuppressedTabSync(async () => {
           if (tab.sessionId) {
             await active!.backend.controller.handle({
@@ -2085,6 +2304,7 @@ export function createHarnessHostRuntime(
             await active!.backend.controller.handle({ type: 'newSession', payload: {} });
           }
         });
+        if (tab.sessionId) void refreshSessionCheckpoints(tab.worktreePath ?? workspacePath, tab.sessionId);
       }
       pushUnifiedTabs();
     });
@@ -2442,7 +2662,35 @@ export function createHarnessHostRuntime(
       platform.schedulerLockDir ? isSchedulerLockHeld(schedulerLockPath(platform.schedulerLockDir), process.pid) : false,
     ...(platform.onSchedulesChanged ? { onSchedulesChanged: platform.onSchedulesChanged } : {}),
     openFile: (path) => sendInlineFile(path),
-    openDiff: (request) => sendInlineDiff(request),
+    openDiff: (request, meta) => sendInlineDiff(request, meta),
+    confirm: (message, detail, action) => mobileAwareWorkbench.confirm(message, detail, action),
+    getDirectProvider: async () => {
+      const providers = readProviders();
+      const activeId = active?.backend.profile.id;
+      const ordered = [
+        ...(activeId ? providers.filter((p) => p.boundBackendIds.includes(activeId)) : []),
+        ...providers.filter((p) => !activeId || !p.boundBackendIds.includes(activeId)),
+      ];
+      for (const provider of ordered) {
+        if (!provider.openaiChatUrl && !provider.anthropicUrl) continue;
+        const apiKey = await platform.secrets.get(providerSecretKey(provider.id));
+        if (apiKey?.trim()) {
+          return { provider, apiKey: apiKey.trim() };
+        }
+      }
+      return undefined;
+    },
+    removeWorktree: async (target) => {
+      const { mainRepoPath } = await removeProjectWorktree({ worktreePath: target, log });
+      const nextRecent = removeRecentProjectFromList(readRecentProjects(), target);
+      await platform.globalState.update(RECENT_PROJECTS_KEY, nextRecent);
+      hub?.removeProjectSessions(target);
+      if (normalizeProjectPath(target) === normalizeProjectPath(workspacePath)) {
+        await switchWorkspace(mainRepoPath);
+      } else {
+        pushProjects();
+      }
+    },
     workspacePath: () => workspacePath,
     projects: projectsState,
     profiles,
@@ -2654,6 +2902,8 @@ export function createHarnessHostRuntime(
       }
       if (
         affects('ui.theme') ||
+        affects('ui.preset') ||
+        affects('ui.highContrast') ||
         affects('ui.fontSize') ||
         affects('ui.fontFamily') ||
         affects('ui.lineHeight') ||
@@ -3168,7 +3418,8 @@ export function createHarnessHostRuntime(
       void (async () => {
         const payload = message.payload;
         if (payload.id && isSystemAccountId(payload.id)) {
-          // 本机默认账号只允许更新附加凭据（如 CodeBuddy usage-cookie）
+          // 本机默认账号支持自定义名称（留空恢复自动识别邮箱 / 默认名称）及附加凭据（如 CodeBuddy usage-cookie）
+          await saveSystemAccountLabel(payload.id, payload.label);
           if (payload.usageCookie !== undefined) {
             const cleanCookie = payload.usageCookie.trim();
             if (cleanCookie) await platform.secrets.store(accountCookieSecretKey(payload.id), cleanCookie);
@@ -3178,12 +3429,23 @@ export function createHarnessHostRuntime(
           await inspectOneAccount(payload.backendId, payload.id, undefined, false);
           pushAccounts();
           syncManagedBackendsForChannelChange(payload.backendId);
+          const displayLabel =
+            readSystemAccountLabels()[payload.id] ||
+            accountInspections.get(payload.id)?.identity ||
+            t('account.systemDefault');
+          post({ type: 'toast', payload: { level: 'info', text: t('account.saved', displayLabel) } });
           return;
         }
-        const { accounts: nextAccounts, account: saved } = upsertAccountSetting(readAccounts(), {
+        const existingAccounts = readAccounts();
+        const trimmedLabel = payload.label.trim();
+        const effectiveLabel =
+          trimmedLabel ||
+          (payload.id ? accountInspections.get(payload.id)?.identity : undefined) ||
+          nextAutoAccountLabel(payload.backendId, existingAccounts);
+        const { accounts: nextAccounts, account: saved } = upsertAccountSetting(existingAccounts, {
           ...(payload.id ? { id: payload.id } : {}),
           backendId: payload.backendId,
-          label: payload.label,
+          label: effectiveLabel,
           ...(payload.isolateSessions !== undefined ? { isolateSessions: payload.isolateSessions } : {}),
           ...(payload.region ? { region: payload.region } : {}),
         });
@@ -3201,6 +3463,25 @@ export function createHarnessHostRuntime(
         }
         await writeSetting(undefined, 'accounts', nextAccounts.length > 0 ? nextAccounts : undefined);
         if (payload.setActive) {
+          const lowerSavedBackend = saved.backendId.toLowerCase();
+          const prevOwner = currentSlotOwner(saved.backendId);
+          if (lowerSavedBackend === 'antigravity') {
+            const sw = await switchAntigravityCredentialSlot({
+              targetAccountId: saved.id,
+              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+              secrets: platform.secrets,
+              env: processEnv(),
+            });
+            if (sw.activated) lastActiveAntigravityAccountId = saved.id;
+          } else if (lowerSavedBackend === 'codebuddy') {
+            const sw = await switchCodebuddyCredentialSlot({
+              targetAccountId: saved.id,
+              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+              secrets: platform.secrets,
+              env: processEnv(),
+            });
+            if (sw.activated) lastActiveCodebuddyAccountId = saved.id;
+          }
           const nextChannels = setBackendChannelSetting(readBackendChannels(), saved.backendId, {
             mode: 'official',
             accountId: saved.id,
@@ -3262,17 +3543,14 @@ export function createHarnessHostRuntime(
           }
           return;
         }
+        const prevOwner = currentSlotOwner(profile.id);
         await accountAuthFlow.startLogin({
           backendId: profile.id,
           backendName: profile.name,
           accountId: id,
           ...(foundAccount ? { account: foundAccount } : {}),
           ...(profile.kind === 'acp' ? { acpCommand: profile.command } : {}),
-          ...(profile.id === 'antigravity' && lastActiveAntigravityAccountId
-            ? { previousActiveAccountId: lastActiveAntigravityAccountId }
-            : profile.id === 'codebuddy' && lastActiveCodebuddyAccountId
-              ? { previousActiveAccountId: lastActiveCodebuddyAccountId }
-              : {}),
+          ...(prevOwner ? { previousActiveAccountId: prevOwner } : {}),
         });
       })();
       return;
@@ -3349,23 +3627,24 @@ export function createHarnessHostRuntime(
           nextBinding = { mode: 'provider', providerId: target.id };
         } else {
           const targetAccountId = accountId?.trim() || systemAccountId(backendId);
+          const prevOwner = currentSlotOwner(backendId);
           nextBinding = { mode: 'official', accountId: targetAccountId };
           if (backendId.toLowerCase() === 'antigravity') {
-            await switchAntigravityCredentialSlot({
+            const sw = await switchAntigravityCredentialSlot({
               targetAccountId,
-              ...(lastActiveAntigravityAccountId ? { previousAccountId: lastActiveAntigravityAccountId } : {}),
+              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
               secrets: platform.secrets,
               env: processEnv(),
             });
-            lastActiveAntigravityAccountId = targetAccountId;
+            if (sw.activated) lastActiveAntigravityAccountId = targetAccountId;
           } else if (backendId.toLowerCase() === 'codebuddy') {
-            await switchCodebuddyCredentialSlot({
+            const sw = await switchCodebuddyCredentialSlot({
               targetAccountId,
-              ...(lastActiveCodebuddyAccountId ? { previousAccountId: lastActiveCodebuddyAccountId } : {}),
+              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
               secrets: platform.secrets,
               env: processEnv(),
             });
-            lastActiveCodebuddyAccountId = targetAccountId;
+            if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
           }
         }
         const nextChannels = setBackendChannelSetting(readBackendChannels(), backendId, nextBinding);
@@ -3374,12 +3653,13 @@ export function createHarnessHostRuntime(
         pushAccounts();
         pushProviders();
         syncManagedBackendsForChannelChange(backendId);
+        const sysId = systemAccountId(backendId);
         const channelLabel =
           nextBinding.mode === 'provider'
             ? (readProviders().find((p) => p.id === nextBinding.providerId)?.name ?? nextBinding.providerId)
             : nextBinding.accountId && !isSystemAccountId(nextBinding.accountId)
               ? (readAccounts().find((a) => a.id === nextBinding.accountId)?.label ?? t('account.systemDefault'))
-              : t('account.systemDefault');
+              : (readSystemAccountLabels()[sysId] || accountInspections.get(sysId)?.identity || t('account.systemDefault'));
         post({
           type: 'toast',
           payload: {
@@ -3721,10 +4001,22 @@ export function createHarnessHostRuntime(
             config,
             log,
           });
-          // 串行化：整窗切到 worktree，同一时间只有一个工作区活动；其他会话保留在标签与历史里。
-          await switchWorkspace(result.worktreePath);
+          // 多 worktree 并行标签（P1-5）：保留已有运行中的标签，独立打开绑定到该 worktree 的新标签
+          await saveRecentProjectPath(result.worktreePath);
+          workspacePath = result.worktreePath;
+          await platform.workspaceState.update(FOLDER_KEY, workspacePath);
           startIfNeeded();
-          await openNewTabInActive();
+          ensureUnifiedTabsRestored(active);
+          const backendId = active?.backend.profile.id ?? targetBackendId;
+          unifiedTabs.openNew(backendId, { path: result.worktreePath, branch: result.branch });
+          if (active) {
+            active.workspacePath = result.worktreePath;
+            active.backend.controller.setWorkspace(result.worktreePath);
+            await withSuppressedTabSync(() => active!.backend.controller.handle({ type: 'newSession', payload: {} }));
+          }
+          pushProjects();
+          pushUnifiedTabs(true);
+          void hub?.refreshSourceControl();
           post({ type: 'toast', payload: { level: 'info', text: t('project.worktreeSessionCreated', result.worktreePath) } });
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
@@ -3740,6 +4032,14 @@ export function createHarnessHostRuntime(
           return;
         }
         const target = normalizeProjectPath(message.payload.path) || message.payload.path;
+        // 若该 worktree 上仍有并行运行的会话标签，拒绝移除，避免中断进行中的智能体
+        const runningOnTarget = buildUnifiedTabsState().items.some(
+          (tab) => tab.running && tab.worktreePath && (normalizeProjectPath(tab.worktreePath) || tab.worktreePath) === target,
+        );
+        if (runningOnTarget) {
+          post({ type: 'toast', payload: { level: 'error', text: t('rollback.running') } });
+          return;
+        }
         const confirmed =
           message.payload.confirmed === true ||
           (await mobileAwareWorkbench.confirm(
@@ -3865,6 +4165,201 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'previewFile') {
       void sendInlineFile(message.payload.path);
+      return;
+    }
+    if (message.type === 'saveWorkspaceFile') {
+      void (async () => {
+        const rawPath = message.payload.path;
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'fileSaved', payload: { path: rawPath, ok: false, error: t('workspace.untrusted') } });
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        const fullPath = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspacePath, rawPath);
+        const relCheck = relative(workspacePath, fullPath);
+        if (relCheck.startsWith('..') || isAbsolute(relCheck)) {
+          post({ type: 'fileSaved', payload: { path: rawPath, ok: false, error: 'EACCES' } });
+          post({ type: 'toast', payload: { level: 'error', text: t('file.saveFailed', basename(rawPath), 'EACCES') } });
+          return;
+        }
+        // 解析真实路径防止符号链接逃逸工作区根目录
+        try {
+          const realRoot = await realpath(workspacePath).catch(() => resolve(workspacePath));
+          const realTarget = await realpath(fullPath).catch(async () => {
+            const realParent = await realpath(dirname(fullPath));
+            return resolve(realParent, basename(fullPath));
+          });
+          const realRel = relative(realRoot, realTarget);
+          if (realRel.startsWith('..') || isAbsolute(realRel)) {
+            post({ type: 'fileSaved', payload: { path: rawPath, ok: false, error: 'EACCES' } });
+            post({ type: 'toast', payload: { level: 'error', text: t('file.saveFailed', basename(rawPath), 'EACCES') } });
+            return;
+          }
+        } catch {
+          // 目标目录尚不存在时依赖后续 writeFile 报错
+        }
+        try {
+          await platform.workbench.writeFile(fullPath, message.payload.content);
+          post({ type: 'fileSaved', payload: { path: rawPath, ok: true } });
+          post({ type: 'toast', payload: { level: 'info', text: t('file.saved', basename(fullPath)) } });
+          void hub?.refreshSourceControl();
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          post({ type: 'fileSaved', payload: { path: rawPath, ok: false, error: msg } });
+          post({ type: 'toast', payload: { level: 'error', text: t('file.saveFailed', basename(fullPath), msg) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'rollbackToTurn') {
+      void (async () => {
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        const snap = active?.backend.controller.peekSnapshot?.() ?? active?.backend.controller.snapshot();
+        const sid = snap?.session.id;
+        if (!sid) {
+          post({ type: 'toast', payload: { level: 'error', text: t('rollback.noTurn') } });
+          return;
+        }
+        if (snap.session.running) {
+          post({ type: 'toast', payload: { level: 'error', text: t('rollback.running') } });
+          return;
+        }
+        const confirmed =
+          message.payload.confirmed === true ||
+          (await mobileAwareWorkbench.confirm(
+            t('checkpoint.confirm', message.payload.turnSeq),
+            t('checkpoint.confirmDetail', message.payload.turnSeq),
+            t('checkpoint.action'),
+          ));
+        if (!confirmed) return;
+        const targetCwd = active?.workspacePath ?? workspacePath;
+        const res = await restoreTurnCheckpoint(targetCwd, sid, message.payload.turnSeq);
+        if (res.ok) {
+          void hub?.refreshSourceControl();
+          post({ type: 'toast', payload: { level: 'info', text: t('checkpoint.restored', message.payload.turnSeq) } });
+        } else {
+          post({ type: 'toast', payload: { level: 'error', text: t('checkpoint.failed', res.error ?? '') } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'forkSessionAtTurn' || message.type === 'editAndResendTurn') {
+      void (async () => {
+        const snap = active?.backend.controller.peekSnapshot?.() ?? active?.backend.controller.snapshot();
+        if (!snap) return;
+        const targetTurn = message.payload.turnSeq;
+        const isEdit = message.type === 'editAndResendTurn';
+        const targetCwd = active?.workspacePath ?? workspacePath;
+
+        // 编辑重发且勾选了同步回滚工作区时，先回滚到上一回合检查点
+        if (isEdit && message.payload.rollbackFiles && snap.session.id && targetTurn > 1) {
+          await restoreTurnCheckpoint(targetCwd, snap.session.id, targetTurn - 1);
+          void hub?.refreshSourceControl();
+        }
+
+        // 整理前 N 轮（编辑重发时为前 N-1 轮）的对话上下文摘要，跨所有底层通用
+        const cutoffTurns = isEdit ? targetTurn - 1 : targetTurn;
+        const transcriptParts: string[] = [];
+        let seenTurns = 0;
+        for (const item of snap.items) {
+          if (item.kind === 'user' && item.pending !== 'queued' && !item.queue) {
+            seenTurns += 1;
+            if (seenTurns > cutoffTurns) break;
+            transcriptParts.push(`User (Turn ${seenTurns}):\n${item.text.slice(0, 2_000)}`);
+          } else if (item.kind === 'assistant' && seenTurns >= 1 && seenTurns <= cutoffTurns && item.markdown) {
+            transcriptParts.push(`Assistant (Turn ${seenTurns}):\n${item.markdown.slice(0, 2_500)}`);
+          }
+        }
+
+        try {
+          await openNewTabInActive();
+          const contextBlock =
+            transcriptParts.length > 0
+              ? `[Forked conversation context up to turn ${cutoffTurns}]\n\n${transcriptParts.join('\n\n---\n\n')}\n\n---\n\n`
+              : '';
+
+          if (isEdit) {
+            const combined = `${contextBlock}${message.payload.text}`;
+            await active?.backend.controller.handle({
+              type: 'sendMessage',
+              payload: { text: combined },
+            });
+          } else {
+            const prompt = contextBlock
+              ? `${contextBlock}Please acknowledge the forked context above concisely and wait for my next instruction.`
+              : 'Continuing from forked session.';
+            await active?.backend.controller.handle({
+              type: 'sendMessage',
+              payload: { text: prompt },
+            });
+            post({ type: 'toast', payload: { level: 'info', text: t('session.forked', targetTurn) } });
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          post({ type: 'toast', payload: { level: 'error', text: t('session.forkFailed', msg) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'terminalCreate') {
+      if (!platform.isWorkspaceTrusted()) {
+        post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+        return;
+      }
+      const fallbackCwd = active?.workspacePath || workspacePath;
+      let resolvedCwd = fallbackCwd;
+      if (message.payload.cwd?.trim()) {
+        const requested = normalizeProjectPath(message.payload.cwd.trim()) || resolve(message.payload.cwd.trim());
+        const allowedRoots = [
+          normalizeProjectPath(fallbackCwd) || fallbackCwd,
+          normalizeProjectPath(workspacePath) || workspacePath,
+          ...readRecentProjects().map((p) => p.path),
+        ];
+        const insideAllowed = allowedRoots.some((root) => {
+          const rel = relative(root, requested);
+          return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+        });
+        if (insideAllowed) resolvedCwd = requested;
+      }
+      terminalManager.create({
+        cwd: resolvedCwd,
+        ...(message.payload.title ? { title: message.payload.title } : {}),
+        ...(message.payload.cols !== undefined ? { cols: message.payload.cols } : {}),
+        ...(message.payload.rows !== undefined ? { rows: message.payload.rows } : {}),
+      });
+      return;
+    }
+    if (message.type === 'terminalInput') {
+      if (!platform.isWorkspaceTrusted()) return;
+      terminalManager.write(message.payload.id, message.payload.data);
+      return;
+    }
+    if (message.type === 'terminalResize') {
+      terminalManager.resize(message.payload.id, message.payload.cols, message.payload.rows);
+      return;
+    }
+    if (message.type === 'terminalClose') {
+      terminalManager.close(message.payload.id);
+      return;
+    }
+    if (message.type === 'terminalRestart') {
+      if (!platform.isWorkspaceTrusted()) return;
+      terminalManager.restart(message.payload.id);
+      return;
+    }
+    if (message.type === 'terminalClear') {
+      terminalManager.clear(message.payload.id);
+      return;
+    }
+    if (message.type === 'terminalSelect') {
+      terminalManager.select(message.payload.id);
+      const scrollback = terminalManager.getScrollback(message.payload.id);
+      if (scrollback) {
+        post({ type: 'terminalOutput', payload: { id: message.payload.id, data: scrollback, reset: true } });
+      }
       return;
     }
     if (message.type === 'previewMarkdown') {
@@ -4243,6 +4738,7 @@ export function createHarnessHostRuntime(
         gatewayLogTimer = undefined;
       }
       accountAuthFlow.dispose();
+      terminalManager.dispose();
       for (const dispose of disposers.splice(0)) dispose();
       await remoteBridge.stop();
       clientHub.dispose();

@@ -192,6 +192,33 @@ describe('输入框', () => {
     }
     expect(items[0]?.textContent).toContain('Ask before edits and commands, per your permission rules.');
   });
+
+  it('输入文字重新测量高度期间锁定输入卡片最小高度，避免临时收缩挤压上方对话流滚动条', () => {
+    render(createElement(Composer));
+    host({ type: 'snapshot', payload: snapshot() });
+
+    const box = input();
+    const card = document.querySelector('.composer') as HTMLDivElement;
+    expect(card).toBeTruthy();
+
+    Object.defineProperty(card, 'offsetHeight', { configurable: true, get: () => 168 });
+    const observedMinHeightsDuringAuto: string[] = [];
+    Object.defineProperty(box, 'scrollHeight', {
+      configurable: true,
+      get: () => {
+        if (box.style.height === 'auto') {
+          observedMinHeightsDuringAuto.push(card.style.minHeight);
+        }
+        return 44;
+      },
+    });
+
+    fireEvent.change(box, { target: { value: '全项目里的' } });
+
+    expect(observedMinHeightsDuringAuto).toEqual(['168px']);
+    expect(card.style.minHeight).toBe('');
+    expect(box.style.height).toBe('44px');
+  });
 });
 
 describe('输入框上方的状态栏', () => {

@@ -120,6 +120,7 @@ export function buildMobileFileContent(
   path: string,
   content: string | undefined,
   missingMessage = 'File not found',
+  options?: { readonly editable?: boolean },
 ): DiffContentData {
   const language = inferLanguage(path);
   if (content === undefined) {
@@ -133,13 +134,15 @@ export function buildMobileFileContent(
     };
   }
   const clipped = truncateText(content);
+  const editable = Boolean(options?.editable && !clipped.truncated);
   return {
     path,
     title: basename(path),
     ...(language ? { language } : {}),
     kind: 'file',
     after: clipped.text,
-    readonly: true,
+    readonly: !editable,
+    ...(editable ? { editable: true } : {}),
     ...(clipped.truncated ? { truncated: true } : {}),
   };
 }

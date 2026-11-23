@@ -615,19 +615,23 @@ export function useVirtualThread({
         return;
       }
 
-      // 若原先处于贴底态且因内容异步/新挂载变高（如长回复渲染、代码高亮）导致 distance 骤增，
-      // 但用户并未向上滚动（scrollTop 未减小），则继续贴底而不误判为用户上翻回弹到中部
+      // 若原先处于贴底态且因内容变高（如长回复渲染、代码高亮）或视口变矮（如输入框多行增高）导致 distance 骤增，
+      // 但用户并未向上滚动（scrollTop 未减小），则继续贴底而不误判为用户上翻
+      const contentGrew = prevScrollHeight > 0 && el.scrollHeight > prevScrollHeight + 1;
+      const clientShrank = lastClientHeightRef.current > 0 && el.clientHeight < lastClientHeightRef.current - 1;
       if (
         stickRef.current &&
         distance >= STICK_THRESHOLD &&
         lastClientHeightRef.current > 0 &&
-        prevScrollHeight > 0 &&
-        el.scrollHeight > prevScrollHeight + 1 &&
+        (contentGrew || clientShrank) &&
         el.scrollTop >= prevScrollTop - 1
       ) {
         el.scrollTop = el.scrollHeight;
         lastScrollTopRef.current = el.scrollTop;
         lastScrollHeightRef.current = el.scrollHeight;
+        if (el.clientHeight > 0) {
+          lastClientHeightRef.current = el.clientHeight;
+        }
         setFarFromBottom(false);
         setUnseen(false);
         return;

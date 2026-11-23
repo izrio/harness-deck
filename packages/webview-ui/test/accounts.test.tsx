@@ -221,4 +221,86 @@ describe('AccountSettings & ModelPicker channel switching', () => {
       payload: { backendId: 'claude', mode: 'provider', providerId: 'volc' },
     });
   });
+
+  it('hides Antigravity 3p quota chips in AccountSettings while keeping gemini windows', () => {
+    applyHostMessage({
+      type: 'snapshot',
+      payload: {
+        ...makeSnapshot(),
+        backends: {
+          items: [
+            {
+              id: 'antigravity',
+              name: 'Antigravity',
+              kind: 'acp',
+              available: true,
+              capabilities: backendCapabilities({ id: 'antigravity', kind: 'acp', name: 'Antigravity' }),
+            },
+          ],
+          active: 'antigravity',
+        },
+        accounts: {
+          items: [
+            {
+              id: 'agy-1',
+              backendId: 'antigravity',
+              label: 'user@gmail.com',
+              status: 'authenticated',
+              plan: 'Google OAuth',
+              quota: {
+                windows: [
+                  { kind: 'weekly', label: 'gemini', usedPercent: 30, remainingPercent: 70 },
+                  { kind: 'session', label: 'gemini', usedPercent: 5, remainingPercent: 95 },
+                  { kind: 'weekly', label: '3p', usedPercent: 100, remainingPercent: 0 },
+                ],
+                queriedAt: Date.now(),
+              },
+            },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'agy-1' } },
+        },
+      },
+    });
+
+    render(<AccountSettings />);
+    const row = screen.getByTestId('account-row-agy-1');
+    expect(row.textContent).toContain('每周·gemini');
+    expect(row.textContent).toContain('5小时·gemini');
+    expect(row.textContent).not.toContain('3p');
+  });
+
+  it('supports editing system default account name and adding a new account without typing a label', () => {
+    render(<AccountSettings />);
+    vscodeMock.reset();
+
+    // 1. 本机默认账号支持编辑自定义名称
+    openActionsMenu('account-actions-system:claude');
+    fireEvent.click(screen.getByTestId('account-edit-system:claude'));
+    const labelInput = screen.getByTestId('account-form-label');
+    fireEvent.change(labelInput, { target: { value: '主账号' } });
+    fireEvent.click(screen.getByTestId('account-form-save'));
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'upsertAccount',
+      payload: {
+        id: 'system:claude',
+        backendId: 'claude',
+        label: '主账号',
+        isolateSessions: false,
+      },
+    });
+
+    // 2. 新增账号时不输入标题也能直接保存并触发登录（由宿主自动命名并在登录后读取邮箱回填）
+    vscodeMock.reset();
+    fireEvent.click(screen.getByTestId('add-account-claude'));
+    fireEvent.click(screen.getByTestId('account-form-save-login'));
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'upsertAccount',
+      payload: {
+        backendId: 'claude',
+        label: '',
+        isolateSessions: false,
+        setActive: true,
+      },
+    });
+  });
 });

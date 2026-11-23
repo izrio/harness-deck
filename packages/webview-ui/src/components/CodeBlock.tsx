@@ -4,8 +4,16 @@ import { cn } from '../lib/utils.ts';
 import { CheckIcon, CodeIcon, CopyIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
-/** Beautiful UI CodeBlock：统一 surface + shadow-card、顶栏标题与复制按钮、行号与竖线分割。 */
-export const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string; lang?: string }) {
+/** Beautiful UI CodeBlock：对话内联代码块（card）与全屏文件查看器无边框代码画布（plain）共用 Shiki 高亮。 */
+export const CodeBlock = memo(function CodeBlock({
+  code,
+  lang,
+  variant = 'card',
+}: {
+  code: string;
+  lang?: string;
+  variant?: 'card' | 'plain';
+}) {
   const [lines, setLines] = useState<HighlightedLines | undefined>(() => cachedHighlight(code, lang));
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -46,6 +54,63 @@ export const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string;
   };
 
   const rawLines = code.split('\n');
+  const totalLines = lines ? lines.length : rawLines.length;
+  const gutterWidth = Math.max(variant === 'plain' ? 44 : 28, String(totalLines).length * 8 + 16);
+
+  const codeContent = (
+    <pre
+      className={cn(
+        'terminal-surface relative m-0 overflow-x-auto text-ink-2',
+        variant === 'plain' && 'min-h-full',
+        lines && 'shiki',
+      )}
+    >
+      <code className="relative block bg-transparent py-2.5 font-mono text-inherit">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 w-px bg-line/70"
+          style={{ left: `${gutterWidth}px` }}
+        />
+        {lines
+          ? lines.map((line, i) => (
+              <div
+                className="line grid items-start"
+                style={{ gridTemplateColumns: `${gutterWidth}px minmax(0,1fr)` }}
+                key={i}
+              >
+                <span className="select-none pr-2.5 text-right text-[11px] text-ink-3 tabular-nums">{i + 1}</span>
+                <span className="pr-3 pl-3 whitespace-pre">
+                  {line.length === 0
+                    ? '\u200b'
+                    : line.map((token, j) => (
+                        <span key={j} style={token.style as CSSProperties}>
+                          {token.content}
+                        </span>
+                      ))}
+                </span>
+              </div>
+            ))
+          : rawLines.map((line, i) => (
+              <div
+                className="line grid items-start"
+                style={{ gridTemplateColumns: `${gutterWidth}px minmax(0,1fr)` }}
+                key={i}
+              >
+                <span className="select-none pr-2.5 text-right text-[11px] text-ink-3 tabular-nums">{i + 1}</span>
+                <span className="pr-3 pl-3 whitespace-pre">{line || '\u200b'}</span>
+              </div>
+            ))}
+      </code>
+    </pre>
+  );
+
+  if (variant === 'plain') {
+    return (
+      <div className="code-block code-block--plain min-h-full w-full bg-canvas" data-lang={lang ?? ''}>
+        {codeContent}
+      </div>
+    );
+  }
 
   return (
     <div className="code-block my-2.5 w-full overflow-hidden rounded-xl border border-line bg-inset/70 dark:bg-surface">
@@ -69,30 +134,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string;
         </button>
       </div>
 
-      <pre className={cn('terminal-surface relative m-0 overflow-x-auto text-ink-2', lines && 'shiki')}>
-        <code className="relative block bg-transparent py-2.5 font-mono text-inherit">
-          <span aria-hidden className="pointer-events-none absolute inset-y-0 left-7 w-px bg-line" />
-          {lines
-            ? lines.map((line, i) => (
-                <div className="line grid grid-cols-[28px_minmax(0,1fr)] items-start" key={i}>
-                  <span className="select-none text-center text-[11px] text-ink-3 tabular-nums">{i + 1}</span>
-                  <span className="pr-3 pl-2.5 whitespace-pre">
-                    {line.length === 0 ? '\u200b' : line.map((token, j) => (
-                      <span key={j} style={token.style as CSSProperties}>
-                        {token.content}
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              ))
-            : rawLines.map((line, i) => (
-                <div className="line grid grid-cols-[28px_minmax(0,1fr)] items-start" key={i}>
-                  <span className="select-none text-center text-[11px] text-ink-3 tabular-nums">{i + 1}</span>
-                  <span className="pr-3 pl-2.5 whitespace-pre">{line || '\u200b'}</span>
-                </div>
-              ))}
-        </code>
-      </pre>
+      {codeContent}
     </div>
   );
 });

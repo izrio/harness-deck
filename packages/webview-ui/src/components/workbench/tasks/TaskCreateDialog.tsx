@@ -3,8 +3,8 @@ import type { AgentProfile, BackendsState, ModelOption, PermissionState, Schedul
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useT, type MessageKey } from '../../../i18n.ts';
 import { cn } from '../../../lib/utils.ts';
@@ -20,6 +20,7 @@ import { PermissionPicker } from '../../PermissionPicker.tsx';
 
 const SEARCH_DELAY_MS = 60;
 const FALLBACK_PERMISSIONS = ['auto', 'workspace-write', 'read-only', 'danger-full-access'] as const;
+const AGENT_NONE_VALUE = '__none__';
 
 let nextTaskSearchId = 500_000;
 
@@ -419,36 +420,37 @@ export function TaskCreateDialog({
 
           {/* 3. 项目 / 委派智能体 */}
           {projectOptions.length > 0 || agents.length > 0 ? (
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 [&_[data-slot=native-select-wrapper]]:w-full">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
               {projectOptions.length > 0 ? (
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectProject')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="task-select-project"
-                    aria-label={t('wb.tasks.selectProject')}
-                    value={projectPath}
-                    onChange={(e) => setProjectPath(e.target.value)}
-                  >
-                    {projectOptions.map(([path, label]) => (
-                      <NativeSelectOption key={path} value={path}>
-                        {label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
+                  <Select value={projectPath || undefined} onValueChange={setProjectPath}>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="task-select-project"
+                      aria-label={t('wb.tasks.selectProject')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projectOptions.map(([path, label]) => (
+                        <SelectItem key={path} value={path}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               ) : null}
 
               {agents.length > 0 ? (
-                <label className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('wb.tasks.selectAgent')}</span>
-                  <NativeSelect
-                    size="sm"
-                    data-testid="task-select-agent"
-                    aria-label={t('wb.tasks.selectAgent')}
-                    value={agentId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
+                  <Select
+                    value={agentId || AGENT_NONE_VALUE}
+                    onValueChange={(value) => {
+                      const nextId = value === AGENT_NONE_VALUE ? '' : value;
                       setAgentId(nextId);
                       const chosen = agents.find((a) => a.id === nextId);
                       if (chosen) {
@@ -464,14 +466,24 @@ export function TaskCreateDialog({
                       }
                     }}
                   >
-                    <NativeSelectOption value="">{t('wb.tasks.agentNone')}</NativeSelectOption>
-                    {agents.map((a) => (
-                      <NativeSelectOption key={a.id} value={a.id}>
-                        {a.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="task-select-agent"
+                      aria-label={t('wb.tasks.selectAgent')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={AGENT_NONE_VALUE}>{t('wb.tasks.agentNone')}</SelectItem>
+                      {agents.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -520,19 +532,26 @@ export function TaskCreateDialog({
 
             {scheduleEnabled ? (
               <div className="flex flex-col gap-2 border-t border-line/60 pt-2.5">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 [&_[data-slot=native-select-wrapper]]:w-full">
-                  <NativeSelect
-                    size="sm"
-                    data-testid="task-schedule-freq"
-                    aria-label={t('wb.schedules.fieldWhen')}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Select
                     value={freqKind}
-                    onChange={(e) => setFreqKind(e.target.value as ScheduleFrequency['kind'])}
+                    onValueChange={(value) => setFreqKind(value as ScheduleFrequency['kind'])}
                   >
-                    <NativeSelectOption value="once">{t('wb.schedules.freqOnce')}</NativeSelectOption>
-                    <NativeSelectOption value="daily">{t('wb.schedules.freqDaily')}</NativeSelectOption>
-                    <NativeSelectOption value="weekly">{t('wb.schedules.freqWeekly')}</NativeSelectOption>
-                    <NativeSelectOption value="interval">{t('wb.schedules.freqInterval')}</NativeSelectOption>
-                  </NativeSelect>
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full"
+                      data-testid="task-schedule-freq"
+                      aria-label={t('wb.schedules.fieldWhen')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="once">{t('wb.schedules.freqOnce')}</SelectItem>
+                      <SelectItem value="daily">{t('wb.schedules.freqDaily')}</SelectItem>
+                      <SelectItem value="weekly">{t('wb.schedules.freqWeekly')}</SelectItem>
+                      <SelectItem value="interval">{t('wb.schedules.freqInterval')}</SelectItem>
+                    </SelectContent>
+                  </Select>
 
                   {freqKind === 'daily' || freqKind === 'weekly' ? (
                     <Input

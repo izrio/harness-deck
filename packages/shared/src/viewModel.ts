@@ -42,8 +42,14 @@ export interface SessionChangesView {
  * - 阅读与聊天：`fontFamily`、`fontSize`、`lineHeight`、`paragraphSpacing`、`contentWidth` 共用于聊天回复、计划和 Markdown 文件预览，切换主题不会改变这些设置。
  * - 终端与代码：`codeFontFamily`、`terminalFontSize`、`terminalLineHeight`。
  */
+export type ThemePreset = 'default' | 'grove' | 'ocean' | 'ember' | 'iris';
+
 export interface AppearanceState {
   readonly theme?: 'system' | 'light' | 'dark';
+  /** 精选 OKLCH 配色预设（default 为 Quiet Zinc / Cool Slate）。 */
+  readonly preset?: ThemePreset;
+  /** 高对比度增强模式（提升边框与文本对比度）。 */
+  readonly highContrast?: boolean;
   readonly fontSize?: number;
   readonly fontFamily?: string;
   readonly lineHeight?: number;
@@ -419,6 +425,12 @@ export interface SessionHeader {
   readonly subagentOf?: { readonly parentId: string };
   /** 本会话（已加载的历史里）改过的文件；没有改动时为 undefined。 */
   readonly changes?: SessionChangesView;
+  /** 已记录 Git 检查点的回合序号列表（1-based，跨底层通用）。 */
+  readonly checkpoints?: readonly number[];
+  /** 当前会话绑定的独立 worktree 路径（如有）。 */
+  readonly worktreePath?: string;
+  /** 当前会话绑定的 worktree 分支名（如有）。 */
+  readonly worktreeBranch?: string;
 }
 
 /** 对话面板里打开的一个标签：一个会话，或还没发送第一条消息的新对话。 */
@@ -434,6 +446,10 @@ export interface TabView {
   readonly running: boolean;
   /** 有等待处理的审批或提问。 */
   readonly needsAttention?: boolean;
+  /** 该标签绑定的独立 worktree 路径（支持多 worktree 并行运行）。 */
+  readonly worktreePath?: string;
+  /** 该标签绑定的 worktree 分支名。 */
+  readonly worktreeBranch?: string;
 }
 
 export interface TabsState {
@@ -1020,8 +1036,36 @@ export interface SourceControlGhStatus {
   readonly detail?: string;
 }
 
+export interface SourceControlPrChecks {
+  readonly total: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly pending: number;
+}
+
+export interface SourceControlPrStatus {
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  readonly state: 'OPEN' | 'MERGED' | 'CLOSED';
+  readonly mergeStateStatus?: string;
+  readonly reviewDecision?: string;
+  readonly checks?: SourceControlPrChecks;
+}
+
 export interface SourceControlActionResult {
-  readonly kind: 'commit' | 'push' | 'pr';
+  readonly kind:
+    | 'commit'
+    | 'push'
+    | 'pr'
+    | 'stage'
+    | 'unstage'
+    | 'discard'
+    | 'checkout'
+    | 'branch'
+    | 'pull'
+    | 'fetch'
+    | 'settle';
   readonly ok: boolean;
   readonly at: number;
   readonly message?: string;
@@ -1034,6 +1078,8 @@ export interface SourceControlState {
   /** 仓库根目录（绝对路径）。 */
   readonly root?: string;
   readonly branch?: string;
+  /** 本地分支列表（用于分支切换）。 */
+  readonly branches?: readonly string[];
   readonly remote?: string;
   readonly files: readonly SourceControlFileView[];
   readonly additions: number;
@@ -1044,9 +1090,28 @@ export interface SourceControlState {
   readonly error?: string;
   /** GitHub CLI（gh）可用性与登录状态。 */
   readonly gh?: SourceControlGhStatus;
-  /** 最近一次显式写操作（commit / push / pr）的结果，供界面清理草稿或保留失败输入。 */
+  /** 当前分支关联的 Pull Request 状态（需 gh 已登录且分支存在 PR）。 */
+  readonly pr?: SourceControlPrStatus;
+  /** 最近一次显式写操作的结果，供界面清理草稿或保留失败输入。 */
   readonly lastAction?: SourceControlActionResult;
   readonly updatedAt: number;
+}
+
+/** 内置终端标签页会话状态（右侧栏「终端」标签页）。 */
+export interface TerminalSessionView {
+  readonly id: string;
+  readonly title: string;
+  readonly cwd: string;
+  readonly running: boolean;
+  readonly exitCode?: number;
+  readonly cols: number;
+  readonly rows: number;
+  readonly createdAt: number;
+}
+
+export interface TerminalState {
+  readonly sessions: readonly TerminalSessionView[];
+  readonly activeId?: string;
 }
 
 export interface WorkbenchState {
@@ -1291,7 +1356,7 @@ export interface RemoteState {
   readonly error?: string;
 }
 
-/** 移动端内嵌 Diff 审阅与只读文件预览（HD-25）。 */
+/** 移动端与内置代码/Diff 审阅查看器数据（HD-25 / P0-1）。 */
 export interface DiffContentData {
   readonly path: string;
   readonly title: string;
@@ -1305,4 +1370,9 @@ export interface DiffContentData {
   readonly deletions?: number;
   readonly truncated?: boolean;
   readonly readonly?: boolean;
+  /** 是否允许在内置 CodeMirror 6 编辑器中直接保存修改。 */
+  readonly editable?: boolean;
+  /** 若来自 Git 工作区改动，记录相对路径与暂存态以支持按 Hunk 暂存/撤销。 */
+  readonly sourceControlPath?: string;
+  readonly staged?: boolean;
 }

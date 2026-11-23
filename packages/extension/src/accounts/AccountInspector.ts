@@ -12,6 +12,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { AccountAuthStatus, AccountConfig, QuotaView } from '@harness-deck/shared';
 import { queryClaudeQuota } from '../claude/quota.ts';
 import type { SecretStore } from '../host/HostPlatform.ts';
+import { createProxyAwareFetch, type FetchLike } from '../providers/proxyFetch.ts';
 import { queryAntigravityQuota } from '../quota/antigravity.ts';
 import { queryCodebuddyQuota } from '../quota/codebuddy.ts';
 import { parseEpochMs, rec, type Rec } from '../quota/util.ts';
@@ -292,11 +293,15 @@ async function inspectCodebuddy(params: {
     const slotKey = accountSlotSecretKey(accountId);
     const storedSlot = (await secrets.get(slotKey))?.trim();
     let slotRaw = storedSlot;
-    if (isActiveSlot || (!slotRaw && isSystemAccountId(accountId))) {
+    // 只有当前激活槽位才允许读取磁盘最新凭据；非激活槽位（含非激活时的本机默认账号）与尚未登录的新增账号绝不读取磁盘，避免串号
+    const canReadDisk = isSystemAccountId(accountId)
+      ? isActiveSlot !== false
+      : isActiveSlot === true && Boolean(storedSlot);
+    if (canReadDisk) {
       const diskRaw = (await readCodebuddyDiskAuthSnapshot(env))?.trim();
       if (diskRaw) {
         slotRaw = diskRaw;
-        if (isActiveSlot && diskRaw !== storedSlot) {
+        if (isActiveSlot === true && diskRaw !== storedSlot) {
           await secrets.store(slotKey, diskRaw).catch(() => undefined);
         }
       }
@@ -384,6 +389,80 @@ async function queryAntigravitySlotQuota(params: {
   }
 }
 
+function parseAntigravityIdentityFingerprint(raw: string): { readonly refreshToken?: string; readonly email?: string } {
+  try {
+    const json = rec(JSON.parse(raw));
+    const token = rec(json?.token);
+    const refreshToken =
+      (typeof token?.refresh_token === 'string' && token.refresh_token.trim()) ||
+      (typeof token?.refreshToken === 'string' && token.refreshToken.trim()) ||
+      (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
+      (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
+      undefined;
+    const idPayload = decodeJwtPayloadUnsafe(token?.id_token ?? json?.id_token);
+    const email =
+      (typeof json?.email === 'string' && json.email.trim().toLowerCase()) ||
+      (typeof idPayload?.email === 'string' && idPayload.email.trim().toLowerCase()) ||
+      undefined;
+    return { ...(refreshToken ? { refreshToken } : {}), ...(email ? { email } : {}) };
+  } catch {
+    return {};
+  }
+}
+
+function antigravityTokensSameAccount(a: string, b: string): boolean {
+  const fa = parseAntigravityIdentityFingerprint(a);
+  const fb = parseAntigravityIdentityFingerprint(b);
+  if (fa.refreshToken && fb.refreshToken && fa.refreshToken !== fb.refreshToken) return false;
+  if (fa.email && fb.email && fa.email !== fb.email) return false;
+  return true;
+}
+
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
+const GOOGLE_USERINFO_TIMEOUT_MS = 6_000;
+const googleUserInfoCache = new Map<string, string | null>();
+
+async function fetchGoogleUserEmail(params: {
+  readonly accessToken: string;
+  readonly getHttpProxy?: () => string | undefined;
+  readonly fetchImpl?: FetchLike;
+}): Promise<string | undefined> {
+  const { accessToken, getHttpProxy, fetchImpl } = params;
+  if (!fetchImpl && googleUserInfoCache.has(accessToken)) {
+    return googleUserInfoCache.get(accessToken) ?? undefined;
+  }
+  const fetchFn = fetchImpl ?? createProxyAwareFetch(getHttpProxy);
+  try {
+    const response = await fetchFn(GOOGLE_USERINFO_URL, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${accessToken}`,
+      },
+      signal: AbortSignal.timeout(GOOGLE_USERINFO_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      return undefined;
+    }
+    const json = rec(await response.json());
+    const identity =
+      (typeof json?.email === 'string' && json.email.trim()) ||
+      (typeof json?.name === 'string' && json.name.trim()) ||
+      undefined;
+    if (!fetchImpl) {
+      if (googleUserInfoCache.size >= 64) {
+        const oldest = googleUserInfoCache.keys().next().value;
+        if (oldest !== undefined) googleUserInfoCache.delete(oldest);
+      }
+      googleUserInfoCache.set(accessToken, identity ?? null);
+    }
+    return identity;
+  } catch {
+    return undefined;
+  }
+}
+
 async function inspectAntigravity(params: {
   readonly accountId: string;
   readonly isActiveSlot?: boolean;
@@ -392,30 +471,37 @@ async function inspectAntigravity(params: {
   readonly now: number;
   readonly includeQuota?: boolean;
   readonly getHttpProxy?: () => string | undefined;
+  readonly fetchImpl?: FetchLike;
   readonly clientVersion?: string;
 }): Promise<AccountInspectionResult> {
-  const { accountId, isActiveSlot, env, secrets, now, includeQuota, getHttpProxy, clientVersion } = params;
+  const { accountId, isActiveSlot, env, secrets, now, includeQuota, getHttpProxy, fetchImpl, clientVersion } = params;
   const slotKey = accountSlotSecretKey(accountId);
   const storedRaw = (await secrets.get(slotKey))?.trim();
   let raw = storedRaw;
 
-  // 当前激活槽位（或本机默认槽位无快照时）优先读取磁盘最新凭据，
-  // 避免 `agy` 自动续期更新了本地 token 文件后，面板仍读取到 SecretStorage 里的旧过期快照。
-  if (isActiveSlot || (!raw && isSystemAccountId(accountId))) {
+  // 严格按槽位隔离磁盘凭据读取：
+  // - 非激活槽位（isActiveSlot === false，含本机默认账号）绝不读取磁盘文件，避免把当前激活账号的 token 与用量串给其他账号；
+  // - 尚未登录过的新增独立账号（!storedRaw）即使已设为当前渠道，也绝不窃取磁盘上原账号的 token；
+  // - 当前激活槽位（已有快照，或激活的本机默认账号）读取磁盘被 CLI 自动续期的新 token 时，仅在同一账号时回写同步。
+  const canReadDisk = isSystemAccountId(accountId)
+    ? isActiveSlot !== false
+    : isActiveSlot === true && Boolean(storedRaw);
+  if (canReadDisk) {
     const diskRaw = (await readAntigravityDiskTokenRaw(env))?.trim();
-    if (diskRaw) {
+    if (diskRaw && (!storedRaw || antigravityTokensSameAccount(storedRaw, diskRaw))) {
       raw = diskRaw;
-      if (isActiveSlot && diskRaw !== storedRaw) {
+      if (isActiveSlot === true && diskRaw !== storedRaw) {
         await secrets.store(slotKey, diskRaw).catch(() => undefined);
       }
     }
   }
   if (!raw) {
-    // 兼容检查两个路径均无凭据
-    const hasPrimary = await pathExists(antigravityPrimaryTokenPath(env));
-    const hasFallback = await pathExists(antigravityFallbackTokenPath(env));
-    if (isSystemAccountId(accountId) && (hasPrimary || hasFallback)) {
-      return { status: 'unknown' };
+    if (isSystemAccountId(accountId) && isActiveSlot !== false) {
+      const hasPrimary = await pathExists(antigravityPrimaryTokenPath(env));
+      const hasFallback = await pathExists(antigravityFallbackTokenPath(env));
+      if (hasPrimary || hasFallback) {
+        return { status: 'unknown' };
+      }
     }
     return { status: 'unauthenticated' };
   }
@@ -441,19 +527,31 @@ async function inspectAntigravity(params: {
   // Google OAuth access_token 约 1 小时过期，只要存在 refresh_token，`agy` 运行时会自动刷新，仍为可用登录态
   const expired = accessTokenExpired && !refreshToken;
   const idPayload = decodeJwtPayloadUnsafe(token?.id_token ?? json?.id_token);
-  const email =
+  let email =
     (typeof json?.email === 'string' && json.email.trim()) ||
     (typeof idPayload?.email === 'string' && idPayload.email.trim()) ||
     undefined;
 
-  let quota: QuotaView | undefined;
-  if (!accessTokenExpired && accessToken && includeQuota) {
-    quota = await queryAntigravitySlotQuota({
-      rawTokenJson: raw,
-      ...(getHttpProxy ? { getHttpProxy } : {}),
-      ...(clientVersion ? { clientVersion } : {}),
-    }).catch(() => undefined);
-  }
+  const shouldQueryUserInfo = !email && !accessTokenExpired && Boolean(accessToken) && (includeQuota === true || Boolean(fetchImpl));
+  const shouldQueryQuota = !accessTokenExpired && Boolean(accessToken) && includeQuota === true;
+
+  const [fetchedEmail, quota] = await Promise.all([
+    shouldQueryUserInfo
+      ? fetchGoogleUserEmail({
+          accessToken,
+          ...(getHttpProxy ? { getHttpProxy } : {}),
+          ...(fetchImpl ? { fetchImpl } : {}),
+        })
+      : Promise.resolve(undefined),
+    shouldQueryQuota
+      ? queryAntigravitySlotQuota({
+          rawTokenJson: raw,
+          ...(getHttpProxy ? { getHttpProxy } : {}),
+          ...(clientVersion ? { clientVersion } : {}),
+        }).catch(() => undefined)
+      : Promise.resolve(undefined),
+  ]);
+  if (!email && fetchedEmail) email = fetchedEmail;
 
   return {
     status: expired ? 'expired' : 'authenticated',
@@ -528,10 +626,11 @@ export async function inspectOfficialAccount(params: {
   readonly secrets: SecretStore;
   readonly includeQuota?: boolean;
   readonly getHttpProxy?: () => string | undefined;
+  readonly fetchImpl?: FetchLike;
   readonly clientVersion?: string;
   readonly now?: () => number;
 }): Promise<AccountInspectionResult> {
-  const { backendId, accountId, account, isActiveSlot, storageRoot, baseEnv, secrets, includeQuota, getHttpProxy, clientVersion } = params;
+  const { backendId, accountId, account, isActiveSlot, storageRoot, baseEnv, secrets, includeQuota, getHttpProxy, fetchImpl, clientVersion } = params;
   const now = (params.now ?? Date.now)();
   const normalized = backendId.toLowerCase();
   const userHome = resolveUserHome(baseEnv);
@@ -606,6 +705,7 @@ export async function inspectOfficialAccount(params: {
       now,
       ...(includeQuota !== undefined ? { includeQuota } : {}),
       ...(getHttpProxy ? { getHttpProxy } : {}),
+      ...(fetchImpl ? { fetchImpl } : {}),
       ...(clientVersion ? { clientVersion } : {}),
     });
   }

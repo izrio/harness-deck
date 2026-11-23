@@ -510,4 +510,111 @@ describe('AccountIsolation & AccountInspector', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('isolates Antigravity slot inspection so inactive system slot and new unlogged accounts never read another account disk token', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hd-accounts-agy-iso-'));
+    try {
+      const fakeHome = join(root, 'home');
+      const storageRoot = join(root, 'storage');
+      const secrets = memorySecrets();
+      const env = { HOME: fakeHome };
+      const nowMs = 1_800_000_000_000;
+
+      // 磁盘上当前是账号 B 的 token
+      const tokenPath = antigravityPrimaryTokenPath(env);
+      await mkdir(join(fakeHome, '.gemini', 'antigravity-cli'), { recursive: true });
+      const accountBToken = JSON.stringify({
+        email: 'b@gmail.com',
+        token: {
+          access_token: 'access-b',
+          refresh_token: 'refresh-b',
+          expiry: new Date(nowMs + 3600_000).toISOString(),
+        },
+      });
+      await writeFile(tokenPath, accountBToken, 'utf8');
+      await secrets.store(accountSlotSecretKey('agy-b'), accountBToken);
+
+      // 1. 本机默认账号处于非激活态且无自身快照时，绝不能去读磁盘上属于 agy-b 的 token
+      const inactiveSys = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: systemAccountId('antigravity'),
+        isActiveSlot: false,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(inactiveSys.status, 'unauthenticated');
+      assert.equal(inactiveSys.identity, undefined);
+
+      // 2. 尚未登录过的新增独立账号即使设为激活态，也绝不能窃取磁盘上其他账号的 token
+      const brandNew = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: 'agy-brand-new',
+        isActiveSlot: true,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(brandNew.status, 'unauthenticated');
+      assert.equal(secrets.map.get(accountSlotSecretKey('agy-brand-new')), undefined);
+
+      // 3. 已登录的槽位 A 如果磁盘上是不同 refresh_token/email 的账号 B，不应被磁盘 token 覆盖串号
+      const accountAToken = JSON.stringify({
+        email: 'a@gmail.com',
+        token: {
+          access_token: 'access-a',
+          refresh_token: 'refresh-a',
+          expiry: new Date(nowMs + 1800_000).toISOString(),
+        },
+      });
+      await secrets.store(accountSlotSecretKey('agy-a'), accountAToken);
+      const slotA = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: 'agy-a',
+        isActiveSlot: true,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(slotA.status, 'authenticated');
+      assert.equal(slotA.identity, 'a@gmail.com');
+      assert.equal(secrets.map.get(accountSlotSecretKey('agy-a')), accountAToken);
+
+      // 4. 当 token 文件不含 email / id_token 时，自动通过 Google UserInfo 接口读取邮箱作为 identity
+      const tokenWithoutEmail = JSON.stringify({
+        token: {
+          access_token: 'access-no-email',
+          refresh_token: 'refresh-no-email',
+          expiry: new Date(nowMs + 3600_000).toISOString(),
+        },
+      });
+      await secrets.store(accountSlotSecretKey('agy-userinfo'), tokenWithoutEmail);
+      const fetchedUrls: string[] = [];
+      const userInfoInsp = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: 'agy-userinfo',
+        isActiveSlot: false,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+        fetchImpl: async (input) => {
+          fetchedUrls.push(String(input));
+          return new Response(JSON.stringify({ email: 'auto@gmail.com', name: 'Auto User' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        },
+      });
+      assert.equal(userInfoInsp.status, 'authenticated');
+      assert.equal(userInfoInsp.identity, 'auto@gmail.com');
+      assert.equal(fetchedUrls.length, 1);
+      assert.ok(fetchedUrls[0]?.includes('googleapis.com/oauth2/v2/userinfo'));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

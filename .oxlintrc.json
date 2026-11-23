@@ -1,0 +1,212 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react"],
+  "jsPlugins": ["./oxlint-plugins/harness-deck.mjs"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "es2022": true,
+    "node": true
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/*.vsix",
+    ".e2e-screenshots/**",
+    "packages/jetbrains/build/**",
+    "**/.gradle/**",
+    "**/.intellijPlatform/**",
+    "**/.kotlin/**"
+  ],
+  "rules": {
+    "eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_",
+        "ignoreRestSiblings": true
+      }
+    ],
+    "eslint/no-unused-expressions": [
+      "error",
+      {
+        "allowShortCircuit": true,
+        "allowTernary": true
+      }
+    ],
+    "eslint/no-control-regex": "off",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": ["error", { "checksVoidReturn": false }],
+    "typescript/no-base-to-string": "off",
+    "typescript/unbound-method": "off",
+    "typescript/require-array-sort-compare": "off",
+    "react/rules-of-hooks": "off",
+    "react/exhaustive-deps": "off",
+    "react/set-state-in-effect": "off",
+    "react/refs": "off",
+    "react/purity": "off",
+    "react/preserve-manual-memoization": "off",
+    "react/jsx-key": "off",
+    "react/no-unescaped-entities": "off"
+  },
+  "overrides": [
+    {
+      "files": ["packages/webview-ui/**/*.{ts,tsx}"],
+      "env": {
+        "browser": true,
+        "es2022": true
+      },
+      "rules": {
+        "react/rules-of-hooks": "error",
+        "harness-deck/no-uppercase-ui-import": "error",
+        "harness-deck/no-iconify-root-import": "error",
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@iconify/react",
+                "message": "插件 Webview 必须支持离线与严格 CSP，请改用 @iconify/react/offline 或 src/components/icons.tsx（见 AGENTS.md）。"
+              },
+              {
+                "name": "react-icons",
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              },
+              {
+                "name": "@tabler/icons-react",
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              },
+              {
+                "name": "feather-icons",
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "@mui/*",
+                  "antd",
+                  "antd/*",
+                  "@chakra-ui/*",
+                  "@mantine/*",
+                  "@arco-design/*",
+                  "@headlessui/*",
+                  "naive-ui",
+                  "primereact/*"
+                ],
+                "message": "项目组件库仅允许使用 shadcn-ui 与 beautifului，禁止引入其他 UI 组件库（见 AGENTS.md）。"
+              },
+              {
+                "group": ["@heroicons/*", "react-icons/*", "@phosphor-icons/*"],
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              },
+              {
+                "group": ["@iconify-json/*"],
+                "message": "禁止直接导入全量 @iconify-json/* 图标集 JSON，请改用按需打包的 @iconify-icons/<set>/<name> 单图标子路径（见 AGENTS.md）。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/webview-ui/src/**/*.{ts,tsx}"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@iconify/react",
+                "message": "插件 Webview 必须支持离线与严格 CSP，请改用 @iconify/react/offline 或 src/components/icons.tsx（见 AGENTS.md）。"
+              },
+              {
+                "name": "react-icons",
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              },
+              {
+                "name": "@tabler/icons-react",
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              },
+              {
+                "name": "feather-icons",
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              },
+              {
+                "name": "lucide-react",
+                "message": "业务与 beautifului 图标统一使用离线 Iconify（src/components/icons.tsx 或 @iconify/react/offline + @iconify-icons/*），禁止直接导入 lucide-react（见 AGENTS.md）。"
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "@mui/*",
+                  "antd",
+                  "antd/*",
+                  "@chakra-ui/*",
+                  "@mantine/*",
+                  "@arco-design/*",
+                  "@headlessui/*",
+                  "naive-ui",
+                  "primereact/*"
+                ],
+                "message": "项目组件库仅允许使用 shadcn-ui 与 beautifului，禁止引入其他 UI 组件库（见 AGENTS.md）。"
+              },
+              {
+                "group": ["@heroicons/*", "react-icons/*", "@phosphor-icons/*"],
+                "message": "项目图标统一使用 Iconify 离线方案（@iconify/react/offline + @iconify-icons/*），禁止引入其他图标库（见 AGENTS.md）。"
+              },
+              {
+                "group": ["@iconify-json/*"],
+                "message": "禁止直接导入全量 @iconify-json/* 图标集 JSON，请改用按需打包的 @iconify-icons/<set>/<name> 单图标子路径（见 AGENTS.md）。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/webview-ui/src/components/ui/**/*.{ts,tsx}"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@iconify/react",
+                "message": "插件 Webview 必须支持离线与严格 CSP，请改用 @iconify/react/offline 或 src/components/icons.tsx（见 AGENTS.md）。"
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "@mui/*",
+                  "antd",
+                  "antd/*",
+                  "@chakra-ui/*",
+                  "@mantine/*",
+                  "@arco-design/*",
+                  "@headlessui/*",
+                  "naive-ui",
+                  "primereact/*"
+                ],
+                "message": "项目组件库仅允许使用 shadcn-ui 与 beautifului，禁止引入其他 UI 组件库（见 AGENTS.md）。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/*/test/**/*.{ts,tsx}", "packages/*/src/**/*.test.{ts,tsx}"],
+      "rules": {
+        "eslint/no-unsafe-optional-chaining": "off",
+        "harness-deck/no-sleep-in-tests": "warn",
+        "harness-deck/no-wall-clock-in-tests": "warn",
+        "harness-deck/quarantine-needs-issue": "error"
+      }
+    }
+  ]
+}

@@ -845,7 +845,7 @@ try {
   const tabBar = page.getByTestId('tabs');
   check('两个会话各占一个标签', (await tabBar.locator('.tab').count()) === 2, await tabBar.innerText().catch(() => ''));
   await shot('09b-tabs');
-  const secondSession = await tabBar.locator('.tab').nth(1);
+  const secondSession = tabBar.locator('.tab').nth(1);
   await secondSession.click();
   await page.locator('.assistant', { hasText: '有什么可以帮你' }).waitFor({ timeout: 2_000 }).then(
     () => check('点击后台标签立即切过去（流一直在跟随）', true),

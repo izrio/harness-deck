@@ -34,7 +34,7 @@ const ROOT_CONFIGS = new Set([
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
   'tsconfig.base.json',
-  'eslint.config.mjs',
+  '.oxlintrc.json',
   'vitest.config.ts',
 ]);
 
@@ -42,13 +42,14 @@ const PACKAGE_LABEL = {
   'packages/shared': 'shared',
   'packages/extension': 'extension',
   'packages/webview-ui': 'webview-ui',
+  'packages/desktop': 'desktop',
 };
 
 function affectedPackages(files) {
   const affected = new Set();
   let all = false;
   for (const file of files) {
-    if (ROOT_CONFIGS.has(file) || file.startsWith('eslint-rules/')) {
+    if (ROOT_CONFIGS.has(file) || file.startsWith('oxlint-plugins/')) {
       all = true;
       continue;
     }

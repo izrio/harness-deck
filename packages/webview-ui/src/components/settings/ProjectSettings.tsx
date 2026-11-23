@@ -311,7 +311,7 @@ export function ProjectSettings() {
             {!isMobileRemote ? (
               <div className="flex items-center justify-end gap-2">
                 {justSaved ? <span className="text-[11.5px] text-green">{t('settings.projects.saved')}</span> : null}
-                <Button type="button" size="default" data-testid="project-save-btn" onClick={saveConfig}>
+                <Button type="button" size="sm" data-testid="project-save-btn" onClick={saveConfig}>
                   {t('settings.projects.saveConfig')}
                 </Button>
               </div>
@@ -323,6 +323,7 @@ export function ProjectSettings() {
         <DialogContent data-testid="mobile-create-worktree-dialog">
           <DialogHeader>
             <DialogTitle>{t('mobile.confirm.worktreeCreateTitle')}</DialogTitle>
+            <DialogDescription className="sr-only">{t('mobile.confirm.worktreePlaceholder')}</DialogDescription>
           </DialogHeader>
           <Input
             size="sm"

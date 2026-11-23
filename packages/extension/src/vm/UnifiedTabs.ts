@@ -20,12 +20,18 @@ export interface UnifiedTab {
   sessionId: string | undefined;
   /** 最近已知的会话标题（冷启动时目标智能体尚未启动也可正确展示）。 */
   cachedTitle?: string;
+  /** 独立 worktree 路径（支持多 worktree 并行标签，P1-5）。 */
+  worktreePath?: string;
+  /** 独立 worktree 分支名。 */
+  worktreeBranch?: string;
 }
 
 export interface PersistedUnifiedTab {
   readonly backendId: string;
   readonly sessionId: string;
   readonly title?: string;
+  readonly worktreePath?: string;
+  readonly worktreeBranch?: string;
 }
 
 export interface PersistedUnifiedTabs {
@@ -75,8 +81,18 @@ export function parsePersistedUnifiedTabs(raw: unknown): PersistedUnifiedTabs | 
     const backendId = typeof item.backendId === 'string' ? item.backendId.trim() : '';
     const sessionId = typeof item.sessionId === 'string' ? item.sessionId.trim() : '';
     const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : undefined;
+    const worktreePath =
+      typeof item.worktreePath === 'string' && item.worktreePath.trim() ? item.worktreePath.trim() : undefined;
+    const worktreeBranch =
+      typeof item.worktreeBranch === 'string' && item.worktreeBranch.trim() ? item.worktreeBranch.trim() : undefined;
     if (!backendId || !sessionId || isPendingSessionId(sessionId)) continue;
-    items.push({ backendId, sessionId, ...(title ? { title } : {}) });
+    items.push({
+      backendId,
+      sessionId,
+      ...(title ? { title } : {}),
+      ...(worktreePath ? { worktreePath } : {}),
+      ...(worktreeBranch ? { worktreeBranch } : {}),
+    });
   }
   let active: PersistedUnifiedTabs['active'];
   if (obj.active && typeof obj.active === 'object') {
@@ -134,6 +150,8 @@ export class UnifiedTabsModel {
           backendId: item.backendId,
           sessionId: item.sessionId,
           ...(item.title ? { cachedTitle: item.title } : {}),
+          ...(item.worktreePath ? { worktreePath: item.worktreePath } : {}),
+          ...(item.worktreeBranch ? { worktreeBranch: item.worktreeBranch } : {}),
         });
       }
 
@@ -217,19 +235,23 @@ export class UnifiedTabsModel {
     return { restoredFromPersisted: false };
   }
 
-  /** 新建对话标签：若已有空的新对话标签则切过去并设为目标智能体，否则追加到最右侧。 */
-  openNew(backendId: string): UnifiedTab {
-    const blank = this.tabs.find((tab) => !tab.sessionId);
-    if (blank) {
-      blank.backendId = backendId;
-      this.activeKey = blank.key;
-      this.persist();
-      return blank;
+  /** 新建对话标签：若指定 worktree 则始终新开独立标签以支持多 worktree 并行；否则复用空标签。 */
+  openNew(backendId: string, worktree?: { readonly path: string; readonly branch?: string }): UnifiedTab {
+    if (!worktree) {
+      const blank = this.tabs.find((tab) => !tab.sessionId && !tab.worktreePath);
+      if (blank) {
+        blank.backendId = backendId;
+        this.activeKey = blank.key;
+        this.persist();
+        return blank;
+      }
     }
     const created: UnifiedTab = {
       key: this.nextKey(),
       backendId,
       sessionId: undefined,
+      ...(worktree ? { worktreePath: worktree.path } : {}),
+      ...(worktree?.branch ? { worktreeBranch: worktree.branch } : {}),
     };
     this.append(created);
     return created;
@@ -442,6 +464,8 @@ export class UnifiedTabsModel {
       key: tab.key,
       backendId: tab.backendId,
       ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
+      ...(tab.worktreePath ? { worktreePath: tab.worktreePath } : {}),
+      ...(tab.worktreeBranch ? { worktreeBranch: tab.worktreeBranch } : {}),
       ...describe(tab, tab.key === this.activeKey),
     }));
     return { items, active: this.activeKey };
@@ -466,6 +490,8 @@ export class UnifiedTabsModel {
         backendId: tab.backendId,
         sessionId: tab.sessionId,
         ...(tab.cachedTitle ? { title: tab.cachedTitle } : {}),
+        ...(tab.worktreePath ? { worktreePath: tab.worktreePath } : {}),
+        ...(tab.worktreeBranch ? { worktreeBranch: tab.worktreeBranch } : {}),
       });
     }
     const cur = this.current;

@@ -3,7 +3,7 @@ import { CheckIcon, PlugIcon } from '../../icons.tsx';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { McpFormState } from './mcpParsers.ts';
 import type { BackendView } from '@harness-deck/shared';
@@ -37,7 +37,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
             <DialogDescription className="sr-only">{t('settings.mcp.desc')}</DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col gap-3 [&_[data-slot=native-select-wrapper]]:w-full">
+          <div className="flex flex-col gap-3">
             {showJsonPaste ? (
               <div className="flex flex-col gap-2 rounded-control border border-line bg-field p-2.5">
                 <Textarea
@@ -75,20 +75,27 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                 />
               </label>
 
-              <label className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.transport')}</span>
-                <NativeSelect
-                  size="sm"
-                  data-testid="mcp-form-transport"
-                  className="w-full text-[12px]"
+                <Select
                   value={form.transport}
-                  onChange={(e) => setForm({ ...form, transport: e.target.value as McpTransport })}
+                  onValueChange={(value) => setForm({ ...form, transport: value as McpTransport })}
                 >
-                  <NativeSelectOption value="stdio">{t('settings.mcp.form.transportStdio')}</NativeSelectOption>
-                  <NativeSelectOption value="http">{t('settings.mcp.form.transportHttp')}</NativeSelectOption>
-                  <NativeSelectOption value="sse">{t('settings.mcp.form.transportSse')}</NativeSelectOption>
-                </NativeSelect>
-              </label>
+                  <SelectTrigger
+                    size="sm"
+                    data-testid="mcp-form-transport"
+                    aria-label={t('settings.mcp.form.transport')}
+                    className="w-full text-[12px]"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stdio">{t('settings.mcp.form.transportStdio')}</SelectItem>
+                    <SelectItem value="http">{t('settings.mcp.form.transportHttp')}</SelectItem>
+                    <SelectItem value="sse">{t('settings.mcp.form.transportSse')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {form.transport === 'stdio' ? (
@@ -158,21 +165,25 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.mcp.form.agents')}</span>
                 <div className="flex items-center gap-1.5 text-[11px]">
-                  <button
+                  <Button
                     type="button"
-                    className="cursor-pointer border-0 bg-transparent px-1 text-accent-ink hover:underline"
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0 text-[11px] text-accent-ink"
                     onClick={() => setForm({ ...form, agents: agents.map((a) => a.id) })}
                   >
                     {t('settings.mcp.form.selectAllAgents')}
-                  </button>
+                  </Button>
                   <span className="text-ink-4">·</span>
-                  <button
+                  <Button
                     type="button"
-                    className="cursor-pointer border-0 bg-transparent px-1 text-ink-3 hover:underline"
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0 text-[11px] text-ink-3"
                     onClick={() => setForm({ ...form, agents: [] })}
                   >
                     {t('settings.mcp.form.clearAgents')}
-                  </button>
+                  </Button>
                 </div>
               </div>
               <span className="text-[11px] text-ink-3">{t('settings.mcp.form.agentsHint')}</span>

@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Harness Deck",
   "description": "%extension.description%",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -352,6 +352,23 @@
           ],
           "default": "dark",
           "markdownDescription": "%config.ui.theme%"
+        },
+        "harnessDeck.ui.preset": {
+          "type": "string",
+          "enum": [
+            "default",
+            "grove",
+            "ocean",
+            "ember",
+            "iris"
+          ],
+          "default": "default",
+          "description": "OKLCH color theme preset for Harness Deck UI."
+        },
+        "harnessDeck.ui.highContrast": {
+          "type": "boolean",
+          "default": false,
+          "description": "Increase border and text contrast in Harness Deck UI."
         },
         "harnessDeck.notifications.enabled": {
           "type": "boolean",

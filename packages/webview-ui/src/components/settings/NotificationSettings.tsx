@@ -38,7 +38,7 @@ export function NotificationSettings() {
           <Button
             type="button"
             variant="outline"
-            size="default"
+            size="xs"
             data-testid="notif-test-btn"
             onClick={() => postToHost({ type: 'testNotification', payload: {} })}
           >

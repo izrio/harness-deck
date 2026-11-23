@@ -5,9 +5,16 @@ import { createElement } from 'react';
 import type { HostSnapshot, HostToWebview, WorkbenchState } from '@harness-deck/shared';
 import { backendCapabilities } from '@harness-deck/shared';
 import { App } from '../src/App.tsx';
+import { buildChangeDirTree } from '../src/components/workbench/ChangesView.tsx';
 import * as store from '../src/store.ts';
 
 const posted: unknown[] = [];
+
+function chooseSelectOption(testId: string, optionName: string | RegExp) {
+  const trigger = screen.getByTestId(testId);
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: optionName }));
+}
 
 function sampleWorkbench(): WorkbenchState {
   return {
@@ -531,8 +538,8 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     fireEvent.change(screen.getByTestId('agent-input-name'), { target: { value: '安全审计员' } });
     fireEvent.change(screen.getByTestId('agent-input-specialty'), { target: { value: 'CSP 与依赖安全审计' } });
     fireEvent.change(screen.getByTestId('agent-input-instructions'), { target: { value: '逐项核查权限边界' } });
-    fireEvent.change(screen.getByTestId('agent-select-backend'), { target: { value: 'claude' } });
-    fireEvent.change(screen.getByTestId('agent-select-model'), { target: { value: 'deepseek::deepseek-reasoner' } });
+    chooseSelectOption('agent-select-backend', 'Claude Code');
+    chooseSelectOption('agent-select-model', /DeepSeek R1/);
     fireEvent.click(screen.getByTestId('agent-submit-btn'));
     expect(screen.queryByTestId('agent-form')).toBeNull();
 
@@ -608,7 +615,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     fireEvent.click(screen.getByTestId('task-new-btn'));
     fireEvent.change(screen.getByTestId('task-input-title'), { target: { value: '搜索优化' } });
     fireEvent.change(screen.getByTestId('task-input-prompt'), { target: { value: '实现跨项目会话搜索优化' } });
-    fireEvent.change(screen.getByTestId('task-select-project'), { target: { value: '/repo/beta' } });
+    chooseSelectOption('task-select-project', 'beta');
 
     // 在模型选择器前面切换运行时到 Claude Code，向宿主拉取该运行时的模型列表
     fireEvent.click(screen.getByTestId('task-runtime-picker'));
@@ -659,7 +666,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
 
     // 开启定时执行并设置为每天 09:30
     fireEvent.click(screen.getByTestId('task-schedule-toggle'));
-    fireEvent.change(screen.getByTestId('task-schedule-freq'), { target: { value: 'daily' } });
+    chooseSelectOption('task-schedule-freq', '每天');
     fireEvent.change(screen.getByTestId('task-schedule-time'), { target: { value: '09:30' } });
 
     fireEvent.click(screen.getByTestId('task-create-btn'));
@@ -899,5 +906,29 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
         }),
       }),
     );
+  });
+
+  it('Git 目录树将同一父目录下的文件聚合为层级树节点并自动压缩单子节点路径', () => {
+    const tree = buildChangeDirTree([
+      { path: 'packages/extension/src/accounts/a.ts', status: 'modified', staged: false },
+      { path: 'packages/extension/src/host/h.ts', status: 'modified', staged: false },
+      { path: 'packages/shared/src/bridge.ts', status: 'modified', staged: false },
+      { path: 'packages/webview-ui/src/components/ui/select.tsx', status: 'modified', staged: false },
+      { path: 'packages/webview-ui/src/components/settings/AccountSettings.tsx', status: 'modified', staged: false },
+      { path: 'README.md', status: 'modified', staged: false },
+    ]);
+
+    expect(tree.rootFiles.map((f) => f.path)).toEqual(['README.md']);
+    expect(tree.dirs).toHaveLength(1);
+    const pkg = tree.dirs[0]!;
+    expect(pkg.name).toBe('packages');
+    expect(pkg.totalFiles).toBe(5);
+    expect(pkg.dirs.map((d) => [d.name, d.totalFiles])).toEqual([
+      ['extension/src', 2],
+      ['shared/src', 1],
+      ['webview-ui/src/components', 2],
+    ]);
+    expect(pkg.dirs[0]!.dirs.map((d) => d.name)).toEqual(['accounts', 'host']);
+    expect(pkg.dirs[2]!.dirs.map((d) => d.name)).toEqual(['settings', 'ui']);
   });
 });

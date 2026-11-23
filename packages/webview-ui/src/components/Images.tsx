@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { CloseIcon, ErrorIcon, ImageIcon } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
-function useImageSrc(image: ImageView): string | 'error' | undefined {
+function useImageSrc(image: ImageView): string | undefined {
   const key = imageKey(image);
   const value = useView((s) => (key ? s.images[key] : undefined));
   useEffect(() => {

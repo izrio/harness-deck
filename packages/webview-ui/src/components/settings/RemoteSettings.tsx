@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useT } from '../../i18n.ts';
 import { relativeTime } from '../../lib/time.ts';
@@ -299,23 +299,31 @@ function IdeRemoteSettingsPanel() {
               </Button>
             </div>
             <span className="text-[11.5px] text-ink-3">{t('remote.lanHostHint')}</span>
-            <NativeSelect
-              id="remote-lan-select"
-              size="sm"
-              data-testid="remote-lan-select"
-              value={remote?.selectedHost ?? ''}
-              onChange={(e) => postToHost({ type: 'setRemoteConfig', payload: { selectedHost: e.target.value } })}
+            <Select
+              value={remote?.selectedHost || ((remote?.interfaces ?? []).length === 0 ? '127.0.0.1' : undefined)}
+              onValueChange={(value) => postToHost({ type: 'setRemoteConfig', payload: { selectedHost: value } })}
             >
-              {(remote?.interfaces ?? []).length === 0 ? (
-                <NativeSelectOption value="127.0.0.1">127.0.0.1</NativeSelectOption>
-              ) : (
-                (remote?.interfaces ?? []).map((iface) => (
-                  <NativeSelectOption key={`${iface.name}-${iface.address}`} value={iface.address}>
-                    {iface.address} ({iface.name})
-                  </NativeSelectOption>
-                ))
-              )}
-            </NativeSelect>
+              <SelectTrigger
+                id="remote-lan-select"
+                size="sm"
+                className="w-full"
+                data-testid="remote-lan-select"
+                aria-label={t('remote.lanHost')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(remote?.interfaces ?? []).length === 0 ? (
+                  <SelectItem value="127.0.0.1">127.0.0.1</SelectItem>
+                ) : (
+                  (remote?.interfaces ?? []).map((iface) => (
+                    <SelectItem key={`${iface.name}-${iface.address}`} value={iface.address}>
+                      {iface.address} ({iface.name})
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
 
           {remote?.wslNat?.active ? (
@@ -364,22 +372,30 @@ function IdeRemoteSettingsPanel() {
             </div>
           ) : null}
 
-          <label className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1">
             <span className="text-[12.5px] font-medium text-ink">{t('remote.defaultScope')}</span>
-            <NativeSelect
-              size="sm"
-              data-testid="remote-scope-select"
+            <Select
               value={pairScope}
-              onChange={(e) => {
-                const next = e.target.value as RemoteScope;
+              onValueChange={(value) => {
+                const next = value as RemoteScope;
                 setPairScope(next);
                 postToHost({ type: 'setRemoteConfig', payload: { scope: next } });
               }}
             >
-              <NativeSelectOption value="operate">{t('remote.scope.operate')}</NativeSelectOption>
-              <NativeSelectOption value="read-only">{t('remote.scope.readOnly')}</NativeSelectOption>
-            </NativeSelect>
-          </label>
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                data-testid="remote-scope-select"
+                aria-label={t('remote.defaultScope')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="operate">{t('remote.scope.operate')}</SelectItem>
+                <SelectItem value="read-only">{t('remote.scope.readOnly')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* Tailscale */}
           <div className="flex flex-col gap-2 border-t border-line pt-3">
@@ -458,21 +474,27 @@ function IdeRemoteSettingsPanel() {
       <SettingsSection title={t('remote.pairingTitle')} testId="remote-pairing-section">
         <div className="primitive-card-pad flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect
-              size="sm"
-              aria-label={t('remote.pairingRoute')}
-              data-testid="remote-pairing-route-select"
+            <Select
               value={routeKind}
-              onChange={(e) => setRouteKind(e.target.value as RemoteRouteKind)}
+              onValueChange={(value) => setRouteKind(value as RemoteRouteKind)}
             >
-              <NativeSelectOption value="lan">{t('remote.route.lan')}</NativeSelectOption>
-              <NativeSelectOption value="tailscale" disabled={!tailscale?.serveUrl}>
-                {t('remote.route.tailscale')}
-              </NativeSelectOption>
-              <NativeSelectOption value="tunnel" disabled={!remote?.tunnelUrl}>
-                {t('remote.route.tunnel')}
-              </NativeSelectOption>
-            </NativeSelect>
+              <SelectTrigger
+                size="sm"
+                aria-label={t('remote.pairingRoute')}
+                data-testid="remote-pairing-route-select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lan">{t('remote.route.lan')}</SelectItem>
+                <SelectItem value="tailscale" disabled={!tailscale?.serveUrl}>
+                  {t('remote.route.tailscale')}
+                </SelectItem>
+                <SelectItem value="tunnel" disabled={!remote?.tunnelUrl}>
+                  {t('remote.route.tunnel')}
+                </SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               type="button"
               size="sm"
@@ -642,22 +664,28 @@ function IdeRemoteSettingsPanel() {
             </div>
 
             <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
-              <NativeSelect
-                size="sm"
-                aria-label={t('remote.webhookPreset')}
-                data-testid="remote-webhook-preset"
+              <Select
                 value={push.webhook.preset}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   postToHost({
                     type: 'setRemotePushConfig',
-                    payload: { webhook: { preset: e.target.value as RemoteWebhookPreset } },
+                    payload: { webhook: { preset: value as RemoteWebhookPreset } },
                   })
                 }
               >
-                <NativeSelectOption value="bark">Bark</NativeSelectOption>
-                <NativeSelectOption value="ntfy">ntfy</NativeSelectOption>
-                <NativeSelectOption value="custom">Custom JSON</NativeSelectOption>
-              </NativeSelect>
+                <SelectTrigger
+                  size="sm"
+                  aria-label={t('remote.webhookPreset')}
+                  data-testid="remote-webhook-preset"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bark">Bark</SelectItem>
+                  <SelectItem value="ntfy">ntfy</SelectItem>
+                  <SelectItem value="custom">Custom JSON</SelectItem>
+                </SelectContent>
+              </Select>
               <Input
                 size="sm"
                 aria-label={t('remote.webhookUrl')}

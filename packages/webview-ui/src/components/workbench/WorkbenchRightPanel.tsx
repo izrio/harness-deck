@@ -7,7 +7,7 @@
  * - Git：复用 ChangesView 展示分支、未提交改动、内置 Diff 审阅、提交、推送与创建 PR
  * - 宽屏桌面（>=768px）：停靠在主内容区右侧；窄屏 / 移动端（<768px）：通过 shadcn/ui Sheet 右侧抽屉展开
  */
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type { FileCandidate, SourceControlFileView } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,10 +28,13 @@ import {
   GitBranchIcon,
   RefreshIcon,
   SearchIcon,
+  TerminalIcon,
   VscodeFolderIcon,
   VscodeFolderOpenIcon,
 } from '../icons.tsx';
 import { ChangesView } from './ChangesView.tsx';
+
+const LazyTerminalView = lazy(() => import('./TerminalView.tsx'));
 
 interface FileTreeNode {
   readonly name: string;
@@ -105,8 +108,10 @@ export function WorkbenchRightPanel() {
   const tab = useView((s) => s.rightPanelTab);
   const sourceControl = useView((s) => s.workbench.sourceControl);
   const dirtyFiles = useView((s) => s.workspace.dirtyFiles);
+  const terminalSessions = useView((s) => s.terminal.sessions);
 
   const changesCount = sourceControl?.available ? sourceControl.files.length : dirtyFiles;
+  const runningTerminals = terminalSessions.filter((s) => s.running).length;
 
   const panelBody = (
     <Tabs
@@ -139,6 +144,20 @@ export function WorkbenchRightPanel() {
               </span>
             ) : null}
           </TabsTrigger>
+          <TabsTrigger
+            value="terminal"
+            data-testid="right-panel-tab-terminal"
+            className="h-9 flex-none gap-1.5 rounded-none px-2 text-[12.5px] after:bottom-0 after:bg-brand"
+            onClick={() => setRightPanelTab('terminal')}
+          >
+            <TerminalIcon className="size-3.5 shrink-0" />
+            <span>{t('wb.rightPanel.terminal')}</span>
+            {runningTerminals > 0 ? (
+              <span className="rounded-full bg-green-tint px-1.5 text-[10.5px] font-medium text-green tabular-nums">
+                {runningTerminals}
+              </span>
+            ) : null}
+          </TabsTrigger>
         </TabsList>
 
         {!isMobile ? (
@@ -162,6 +181,13 @@ export function WorkbenchRightPanel() {
       </TabsContent>
       <TabsContent value="git" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
         <ChangesView compact />
+      </TabsContent>
+      <TabsContent value="terminal" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+        {tab === 'terminal' ? (
+          <Suspense fallback={<div className="p-4 text-[12px] text-ink-3">{t('thread.opening')}</div>}>
+            <LazyTerminalView />
+          </Suspense>
+        ) : null}
       </TabsContent>
     </Tabs>
   );

@@ -74,21 +74,25 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
             ) : (
               <div className="flex flex-col gap-1.5">
                 <div className="flex justify-end gap-1.5 text-[11px]">
-                  <button
+                  <Button
                     type="button"
-                    className="cursor-pointer border-0 bg-transparent px-1 text-accent-ink hover:underline"
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0 text-[11px] text-accent-ink"
                     onClick={() => setSelectedCandidateKeys(candidates.map((c) => c.key))}
                   >
                     {t('settings.skills.dialog.selectAll')}
-                  </button>
+                  </Button>
                   <span className="text-ink-4">·</span>
-                  <button
+                  <Button
                     type="button"
-                    className="cursor-pointer border-0 bg-transparent px-1 text-ink-3 hover:underline"
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0 text-[11px] text-ink-3"
                     onClick={() => setSelectedCandidateKeys([])}
                   >
                     {t('settings.skills.dialog.selectNone')}
-                  </button>
+                  </Button>
                 </div>
 
                 <div

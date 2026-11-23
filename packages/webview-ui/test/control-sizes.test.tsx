@@ -143,4 +143,50 @@ describe('组件尺寸统一规范（AGENTS.md）', () => {
       }
     }
   });
+
+  it('业务组件中的下拉选择统一使用 shadcn Select，不使用 NativeSelect 或原生 <select>', () => {
+    const files = walkTsxFiles(COMPONENTS_DIR);
+    for (const file of files) {
+      const rel = relative(COMPONENTS_DIR, file).replace(/\\/gu, '/');
+      if (rel.startsWith('ui/')) continue;
+      const src = readFileSync(file, 'utf8');
+      expect(src, `${rel} 请使用 @/components/ui/select 替代 NativeSelect`).not.toMatch(/\bNativeSelect\b/u);
+      expect(src, `${rel} 请使用 @/components/ui/select 替代原生 <select>`).not.toMatch(/<select[\s>]/u);
+    }
+  });
+
+  it('设置页表单与控件统一采用 size="sm" / "xs"（不使用零散 default / icon 高度）', () => {
+    const files = walkTsxFiles(COMPONENTS_DIR);
+    const controlTagRe = /<(Input|Button|SelectTrigger|NumberStepper)\b([\s\S]*?)(?:\/>|>)/gu;
+    for (const file of files) {
+      const rel = relative(COMPONENTS_DIR, file).replace(/\\/gu, '/');
+      if (!rel.startsWith('settings/') && rel !== 'AppearancePanel.tsx') continue;
+      const src = readFileSync(file, 'utf8');
+      for (const match of src.matchAll(controlTagRe)) {
+        const tag = match[1];
+        const attrs = match[2] ?? '';
+        const sizeMatch = attrs.match(/\bsize="([^"]+)"/u);
+        expect(
+          sizeMatch?.[1],
+          `${rel} 中的 <${tag}> 在设置页应显式使用 sm/xs/icon-sm/icon-xs，而非 ${sizeMatch?.[1] ?? 'default'}`,
+        ).not.toBe('default');
+        expect(
+          sizeMatch?.[1],
+          `${rel} 中的 <${tag}> 在设置页图标按钮应使用 icon-sm/icon-xs，而非 icon`,
+        ).not.toBe('icon');
+      }
+    }
+  });
+
+  it('所有 DialogContent 弹窗均包含 DialogDescription 无障碍描述', () => {
+    const srcRoot = join(TEST_DIR, '../src');
+    const files = walkTsxFiles(srcRoot);
+    for (const file of files) {
+      const rel = relative(srcRoot, file).replace(/\\/gu, '/');
+      if (rel.startsWith('components/ui/')) continue;
+      const src = readFileSync(file, 'utf8');
+      if (!src.includes('<DialogContent')) continue;
+      expect(src, `${rel} 中的 DialogContent 缺少 DialogDescription`).toContain('DialogDescription');
+    }
+  });
 });

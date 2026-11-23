@@ -16,7 +16,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
         <Button
           type="button"
           variant="link"
-          size="default"
+          size="sm"
           className="h-auto p-0 text-[12px]"
           disabled={!hasAnyUrl || pendingFetchId !== undefined}
           data-testid="provider-fetch-models"
@@ -44,7 +44,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
       ) : null}
 
       {/* 表头（桌面宽屏展示） */}
-      <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_2.25rem] items-center gap-1.5 text-[11.5px] text-ink-3 sm:grid">
+      <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_2rem] items-center gap-1.5 text-[11.5px] text-ink-3 sm:grid">
         <span>{t('settings.providers.colModelId')}</span>
         <span>{t('settings.providers.colDisplayName')}</span>
         <span>{t('settings.providers.colContext')}</span>
@@ -59,10 +59,10 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
           <div
             key={row.rowKey}
             data-testid={`provider-model-row-${index}`}
-            className="grid grid-cols-1 items-center gap-1.5 rounded-control bg-field/40 p-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_2.25rem] sm:bg-transparent sm:p-0"
+            className="grid grid-cols-1 items-center gap-1.5 rounded-control bg-field/40 p-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5.5rem_5.5rem_minmax(0,1fr)_4rem_2rem] sm:bg-transparent sm:p-0"
           >
             <Input
-              size="default"
+              size="sm"
               data-testid={`provider-model-id-${index}`}
               aria-label={t('settings.providers.colModelId')}
               className="font-mono text-[12px]"
@@ -71,7 +71,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
               onChange={(e) => updateModelRow(row.rowKey, { id: e.target.value })}
             />
             <Input
-              size="default"
+              size="sm"
               data-testid={`provider-model-name-${index}`}
               aria-label={t('settings.providers.colDisplayName')}
               className="text-[12px]"
@@ -80,7 +80,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
               onChange={(e) => updateModelRow(row.rowKey, { name: e.target.value })}
             />
             <Input
-              size="default"
+              size="sm"
               data-testid={`provider-model-ctx-${index}`}
               aria-label={t('settings.providers.colContext')}
               className="font-mono text-[12px]"
@@ -89,7 +89,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
               onChange={(e) => updateModelRow(row.rowKey, { contextWindow: e.target.value })}
             />
             <Input
-              size="default"
+              size="sm"
               data-testid={`provider-model-maxout-${index}`}
               aria-label={t('settings.providers.colMaxOutput')}
               className="font-mono text-[12px]"
@@ -98,7 +98,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
               onChange={(e) => updateModelRow(row.rowKey, { maxOutputTokens: e.target.value })}
             />
             <Input
-              size="default"
+              size="sm"
               data-testid={`provider-model-efforts-${index}`}
               aria-label={t('settings.providers.colEfforts')}
               className="font-mono text-[12px]"
@@ -120,7 +120,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               aria-label={t('settings.providers.removeModel')}
               data-testid={`provider-model-remove-${index}`}
               onClick={() => removeModelRow(row.rowKey)}
@@ -135,7 +135,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
         <Button
           type="button"
           variant="outline"
-          size="default"
+          size="sm"
           data-testid="provider-add-model"
           onClick={addModelRow}
         >
@@ -144,7 +144,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
         <Button
           type="button"
           variant="link"
-          size="default"
+          size="sm"
           className="h-auto p-0 text-[12px]"
           data-testid="provider-batch-toggle"
           onClick={() => setBatchOpen((v) => !v)}
@@ -170,7 +170,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
             <Button
               type="button"
               variant="ghost"
-              size="default"
+              size="sm"
               onClick={() => {
                 setBatchOpen(false);
                 setBatchText('');
@@ -180,7 +180,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
             </Button>
             <Button
               type="button"
-              size="default"
+              size="sm"
               data-testid="provider-batch-confirm"
               onClick={applyBatchPaste}
             >

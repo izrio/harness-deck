@@ -13,12 +13,13 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { SettingsSection } from './SettingsSection.tsx';
 
@@ -105,6 +106,7 @@ export function GeneralSettings() {
         <DialogContent data-testid="mobile-rename-dialog">
           <DialogHeader>
             <DialogTitle>{t('mobile.confirm.renameTitle')}</DialogTitle>
+            <DialogDescription className="sr-only">{t('mobile.confirm.renamePlaceholder')}</DialogDescription>
           </DialogHeader>
           <Input
             size="sm"
@@ -182,28 +184,35 @@ export function AdvancedSettings() {
   return (
     <SettingsSection title={t('settings.advanced.title')} testId="settings-advanced">
       <div className="primitive-card-pad flex flex-col gap-3">
-        <div className="flex flex-col gap-1 [&_[data-slot=native-select-wrapper]]:mt-1 [&_[data-slot=native-select-wrapper]]:w-full">
+        <div className="flex flex-col gap-1">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.schedules.title')}</span>
           <span className="text-[11.5px] text-ink-3">{t('settings.schedules.hint')}</span>
-          <NativeSelect
-            size="default"
-            data-testid="pref-schedule-permission"
-            aria-label={t('settings.schedules.title')}
+          <Select
             value={preferences.schedulePermission ?? 'danger-full-access'}
-            onChange={(e) =>
-              updateSchedulePermission(e.target.value as NonNullable<PreferencesState['schedulePermission']>)
+            onValueChange={(value) =>
+              updateSchedulePermission(value as NonNullable<PreferencesState['schedulePermission']>)
             }
           >
-            <NativeSelectOption value="danger-full-access">{t('wb.schedules.permFull')}</NativeSelectOption>
-            <NativeSelectOption value="workspace-write">{t('wb.schedules.permWorkspace')}</NativeSelectOption>
-            <NativeSelectOption value="read-only">{t('wb.schedules.permRead')}</NativeSelectOption>
-          </NativeSelect>
+            <SelectTrigger
+              size="sm"
+              className="mt-1 w-full"
+              data-testid="pref-schedule-permission"
+              aria-label={t('settings.schedules.title')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="danger-full-access">{t('wb.schedules.permFull')}</SelectItem>
+              <SelectItem value="workspace-write">{t('wb.schedules.permWorkspace')}</SelectItem>
+              <SelectItem value="read-only">{t('wb.schedules.permRead')}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <label className="flex flex-col gap-1 border-t border-line pt-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshPath')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="adv-dsh-path"
             className="font-mono text-[12px]"
             disabled={isMobileRemote}
@@ -218,7 +227,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshProfile')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="adv-dsh-profile"
             className="font-mono text-[12px]"
             disabled={isMobileRemote}
@@ -233,7 +242,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1 border-t border-line pt-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.zcodePath')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="adv-zcode-path"
             className="font-mono text-[12px]"
             disabled={isMobileRemote}
@@ -248,7 +257,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.claudePath')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="adv-claude-path"
             className="font-mono text-[12px]"
             disabled={isMobileRemote}
@@ -263,7 +272,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.piPath')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="adv-pi-path"
             className="font-mono text-[12px]"
             disabled={isMobileRemote}
@@ -278,7 +287,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codexPath')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="adv-codex-path"
             className="font-mono text-[12px]"
             disabled={isMobileRemote}
@@ -293,7 +302,7 @@ export function AdvancedSettings() {
         <label className="flex flex-col gap-1">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codebuddyPath')}</span>
           <Input
-            size="default"
+            size="sm"
             data-testid="adv-codebuddy-path"
             className="font-mono text-[12px]"
             disabled={isMobileRemote}
@@ -321,18 +330,18 @@ export function AdvancedSettings() {
 
         {!isMobileRemote ? (
           <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
+            <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
               <RefreshIcon className="size-3.5 text-ink-3" />
               <span>{t('header.restart')}</span>
             </Button>
-            <Button type="button" variant="outline" size="default" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
+            <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
               <LogIcon className="size-3.5 text-ink-3" />
               <span>{t('header.logs')}</span>
             </Button>
             <Button
               type="button"
               variant="ghost"
-              size="default"
+              size="sm"
               className="ml-auto text-ink-2 hover:text-ink"
               data-testid="open-vscode-settings"
               onClick={() => postToHost({ type: 'openSettings', payload: {} })}

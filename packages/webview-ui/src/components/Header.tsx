@@ -10,11 +10,12 @@ import { useIsMobile } from '../hooks/use-mobile.ts';
 import { cn } from '../lib/utils.ts';
 import {
   ClockIcon,
+  CommandIcon,
   ExpandPanelIcon,
   FolderTreeIcon,
   GitBranchIcon,
-  KanbanIcon,
-  ListIcon,
+  LayoutDashboardIcon,
+  ListTodoIcon,
   PanelRightIcon,
   PlusIcon,
   SettingsIcon,
@@ -29,7 +30,7 @@ import { useT, type MessageKey } from '../i18n.ts';
 function renderModuleIcon(mod: WorkbenchModule) {
   switch (mod) {
     case 'overview':
-      return <ListIcon className="size-3.5 shrink-0" />;
+      return <LayoutDashboardIcon className="size-3.5 shrink-0" />;
     case 'changes':
       return <GitBranchIcon className="size-3.5 shrink-0" />;
     case 'schedules':
@@ -37,7 +38,7 @@ function renderModuleIcon(mod: WorkbenchModule) {
     case 'agents':
       return <UsersIcon className="size-3.5 shrink-0" />;
     case 'tasks':
-      return <KanbanIcon className="size-3.5 shrink-0" />;
+      return <ListTodoIcon className="size-3.5 shrink-0" />;
     case 'sessions':
       return <FolderTreeIcon className="size-3.5 shrink-0" />;
   }
@@ -48,11 +49,13 @@ export function Header({
   onToggleSidebar,
   onOpenMobileDrawer,
   onNewWorktree,
+  onOpenCommandPalette,
 }: {
   readonly sidebarOpen?: boolean;
   readonly onToggleSidebar?: () => void;
   readonly onOpenMobileDrawer?: () => void;
   readonly onNewWorktree?: () => void;
+  readonly onOpenCommandPalette?: () => void;
 }) {
   const isMobile = useIsMobile();
   const clientSurface = useView((s) => s.clientSurface);
@@ -157,6 +160,19 @@ export function Header({
                 )}
               </span>
             </button>
+          ) : null}
+          {onOpenCommandPalette ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              data-testid="open-command-palette-btn"
+              aria-label={t('cmdPalette.trigger')}
+              title={t('cmdPalette.trigger')}
+              onClick={onOpenCommandPalette}
+            >
+              <CommandIcon className="size-3.5" />
+            </Button>
           ) : null}
           <Button
             type="button"

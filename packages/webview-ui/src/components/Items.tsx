@@ -20,16 +20,20 @@ export const ItemView = memo(function ItemView({
   turnDoneCopyText,
   turnSeq,
   canRollback = false,
+  hasCheckpoint = false,
+  canFork = false,
 }: {
   item: Item;
   hideAssistantActions?: boolean;
   turnDoneCopyText?: string;
   turnSeq?: number;
   canRollback?: boolean;
+  hasCheckpoint?: boolean;
+  canFork?: boolean;
 }) {
   switch (item.kind) {
     case 'user':
-      return <UserBubble item={item} />;
+      return <UserBubble item={item} {...(turnSeq !== undefined ? { turnSeq } : {})} />;
     case 'assistant':
       return <AssistantMessage item={item} hideActions={hideAssistantActions} />;
     case 'activity':
@@ -48,6 +52,8 @@ export const ItemView = memo(function ItemView({
           {...(turnDoneCopyText !== undefined ? { copyText: turnDoneCopyText } : {})}
           {...(turnSeq !== undefined ? { turnSeq } : {})}
           {...(canRollback ? { canRollback } : {})}
+          {...(hasCheckpoint ? { hasCheckpoint } : {})}
+          {...(canFork ? { canFork } : {})}
         />
       );
   }

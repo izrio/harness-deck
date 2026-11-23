@@ -1,10 +1,10 @@
 /**
- * 测试纪律规则（HD-03）：
- * - `no-sleep-in-tests`：测试里不要用 sleep / 定时器等真实时间（先 warn，清理存量后改 error）
+ * Harness Deck Oxlint JS 插件（迁移自 eslint-rules/test-discipline.mjs + UI 边界约束）：
+ * - `no-sleep-in-tests`：测试里不要用 sleep / 定时器等真实时间
  * - `no-wall-clock-in-tests`：不要用 Date.now() / performance.now() 的差值做断言
  * - `quarantine-needs-issue`：it.skip / describe.skip / it.todo 必须在上方写 `// quarantine: #<issue> <原因>`
- *
- * 只作用于测试文件；`test/mock-model/` 这类夹具不是测试文件，不受影响。
+ * - `no-uppercase-ui-import`：禁止从 `ui/[A-Z]*` 导入非 shadcn 官方小写组件
+ * - `no-iconify-root-import`：禁止整包导入 `@iconify-icons/<set>` 索引，必须按单图标子路径导入
  */
 
 const TEST_FILE = /(?:^|\/)test\/.*\.(?:test|spec)\.(?:ts|tsx)$|(?:^|\/)src\/.*\.(?:test|spec)\.(?:ts|tsx)$/u;
@@ -62,7 +62,7 @@ const noWallClockInTests = {
   },
   create(context) {
     if (!isTestFile(context.filename)) return {};
-    const sourceCode = context.sourceCode ?? context.getSourceCode();
+    const sourceCode = context.sourceCode;
     return {
       CallExpression(node) {
         const name = calleeName(node.callee);
@@ -74,9 +74,21 @@ const noWallClockInTests = {
         const parent = node.parent;
         const inDifference = parent?.type === 'BinaryExpression' && parent.operator === '-';
         if (!inDifference) return;
-        const inExpect = sourceCode
-          .getAncestors(node)
-          .some((ancestor) => ancestor.type === 'CallExpression' && calleeName(ancestor.callee) === 'expect');
+        const ancestors =
+          typeof sourceCode?.getAncestors === 'function'
+            ? sourceCode.getAncestors(node)
+            : (() => {
+                const list = [];
+                let cur = node.parent;
+                while (cur) {
+                  list.push(cur);
+                  cur = cur.parent;
+                }
+                return list;
+              })();
+        const inExpect = ancestors.some(
+          (ancestor) => ancestor.type === 'CallExpression' && calleeName(ancestor.callee) === 'expect',
+        );
         if (inExpect) context.report({ node, messageId: 'wallClock' });
       },
     };
@@ -96,7 +108,7 @@ const quarantineNeedsIssue = {
   },
   create(context) {
     if (!isTestFile(context.filename)) return {};
-    const sourceCode = context.sourceCode ?? context.getSourceCode();
+    const sourceCode = context.sourceCode;
     return {
       CallExpression(node) {
         const name = calleeName(node.callee);
@@ -104,7 +116,7 @@ const quarantineNeedsIssue = {
         const root = memberRootName(node.callee);
         if (root !== 'it' && root !== 'test' && root !== 'describe') return;
         const line = node.loc?.start.line ?? 0;
-        const previous = line > 1 ? sourceCode.lines[line - 2] ?? '' : '';
+        const previous = line > 1 ? (sourceCode?.lines?.[line - 2] ?? '') : '';
         if (!QUARANTINE.test(previous)) {
           context.report({ node, messageId: 'missing' });
         }
@@ -113,10 +125,59 @@ const quarantineNeedsIssue = {
   },
 };
 
+const UPPERCASE_UI_IMPORT = /(?:^|\/)ui\/[A-Z]/u;
+
+const noUppercaseUiImport = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'src/components/ui/ 仅限通过 shadcn CLI 安装的官方小写组件文件' },
+    schema: [],
+    messages: {
+      uppercaseUi: 'src/components/ui/ 仅限通过 shadcn CLI 安装的官方小写组件文件，禁止手写新造基础组件（见 AGENTS.md）。',
+    },
+  },
+  create(context) {
+    return {
+      ImportDeclaration(node) {
+        const value = node.source?.value;
+        if (typeof value === 'string' && UPPERCASE_UI_IMPORT.test(value)) {
+          context.report({ node, messageId: 'uppercaseUi' });
+        }
+      },
+    };
+  },
+};
+
+const ICONIFY_ROOT_IMPORT = /^@iconify-icons\/[^/]+$/u;
+
+const noIconifyRootImport = {
+  meta: {
+    type: 'problem',
+    docs: { description: '禁止整包导入 @iconify-icons/<set> 索引，必须按单图标子路径导入' },
+    schema: [],
+    messages: {
+      rootImport: '请按单图标子路径导入（如 @iconify-icons/lucide/check），禁止引入整包图标索引（见 AGENTS.md）。',
+    },
+  },
+  create(context) {
+    return {
+      ImportDeclaration(node) {
+        const value = node.source?.value;
+        if (typeof value === 'string' && ICONIFY_ROOT_IMPORT.test(value)) {
+          context.report({ node, messageId: 'rootImport' });
+        }
+      },
+    };
+  },
+};
+
 export default {
+  meta: { name: 'harness-deck' },
   rules: {
     'no-sleep-in-tests': noSleepInTests,
     'no-wall-clock-in-tests': noWallClockInTests,
     'quarantine-needs-issue': quarantineNeedsIssue,
+    'no-uppercase-ui-import': noUppercaseUiImport,
+    'no-iconify-root-import': noIconifyRootImport,
   },
 };

@@ -24,6 +24,7 @@ const READ_ONLY_ALLOWED_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'markUnreadRead',
   'registerWebPushSubscription',
   'unregisterWebPushSubscription',
+  'terminalSelect',
 ]);
 
 /** 无论何种远程作用域都默认禁止的高危宿主机配置与远程管理写操作（必须回到本机 IDE 操作）。 */

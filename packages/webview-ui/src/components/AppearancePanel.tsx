@@ -131,26 +131,28 @@ export function AppearancePanel() {
             {FONT_PRESETS.map((preset) => {
               const selected = activePreset?.id === preset.id;
               return (
-                <button
+                <Button
                   key={preset.id}
                   type="button"
+                  variant={selected ? 'secondary' : 'ghost'}
+                  size="xs"
                   data-testid={`font-preset-${preset.id}`}
                   onClick={() => selectFontPreset(preset.value)}
                   className={cn(
-                    'rounded-full px-2.5 py-0.5 text-[11.5px] transition-colors duration-100',
+                    'rounded-full px-2.5 text-[11.5px]',
                     selected
-                      ? 'bg-accent-tint font-medium text-accent-ink shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]'
-                      : 'bg-field text-ink-2 shadow-hairline hover:bg-hover hover:text-ink',
+                      ? 'bg-accent-tint font-medium text-accent-ink hover:bg-accent-tint'
+                      : 'text-ink-2 hover:text-ink',
                   )}
                 >
                   {t(preset.id === 'vscode' && hostKind === 'jetbrains' ? 'settings.appearance.fontPreset.ide' : preset.labelKey)}
-                </button>
+                </Button>
               );
             })}
           </div>
         </div>
         <Input
-          size="default"
+          size="sm"
           data-testid="prose-font-family"
           value={family}
           placeholder={t('appearance.familyPlaceholder')}
@@ -167,7 +169,7 @@ export function AppearancePanel() {
         <div className="flex items-center gap-2">
           {appearance.fontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
           <NumberStepper
-            size="default"
+            size="sm"
             decLabel={t('appearance.smaller')}
             incLabel={t('appearance.larger')}
             decDisabled={size <= MIN_SIZE}
@@ -187,7 +189,7 @@ export function AppearancePanel() {
         <div className="flex items-center gap-2">
           {appearance.lineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
           <NumberStepper
-            size="default"
+            size="sm"
             decLabel={t('settings.appearance.lineHeightSmaller')}
             incLabel={t('settings.appearance.lineHeightLarger')}
             decDisabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
@@ -207,7 +209,7 @@ export function AppearancePanel() {
         <div className="flex items-center gap-2">
           {appearance.paragraphSpacing === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
           <NumberStepper
-            size="default"
+            size="sm"
             decLabel={t('settings.appearance.paragraphSpacingSmaller')}
             incLabel={t('settings.appearance.paragraphSpacingLarger')}
             decDisabled={paragraphSpacing <= MIN_SPACING}
@@ -233,12 +235,12 @@ export function AppearancePanel() {
                   key={preset.width}
                   type="button"
                   variant={selected ? 'secondary' : 'ghost'}
-                  size="default"
+                  size="xs"
                   data-testid={`width-preset-${preset.width}`}
                   onClick={() => setContentWidth(preset.width)}
                   className={cn(
                     'rounded-full px-2 text-[11px]',
-                    selected && 'bg-accent-tint text-accent-ink',
+                    selected && 'bg-accent-tint text-accent-ink hover:bg-accent-tint',
                   )}
                 >
                   {t(preset.labelKey)}
@@ -247,7 +249,7 @@ export function AppearancePanel() {
             })}
           </div>
           <NumberStepper
-            size="default"
+            size="sm"
             decLabel={t('settings.appearance.contentWidthSmaller')}
             incLabel={t('settings.appearance.contentWidthLarger')}
             decDisabled={contentWidth <= MIN_WIDTH}
@@ -268,7 +270,7 @@ export function AppearancePanel() {
       </div>
 
       <div className="flex items-center justify-end">
-        <Button type="button" variant="ghost" size="default" data-testid="prose-reset" onClick={resetProse}>
+        <Button type="button" variant="ghost" size="sm" data-testid="prose-reset" onClick={resetProse}>
           {t('appearance.reset')}
         </Button>
       </div>

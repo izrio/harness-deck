@@ -115,8 +115,19 @@ if (typeof window !== 'undefined') {
     }) as typeof requestAnimationFrame;
   }
 
-  if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
-    Element.prototype.scrollIntoView = vi.fn();
+  if (typeof Element !== 'undefined') {
+    if (typeof Element.prototype.scrollIntoView !== 'function') {
+      Element.prototype.scrollIntoView = vi.fn();
+    }
+    if (typeof Element.prototype.hasPointerCapture !== 'function') {
+      Element.prototype.hasPointerCapture = () => false;
+    }
+    if (typeof Element.prototype.setPointerCapture !== 'function') {
+      Element.prototype.setPointerCapture = vi.fn();
+    }
+    if (typeof Element.prototype.releasePointerCapture !== 'function') {
+      Element.prototype.releasePointerCapture = vi.fn();
+    }
   }
 
   if (typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.scrollTo !== 'function') {

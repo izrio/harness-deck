@@ -46,7 +46,7 @@ export interface PersistedState {
   /** 右侧文件/Git 面板是否展开。 */
   readonly rightPanelOpen?: boolean;
   /** 右侧面板当前激活的标签页。 */
-  readonly rightPanelTab?: 'files' | 'git';
+  readonly rightPanelTab?: 'files' | 'git' | 'terminal';
   /** 上次选中的智能体，用于在冷启动收到 Host 快照前立即显示正确的智能体名称而不回退到 DeepSeek。 */
   readonly activeBackend?: { readonly id: string; readonly name: string; readonly kind?: BackendView['kind'] };
 }

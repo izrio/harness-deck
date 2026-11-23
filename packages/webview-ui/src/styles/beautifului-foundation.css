@@ -163,6 +163,103 @@
   --brand-foreground: #ffffff;
 }
 
+/* ── Curated OKLCH Theme Presets (P2-9) ───────────────── */
+
+:root[data-theme-preset="grove"] {
+  --accent: oklch(0.51 0.145 152);
+  --accent-ink: oklch(0.42 0.135 152);
+  --accent-tint: oklch(0.51 0.145 152 / 0.11);
+}
+.dark[data-theme-preset="grove"] {
+  --page: oklch(0.195 0.011 158);
+  --canvas: oklch(0.218 0.012 158);
+  --surface: oklch(0.252 0.014 158);
+  --inset: oklch(0.233 0.012 158);
+  --accent: oklch(0.64 0.15 152);
+  --accent-ink: oklch(0.76 0.13 152);
+  --accent-tint: oklch(0.64 0.15 152 / 0.16);
+}
+
+:root[data-theme-preset="ocean"] {
+  --accent: oklch(0.5 0.15 228);
+  --accent-ink: oklch(0.42 0.14 228);
+  --accent-tint: oklch(0.5 0.15 228 / 0.11);
+}
+.dark[data-theme-preset="ocean"] {
+  --page: oklch(0.194 0.013 236);
+  --canvas: oklch(0.218 0.015 236);
+  --surface: oklch(0.254 0.017 236);
+  --inset: oklch(0.234 0.014 236);
+  --accent: oklch(0.63 0.155 226);
+  --accent-ink: oklch(0.77 0.125 222);
+  --accent-tint: oklch(0.63 0.155 226 / 0.16);
+}
+
+:root[data-theme-preset="ember"] {
+  --accent: oklch(0.56 0.185 38);
+  --accent-ink: oklch(0.47 0.17 38);
+  --accent-tint: oklch(0.56 0.185 38 / 0.11);
+}
+.dark[data-theme-preset="ember"] {
+  --page: oklch(0.198 0.01 38);
+  --canvas: oklch(0.222 0.011 38);
+  --surface: oklch(0.258 0.013 38);
+  --inset: oklch(0.238 0.011 38);
+  --accent: oklch(0.66 0.175 42);
+  --accent-ink: oklch(0.79 0.14 48);
+  --accent-tint: oklch(0.66 0.175 42 / 0.16);
+}
+
+:root[data-theme-preset="iris"] {
+  --accent: oklch(0.51 0.2 292);
+  --accent-ink: oklch(0.43 0.185 292);
+  --accent-tint: oklch(0.51 0.2 292 / 0.11);
+}
+.dark[data-theme-preset="iris"] {
+  --page: oklch(0.196 0.012 290);
+  --canvas: oklch(0.22 0.014 290);
+  --surface: oklch(0.256 0.016 290);
+  --inset: oklch(0.236 0.014 290);
+  --accent: oklch(0.62 0.195 292);
+  --accent-ink: oklch(0.77 0.145 292);
+  --accent-tint: oklch(0.62 0.195 292 / 0.16);
+}
+
+/* ── High Contrast Mode (P2-9) ────────────────────────── */
+
+:root[data-high-contrast="true"] {
+  --ink: #09090b;
+  --ink-2: #3f3f46;
+  --ink-3: #52525b;
+  --line: #a1a1aa;
+  --line-strong: #71717a;
+}
+
+.dark[data-high-contrast="true"] {
+  --page: oklch(0.15 0.005 264);
+  --canvas: oklch(0.175 0.006 264);
+  --surface: oklch(0.22 0.008 264);
+  --ink: #ffffff;
+  --ink-2: oklch(0.86 0.006 260);
+  --ink-3: oklch(0.72 0.01 262);
+  --line: oklch(0.45 0.012 262);
+  --line-strong: oklch(0.58 0.014 264);
+}
+
+/* ── Zero-Flash Theme Switching & Offscreen Pause (P2-9 / P2-10) ── */
+
+.no-transitions,
+.no-transitions *,
+.no-transitions *::before,
+.no-transitions *::after {
+  transition: none !important;
+}
+
+[data-offscreen="true"],
+[data-offscreen="true"] * {
+  animation-play-state: paused !important;
+}
+
 @theme inline {
   /* colors */
   --color-page: var(--page);
