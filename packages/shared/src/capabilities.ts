@@ -4,7 +4,12 @@
  * 事实来源：`packages/extension/README.md` 的「不同底层的差别」与各控制器的实现。
  * 新增底层时在这里补一条；权限档位不在这里——它随会话由底层下发（`PermissionState.options`）。
  */
-import type { BackendCapabilities, BackendProtocolCapability, QuotaProviderId } from './viewModel.ts';
+import type {
+  BackendAccountCapability,
+  BackendCapabilities,
+  BackendProtocolCapability,
+  QuotaProviderId,
+} from './viewModel.ts';
 
 /** 判断能力时需要的底层信息；`BackendView`、`BackendProfile` 都能直接传进来。 */
 export interface BackendCapabilityInput {
@@ -27,9 +32,82 @@ const OPENAI_RESPONSES_CHAT: BackendProtocolCapability = {
 };
 const ACCOUNT_ONLY: BackendProtocolCapability = { kind: 'account-only' };
 
+const ACCOUNT_SINGLE_ACP: BackendAccountCapability = {
+  supported: true,
+  multiAccount: false,
+  isolation: 'single',
+  loginKind: 'acp-auth',
+};
+
+const ACCOUNT_DSH: BackendAccountCapability = {
+  supported: true,
+  multiAccount: true,
+  isolation: 'api-key',
+  loginKind: 'api-key',
+};
+
+const ACCOUNT_CLAUDE: BackendAccountCapability = {
+  supported: true,
+  multiAccount: true,
+  isolation: 'config-dir',
+  loginKind: 'terminal',
+  supportsQuota: true,
+  supportsSessionIsolation: true,
+};
+
+const ACCOUNT_CODEX: BackendAccountCapability = {
+  supported: true,
+  multiAccount: true,
+  isolation: 'config-dir',
+  loginKind: 'oauth-cli',
+  supportsSessionIsolation: true,
+};
+
+const ACCOUNT_PI: BackendAccountCapability = {
+  supported: true,
+  multiAccount: true,
+  isolation: 'config-dir',
+  loginKind: 'terminal',
+  supportsSessionIsolation: true,
+};
+
+const ACCOUNT_CODEBUDDY: BackendAccountCapability = {
+  supported: true,
+  multiAccount: true,
+  isolation: 'config-dir',
+  loginKind: 'terminal',
+  supportsRegion: true,
+  supportsQuota: true,
+  supportsSessionIsolation: true,
+};
+
+const ACCOUNT_OPENCODE: BackendAccountCapability = {
+  supported: true,
+  multiAccount: true,
+  isolation: 'config-dir',
+  loginKind: 'terminal',
+  supportsSessionIsolation: true,
+};
+
+const ACCOUNT_ANTIGRAVITY: BackendAccountCapability = {
+  supported: true,
+  multiAccount: true,
+  isolation: 'credential-slot',
+  loginKind: 'oauth-cli',
+  supportsQuota: true,
+};
+
+const ACCOUNT_ZCODE: BackendAccountCapability = {
+  supported: true,
+  multiAccount: false,
+  isolation: 'single',
+  loginKind: 'terminal',
+};
+
 /** 所有底层都有的基础能力。 */
 const BASIC: BackendCapabilities = {
   protocols: THREE_PROTOCOLS,
+  account: ACCOUNT_SINGLE_ACP,
   webUi: false,
   apiKeySetup: false,
   approvalHint: false,
@@ -46,6 +124,7 @@ const BASIC: BackendCapabilities = {
 /** dsh（DeepSeek Harness）：功能最全。 */
 const DSH: BackendCapabilities = {
   ...BASIC,
+  account: ACCOUNT_DSH,
   webUi: true,
   apiKeySetup: true,
   approvalHint: true,
@@ -58,18 +137,24 @@ const DSH: BackendCapabilities = {
 };
 
 /** ZCode：原生协议，支持消息插队与提问卡片。 */
-const ZCODE: BackendCapabilities = { ...BASIC, steer: true, questions: true };
+const ZCODE: BackendCapabilities = { ...BASIC, account: ACCOUNT_ZCODE, steer: true, questions: true };
 
 /** Pi：原生 RPC，支持运行中 `steer` 插队。 */
-const PI: BackendCapabilities = { ...BASIC, steer: true };
+const PI: BackendCapabilities = { ...BASIC, account: ACCOUNT_PI, steer: true };
 
 /** Claude Code：原生 stream-json，可查订阅额度。 */
-const CLAUDE: BackendCapabilities = { ...BASIC, protocols: ANTHROPIC_ONLY, quota: 'claude' };
+const CLAUDE: BackendCapabilities = {
+  ...BASIC,
+  protocols: ANTHROPIC_ONLY,
+  account: ACCOUNT_CLAUDE,
+  quota: 'claude',
+};
 
 /** Codex：原生 app-server，支持 OpenAI Responses/Chat、运行中插队、提问卡片与子代理调用。 */
 const CODEX: BackendCapabilities = {
   ...BASIC,
   protocols: OPENAI_RESPONSES_CHAT,
+  account: ACCOUNT_CODEX,
   steer: true,
   questions: true,
   subagents: true,
@@ -79,6 +164,7 @@ const CODEX: BackendCapabilities = {
 const CODEBUDDY: BackendCapabilities = {
   ...BASIC,
   protocols: OPENAI_CHAT,
+  account: ACCOUNT_CODEBUDDY,
   quota: 'codebuddy',
   subagents: true,
 };
@@ -141,6 +227,26 @@ function quotaFor(input: BackendCapabilityInput): QuotaProviderId | undefined {
   return undefined;
 }
 
+function accountFor(input: BackendCapabilityInput): BackendAccountCapability {
+  const id = input.id.toLowerCase();
+  if (input.kind === 'dsh' || id === 'dsh') return ACCOUNT_DSH;
+  if (input.kind === 'claude' || id === 'claude') return ACCOUNT_CLAUDE;
+  if (input.kind === 'codex' || id === 'codex') return ACCOUNT_CODEX;
+  if (input.kind === 'pi' || id === 'pi' || id === 'oh-my-pi') return ACCOUNT_PI;
+  if (input.kind === 'codebuddy' || id === 'codebuddy') return ACCOUNT_CODEBUDDY;
+  if (input.kind === 'zcode' || id === 'zcode') return ACCOUNT_ZCODE;
+  if (id === 'opencode') return ACCOUNT_OPENCODE;
+  if (id === 'antigravity') return ACCOUNT_ANTIGRAVITY;
+  const bin = commandBin(input.command ?? input.executable);
+  if (bin === 'agy' || bin === 'antigravity') return ACCOUNT_ANTIGRAVITY;
+  if (bin === 'opencode') return ACCOUNT_OPENCODE;
+  if (bin === 'claude') return ACCOUNT_CLAUDE;
+  if (bin === 'codex') return ACCOUNT_CODEX;
+  if (bin === 'codebuddy' || bin === 'cbc') return ACCOUNT_CODEBUDDY;
+  if (bin === 'pi' || bin === 'omp') return ACCOUNT_PI;
+  return ACCOUNT_SINGLE_ACP;
+}
+
 const ID_OVERRIDES: Readonly<Record<string, Partial<BackendCapabilities>>> = {
   dsh: DSH,
   zcode: ZCODE,
@@ -148,8 +254,8 @@ const ID_OVERRIDES: Readonly<Record<string, Partial<BackendCapabilities>>> = {
   'oh-my-pi': PI,
   codex: CODEX,
   codebuddy: CODEBUDDY,
-  opencode: { protocols: THREE_PROTOCOLS },
-  antigravity: { protocols: ACCOUNT_ONLY, quota: 'antigravity' },
+  opencode: { protocols: THREE_PROTOCOLS, account: ACCOUNT_OPENCODE },
+  antigravity: { protocols: ACCOUNT_ONLY, account: ACCOUNT_ANTIGRAVITY, quota: 'antigravity' },
 };
 
 /**
@@ -164,6 +270,7 @@ export function backendCapabilities(input: BackendCapabilityInput): BackendCapab
     ...base,
     ...override,
     protocols: protocolFor(input),
+    account: accountFor(input),
     ...(quota ? { quota } : {}),
   };
 }

@@ -18,6 +18,8 @@ const GLOBAL_ONLY_SETTINGS = new Set([
   'acpRegistryUrl',
   'providers',
   'protocolGateway',
+  'accounts',
+  'backendChannels',
   'projects',
   'mcpServers',
   'dsh.path',
@@ -67,6 +69,8 @@ const WATCHED_SETTING_KEYS = [
   'mcpServers',
   'providers',
   'protocolGateway',
+  'accounts',
+  'backendChannels',
 ] as const;
 
 const ALL_COMMANDS: readonly HostCommandId[] = [
@@ -75,6 +79,8 @@ const ALL_COMMANDS: readonly HostCommandId[] = [
   'newSession',
   'interrupt',
   'selectBackend',
+  'selectChannel',
+  'loginAccount',
   'selectModel',
   'explainSelection',
   'fixSelection',
@@ -263,10 +269,12 @@ export function activate(context: vscode.ExtensionContext): void {
     openProjectWindow: async (path: string) => {
       await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path), false);
     },
-    runInTerminal: async ({ name, cwd, commands }) => {
-      const terminal =
-        vscode.window.terminals.find((term) => term.name === name && term.exitStatus === undefined) ??
-        vscode.window.createTerminal({ name, cwd });
+    runInTerminal: async ({ name, cwd, commands, env }) => {
+      const hasCustomEnv = Boolean(env && Object.keys(env).length > 0);
+      const terminal = hasCustomEnv
+        ? vscode.window.createTerminal({ name, cwd, env })
+        : (vscode.window.terminals.find((term) => term.name === name && term.exitStatus === undefined) ??
+          vscode.window.createTerminal({ name, cwd }));
       terminal.show();
       const isWinPowerShell = process.platform === 'win32' && /powershell(?:\.exe)?$/iu.test(vscode.env.shell);
       if (isWinPowerShell && commands.length > 1) {

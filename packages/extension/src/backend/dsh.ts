@@ -98,6 +98,7 @@ async function readRuntimeConfig(profile: Extract<BackendProfile, { kind: 'dsh' 
   const prepared = await host.prepareBackendLaunch?.(profile);
   const boundProvider = host.boundProvider?.(profile.id);
   let providerPatch: Awaited<ReturnType<typeof prepareDshProviderRuntime>>;
+  let launchEnv = host.processEnv();
   if (boundProvider && host.ensureProviderProxy) {
     try {
       const proxy = await host.ensureProviderProxy();
@@ -107,8 +108,18 @@ async function readRuntimeConfig(profile: Extract<BackendProfile, { kind: 'dsh' 
         proxy.token,
         host.storageRoot,
       );
+      if (providerPatch?.env) {
+        launchEnv = host.processEnv(providerPatch.env);
+      }
     } catch (error) {
       host.log(`准备服务商 ${boundProvider.name} 的 dsh 配置失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else if (host.prepareAccountLaunch) {
+    try {
+      const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv);
+      if (accountPatch) launchEnv = accountPatch.env;
+    } catch (error) {
+      host.log(`准备 DeepSeek 官方账号环境失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
   const launcherArgs = [
@@ -119,7 +130,7 @@ async function readRuntimeConfig(profile: Extract<BackendProfile, { kind: 'dsh' 
     configuredPath,
     profile: host.settings.get<string>('dsh.profile', 'web') || 'web',
     cwd: host.workspacePath(),
-    env: host.processEnv(providerPatch?.env),
+    env: launchEnv,
     ...(launcherArgs.length > 0 ? { launcherArgs } : {}),
     ...(cachedExecutable ? { cachedExecutable } : {}),
     onResolvedExecutable: (resolved) => host.setCachedExecutable?.(profile.id, cmdSpec, resolved),

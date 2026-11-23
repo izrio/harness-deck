@@ -1,23 +1,31 @@
 /**
  * 模型选择（上方列表选模型 + 下方滑块调思考等级）。
  */
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
-import type { ModelOption } from '@harness-deck/shared';
-import { useView } from '../store.ts';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { backendCapabilities, isProviderReadyForBackend, type ModelOption } from '@harness-deck/shared';
+import { openSettingsPage, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import { GlideMenu } from './beautifului/index.ts';
-import { CheckIcon, ChevronDownIcon, SpinnerIcon } from './icons.tsx';
+import { CheckIcon, ChevronDownIcon, KeyIcon, SpinnerIcon, UsersIcon } from './icons.tsx';
 import { ModelVendorLogo } from './ModelVendorLogo.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
 import { useT } from '../i18n.ts';
 
 const keyOf = (o: { provider: string; model: string }) => `${o.provider}/${o.model}`;
 
 export function ModelPicker({ disabled }: { disabled: boolean }) {
   const models = useView((s) => s.models);
+  const backends = useView((s) => s.backends);
+  const providers = useView((s) => s.providers);
+  const accounts = useView((s) => s.accounts);
   const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
+  const [channelExpanded, setChannelExpanded] = useState(false);
+  const close = useCallback(() => {
+    setOpen(false);
+    setChannelExpanded(false);
+  }, []);
   const t = useT();
   const current = models.current;
   const option = models.options.find((o) => o.provider === current?.provider && o.model === current?.model);
@@ -29,6 +37,37 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
     : loading
       ? t('model.loading')
       : (current?.model ?? t('model.default'));
+
+  const activeBackend = useMemo(
+    () => backends.items.find((b) => b.id === backends.active),
+    [backends.items, backends.active],
+  );
+  const activeChannel = activeBackend ? (accounts.channels[activeBackend.id] ?? activeBackend.activeChannel) : undefined;
+  const backendAccounts = useMemo(
+    () => (activeBackend ? accounts.items.filter((a) => a.backendId === activeBackend.id) : []),
+    [accounts.items, activeBackend],
+  );
+  const compatibleProviders = useMemo(() => {
+    if (!activeBackend) return [];
+    const caps = activeBackend.capabilities ?? backendCapabilities(activeBackend);
+    if (caps.protocols.kind !== 'supported') return [];
+    return providers.items.filter((p) =>
+      isProviderReadyForBackend(p, activeBackend, { protocolGatewayEnabled: providers.protocolGatewayEnabled === true }),
+    );
+  }, [activeBackend, providers.items, providers.protocolGatewayEnabled]);
+
+  const channelSummary = useMemo(() => {
+    if (!activeBackend) return undefined;
+    if (activeChannel?.mode === 'provider') {
+      const p = providers.items.find((item) => item.id === activeChannel.providerId);
+      return p ? t('model.channel.provider', p.name) : undefined;
+    }
+    const targetAccId = activeChannel?.accountId ?? `system:${activeBackend.id}`;
+    const acc = backendAccounts.find((a) => a.id === targetAccId);
+    return acc ? t('model.channel.official', acc.label) : undefined;
+  }, [activeBackend, activeChannel, providers.items, backendAccounts, t]);
+
+  const showChannelSwitcher = Boolean(activeBackend && (backendAccounts.length > 0 || compatibleProviders.length > 0));
 
   const select = useCallback(
     (o: ModelOption, reasoningEffort?: string, shouldClose = false) => {
@@ -78,6 +117,135 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
           aria-label={t('model.select')}
           className="model-menu flex max-h-96 w-auto min-w-[260px] max-w-[min(360px,calc(100vw-16px))] flex-col overflow-hidden rounded-card p-0 shadow-raised"
         >
+          {showChannelSwitcher && activeBackend ? (
+            <div className="border-b border-line bg-inset/45 px-2 py-1.5" data-testid="model-channel-switcher">
+              <button
+                type="button"
+                data-testid="model-channel-toggle"
+                onClick={() => setChannelExpanded((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 rounded-[6px] px-1.5 py-1 text-left text-[11.5px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"
+              >
+                <span className="flex min-w-0 items-center gap-1.5 truncate">
+                  {activeChannel?.mode === 'provider' ? (
+                    <KeyIcon className="size-3 shrink-0 text-accent-ink" />
+                  ) : (
+                    <UsersIcon className="size-3 shrink-0 text-accent-ink" />
+                  )}
+                  <span className="truncate">{channelSummary ?? t('model.channel.label')}</span>
+                </span>
+                <ChevronDownIcon
+                  className={cn('size-3 shrink-0 text-ink-3 transition-transform duration-150', channelExpanded && 'rotate-180')}
+                />
+              </button>
+
+              {channelExpanded ? (
+                <div className="mt-1 flex flex-col gap-0.5 border-t border-line/70 pt-1" data-testid="model-channel-options">
+                  {backendAccounts.length > 0 ? (
+                    <>
+                      <div className="px-1.5 pt-0.5 text-[10.5px] font-medium text-ink-3">
+                        {t('model.channel.officialGroup')}
+                      </div>
+                      {backendAccounts.map((acc) => {
+                        const isCur =
+                          (activeChannel?.mode ?? 'official') === 'official' &&
+                          (activeChannel?.mode === 'official' ? (activeChannel.accountId ?? `system:${activeBackend.id}`) : `system:${activeBackend.id}`) === acc.id;
+                        return (
+                          <button
+                            key={acc.id}
+                            type="button"
+                            data-testid={`quick-channel-official-${acc.id}`}
+                            onClick={() => {
+                              postToHost({
+                                type: 'setBackendChannel',
+                                payload: { backendId: activeBackend.id, mode: 'official', accountId: acc.id },
+                              });
+                              close();
+                            }}
+                            className={cn(
+                              'flex w-full items-center gap-1.5 rounded-[6px] px-1.5 py-1 text-left text-[12px] transition-colors hover:bg-hover',
+                              isCur ? 'font-medium text-ink' : 'text-ink-2',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'size-1.5 shrink-0 rounded-full',
+                                acc.status === 'authenticated'
+                                  ? 'bg-green'
+                                  : acc.status === 'expired'
+                                    ? 'bg-orange'
+                                    : 'bg-ink-3/40',
+                              )}
+                            />
+                            <span className="min-w-0 flex-1 truncate">{acc.label}</span>
+                            {acc.plan ? <span className="text-[10.5px] text-ink-3">{acc.plan}</span> : null}
+                            {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
+                          </button>
+                        );
+                      })}
+                    </>
+                  ) : null}
+
+                  {compatibleProviders.length > 0 ? (
+                    <>
+                      <div className="px-1.5 pt-1 text-[10.5px] font-medium text-ink-3">
+                        {t('model.channel.providerGroup')}
+                      </div>
+                      {compatibleProviders.map((p) => {
+                        const isCur = activeChannel?.mode === 'provider' && activeChannel.providerId === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            data-testid={`quick-channel-provider-${p.id}`}
+                            onClick={() => {
+                              postToHost({
+                                type: 'setBackendChannel',
+                                payload: { backendId: activeBackend.id, mode: 'provider', providerId: p.id },
+                              });
+                              close();
+                            }}
+                            className={cn(
+                              'flex w-full items-center gap-1.5 rounded-[6px] px-1.5 py-1 text-left text-[12px] transition-colors hover:bg-hover',
+                              isCur ? 'font-medium text-ink' : 'text-ink-2',
+                            )}
+                          >
+                            <KeyIcon className="size-3 shrink-0 text-ink-3" />
+                            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                            {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
+                          </button>
+                        );
+                      })}
+                    </>
+                  ) : null}
+
+                  <div className="mt-1 flex items-center justify-between gap-1 border-t border-line/70 pt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        close();
+                        openSettingsPage('accounts');
+                      }}
+                    >
+                      {t('model.channel.manageAccounts')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        close();
+                        openSettingsPage('providers');
+                      }}
+                    >
+                      {t('model.channel.manageProviders')}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div role="menu" className="model-menu__level max-h-60 overflow-y-auto p-1" data-testid="model-list">
             <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
               {groups.map((group) => (

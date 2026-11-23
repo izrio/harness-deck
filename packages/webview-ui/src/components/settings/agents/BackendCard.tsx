@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { backendCapabilities, type BackendView, type NodeEnvState, type ProviderView } from '@harness-deck/shared';
+import { backendCapabilities, type AccountView, type BackendView, type NodeEnvState, type ProviderView } from '@harness-deck/shared';
 import type { MessageKey } from '../../../i18n.ts';
 import { useT } from '../../../i18n.ts';
 import { setSettingsTab } from '../../../store.ts';
 import { postToHost } from '../../../vscode.ts';
 import { BackendLogo } from '../../BackendLogo.tsx';
-import { CheckIcon, CopyIcon, DownloadIcon, GlobeIcon, KeyIcon, PencilIcon, SpinnerIcon, TrashIcon } from '../../icons.tsx';
+import { CheckIcon, CopyIcon, DownloadIcon, GlobeIcon, KeyIcon, PencilIcon, SpinnerIcon, TrashIcon, UsersIcon } from '../../icons.tsx';
 import { ValuePill } from '../../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -28,6 +28,7 @@ export function BackendCard({
   isDefault,
   nodeEnv,
   boundProvider,
+  activeAccount,
   onEdit,
 }: {
   readonly backend: BackendView;
@@ -35,6 +36,7 @@ export function BackendCard({
   readonly isDefault: boolean;
   readonly nodeEnv?: NodeEnvState;
   readonly boundProvider?: ProviderView;
+  readonly activeAccount?: AccountView;
   readonly onEdit: () => void;
 }) {
   const t = useT();
@@ -101,6 +103,18 @@ export function BackendCard({
                 <ValuePill tone="accent" className="text-[10.5px] hover:opacity-85">
                   <KeyIcon className="size-2.5" />
                   <span>{t('settings.providers.boundBadge', boundProvider.name)}</span>
+                </ValuePill>
+              </button>
+            ) : activeAccount ? (
+              <button
+                type="button"
+                data-testid={`backend-active-account-${backend.id}`}
+                onClick={() => setSettingsTab('accounts')}
+                className="inline-flex cursor-pointer items-center border-0 bg-transparent p-0"
+              >
+                <ValuePill className="text-[10.5px] hover:opacity-85">
+                  <UsersIcon className="size-2.5" />
+                  <span>{t('settings.accounts.officialBadge', activeAccount.label)}</span>
                 </ValuePill>
               </button>
             ) : null}

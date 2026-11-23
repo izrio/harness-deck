@@ -154,12 +154,14 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     expect(screen.getByTestId('settings-appearance')).toBeTruthy();
     expect(screen.queryByTestId('settings-notifications')).toBeNull();
 
-    // 键盘方向键依次切换：外观 -> 通知 -> 外部智能体 -> 服务商 -> 技能 -> MCP -> 会话 -> 聊天命令 -> 项目 -> 运行时与诊断
+    // 键盘方向键依次切换：外观 -> 通知 -> 外部智能体 -> 账号 -> 服务商 -> 技能 -> MCP -> 会话 -> 聊天命令 -> 项目 -> 运行时与诊断
     const tabs = screen.getByTestId('settings-tabs');
     fireEvent.keyDown(tabs, { key: 'ArrowDown' });
     expect(screen.getByTestId('settings-notifications')).toBeTruthy();
     fireEvent.keyDown(tabs, { key: 'ArrowDown' });
     expect(screen.getByTestId('settings-backends')).toBeTruthy();
+    fireEvent.keyDown(tabs, { key: 'ArrowDown' });
+    expect(screen.getByTestId('settings-accounts')).toBeTruthy();
     fireEvent.keyDown(tabs, { key: 'ArrowDown' });
     expect(screen.getByTestId('settings-providers')).toBeTruthy();
     fireEvent.keyDown(tabs, { key: 'ArrowDown' });

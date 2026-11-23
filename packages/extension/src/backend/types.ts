@@ -5,6 +5,7 @@
  * 界面本身不区分底层。extension.ts 同一时间只运行一个底层，切换时停掉旧的、启动新的，Webview 重新取快照。
  */
 import type {
+  AccountsState,
   AppearanceState,
   BackendsState,
   ExtensionsState,
@@ -57,6 +58,8 @@ export interface ChatBackendController {
   backendsChanged(): void;
   /** 服务商配置变化（推送给 Webview）。 */
   providersChanged?(): void;
+  /** 官方账号与渠道路由变化（推送给 Webview）。 */
+  accountsChanged?(): void;
   /** 项目与 Worktree 配置变化（推送给 Webview）。 */
   projectsChanged(): void;
   /** 扩展（Agent Skills 与 MCP 服务器）配置变化（推送给 Webview）。 */
@@ -116,6 +119,8 @@ export interface ControllerHostOptions {
   readonly backends?: () => BackendsState;
   /** 第三方服务商配置与智能体绑定状态（随快照下发）。 */
   readonly providers?: () => ProvidersState;
+  /** 官方账号列表与智能体渠道路由状态（随快照下发）。 */
+  readonly accounts?: () => AccountsState;
   /** 项目与 Worktree 配置（随快照下发，设置页里管理）。 */
   readonly projects?: () => ProjectsState;
   /** 扩展模块状态（已安装 Agent Skills 与统一 MCP 服务器配置）。 */

@@ -40,8 +40,10 @@ import {
   ServerIcon,
   SlashIcon,
   SmartphoneIcon,
+  UsersIcon,
 } from './icons.tsx';
 import { useIsMobile } from '../hooks/use-mobile.ts';
+import { AccountSettings } from './settings/AccountSettings.tsx';
 import { AgentSettings } from './settings/AgentSettings.tsx';
 import { AppearanceSettings } from './settings/AppearanceSettings.tsx';
 import { ChatCommandSettings } from './settings/ChatCommandSettings.tsx';
@@ -93,6 +95,7 @@ export function SettingsPage() {
       label: t('settings.nav.agent'),
       items: [
         { id: 'agents', label: t('settings.nav.agents'), icon: <AgentIcon className="size-3.5" /> },
+        { id: 'accounts', label: t('settings.nav.accounts'), icon: <UsersIcon className="size-3.5" /> },
         { id: 'providers', label: t('settings.nav.providers'), icon: <KeyIcon className="size-3.5" /> },
       ],
     },
@@ -307,6 +310,8 @@ function renderActiveTab(tab: SettingsTab): ReactNode {
       return <NotificationSettings />;
     case 'agents':
       return <AgentSettings />;
+    case 'accounts':
+      return <AccountSettings />;
     case 'providers':
       return <ProviderSettings />;
     case 'skills':

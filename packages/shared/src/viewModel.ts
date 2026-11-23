@@ -437,6 +437,30 @@ export type BackendProtocolCapability =
 /** 能查询订阅额度的服务商。 */
 export type QuotaProviderId = 'claude' | 'antigravity' | 'codebuddy';
 
+/** 官方账号的隔离策略。 */
+export type AccountIsolationKind = 'config-dir' | 'credential-slot' | 'api-key' | 'single';
+
+/** 官方渠道的登录触发方式。 */
+export type AccountLoginKind = 'oauth-cli' | 'terminal' | 'acp-auth' | 'api-key';
+
+/** 底层官方账号管理能力描述符。 */
+export interface BackendAccountCapability {
+  /** 是否支持官方渠道账号管理与登录。 */
+  readonly supported: boolean;
+  /** 是否支持添加并切换多个不同的官方账号。 */
+  readonly multiAccount: boolean;
+  /** 多账号隔离策略。 */
+  readonly isolation: AccountIsolationKind;
+  /** 触发官方登录的默认方式。 */
+  readonly loginKind: AccountLoginKind;
+  /** 是否支持区分区域（例如 CodeBuddy 的国内/国际/内部版）。 */
+  readonly supportsRegion?: boolean;
+  /** 是否支持按账号查询官方订阅额度。 */
+  readonly supportsQuota?: boolean;
+  /** 是否支持为该账号独立隔离会话历史（config-dir 隔离时可选）。 */
+  readonly supportsSessionIsolation?: boolean;
+}
+
 /**
  * 底层能做什么：由底层的描述符声明，界面只读这里，不再按 id / kind 判断功能是否可用。
  * 权限档位不在这里：它随会话由底层下发（`PermissionState.options`），每个底层可能不同。
@@ -446,6 +470,8 @@ export interface BackendCapabilities {
   readonly protocols: BackendProtocolCapability;
   /** 可查询订阅额度时对应的服务商；不填表示不支持。 */
   readonly quota?: QuotaProviderId;
+  /** 官方渠道账号管理与多账号隔离能力。 */
+  readonly account?: BackendAccountCapability;
   /** 能在浏览器打开底层自带的 Web UI（dsh 网页）。 */
   readonly webUi: boolean;
   /** 支持在插件里配置 API Key（dsh）。 */
@@ -527,6 +553,8 @@ export interface BackendView {
   readonly alive?: boolean;
   /** 该智能体在当前窗口进程中是否有会话正在执行回复。 */
   readonly running?: boolean;
+  /** 该智能体当前激活的模型渠道（官方账号或第三方服务商）。 */
+  readonly activeChannel?: BackendChannelBinding;
 }
 
 /** 本机 Node.js 与 npm 的探测结果（底层通过 npm 安装和管理）。 */
@@ -1079,6 +1107,79 @@ export interface ProvidersState {
   readonly protocolGatewayOrigin?: string;
   /** 本地网关最近的请求与协议转换日志。 */
   readonly gatewayLogs?: readonly ProviderGatewayLogEntry[];
+}
+
+// ────────────────────────────────────────────────────────────
+// 设置 -> Agent -> 账号（各智能体官方渠道多账号管理与渠道路由）
+// ────────────────────────────────────────────────────────────
+
+export type AccountRegion = 'cn' | 'ai' | 'internal';
+
+export type AccountAuthStatus = 'authenticated' | 'expired' | 'unauthenticated' | 'logging-in' | 'unknown';
+
+/** 写入设置 `harnessDeck.accounts` 的官方账号非敏感元数据（敏感凭据与密钥绝不写入此处）。 */
+export interface AccountConfig {
+  readonly id: string;
+  readonly backendId: string;
+  readonly label: string;
+  /** 默认 false（仅隔离登录凭据，软链共享项目历史会话）；true 表示完全独立会话历史。 */
+  readonly isolateSessions?: boolean;
+  /** CodeBuddy 等支持多区域的官方渠道环境。 */
+  readonly region?: AccountRegion;
+  readonly createdAt: number;
+}
+
+/** 智能体当前的模型渠道绑定：使用官方渠道（指定或默认账号）还是第三方服务商。 */
+export type BackendChannelBinding =
+  | { readonly mode: 'official'; readonly accountId?: string }
+  | { readonly mode: 'provider'; readonly providerId: string };
+
+/** 下发给 Webview 的脱敏官方账号视图模型（不含任何 Token、Cookie 或 API Key）。 */
+export interface AccountView {
+  readonly id: string;
+  readonly backendId: string;
+  readonly label: string;
+  /** 是否为系统默认主目录中自动探测到的本机官方账号（不可删除，仅可登录/退出）。 */
+  readonly isSystemDefault?: boolean;
+  readonly isolateSessions?: boolean;
+  readonly region?: AccountRegion;
+  readonly status: AccountAuthStatus;
+  /** 脱敏后的账号标识（如邮箱、用户名或掩码 Key）。 */
+  readonly identity?: string;
+  /** 订阅计划或认证方式（如 Max、Pro、Plus、Team、API Key）。 */
+  readonly plan?: string;
+  /** 凭据过期时间戳（epoch ms），未提供时为 undefined。 */
+  readonly expiresAt?: number;
+  /** 是否已配置额外凭据（例如 dsh 的官方 API Key 或 CodeBuddy 的 usage-cookie）。 */
+  readonly hasSecret?: boolean;
+  /** 是否已配置 CodeBuddy 额度查询 Cookie。 */
+  readonly hasUsageCookie?: boolean;
+  /** 最近一次查到的官方订阅额度。 */
+  readonly quota?: QuotaView;
+  readonly checkedAt?: number;
+  readonly createdAt?: number;
+  readonly error?: string;
+}
+
+/** 官方登录流程的实时状态，用于前端登录弹窗展示授权链接、设备码或终端引导。 */
+export interface AccountLoginProgress {
+  readonly accountId: string;
+  readonly backendId: string;
+  readonly phase: 'starting' | 'waiting-browser' | 'waiting-terminal' | 'verifying' | 'succeeded' | 'failed' | 'cancelled';
+  readonly authUrl?: string;
+  readonly deviceCode?: string;
+  readonly command?: string;
+  readonly message?: string;
+}
+
+export interface AccountsState {
+  readonly items: readonly AccountView[];
+  /** 每个底层智能体当前激活的渠道路由（backendId -> official/provider）。 */
+  readonly channels: Readonly<Record<string, BackendChannelBinding>>;
+  /** 正在进行的官方登录任务状态。 */
+  readonly loginProgress?: AccountLoginProgress;
+  /** 正在批量刷新账号状态与额度。 */
+  readonly checking?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────

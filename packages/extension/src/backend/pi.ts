@@ -136,6 +136,17 @@ export function createPiBackend(
       } catch (error) {
         host.log(`准备服务商 ${boundProvider.name} 的 Pi 配置失败：${error instanceof Error ? error.message : String(error)}`);
       }
+    } else if (host.prepareAccountLaunch) {
+      try {
+        const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv);
+        if (current !== generation) return;
+        if (accountPatch) {
+          launchEnv = accountPatch.env;
+          currentPiAgentDir = accountPatch.configDir;
+        }
+      } catch (error) {
+        host.log(`准备 Pi 官方账号环境失败：${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     if (host.prepareBackendLaunch) {

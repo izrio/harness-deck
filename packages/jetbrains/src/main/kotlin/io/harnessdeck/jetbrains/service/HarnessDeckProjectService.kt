@@ -398,7 +398,9 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
                 val name = params.get("name")?.asStringOrNull() ?: "Harness Deck"
                 val cwd = params.get("cwd")?.asStringOrNull() ?: workbench.projectBasePath()
                 val cmds = params.getAsJsonArray("commands")?.map { it.asString } ?: emptyList()
-                workbench.runInTerminal(name, cwd, cmds).thenApply { JsonObject() }
+                val envObj = params.getAsJsonObject("env")
+                val envMap = envObj?.entrySet()?.associate { (k, v) -> k to v.asString } ?: emptyMap()
+                workbench.runInTerminal(name, cwd, cmds, envMap).thenApply { JsonObject() }
             }
             "ide/secretGet" -> {
                 val key = params.get("key")?.asStringOrNull().orEmpty()

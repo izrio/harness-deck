@@ -90,6 +90,7 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 - **改动**：修改文件的那一行显示增删行数，点击在 Diff 编辑器里查看。
 - **审批**：底层要执行需要确认的操作时，对话末尾出现审批卡片。
 - **模型、模式**：输入框工具条切换模型（上方选择模型、下方滑动调整思考等级）和权限 / 模式。ACP 底层的模型是按会话设置的：新对话沿用你上次选的模型和思考等级，已有会话保持自己的。
+- **官方账号与渠道管理**：在「设置 → Agent → 账号」中可为 Claude Code、Codex、CodeBuddy、Antigravity、Pi、OpenCode、DeepSeek 等智能体登录并管理多个官方渠道账号（支持独立凭据隔离、可选独立会话历史与按账号查询订阅额度），并可在设置页、模型选择器顶部或命令面板随时将智能体在「官方账号」与「第三方服务商」之间一键切换。
 - **外观、字体和排版**：设置 → 外观中可切换浅色 / 深色 / 跟随系统主题，以及阅读与聊天排版参数。
 - **滚动到底部**：往上翻看历史时右下角出现「↓」按钮，有新内容时带提示点，点一下回到底部并继续跟随。
 
@@ -184,7 +185,9 @@ A VS Code chat panel for coding agents: streaming replies, compact tool rows, ap
 
 **Differences**: all backends support streaming, tool rows, approvals, to-dos, stop, diffs, models/modes, session history, concurrent multi-tab sessions, session changes bar, and serial worktree sessions. Message steering is supported on DeepSeek, Pi, ZCode, and Codex; subagent cards on DeepSeek, Codex, and CodeBuddy; question cards on DeepSeek, ZCode, and Codex; subscription quota on Claude Code, CodeBuddy, and Antigravity; per-turn file rollback, `/goal`, and the browser Web UI link are DeepSeek-only.
 
-**Settings**: `harnessDeck.backends`, `harnessDeck.dsh.path`, `harnessDeck.dsh.profile`, `harnessDeck.claude.path`, `harnessDeck.codex.path`, `harnessDeck.codebuddy.path`, `harnessDeck.pi.path`, `harnessDeck.zcode.path`, `harnessDeck.context.includeActiveEditor`, `harnessDeck.ui.language`, `harnessDeck.ui.fontSize`, `harnessDeck.ui.fontFamily`, `harnessDeck.ui.codeFontFamily`, `harnessDeck.ui.showTurnChanges`.
+**Settings**: `harnessDeck.backends`, `harnessDeck.accounts`, `harnessDeck.backendChannels`, `harnessDeck.providers`, `harnessDeck.dsh.path`, `harnessDeck.dsh.profile`, `harnessDeck.claude.path`, `harnessDeck.codex.path`, `harnessDeck.codebuddy.path`, `harnessDeck.pi.path`, `harnessDeck.zcode.path`, `harnessDeck.context.includeActiveEditor`, `harnessDeck.ui.language`, `harnessDeck.ui.fontSize`, `harnessDeck.ui.fontFamily`, `harnessDeck.ui.codeFontFamily`, `harnessDeck.ui.showTurnChanges`.
+
+**Official Accounts & Channel Switching**: manage multiple official accounts per agent under Settings → Agent → Accounts (isolated config directories / credential slots / official API keys with optional isolated sessions and per-account subscription quota) and switch any agent between official accounts and third-party providers from Settings, the Model Picker header, or the Command Palette (`Switch Model Channel / Official Account`).
 
 **Mobile Remote Access (PWA + LAN / Tailscale / BYO Tunnel)**: disabled by default. Enable in Settings → Mobile Remote (or command `Harness Deck: Toggle Mobile Remote Access`), generate a 5-minute single-use QR pairing link (`#code=` fragment), and connect from your phone browser or installed PWA. Supports `read-only` and `operate` device scopes, per-device revocation, in-app Diff review, local VAPID Web Push & Webhook fallback (suppressed while IDE is focused), Tailscale `serve` / custom HTTPS tunnel routing, and standalone headless mode via `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`.
 

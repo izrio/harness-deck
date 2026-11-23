@@ -1,0 +1,176 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { backendCapabilities, type HostSnapshot } from '@harness-deck/shared';
+import { applyHostMessage, resetStoreForTests } from '../src/store.ts';
+import { AccountSettings } from '../src/components/settings/AccountSettings.tsx';
+import { ModelPicker } from '../src/components/ModelPicker.tsx';
+import { mockVsCodeApi } from './setup.ts';
+
+const vscodeMock = mockVsCodeApi();
+
+function makeSnapshot(): HostSnapshot {
+  return {
+    runtime: { kind: 'connected', version: '1.0.0', newerThanTested: false },
+    connection: 'connected',
+    sessions: [],
+    tabs: { items: [{ key: 't1', title: 'New', running: false }], active: 't1' },
+    session: { title: 'New', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+    items: [],
+    models: {
+      options: [
+        { provider: 'anthropic', model: 'claude-sonnet', name: 'Claude Sonnet', group: 'Anthropic', efforts: [] },
+      ],
+      current: { provider: 'anthropic', model: 'claude-sonnet' },
+    },
+    interactions: [],
+    permissions: { options: [] },
+    workspace: { dirtyFiles: 0 },
+    context: { includeActiveByDefault: true, pinned: [] },
+    commands: [],
+    locale: 'zh',
+    appearance: {},
+    backends: {
+      active: 'claude',
+      items: [
+        {
+          id: 'claude',
+          name: 'Claude Code',
+          kind: 'claude',
+          capabilities: backendCapabilities({ id: 'claude', kind: 'claude' }),
+          activeChannel: { mode: 'official', accountId: 'system:claude' },
+        },
+        {
+          id: 'antigravity',
+          name: 'Antigravity',
+          kind: 'acp',
+          capabilities: backendCapabilities({ id: 'antigravity', kind: 'acp', command: 'agy' }),
+          activeChannel: { mode: 'official', accountId: 'system:antigravity' },
+        },
+      ],
+    },
+    providers: {
+      items: [
+        {
+          id: 'volc',
+          name: '火山方舟',
+          anthropicUrl: 'https://ark.cn-beijing.volces.com/api/coding',
+          models: [{ id: 'ark-code-latest', name: 'Ark Code Latest' }],
+          boundBackendIds: [],
+          hasApiKey: true,
+        },
+      ],
+    },
+    accounts: {
+      items: [
+        {
+          id: 'system:claude',
+          backendId: 'claude',
+          label: '本机默认账号',
+          isSystemDefault: true,
+          status: 'authenticated',
+          identity: 'me@example.com',
+          plan: 'Max',
+        },
+        {
+          id: 'claude-work',
+          backendId: 'claude',
+          label: '公司号',
+          status: 'authenticated',
+          identity: 'work@corp.com',
+          plan: 'Pro',
+        },
+        {
+          id: 'system:antigravity',
+          backendId: 'antigravity',
+          label: '本机默认账号',
+          isSystemDefault: true,
+          status: 'authenticated',
+          identity: 'dev@gmail.com',
+        },
+      ],
+      channels: {
+        claude: { mode: 'official', accountId: 'system:claude' },
+        antigravity: { mode: 'official', accountId: 'system:antigravity' },
+      },
+    },
+  };
+}
+
+describe('AccountSettings & ModelPicker channel switching', () => {
+  beforeEach(() => {
+    resetStoreForTests();
+    vscodeMock.reset();
+    applyHostMessage({ type: 'snapshot', payload: makeSnapshot() });
+  });
+
+  it('renders official accounts, switches between official accounts and providers, and disables providers for account-only agents', () => {
+    render(<AccountSettings />);
+
+    // 挂载时触发一次状态与额度刷新
+    expect(vscodeMock.posted.some((m) => m.type === 'refreshAccounts')).toBe(true);
+    expect(screen.getByTestId('account-row-system:claude')).toBeTruthy();
+    expect(screen.getByTestId('account-row-claude-work')).toBeTruthy();
+
+    // Antigravity 为 account-only，服务商按钮置灰
+    const agyProviderBtn = screen.getByTestId('channel-provider-antigravity') as HTMLButtonElement;
+    expect(agyProviderBtn.disabled).toBe(true);
+
+    // 切换 Claude Code 到另一个官方账号
+    fireEvent.click(screen.getByTestId('account-use-claude-work'));
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'setBackendChannel',
+      payload: { backendId: 'claude', mode: 'official', accountId: 'claude-work' },
+    });
+
+    // 切换 Claude Code 到第三方服务商
+    fireEvent.click(screen.getByTestId('channel-provider-claude'));
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'setBackendChannel',
+      payload: { backendId: 'claude', mode: 'provider', providerId: 'volc' },
+    });
+  });
+
+  it('adds a new account via modal and confirms before deleting', () => {
+    render(<AccountSettings />);
+    vscodeMock.reset();
+
+    fireEvent.click(screen.getByTestId('add-account-claude'));
+    const labelInput = screen.getByTestId('account-form-label');
+    fireEvent.change(labelInput, { target: { value: '备用号' } });
+    fireEvent.click(screen.getByTestId('account-form-save-login'));
+
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'upsertAccount',
+      payload: {
+        backendId: 'claude',
+        label: '备用号',
+        isolateSessions: false,
+        setActive: true,
+      },
+    });
+
+    // 删除独立账号弹出二次确认
+    fireEvent.click(screen.getByTestId('account-delete-claude-work'));
+    expect(screen.getByTestId('account-delete-dialog')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('account-delete-confirm'));
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'deleteAccount',
+      payload: { id: 'claude-work' },
+    });
+  });
+
+  it('supports quick official/provider channel switching inside ModelPicker', () => {
+    render(<ModelPicker disabled={false} />);
+    vscodeMock.reset();
+
+    fireEvent.click(screen.getByTestId('model-picker'));
+    fireEvent.click(screen.getByTestId('model-channel-toggle'));
+    fireEvent.click(screen.getByTestId('quick-channel-provider-volc'));
+
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'setBackendChannel',
+      payload: { backendId: 'claude', mode: 'provider', providerId: 'volc' },
+    });
+  });
+});

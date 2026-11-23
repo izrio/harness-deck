@@ -73,6 +73,7 @@ export function AgentSettings() {
   const t = useT();
   const backends = useView((s) => s.backends);
   const providers = useView((s) => s.providers.items);
+  const accounts = useView((s) => s.accounts);
   const nodeEnv = backends.nodeEnv;
   const requestedVersionsRef = useRef(new Set<string>());
   const [form, setForm] = useState<AgentFormState | undefined>();
@@ -404,21 +405,39 @@ export function AgentSettings() {
         </Dialog>
 
         <div className="flex flex-col gap-2">
-          {backends.items.map((backend) => (
-            <BackendCard
-              key={backend.id}
-              backend={backend}
-              active={backend.id === backends.active}
-              isDefault={backend.id === (backends.defaultBackend ?? backends.active)}
-              nodeEnv={nodeEnv}
-              boundProvider={providers.find(
-                (p) =>
-                  p.boundBackendIds.includes(backend.id) ||
-                  (backend.id === 'pi' && p.boundBackendIds.includes('oh-my-pi')),
-              )}
-              onEdit={() => openEdit(backend)}
-            />
-          ))}
+          {backends.items.map((backend) => {
+            const channel = accounts.channels[backend.id] ?? backend.activeChannel;
+            const boundProvider =
+              channel?.mode === 'provider'
+                ? providers.find((p) => p.id === channel.providerId)
+                : channel?.mode === 'official'
+                  ? undefined
+                  : providers.find(
+                      (p) =>
+                        p.boundBackendIds.includes(backend.id) ||
+                        (backend.id === 'pi' && p.boundBackendIds.includes('oh-my-pi')),
+                    );
+            const activeAccount =
+              !boundProvider
+                ? accounts.items.find(
+                    (a) =>
+                      a.backendId === backend.id &&
+                      a.id === (channel?.mode === 'official' && channel.accountId ? channel.accountId : `system:${backend.id}`),
+                  )
+                : undefined;
+            return (
+              <BackendCard
+                key={backend.id}
+                backend={backend}
+                active={backend.id === backends.active}
+                isDefault={backend.id === (backends.defaultBackend ?? backends.active)}
+                nodeEnv={nodeEnv}
+                {...(boundProvider ? { boundProvider } : {})}
+                {...(activeAccount ? { activeAccount } : {})}
+                onEdit={() => openEdit(backend)}
+              />
+            );
+          })}
         </div>
       </div>
     </SettingsSection>

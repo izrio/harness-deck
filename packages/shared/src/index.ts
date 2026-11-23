@@ -2,6 +2,14 @@ export type { RuntimeStatus } from './runtime.ts';
 export { IMAGE_MEDIA_TYPES, MAX_IMAGES, TASK_COLUMNS, WORKBENCH_MODULES } from './limits.ts';
 export { joinLabel, splitLabel } from './labels.ts';
 export type {
+  AccountAuthStatus,
+  AccountConfig,
+  AccountIsolationKind,
+  AccountLoginKind,
+  AccountLoginProgress,
+  AccountRegion,
+  AccountsState,
+  AccountView,
   AdvancedPreferences,
   AcpRegistryEntry,
   AcpRegistryState,
@@ -9,6 +17,8 @@ export type {
   AgentToolConfig,
   AppearanceState,
   AttachmentView,
+  BackendAccountCapability,
+  BackendChannelBinding,
   BackendsState,
   BackendCapabilities,
   BackendView,

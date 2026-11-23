@@ -420,6 +420,7 @@ export class ChatController implements ChatBackendController {
       ...(this.options.preferences ? { preferences: this.options.preferences() } : {}),
       backends: this.options.backends?.() ?? { items: [], active: '' },
       ...(this.options.providers ? { providers: this.options.providers() } : {}),
+      ...(this.options.accounts ? { accounts: this.options.accounts() } : {}),
       ...(this.options.projects ? { projects: this.options.projects() } : {}),
       ...(this.options.extensions ? { extensions: this.options.extensions() } : {}),
       ...(includeWorkbench && this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
@@ -444,6 +445,13 @@ export class ChatController implements ChatBackendController {
   providersChanged(): void {
     if (this.options.providers) {
       this.options.post({ type: 'providers', payload: this.options.providers() });
+    }
+    this.scheduleRender();
+  }
+
+  accountsChanged(): void {
+    if (this.options.accounts) {
+      this.options.post({ type: 'accounts', payload: this.options.accounts() });
     }
     this.scheduleRender();
   }

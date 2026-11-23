@@ -473,6 +473,11 @@ class IdeaWorkbenchAdapter(private val project: Project) {
         return future
     }
 
-    fun runInTerminal(name: String, cwd: String, commands: List<String>): CompletableFuture<Void> =
-        TerminalRunnerHelper.runCommands(project, name, cwd, commands)
+    fun runInTerminal(
+        name: String,
+        cwd: String,
+        commands: List<String>,
+        env: Map<String, String> = emptyMap(),
+    ): CompletableFuture<Void> =
+        TerminalRunnerHelper.runCommands(project, name, cwd, commands, env)
 }

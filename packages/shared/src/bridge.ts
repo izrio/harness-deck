@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { RuntimeStatus } from './runtime.ts';
 import { IMAGE_MEDIA_TYPES, MAX_IMAGE_BASE64, MAX_IMAGES, TASK_COLUMNS } from './limits.ts';
 import type {
+  AccountLoginProgress,
+  AccountsState,
   AppearanceState,
   ClientSurface,
   CommandView,
@@ -565,6 +567,49 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   }),
   /** 悬浮上下文旁的用量标识时查询官方订阅额度；宿主按激活后端判断是否有官方 OAuth 凭据。 */
   z.object({ type: z.literal('fetchQuota'), payload: z.object({ requestId: z.number().int() }) }),
+  /** 设置 -> Agent -> 账号：官方渠道多账号管理与智能体渠道路由切换（官方 ↔ 服务商）。 */
+  z.object({
+    type: z.literal('upsertAccount'),
+    payload: z.object({
+      id: z.string().max(120).optional(),
+      backendId: z.string().min(1).max(100),
+      label: z.string().min(1).max(120),
+      isolateSessions: z.boolean().optional(),
+      region: z.enum(['cn', 'ai', 'internal']).optional(),
+      /** 仅 dsh 官方 API Key 账号使用：undefined 保留原密钥，空串清除，非空写入 SecretStorage。 */
+      apiKey: z.string().max(4_000).optional(),
+      /** 仅 CodeBuddy 官方额度查询 Cookie 使用：undefined 保留，空串清除，非空写入 SecretStorage。 */
+      usageCookie: z.string().max(8_000).optional(),
+      /** 保存后是否立即设为该智能体的激活官方账号。 */
+      setActive: z.boolean().optional(),
+    }),
+  }),
+  z.object({ type: z.literal('deleteAccount'), payload: z.object({ id: z.string().min(1).max(120) }) }),
+  z.object({
+    type: z.literal('loginAccount'),
+    payload: z.object({
+      id: z.string().min(1).max(120),
+      backendId: z.string().min(1).max(100).optional(),
+    }),
+  }),
+  z.object({ type: z.literal('cancelAccountLogin'), payload: z.object({ id: z.string().max(120).optional() }) }),
+  z.object({ type: z.literal('logoutAccount'), payload: z.object({ id: z.string().min(1).max(120) }) }),
+  z.object({
+    type: z.literal('refreshAccounts'),
+    payload: z.object({
+      backendId: z.string().max(100).optional(),
+      includeQuota: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('setBackendChannel'),
+    payload: z.object({
+      backendId: z.string().min(1).max(100),
+      mode: z.enum(['official', 'provider']),
+      accountId: z.string().max(120).optional(),
+      providerId: z.string().max(100).optional(),
+    }),
+  }),
   /** 手机端远程互通（HD-23 / HD-26 / HD-27）。 */
   z.object({ type: z.literal('setRemoteEnabled'), payload: z.object({ enabled: z.boolean() }) }),
   z.object({
@@ -644,6 +689,7 @@ export interface HostSnapshot {
   readonly preferences?: PreferencesState;
   readonly backends: BackendsState;
   readonly providers?: ProvidersState;
+  readonly accounts?: AccountsState;
   readonly projects?: ProjectsState;
   readonly extensions?: ExtensionsState;
   readonly workbench?: WorkbenchState;
@@ -679,6 +725,8 @@ export type HostToWebview =
   | { readonly type: 'preferences'; readonly payload: PreferencesState }
   | { readonly type: 'backends'; readonly payload: BackendsState }
   | { readonly type: 'providers'; readonly payload: ProvidersState }
+  | { readonly type: 'accounts'; readonly payload: AccountsState }
+  | { readonly type: 'accountLoginProgress'; readonly payload: AccountLoginProgress | undefined }
   | {
       readonly type: 'providerModelsFetched';
       readonly payload: { readonly requestId: number; readonly models: readonly ProviderModelItem[]; readonly error?: string };

@@ -12,8 +12,16 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, resolve } from 'node:path';
 import {
+  backendCapabilities,
+  isProviderReadyForBackend,
+  type AccountConfig,
+  type AccountLoginProgress,
+  type AccountsState,
+  type AccountView,
   type AdvancedPreferences,
+  type AcpRegistryState,
   type AppearanceState,
+  type BackendChannelBinding,
   type BackendsState,
   type ChatCommand,
   type ClientSurface,
@@ -32,12 +40,33 @@ import {
   type RemoteScope,
   type RemoteState,
   type RuntimeStatus,
-  type AcpRegistryState,
   type TabsState,
   type WebviewToHost,
   type WorkbenchModule,
   type WorkbenchState,
 } from '@harness-deck/shared';
+import { AccountAuthFlowManager } from '../accounts/AccountAuthFlow.ts';
+import { inspectOfficialAccount, type AccountInspectionResult } from '../accounts/AccountInspector.ts';
+import {
+  clearAccountCredentials,
+  prepareAccountLaunchPatch,
+  removeIsolatedAccountData,
+  switchAntigravityCredentialSlot,
+} from '../accounts/AccountIsolation.ts';
+import {
+  accountApiKeySecretKey,
+  accountCookieSecretKey,
+  activeOfficialAccountId,
+  deleteAccountSetting,
+  effectiveProviderForBackend,
+  isSystemAccountId,
+  parseAccountsSetting,
+  parseBackendChannelsSetting,
+  resolveBackendChannel,
+  setBackendChannelSetting,
+  systemAccountId,
+  upsertAccountSetting,
+} from '../accounts/AccountStore.ts';
 import { createAcpBackend } from '../backend/acp.ts';
 import { parseAcpRegistry } from '../backend/acpRegistry.ts';
 import { createClaudeBackend } from '../backend/claude.ts';
@@ -123,7 +152,6 @@ import {
   buildProvidersState,
   deleteProviderSetting,
   parseProvidersSetting,
-  providerForBackend,
   providerSecretKey,
   upsertProviderSetting,
 } from '../providers/ProviderStore.ts';
@@ -645,6 +673,7 @@ export function createHarnessHostRuntime(
           ...(alive ? { alive: true } : {}),
           ...(running ? { running: true } : {}),
           ...(webUrl ? { webUrl } : {}),
+          activeChannel: channelFor(p.id),
         };
       }),
       active: active?.backend.profile.id ?? targetBackendId,
@@ -834,18 +863,218 @@ export function createHarnessHostRuntime(
     return dispatcher;
   };
 
-  // ---- 第三方服务商（Coding Plan 与自定义网关）与本机回环代理 ----
+  // ---- 第三方服务商（Coding Plan 与自定义网关）、官方多账号与渠道路由 ----
   const providerHasKey = new Set<string>();
   const apiKeyCache = new Map<string, string>();
   const selectedProviderModels = new Map<string, string>();
   const readProviders = () => parseProvidersSetting(platform.settings.get<unknown>('providers', []));
+  const readAccounts = () => parseAccountsSetting(platform.settings.get<unknown>('accounts', []));
+  const readBackendChannels = () =>
+    parseBackendChannelsSetting(platform.settings.get<unknown>('backendChannels', {}));
   const readProtocolGatewayEnabled = (): boolean =>
     platform.settings.get<boolean>('protocolGateway', false) === true;
-  const boundProviderSignatureFor = (backendId: string): string =>
-    JSON.stringify({
-      provider: providerForBackend(readProviders(), backendId) ?? null,
+
+  const accountInspections = new Map<string, AccountInspectionResult & { readonly checkedAt: number }>();
+  const accountRevision = new Map<string, number>();
+  let accountsChecking = false;
+  let lastActiveAntigravityAccountId: string | undefined;
+
+  const bumpAccountRevision = (backendId: string): void => {
+    accountRevision.set(backendId, (accountRevision.get(backendId) ?? 0) + 1);
+  };
+
+  const channelFor = (backendId: string): BackendChannelBinding =>
+    resolveBackendChannel(backendId, readBackendChannels(), readProviders(), readAccounts());
+
+  const effectiveProviderFor = (backendId: string) =>
+    effectiveProviderForBackend(backendId, readBackendChannels(), readProviders(), readAccounts());
+
+  const boundProviderSignatureFor = (backendId: string): string => {
+    const providers = readProviders();
+    const accounts = readAccounts();
+    const channels = readBackendChannels();
+    const channel = resolveBackendChannel(backendId, channels, providers, accounts);
+    const provider = effectiveProviderForBackend(backendId, channels, providers, accounts);
+    const activeAcc =
+      channel.mode === 'official' && channel.accountId && !isSystemAccountId(channel.accountId)
+        ? accounts.find((a) => a.id === channel.accountId)
+        : undefined;
+    return JSON.stringify({
+      channel,
+      provider: provider ?? null,
+      account: activeAcc ?? null,
+      rev: accountRevision.get(backendId) ?? 0,
       gateway: readProtocolGatewayEnabled(),
     });
+  };
+
+  const accountsState = (): AccountsState => {
+    const profileList = profiles();
+    const configured = readAccounts();
+    const providers = readProviders();
+    const rawChannels = readBackendChannels();
+    const loginProg = accountAuthFlow.progress;
+
+    const channels: Record<string, BackendChannelBinding> = {};
+    const items: AccountView[] = [];
+
+    for (const profile of profileList) {
+      channels[profile.id] = resolveBackendChannel(profile.id, rawChannels, providers, configured);
+
+      const sysId = systemAccountId(profile.id);
+      const sysInsp = accountInspections.get(sysId);
+      const sysLoggingIn =
+        loginProg?.accountId === sysId &&
+        (loginProg.phase === 'starting' ||
+          loginProg.phase === 'waiting-browser' ||
+          loginProg.phase === 'waiting-terminal' ||
+          loginProg.phase === 'verifying');
+      items.push({
+        id: sysId,
+        backendId: profile.id,
+        label: t('account.systemDefault'),
+        isSystemDefault: true,
+        status: sysLoggingIn ? 'logging-in' : (sysInsp?.status ?? 'unknown'),
+        ...(sysInsp?.identity ? { identity: sysInsp.identity } : {}),
+        ...(sysInsp?.plan ? { plan: sysInsp.plan } : {}),
+        ...(sysInsp?.expiresAt !== undefined ? { expiresAt: sysInsp.expiresAt } : {}),
+        ...(sysInsp?.hasSecret !== undefined ? { hasSecret: sysInsp.hasSecret } : {}),
+        ...(sysInsp?.hasUsageCookie !== undefined ? { hasUsageCookie: sysInsp.hasUsageCookie } : {}),
+        ...(sysInsp?.quota ? { quota: sysInsp.quota } : {}),
+        ...(sysInsp?.checkedAt !== undefined ? { checkedAt: sysInsp.checkedAt } : {}),
+        ...(sysInsp?.error ? { error: sysInsp.error } : {}),
+      });
+
+      for (const acc of configured.filter((a) => a.backendId === profile.id)) {
+        const insp = accountInspections.get(acc.id);
+        const loggingIn =
+          loginProg?.accountId === acc.id &&
+          (loginProg.phase === 'starting' ||
+            loginProg.phase === 'waiting-browser' ||
+            loginProg.phase === 'waiting-terminal' ||
+            loginProg.phase === 'verifying');
+        items.push({
+          id: acc.id,
+          backendId: acc.backendId,
+          label: acc.label,
+          ...(acc.isolateSessions ? { isolateSessions: true } : {}),
+          ...(acc.region ? { region: acc.region } : {}),
+          status: loggingIn ? 'logging-in' : (insp?.status ?? 'unknown'),
+          ...(insp?.identity ? { identity: insp.identity } : {}),
+          ...(insp?.plan ? { plan: insp.plan } : {}),
+          ...(insp?.expiresAt !== undefined ? { expiresAt: insp.expiresAt } : {}),
+          ...(insp?.hasSecret !== undefined ? { hasSecret: insp.hasSecret } : {}),
+          ...(insp?.hasUsageCookie !== undefined ? { hasUsageCookie: insp.hasUsageCookie } : {}),
+          ...(insp?.quota ? { quota: insp.quota } : {}),
+          ...(insp?.checkedAt !== undefined ? { checkedAt: insp.checkedAt } : {}),
+          createdAt: acc.createdAt,
+          ...(insp?.error ? { error: insp.error } : {}),
+        });
+      }
+    }
+
+    return {
+      items,
+      channels,
+      ...(loginProg ? { loginProgress: loginProg } : {}),
+      ...(accountsChecking ? { checking: true } : {}),
+    };
+  };
+
+  const pushAccounts = (): void => {
+    const payload = accountsState();
+    if (active?.backend.controller.accountsChanged) {
+      active.backend.controller.accountsChanged();
+    } else {
+      post({ type: 'accounts', payload });
+    }
+    for (const entry of managedBackends.values()) {
+      if (entry !== active) {
+        entry.backend.controller.accountsChanged?.();
+      }
+    }
+    pushBackends();
+  };
+
+  const inspectOneAccount = async (
+    backendId: string,
+    accountId: string,
+    account: AccountConfig | undefined,
+    includeQuota = false,
+  ): Promise<void> => {
+    const clientVersion = installedVersions.get(backendId);
+    const res = await inspectOfficialAccount({
+      backendId,
+      accountId,
+      ...(account ? { account } : {}),
+      storageRoot,
+      baseEnv: processEnv(),
+      secrets: platform.secrets,
+      includeQuota,
+      getHttpProxy: () => platform.settings.getHttpProxy(),
+      ...(clientVersion ? { clientVersion } : {}),
+    });
+    const prev = accountInspections.get(accountId);
+    accountInspections.set(accountId, {
+      ...res,
+      ...(!includeQuota && prev?.quota && res.status === 'authenticated' ? { quota: prev.quota } : {}),
+      checkedAt: Date.now(),
+    });
+  };
+
+  const refreshAccountInspections = async (options?: {
+    readonly backendId?: string;
+    readonly includeQuota?: boolean;
+  }): Promise<void> => {
+    accountsChecking = true;
+    pushAccounts();
+    try {
+      const configured = readAccounts();
+      const targets = options?.backendId
+        ? profiles().filter((p) => p.id === options.backendId)
+        : profiles();
+      const jobs: Promise<void>[] = [];
+      for (const p of targets) {
+        const sysId = systemAccountId(p.id);
+        jobs.push(inspectOneAccount(p.id, sysId, undefined, options?.includeQuota === true));
+        for (const acc of configured.filter((a) => a.backendId === p.id)) {
+          jobs.push(inspectOneAccount(p.id, acc.id, acc, options?.includeQuota === true));
+        }
+      }
+      await Promise.all(jobs);
+    } finally {
+      accountsChecking = false;
+      pushAccounts();
+    }
+  };
+
+  let syncManagedBackendsForChannelChange = (_targetBackendId?: string): void => undefined;
+
+  const accountAuthFlow = new AccountAuthFlowManager({
+    storageRoot: platform.storageRoot,
+    workspacePath: () => workspacePath,
+    processEnv: () => processEnv(),
+    settingsGet: (k, def) => platform.settings.get(k, def),
+    secrets: platform.secrets,
+    openExternal: (url) => platform.openExternal(url),
+    runInTerminal: (opts) => platform.runInTerminal(opts),
+    log,
+    onProgress: (progress: AccountLoginProgress | undefined) => {
+      post({ type: 'accountLoginProgress', payload: progress });
+      pushAccounts();
+    },
+    onComplete: async (accountId, backendId) => {
+      const acc = readAccounts().find((a) => a.id === accountId);
+      await inspectOneAccount(backendId, accountId, acc, true);
+      bumpAccountRevision(backendId);
+      const currentBinding = channelFor(backendId);
+      if (currentBinding.mode === 'official' && (currentBinding.accountId ?? systemAccountId(backendId)) === accountId) {
+        syncManagedBackendsForChannelChange(backendId);
+      }
+      pushAccounts();
+      post({ type: 'toast', payload: { level: 'info', text: t('account.loginSucceeded') } });
+    },
+  });
 
   let gatewayLogTimer: ReturnType<typeof setTimeout> | undefined;
   let scheduleGatewayLogPush = (): void => undefined;
@@ -1283,6 +1512,7 @@ export function createHarnessHostRuntime(
     preferences: readPreferences(),
     backends: backendsState(),
     providers: providersState(),
+    accounts: accountsState(),
     projects: projectsState(),
     extensions: extensionsState(),
     ...(hub ? { workbench: hub.state() } : {}),
@@ -1408,6 +1638,7 @@ export function createHarnessHostRuntime(
       preferences: readPreferences,
       backends: backendsState,
       providers: providersState,
+      accounts: accountsState,
       projects: projectsState,
       extensions: extensionsState,
       showTurnChanges: () => platform.settings.get<boolean>('ui.showTurnChanges', false),
@@ -1522,7 +1753,29 @@ export function createHarnessHostRuntime(
       persistEnvCache();
       pushBackends();
     },
-    boundProvider: (backendId) => providerForBackend(readProviders(), backendId),
+    boundProvider: (backendId) => effectiveProviderFor(backendId),
+    prepareAccountLaunch: async (backendId, baseEnv) => {
+      const binding = channelFor(backendId);
+      if (binding.mode !== 'official') return undefined;
+      const accountId = binding.accountId ?? systemAccountId(backendId);
+      const acc = isSystemAccountId(accountId) ? undefined : readAccounts().find((a) => a.id === accountId);
+      const patch = await prepareAccountLaunchPatch({
+        backendId,
+        accountId,
+        ...(acc ? { account: acc } : {}),
+        storageRoot,
+        baseEnv,
+        secrets: platform.secrets,
+        activateSlot: backendId.toLowerCase() === 'antigravity',
+        ...(backendId.toLowerCase() === 'antigravity' && lastActiveAntigravityAccountId
+          ? { previousAccountId: lastActiveAntigravityAccountId }
+          : {}),
+      });
+      if (backendId.toLowerCase() === 'antigravity') {
+        lastActiveAntigravityAccountId = accountId;
+      }
+      return patch;
+    },
     ensureProviderProxy: async () => {
       const hadOrigin = Boolean(providerProxy.origin);
       const origin = await providerProxy.ensureStarted();
@@ -1570,6 +1823,28 @@ export function createHarnessHostRuntime(
 
   const isBackendRunningTurn = (entry: ManagedBackend): boolean =>
     entry.backend.controller.peekSnapshot?.()?.session.running === true;
+
+  syncManagedBackendsForChannelChange = (targetBackendIdOnly?: string): void => {
+    for (const [id, entry] of [...managedBackends.entries()]) {
+      if (targetBackendIdOnly && id !== targetBackendIdOnly) continue;
+      const nextSig = boundProviderSignatureFor(id);
+      if (nextSig === entry.boundProviderSignature) continue;
+      entry.boundProviderSignature = nextSig;
+      if (id === active?.backend.profile.id) {
+        if (!isBackendRunningTurn(entry)) {
+          void switchBackend(id, true);
+        }
+      } else if (!isBackendRunningTurn(entry)) {
+        void enqueueBackendTransition(async () => {
+          await stopAndDeleteManagedBackend(id);
+          pushBackends();
+        });
+      }
+    }
+  };
+
+  // 启动时静默做一次纯本地凭据状态探测（不发网络请求，毫秒级完成）
+  void refreshAccountInspections({ includeQuota: false }).catch(() => undefined);
 
   const stopAndDeleteManagedBackend = async (id: string): Promise<void> => {
     const existing = managedBackends.get(id);
@@ -2342,10 +2617,10 @@ export function createHarnessHostRuntime(
         pushExtensions();
         reloadActiveIfExtensionsChanged();
       }
-      if (affects('providers') || affects('protocolGateway')) {
+      if (affects('providers') || affects('protocolGateway') || affects('accounts') || affects('backendChannels')) {
         void (async () => {
           const anyUsesProvider = [...managedBackends.values()].some((entry) =>
-            Boolean(providerForBackend(readProviders(), entry.backend.profile.id)),
+            Boolean(effectiveProviderFor(entry.backend.profile.id)),
           );
           if (readProtocolGatewayEnabled()) {
             await providerProxy.ensureStarted().catch((err: unknown) => log(`启动本地协议转换网关失败：${String(err)}`));
@@ -2354,19 +2629,8 @@ export function createHarnessHostRuntime(
           }
           await refreshProviderSecretFlags();
           pushProviders();
-          for (const [id, entry] of [...managedBackends.entries()]) {
-            const nextSig = boundProviderSignatureFor(id);
-            if (nextSig === entry.boundProviderSignature) continue;
-            entry.boundProviderSignature = nextSig;
-            if (id === active?.backend.profile.id) {
-              void switchBackend(id, true);
-            } else if (!isBackendRunningTurn(entry)) {
-              void enqueueBackendTransition(async () => {
-                await stopAndDeleteManagedBackend(id);
-                pushBackends();
-              });
-            }
-          }
+          pushAccounts();
+          syncManagedBackendsForChannelChange();
         })();
       }
       if (affects('ui.language')) {
@@ -2543,11 +2807,31 @@ export function createHarnessHostRuntime(
           await providerProxy.ensureStarted().catch((err: unknown) => log(`启动本地协议转换网关失败：${String(err)}`));
         }
         await writeSetting(undefined, 'providers', nextProviders.length > 0 ? nextProviders : undefined);
+        // 与旧版「服务商勾选绑定智能体」保持双向联动：勾选时切到该服务商，取消且正指向该服务商时回退官方
+        let nextChannels = readBackendChannels();
+        let channelsChanged = false;
+        for (const bid of saved.boundBackendIds) {
+          const cur = nextChannels[bid];
+          if (cur?.mode !== 'provider' || cur.providerId !== saved.id) {
+            nextChannels = setBackendChannelSetting(nextChannels, bid, { mode: 'provider', providerId: saved.id });
+            channelsChanged = true;
+          }
+        }
+        for (const [bid, binding] of Object.entries(nextChannels)) {
+          if (binding.mode === 'provider' && binding.providerId === saved.id && !saved.boundBackendIds.includes(bid)) {
+            nextChannels = setBackendChannelSetting(nextChannels, bid, { mode: 'official' });
+            channelsChanged = true;
+          }
+        }
+        if (channelsChanged) {
+          await writeSetting(undefined, 'backendChannels', Object.keys(nextChannels).length > 0 ? nextChannels : undefined);
+        }
         await hub?.syncProviderAgentBindings(saved);
         if (saved.defaultModel) {
           selectedProviderModels.set(saved.id, saved.defaultModel);
         }
         pushProviders();
+        pushAccounts();
       })();
       return;
     }
@@ -2560,8 +2844,20 @@ export function createHarnessHostRuntime(
         selectedProviderModels.delete(id);
         const nextProviders = deleteProviderSetting(readProviders(), id);
         await writeSetting(undefined, 'providers', nextProviders.length > 0 ? nextProviders : undefined);
+        let nextChannels = readBackendChannels();
+        let channelsChanged = false;
+        for (const [bid, binding] of Object.entries(nextChannels)) {
+          if (binding.mode === 'provider' && binding.providerId === id) {
+            nextChannels = setBackendChannelSetting(nextChannels, bid, { mode: 'official' });
+            channelsChanged = true;
+          }
+        }
+        if (channelsChanged) {
+          await writeSetting(undefined, 'backendChannels', Object.keys(nextChannels).length > 0 ? nextChannels : undefined);
+        }
         await hub?.clearProviderAgentBindings(id);
         pushProviders();
+        pushAccounts();
       })();
       return;
     }
@@ -2570,7 +2866,7 @@ export function createHarnessHostRuntime(
         const enabled = message.payload.enabled;
         await writeSetting(undefined, 'protocolGateway', enabled ? true : undefined);
         const anyUsesProvider = [...managedBackends.values()].some((entry) =>
-          Boolean(providerForBackend(readProviders(), entry.backend.profile.id)),
+          Boolean(effectiveProviderFor(entry.backend.profile.id)),
         );
         if (enabled) {
           await providerProxy.ensureStarted().catch((err: unknown) => log(`启动本地协议转换网关失败：${String(err)}`));
@@ -2578,19 +2874,7 @@ export function createHarnessHostRuntime(
           await providerProxy.dispose();
         }
         pushProviders();
-        for (const [id, entry] of [...managedBackends.entries()]) {
-          const nextSig = boundProviderSignatureFor(id);
-          if (nextSig === entry.boundProviderSignature) continue;
-          entry.boundProviderSignature = nextSig;
-          if (id === active?.backend.profile.id) {
-            void switchBackend(id, true);
-          } else if (!isBackendRunningTurn(entry)) {
-            void enqueueBackendTransition(async () => {
-              await stopAndDeleteManagedBackend(id);
-              pushBackends();
-            });
-          }
-        }
+        syncManagedBackendsForChannelChange();
       })();
       return;
     }
@@ -2612,9 +2896,29 @@ export function createHarnessHostRuntime(
           message.payload.boundAgentIds,
         );
         await writeSetting(undefined, 'providers', nextProviders.length > 0 ? nextProviders : undefined);
+        let nextChannels = readBackendChannels();
+        let channelsChanged = false;
+        for (const bid of message.payload.boundBackendIds) {
+          nextChannels = setBackendChannelSetting(nextChannels, bid, { mode: 'provider', providerId: message.payload.id });
+          channelsChanged = true;
+        }
+        for (const [bid, binding] of Object.entries(nextChannels)) {
+          if (
+            binding.mode === 'provider' &&
+            binding.providerId === message.payload.id &&
+            !message.payload.boundBackendIds.includes(bid)
+          ) {
+            nextChannels = setBackendChannelSetting(nextChannels, bid, { mode: 'official' });
+            channelsChanged = true;
+          }
+        }
+        if (channelsChanged) {
+          await writeSetting(undefined, 'backendChannels', Object.keys(nextChannels).length > 0 ? nextChannels : undefined);
+        }
         const updated = nextProviders.find((p) => p.id === message.payload.id);
         if (updated) await hub?.syncProviderAgentBindings(updated);
         pushProviders();
+        pushAccounts();
       })();
       return;
     }
@@ -2650,18 +2954,51 @@ export function createHarnessHostRuntime(
         const backendId = active?.backend.profile.id ?? defaultBackendId;
         const profile = active?.backend.profile ?? profiles().find((p) => p.id === backendId);
         const providerId = quotaProviderFor(profile);
-        if (!providerId || (providerId !== 'antigravity' && providerForBackend(readProviders(), backendId))) {
+        if (!providerId || (providerId !== 'antigravity' && effectiveProviderFor(backendId))) {
           post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
           return;
         }
         try {
-          const query = providerId === 'claude' ? queryClaudeQuota : providerId === 'antigravity' ? queryAntigravityQuota : queryCodebuddyQuota;
+          const activeAccId =
+            activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts()) ??
+            systemAccountId(backendId);
+          const accCfg = isSystemAccountId(activeAccId)
+            ? undefined
+            : readAccounts().find((a) => a.id === activeAccId);
+          const accPatch = await prepareAccountLaunchPatch({
+            backendId,
+            accountId: activeAccId,
+            ...(accCfg ? { account: accCfg } : {}),
+            storageRoot,
+            baseEnv: processEnv(),
+            secrets: platform.secrets,
+            activateSlot: false,
+          });
+          const query =
+            providerId === 'claude'
+              ? queryClaudeQuota
+              : providerId === 'antigravity'
+                ? queryAntigravityQuota
+                : queryCodebuddyQuota;
           const clientVersion = installedVersions.get(backendId);
           const quota = await query({
-            env: process.env,
+            env: accPatch.env,
             getHttpProxy: () => platform.settings.getHttpProxy(),
             ...(clientVersion ? { clientVersion } : {}),
           });
+          if (quota) {
+            const prev = accountInspections.get(activeAccId);
+            accountInspections.set(activeAccId, {
+              status: prev?.status ?? 'authenticated',
+              ...(prev?.identity ? { identity: prev.identity } : {}),
+              ...(prev?.plan ? { plan: prev.plan } : {}),
+              ...(prev?.expiresAt !== undefined ? { expiresAt: prev.expiresAt } : {}),
+              ...(prev?.hasSecret !== undefined ? { hasSecret: prev.hasSecret } : {}),
+              ...(prev?.hasUsageCookie !== undefined ? { hasUsageCookie: prev.hasUsageCookie } : {}),
+              quota,
+              checkedAt: Date.now(),
+            });
+          }
           post(
             quota
               ? { type: 'quotaFetched', payload: { requestId, quota } }
@@ -2671,6 +3008,215 @@ export function createHarnessHostRuntime(
           // 额度查询失败不应该打扰用户，前端收到 unavailable 会隐藏标识。
           post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
         }
+      })();
+      return;
+    }
+    if (message.type === 'upsertAccount') {
+      void (async () => {
+        const payload = message.payload;
+        if (payload.id && isSystemAccountId(payload.id)) {
+          // 本机默认账号只允许更新附加凭据（如 CodeBuddy usage-cookie）
+          if (payload.usageCookie !== undefined) {
+            const cleanCookie = payload.usageCookie.trim();
+            if (cleanCookie) await platform.secrets.store(accountCookieSecretKey(payload.id), cleanCookie);
+            else await platform.secrets.delete(accountCookieSecretKey(payload.id));
+            bumpAccountRevision(payload.backendId);
+          }
+          await inspectOneAccount(payload.backendId, payload.id, undefined, false);
+          pushAccounts();
+          syncManagedBackendsForChannelChange(payload.backendId);
+          return;
+        }
+        const { accounts: nextAccounts, account: saved } = upsertAccountSetting(readAccounts(), {
+          ...(payload.id ? { id: payload.id } : {}),
+          backendId: payload.backendId,
+          label: payload.label,
+          ...(payload.isolateSessions !== undefined ? { isolateSessions: payload.isolateSessions } : {}),
+          ...(payload.region ? { region: payload.region } : {}),
+        });
+        if (payload.apiKey !== undefined) {
+          const cleanKey = payload.apiKey.trim();
+          if (cleanKey) await platform.secrets.store(accountApiKeySecretKey(saved.id), cleanKey);
+          else await platform.secrets.delete(accountApiKeySecretKey(saved.id));
+          bumpAccountRevision(saved.backendId);
+        }
+        if (payload.usageCookie !== undefined) {
+          const cleanCookie = payload.usageCookie.trim();
+          if (cleanCookie) await platform.secrets.store(accountCookieSecretKey(saved.id), cleanCookie);
+          else await platform.secrets.delete(accountCookieSecretKey(saved.id));
+          bumpAccountRevision(saved.backendId);
+        }
+        await writeSetting(undefined, 'accounts', nextAccounts.length > 0 ? nextAccounts : undefined);
+        if (payload.setActive) {
+          const nextChannels = setBackendChannelSetting(readBackendChannels(), saved.backendId, {
+            mode: 'official',
+            accountId: saved.id,
+          });
+          await writeSetting(undefined, 'backendChannels', nextChannels);
+        }
+        await inspectOneAccount(saved.backendId, saved.id, saved, false);
+        pushAccounts();
+        syncManagedBackendsForChannelChange(saved.backendId);
+        post({ type: 'toast', payload: { level: 'info', text: t('account.saved', saved.label) } });
+      })();
+      return;
+    }
+    if (message.type === 'deleteAccount') {
+      void (async () => {
+        const id = message.payload.id;
+        if (isSystemAccountId(id)) return;
+        const { accounts: nextAccounts, channels: nextChannels, removed } = deleteAccountSetting(
+          readAccounts(),
+          readBackendChannels(),
+          id,
+        );
+        if (!removed) return;
+        accountAuthFlow.cancel(id);
+        await removeIsolatedAccountData({
+          backendId: removed.backendId,
+          accountId: removed.id,
+          storageRoot,
+          secrets: platform.secrets,
+        });
+        accountInspections.delete(id);
+        await writeSetting(undefined, 'accounts', nextAccounts.length > 0 ? nextAccounts : undefined);
+        await writeSetting(undefined, 'backendChannels', Object.keys(nextChannels).length > 0 ? nextChannels : undefined);
+        bumpAccountRevision(removed.backendId);
+        pushAccounts();
+        syncManagedBackendsForChannelChange(removed.backendId);
+        post({ type: 'toast', payload: { level: 'info', text: t('account.deleted', removed.label) } });
+      })();
+      return;
+    }
+    if (message.type === 'loginAccount') {
+      void (async () => {
+        const { id, backendId: requestedBackend } = message.payload;
+        const configured = readAccounts();
+        const foundAccount = isSystemAccountId(id) ? undefined : configured.find((a) => a.id === id);
+        const backendId =
+          foundAccount?.backendId ??
+          (isSystemAccountId(id) ? id.slice('system:'.length) : requestedBackend?.trim() ?? '');
+        const profile = profiles().find((p) => p.id === backendId);
+        if (!profile) return;
+        if (profile.kind === 'dsh') {
+          if (isSystemAccountId(id)) {
+            await executeCommand('configureApiKey');
+            await inspectOneAccount(profile.id, id, undefined, false);
+            pushAccounts();
+          }
+          return;
+        }
+        await accountAuthFlow.startLogin({
+          backendId: profile.id,
+          backendName: profile.name,
+          accountId: id,
+          ...(foundAccount ? { account: foundAccount } : {}),
+          ...(profile.kind === 'acp' ? { acpCommand: profile.command } : {}),
+          ...(profile.id === 'antigravity' && lastActiveAntigravityAccountId
+            ? { previousActiveAccountId: lastActiveAntigravityAccountId }
+            : {}),
+        });
+      })();
+      return;
+    }
+    if (message.type === 'cancelAccountLogin') {
+      accountAuthFlow.cancel(message.payload.id);
+      return;
+    }
+    if (message.type === 'logoutAccount') {
+      void (async () => {
+        const id = message.payload.id;
+        const foundAccount = isSystemAccountId(id) ? undefined : readAccounts().find((a) => a.id === id);
+        const backendId = foundAccount?.backendId ?? (isSystemAccountId(id) ? id.slice('system:'.length) : '');
+        if (!backendId) return;
+        accountAuthFlow.cancel(id);
+        await clearAccountCredentials({
+          backendId,
+          accountId: id,
+          storageRoot,
+          baseEnv: processEnv(),
+          secrets: platform.secrets,
+        });
+        bumpAccountRevision(backendId);
+        await inspectOneAccount(backendId, id, foundAccount, false);
+        pushAccounts();
+        syncManagedBackendsForChannelChange(backendId);
+        post({ type: 'toast', payload: { level: 'info', text: t('account.loggedOut') } });
+      })();
+      return;
+    }
+    if (message.type === 'refreshAccounts') {
+      void refreshAccountInspections({
+        ...(message.payload.backendId ? { backendId: message.payload.backendId } : {}),
+        includeQuota: message.payload.includeQuota !== false,
+      });
+      return;
+    }
+    if (message.type === 'setBackendChannel') {
+      void (async () => {
+        const { backendId, mode, accountId, providerId } = message.payload;
+        const profile = profiles().find((p) => p.id === backendId);
+        if (!profile) return;
+        const managed = managedBackends.get(backendId);
+        if (managed && isBackendRunningTurn(managed)) {
+          post({ type: 'toast', payload: { level: 'error', text: t('account.switchWhileRunning') } });
+          return;
+        }
+        const caps = backendCapabilities(profile);
+        let nextBinding: BackendChannelBinding;
+        if (mode === 'provider') {
+          if (caps.protocols.kind !== 'supported') {
+            post({ type: 'toast', payload: { level: 'error', text: t('account.providerUnsupported', profile.name) } });
+            return;
+          }
+          const providers = readProviders();
+          const target = providers.find((p) => p.id === providerId);
+          if (!target) {
+            post({ type: 'toast', payload: { level: 'error', text: t('account.providerMissing') } });
+            return;
+          }
+          const ready = isProviderReadyForBackend(target, profile, {
+            protocolGatewayEnabled: readProtocolGatewayEnabled(),
+          });
+          if (!ready) {
+            post({ type: 'toast', payload: { level: 'error', text: t('account.providerIncompatible', target.name, profile.name) } });
+            return;
+          }
+          nextBinding = { mode: 'provider', providerId: target.id };
+        } else {
+          const targetAccountId = accountId?.trim() || systemAccountId(backendId);
+          nextBinding = { mode: 'official', accountId: targetAccountId };
+          if (backendId.toLowerCase() === 'antigravity') {
+            await switchAntigravityCredentialSlot({
+              targetAccountId,
+              ...(lastActiveAntigravityAccountId ? { previousAccountId: lastActiveAntigravityAccountId } : {}),
+              secrets: platform.secrets,
+              env: processEnv(),
+            });
+            lastActiveAntigravityAccountId = targetAccountId;
+          }
+        }
+        const nextChannels = setBackendChannelSetting(readBackendChannels(), backendId, nextBinding);
+        await writeSetting(undefined, 'backendChannels', nextChannels);
+        pushAccounts();
+        pushProviders();
+        syncManagedBackendsForChannelChange(backendId);
+        const channelLabel =
+          nextBinding.mode === 'provider'
+            ? (readProviders().find((p) => p.id === nextBinding.providerId)?.name ?? nextBinding.providerId)
+            : nextBinding.accountId && !isSystemAccountId(nextBinding.accountId)
+              ? (readAccounts().find((a) => a.id === nextBinding.accountId)?.label ?? t('account.systemDefault'))
+              : t('account.systemDefault');
+        post({
+          type: 'toast',
+          payload: {
+            level: 'info',
+            text:
+              nextBinding.mode === 'provider'
+                ? t('account.switchedToProvider', profile.name, channelLabel)
+                : t('account.switchedToOfficial', profile.name, channelLabel),
+          },
+        });
       })();
       return;
     }
@@ -3334,6 +3880,72 @@ export function createHarnessHostRuntime(
         await selectBackendForCurrentTab(picked.id, true);
         return;
       }
+      case 'selectChannel': {
+        const backendId = active?.backend.profile.id ?? defaultBackendId;
+        const profile = profiles().find((p) => p.id === backendId);
+        if (!profile) return;
+        const state = accountsState();
+        const curBinding = state.channels[backendId] ?? channelFor(backendId);
+        const officialItems = state.items
+          .filter((a) => a.backendId === backendId)
+          .map((acc) => ({
+            id: `official:${acc.id}`,
+            label: `${t('account.officialPrefix')} · ${acc.label}`,
+            description: [acc.identity, acc.plan].filter(Boolean).join(' · ') || acc.status,
+            picked:
+              curBinding.mode === 'official' &&
+              (curBinding.accountId ?? systemAccountId(backendId)) === acc.id,
+            mode: 'official' as const,
+            accountId: acc.id,
+          }));
+        const gatewayOn = readProtocolGatewayEnabled();
+        const providerItems = readProviders()
+          .filter((p) => isProviderReadyForBackend(p, profile, { protocolGatewayEnabled: gatewayOn }))
+          .map((p) => ({
+            id: `provider:${p.id}`,
+            label: `${t('account.providerPrefix')} · ${p.name}`,
+            description: p.defaultModel || p.models[0]?.id || '',
+            picked: curBinding.mode === 'provider' && curBinding.providerId === p.id,
+            mode: 'provider' as const,
+            providerId: p.id,
+          }));
+        const allOptions = [...officialItems, ...providerItems];
+        const picked = await platform.pickQuickItem(allOptions, {
+          placeHolder: t('ext.selectChannel', profile.name),
+        });
+        if (!picked) return;
+        dispatchWebviewMessage({
+          type: 'setBackendChannel',
+          payload:
+            picked.mode === 'provider'
+              ? { backendId, mode: 'provider', providerId: picked.providerId }
+              : { backendId, mode: 'official', accountId: picked.accountId },
+        });
+        return;
+      }
+      case 'loginAccount': {
+        const state = accountsState();
+        const backendId = active?.backend.profile.id ?? defaultBackendId;
+        const profileMap = new Map(profiles().map((p) => [p.id, p]));
+        const candidates = state.items
+          .slice()
+          .sort((a, b) => (a.backendId === backendId ? -1 : b.backendId === backendId ? 1 : 0))
+          .map((acc) => ({
+            id: acc.id,
+            label: `${profileMap.get(acc.backendId)?.name ?? acc.backendId} · ${acc.label}`,
+            description: [acc.identity, acc.status].filter(Boolean).join(' · '),
+            backendId: acc.backendId,
+          }));
+        const picked = await platform.pickQuickItem(candidates, {
+          placeHolder: t('ext.loginAccount'),
+        });
+        if (!picked) return;
+        dispatchWebviewMessage({
+          type: 'loginAccount',
+          payload: { id: picked.id, backendId: picked.backendId },
+        });
+        return;
+      }
       case 'selectModel': {
         const chat = current()?.controller;
         if (!chat) return;
@@ -3453,6 +4065,7 @@ export function createHarnessHostRuntime(
         clearTimeout(gatewayLogTimer);
         gatewayLogTimer = undefined;
       }
+      accountAuthFlow.dispose();
       for (const dispose of disposers.splice(0)) dispose();
       await remoteBridge.stop();
       clientHub.dispose();

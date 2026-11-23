@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from 'react';
 import { loadState, postToHost, saveState } from './vscode.ts';
 import type {
+  AccountsState,
   AppearanceState,
   ClientSurface,
   CommandView,
@@ -45,6 +46,7 @@ export type SettingsTab =
   | 'notifications'
   | 'remote'
   | 'agents'
+  | 'accounts'
   | 'providers'
   | 'skills'
   | 'mcp'
@@ -74,6 +76,8 @@ export interface ViewState {
   readonly backends: BackendsState;
   /** 第三方编程套餐与自定义模型服务商及智能体绑定。 */
   readonly providers: ProvidersState;
+  /** 各智能体官方渠道多账号管理与渠道路由状态。 */
+  readonly accounts: AccountsState;
   /** 技能（SKILL.md）与统一 MCP 服务器状态。 */
   readonly extensions: ExtensionsState;
   /** 最近一次「从接口获取模型」的结果。 */
@@ -193,6 +197,7 @@ const initialState: ViewState = {
   tabs: { items: [], active: '' },
   backends: readInitialBackends(),
   providers: { items: [], protocolGatewayEnabled: false },
+  accounts: { items: [], channels: {} },
   extensions: { skills: { items: [] }, mcp: { servers: [] } },
   session: { title: '', running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
   sessionKey: '',
@@ -526,6 +531,7 @@ export function applyHostMessage(message: HostToWebview): void {
         rightPanelTab: resolvedRightPanelTab,
         ...(p.preferences ? { preferences: p.preferences } : {}),
         ...(p.providers ? { providers: p.providers } : {}),
+        ...(p.accounts ? { accounts: p.accounts } : {}),
         ...(p.extensions ? { extensions: p.extensions } : {}),
         ...(p.projects ? { projects: p.projects } : {}),
         ...(p.workbench ? { workbench: p.workbench } : {}),
@@ -551,6 +557,17 @@ export function applyHostMessage(message: HostToWebview): void {
       return;
     case 'providers':
       set({ providers: message.payload });
+      return;
+    case 'accounts':
+      set({ accounts: message.payload });
+      return;
+    case 'accountLoginProgress':
+      set({
+        accounts: {
+          ...state.accounts,
+          ...(message.payload ? { loginProgress: message.payload } : { loginProgress: undefined }),
+        },
+      });
       return;
     case 'extensions':
       set({ extensions: message.payload });

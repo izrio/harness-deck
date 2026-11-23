@@ -267,6 +267,7 @@ export class ClaudeController implements ChatBackendController {
       ...(this.options.preferences ? { preferences: this.options.preferences() } : {}),
       backends: this.backends(),
       ...(this.options.providers ? { providers: this.options.providers() } : {}),
+      ...(this.options.accounts ? { accounts: this.options.accounts() } : {}),
       ...(this.options.projects ? { projects: this.options.projects() } : {}),
       ...(this.options.extensions ? { extensions: this.options.extensions() } : {}),
       ...(includeWorkbench && this.options.workbenchState ? { workbench: this.options.workbenchState() } : {}),
@@ -396,6 +397,13 @@ export class ClaudeController implements ChatBackendController {
       }
     }
     this.scheduleRender();
+  }
+
+  accountsChanged(): void {
+    if (this.options.accounts) {
+      this.options.post({ type: 'accounts', payload: this.options.accounts() });
+    }
+    this.providersChanged();
   }
 
   projectsChanged(): void {

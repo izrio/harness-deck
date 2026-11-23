@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Harness Deck",
   "description": "%extension.description%",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -129,6 +129,16 @@
       {
         "command": "harnessDeck.selectBackend",
         "title": "%command.selectBackend%",
+        "category": "Harness Deck"
+      },
+      {
+        "command": "harnessDeck.selectChannel",
+        "title": "%command.selectChannel%",
+        "category": "Harness Deck"
+      },
+      {
+        "command": "harnessDeck.loginAccount",
+        "title": "%command.loginAccount%",
         "category": "Harness Deck"
       },
       {
@@ -603,6 +613,69 @@
                 "items": {
                   "type": "string"
                 }
+              }
+            }
+          }
+        },
+        "harnessDeck.accounts": {
+          "type": "array",
+          "scope": "machine",
+          "markdownDescription": "%config.accounts%",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "backendId",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "backendId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "isolateSessions": {
+                "type": "boolean"
+              },
+              "region": {
+                "type": "string",
+                "enum": [
+                  "cn",
+                  "ai",
+                  "internal"
+                ]
+              },
+              "createdAt": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "harnessDeck.backendChannels": {
+          "type": "object",
+          "scope": "machine",
+          "markdownDescription": "%config.backendChannels%",
+          "default": {},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "official",
+                  "provider"
+                ]
+              },
+              "accountId": {
+                "type": "string"
+              },
+              "providerId": {
+                "type": "string"
               }
             }
           }

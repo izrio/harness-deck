@@ -32,6 +32,7 @@ export function createClaudeBackend(
   const legacyKey = (name: string) => host.stateKey(`acp.claude.${name}`);
   let status: RuntimeStatus = { kind: 'idle' };
   let generation = 0;
+  let currentClaudeConfigDir: string | undefined;
 
   const common = host.controllerOptions();
   const controller = new ClaudeController({
@@ -46,7 +47,7 @@ export function createClaudeBackend(
     savePreferredModel: (preferred) => void host.globalState.update('harnessDeck.claude.model', preferred),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')) ?? state.get<string[]>(legacyKey('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
-    claudeConfigDir: () => resolveClaudeConfigDir(host.processEnv()),
+    claudeConfigDir: () => currentClaudeConfigDir ?? resolveClaudeConfigDir(host.processEnv()),
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
     boundProvider: () => host.boundProvider?.(profile.id),
     ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
@@ -121,11 +122,18 @@ export function createClaudeBackend(
     if (current !== generation) return;
 
     const resolvedCmd = executablePath;
+    currentClaudeConfigDir = undefined;
+    if (!host.boundProvider?.(profile.id) && host.prepareAccountLaunch) {
+      const prePatch = await host.prepareAccountLaunch(profile.id, baseEnv).catch(() => undefined);
+      if (current !== generation) return;
+      currentClaudeConfigDir = prePatch?.configDir;
+    }
     controller.setSpawner(async (spawnParams) => {
       let launchEnv: Record<string, string | undefined> = host.processEnv();
       const providerExtraArgs: string[] = [];
       const boundProvider = host.boundProvider?.(profile.id);
       if (boundProvider && host.ensureProviderProxy) {
+        currentClaudeConfigDir = undefined;
         try {
           const proxy = await host.ensureProviderProxy();
           const adapted = prepareClaudeProviderRuntime({
@@ -162,6 +170,16 @@ export function createClaudeBackend(
           }
         } catch (error) {
           host.log(`准备服务商 ${boundProvider.name} 的 Claude Code 配置失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+      } else if (host.prepareAccountLaunch) {
+        try {
+          const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv);
+          if (accountPatch) {
+            launchEnv = accountPatch.env;
+            currentClaudeConfigDir = accountPatch.configDir;
+          }
+        } catch (error) {
+          host.log(`准备 Claude Code 官方账号环境失败：${error instanceof Error ? error.message : String(error)}`);
         }
       }
       if (spawnParams.effort) {

@@ -69,6 +69,8 @@ export type HostCommandId =
   | 'newSession'
   | 'interrupt'
   | 'selectBackend'
+  | 'selectChannel'
+  | 'loginAccount'
   | 'selectModel'
   | 'explainSelection'
   | 'fixSelection'
@@ -143,5 +145,6 @@ export interface HostPlatform {
     readonly name: string;
     readonly cwd: string;
     readonly commands: readonly string[];
+    readonly env?: Readonly<Record<string, string>>;
   }): Promise<void>;
 }

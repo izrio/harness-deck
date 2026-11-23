@@ -126,6 +126,7 @@ export interface IdeRpcClient {
     readonly name: string;
     readonly cwd: string;
     readonly commands: readonly string[];
+    readonly env?: Readonly<Record<string, string>>;
   }): Promise<void>;
   secretGet(key: string): Promise<string | undefined>;
   secretStore(key: string, value: string): Promise<void>;

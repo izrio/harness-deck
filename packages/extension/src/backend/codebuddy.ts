@@ -35,6 +35,7 @@ export function createCodebuddyBackend(
   const legacyKey = (name: string) => host.stateKey(`acp.codebuddy.${name}`);
   let status: RuntimeStatus = { kind: 'idle' };
   let generation = 0;
+  let currentCodebuddyConfigDir: string | undefined;
 
   const common = host.controllerOptions();
   const controller = new CodebuddyController({
@@ -56,7 +57,7 @@ export function createCodebuddyBackend(
     savePreferredModel: (preferred) => void host.globalState.update('harnessDeck.codebuddy.model', preferred),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')) ?? state.get<string[]>(legacyKey('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
-    codebuddyConfigDir: () => resolveCodebuddyConfigDir(host.processEnv()),
+    codebuddyConfigDir: () => currentCodebuddyConfigDir ?? resolveCodebuddyConfigDir(host.processEnv()),
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
     boundProvider: () => host.boundProvider?.(profile.id),
     ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
@@ -159,10 +160,21 @@ export function createCodebuddyBackend(
     if (current !== generation) return;
 
     const resolvedCmd = executablePath;
+    let probeEnv: Record<string, string | undefined> = baseEnv;
+    currentCodebuddyConfigDir = undefined;
+    if (!host.boundProvider?.(profile.id) && host.prepareAccountLaunch) {
+      const prePatch = await host.prepareAccountLaunch(profile.id, baseEnv).catch(() => undefined);
+      if (current !== generation) return;
+      if (prePatch) {
+        probeEnv = prePatch.env;
+        currentCodebuddyConfigDir = prePatch.configDir;
+      }
+    }
     controller.setSpawner(async (spawnParams) => {
       let launchEnv: Record<string, string | undefined> = host.processEnv();
       const boundProvider = host.boundProvider?.(profile.id);
       if (boundProvider && host.ensureProviderProxy) {
+        currentCodebuddyConfigDir = undefined;
         try {
           const proxy = await host.ensureProviderProxy();
           const adapted = prepareCodebuddyProviderRuntime({
@@ -183,6 +195,16 @@ export function createCodebuddyBackend(
           }
         } catch (error) {
           host.log(`准备服务商 ${boundProvider.name} 的 CodeBuddy 配置失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+      } else if (host.prepareAccountLaunch) {
+        try {
+          const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv);
+          if (accountPatch) {
+            launchEnv = accountPatch.env;
+            currentCodebuddyConfigDir = accountPatch.configDir;
+          }
+        } catch (error) {
+          host.log(`准备 CodeBuddy 官方账号环境失败：${error instanceof Error ? error.message : String(error)}`);
         }
       }
 
@@ -215,7 +237,7 @@ export function createCodebuddyBackend(
     });
 
     setStatus({ kind: 'connected', version, newerThanTested: false });
-    void probeInitMetadata(resolvedCmd, host.workspacePath(), baseEnv, current);
+    void probeInitMetadata(resolvedCmd, host.workspacePath(), probeEnv, current);
   };
 
   const stopAll = async (): Promise<void> => {

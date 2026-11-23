@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.11.0
+
+**官方账号与渠道管理**：在「设置 → Agent → 账号」中可为 Claude Code、Codex、CodeBuddy、Antigravity、Pi、OpenCode、DeepSeek 等智能体登录并管理多个官方账号，支持配置目录隔离、凭据槽位快照与官方 API Key，可选独立会话历史与按账号查询订阅额度；并可在设置页、模型选择器顶部或命令面板随时将智能体在「官方渠道（指定账号）」与「第三方服务商」之间一键切换，无需重启或手动改配置。
+
+**Official accounts & channel switching**: Added Settings → Agent → Accounts to sign in and manage multiple official accounts for Claude Code, Codex, CodeBuddy, Antigravity, Pi, OpenCode, DeepSeek and other agents, with config-directory isolation, credential-slot snapshots and official API keys, optional isolated session history and per-account subscription quota. Any agent can now be switched between an official channel (a chosen account) and third-party providers from Settings, the Model Picker header or the Command Palette, without restarting or editing config manually.
+
+- **多账号存储与登录流程**：新增 `AccountStore`、`AccountAuthFlow`、`AccountInspector` 与 `AccountIsolation` 宿主模块，持久化账号列表与渠道选择（`harnessDeck.accounts` / `harnessDeck.backendChannels`），按底层提供终端登录、OAuth CLI、API Key 与 ACP 授权等多种登录方式，凭据以机级作用域存储并支持安全编辑与复制。
+  **Multi-account storage & auth flows**: Added host modules `AccountStore`, `AccountAuthFlow`, `AccountInspector` and `AccountIsolation` to persist the account list and channel selection (`harnessDeck.accounts` / `harnessDeck.backendChannels`), with terminal sign-in, OAuth CLI, API Key and ACP authorization per backend; credentials are stored at machine scope and support safe editing and copying.
+- **凭据与会话隔离**：按底层能力选择配置目录、凭据槽位或 API Key 隔离方式，支持为账号单独开启独立会话历史，并在有额度能力的底层上按账号查询订阅额度；能力通过 `capabilities.ts` 的 `account` 描述符声明，界面不按 `kind` 判断功能。
+  **Credential & session isolation**: Isolate accounts via config directories, credential slots or API keys according to backend capability, optionally keep a dedicated session history per account, and query subscription quota per account on quota-capable backends; capabilities are declared through the `account` descriptor in `capabilities.ts` so the UI never branches on `kind`.
+- **渠道切换入口与账号设置页**：新增「设置 → Agent → 账号」页面与模型选择器顶部渠道切换条，补充 `Switch Model Channel / Official Account`、`Login Official Account` 命令面板入口；中英文案与设置契约同步更新，并补充账号模块的单测覆盖。
+  **Channel-switch entry & Accounts settings page**: Added the Settings → Agent → Accounts page and a channel switcher at the top of the Model Picker, plus `Switch Model Channel / Official Account` and `Login Official Account` command-palette entries; Chinese/English strings and the settings contract were updated in sync, with unit tests covering the new account modules.
+
 ## 0.10.0
 
 **工作台界面重构与 ZCode Protocol v1 适配**：工作台从「顶栏六大模块导航 + 独立会话列表」重构为「左侧项目/会话侧边栏 + 右侧工作区文件与 Git 面板 + 精简顶栏工具条」的三栏布局；会话模块更名为「项目」，历史会话整合进左侧栏并支持按运行中 / 等待处理 / 未读筛选；「改动」入口改为直接展开右侧 Git 面板。底层同步适配 ZCode Protocol v1 的会话创建、订阅、流式事件与交互响应 schema，确保 ZCode 后端的推理流、工具状态、模型切换与审批/提问卡片在新协议下正常渲染。

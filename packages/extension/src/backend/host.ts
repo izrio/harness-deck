@@ -3,6 +3,7 @@
  * 不依赖 `vscode` 模块，供 VS Code Extension Host 与 JetBrains Node Sidecar 共同复用。
  */
 import type { ProviderConfig, RuntimeStatus } from '@harness-deck/shared';
+import type { AccountLaunchPatch } from '../accounts/AccountIsolation.ts';
 import type { PreparedBackendLaunch } from '../extensions/mcpService.ts';
 import type { KeyValueStore, QuickPickOption, SettingsStore } from '../host/HostPlatform.ts';
 import { envWithExtraPath } from './npmManager.ts';
@@ -65,8 +66,13 @@ export interface BackendHost {
   ) => void;
   /** 在底层进程启动前准备该 Agent 需要携带的 Skills 挂载目录、dsh patch 与 MCP 服务器列表。 */
   readonly prepareBackendLaunch?: (profile: BackendProfile) => Promise<PreparedBackendLaunch>;
-  /** 读取某个底层智能体当前绑定的第三方服务商配置。 */
+  /** 读取某个底层智能体当前绑定的第三方服务商配置（切回官方渠道时返回 undefined）。 */
   readonly boundProvider?: (backendId: string) => ProviderConfig | undefined;
+  /** 当智能体使用官方渠道时，返回当前激活官方账号的隔离环境变量与配置目录补丁。 */
+  readonly prepareAccountLaunch?: (
+    backendId: string,
+    baseEnv: Readonly<Record<string, string | undefined>>,
+  ) => Promise<AccountLaunchPatch | undefined>;
   /** 启动或复用本机回环服务商代理，返回代理 origin 与一次性本地令牌。 */
   readonly ensureProviderProxy?: () => Promise<{ readonly origin: string; readonly token: string }>;
   /** 是否启用本地协议转换网关（将 OpenAI 兼容接口转换为 Claude Anthropic 协议，默认关闭）。 */

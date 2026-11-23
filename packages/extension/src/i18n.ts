@@ -248,6 +248,21 @@ const zh = {
   'remote.disabledNotice': '手机端远程互通已关闭',
   'remote.pairingCopied': '一次性配对链接已复制到剪贴板（5 分钟有效）：{0}',
   'remote.devicesSummary': '已授权设备：{0} 台 · 当前在线：{1} 个连接',
+  'account.systemDefault': '本机默认账号',
+  'account.saved': '已保存账号：{0}',
+  'account.deleted': '已删除账号：{0}',
+  'account.loggedOut': '已清除该账号的登录凭据',
+  'account.loginSucceeded': '官方账号登录成功，状态已刷新',
+  'account.switchWhileRunning': '当前智能体正在生成回复，请等待本轮结束或停止后再切换渠道',
+  'account.providerUnsupported': '{0} 仅支持官方账号登录，不支持绑定第三方服务商',
+  'account.providerMissing': '目标服务商不存在或已被删除',
+  'account.providerIncompatible': '服务商 {0} 未配置适配 {1} 的接口地址',
+  'account.switchedToOfficial': '{0} 已切换至官方渠道（{1}）',
+  'account.switchedToProvider': '{0} 已切换至服务商（{1}）',
+  'account.officialPrefix': '官方渠道',
+  'account.providerPrefix': '服务商',
+  'ext.selectChannel': '切换 {0} 的模型渠道 / 官方账号',
+  'ext.loginAccount': '选择要登录官方渠道的智能体账号',
 };
 
 export type HostMessageKey = keyof typeof zh;
@@ -496,6 +511,21 @@ const en: Record<HostMessageKey, string> = {
   'remote.disabledNotice': 'Mobile remote bridge disabled',
   'remote.pairingCopied': 'One-time pairing URL copied to clipboard (valid for 5 minutes): {0}',
   'remote.devicesSummary': 'Authorized devices: {0} · Connected clients: {1}',
+  'account.systemDefault': 'System Default',
+  'account.saved': 'Saved account: {0}',
+  'account.deleted': 'Deleted account: {0}',
+  'account.loggedOut': 'Cleared credentials for this account',
+  'account.loginSucceeded': 'Official sign-in succeeded and status refreshed',
+  'account.switchWhileRunning': 'This agent is currently replying. Wait for the turn to finish or stop it before switching channels',
+  'account.providerUnsupported': '{0} only supports official accounts and cannot bind third-party providers',
+  'account.providerMissing': 'Selected provider no longer exists',
+  'account.providerIncompatible': 'Provider {0} does not have a compatible endpoint for {1}',
+  'account.switchedToOfficial': 'Switched {0} to official channel ({1})',
+  'account.switchedToProvider': 'Switched {0} to provider ({1})',
+  'account.officialPrefix': 'Official',
+  'account.providerPrefix': 'Provider',
+  'ext.selectChannel': 'Switch model channel / official account for {0}',
+  'ext.loginAccount': 'Select an agent account to sign in via official channel',
 };
 
 const catalogs: Record<Locale, Record<HostMessageKey, string>> = { zh, en };

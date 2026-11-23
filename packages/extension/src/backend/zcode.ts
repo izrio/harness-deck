@@ -119,6 +119,14 @@ export function createZcodeBackend(
       } catch (error) {
         host.log(`准备服务商 ${boundProvider.name} 的 ZCode 配置失败：${error instanceof Error ? error.message : String(error)}`);
       }
+    } else if (host.prepareAccountLaunch) {
+      try {
+        const accountPatch = await host.prepareAccountLaunch(profile.id, spawnEnv);
+        if (current !== generation) return;
+        if (accountPatch) spawnEnv = accountPatch.env;
+      } catch (error) {
+        host.log(`准备 ZCode 官方账号环境失败：${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     const spawnArgs = [...located.scriptArgs, 'app-server', '--stdio'];
     const conn = new ZcodeConnection({

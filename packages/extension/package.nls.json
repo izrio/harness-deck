@@ -45,6 +45,8 @@
   "extension.description": "A VS Code chat panel for coding agents: native DeepSeek (dsh), Claude Code (claude -p), Codex (codex app-server), CodeBuddy (codebuddy -p), Pi (pi --mode rpc) and ZCode, plus ACP agents such as Antigravity and OpenCode",
   "capabilities.untrusted": "The agent reads and writes files and runs commands in the workspace, so the workspace must be trusted.",
   "command.selectBackend": "Switch Agent",
+  "command.selectChannel": "Switch Model Channel / Official Account",
+  "command.loginAccount": "Sign In Official Agent Account",
   "config.defaultBackend": "Default agent ID started on launch (for example `dsh`, `claude`, `codex`, `codebuddy`, `pi`, `zcode`, `antigravity`, `opencode`, or a custom ACP agent ID). Selecting an agent in Settings updates this automatically.",
   "config.backends": "Extra agents reachable over ACP (Agent Client Protocol). DeepSeek (dsh), Claude Code (`claude -p`), Codex (`codex app-server`), CodeBuddy (`codebuddy -p`), Pi (`pi --mode rpc`), ZCode (`zcode app-server --stdio`), OpenCode (`opencode acp`) and Antigravity (`agy acp`) are built in; an entry with the `id` of a built-in ACP one (`opencode`, `antigravity`) replaces it, for example to give the full path of the command. Each entry needs a `name` and the `command` (plus `args`) that starts the agent in ACP mode. Switch from the chat panel's Settings page or the \"Switch Agent\" command.",
   "config.backends.id": "Stable id (defaults to the name). Sessions and tabs are remembered per id.",
@@ -77,5 +79,7 @@
   "config.mcpServers": "Centrally managed MCP servers handed to your selected Agents on startup. Can also be imported from each Agent's local configuration.",
   "config.protocolGateway": "Start the local protocol conversion gateway (off by default). When enabled, converts OpenAI Chat Completions compatible endpoints into the Claude (Anthropic Messages) protocol for Claude Code.",
   "config.acpRegistryUrl": "Optional HTTPS URL of an ACP agent registry JSON manifest used to discover external ACP agents in Settings (read-only; never installs automatically).",
-  "config.providers": "Third-party Coding Plan and custom model provider configurations (such as Volcengine Ark, Zhipu GLM, Alibaba Bailian, MiniMax, Kimi, CLIProxyAPI) and agent bindings. API keys are stored only in OS secret storage and never written to settings."
+  "config.providers": "Third-party Coding Plan and custom model provider configurations (such as Volcengine Ark, Zhipu GLM, Alibaba Bailian, MiniMax, Kimi, CLIProxyAPI) and agent bindings. API keys are stored only in OS secret storage and never written to settings.",
+  "config.accounts": "Official agent account profiles (metadata only; tokens, API keys and cookies are stored in OS secret storage or isolated directories).",
+  "config.backendChannels": "Per-agent active model channel routing (official account or third-party provider)."
 }
