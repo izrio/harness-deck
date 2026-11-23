@@ -26,7 +26,9 @@ import {
   accountIsolationDir,
   antigravityFallbackTokenPath,
   antigravityPrimaryTokenPath,
+  codebuddyInternetEnvForRegion,
   readAntigravityDiskTokenRaw,
+  readCodebuddyDiskAuthSnapshot,
   resolveUserHome,
 } from './AccountIsolation.ts';
 
@@ -102,13 +104,19 @@ async function inspectClaude(params: {
 
   const oauth = rec(creds?.claudeAiOauth);
   const accessToken = typeof oauth?.accessToken === 'string' ? oauth.accessToken.trim() : '';
+  const refreshToken =
+    (typeof oauth?.refreshToken === 'string' && oauth.refreshToken.trim()) ||
+    (typeof oauth?.refresh_token === 'string' && oauth.refresh_token.trim()) ||
+    '';
   const plan = formatPlanLabel(typeof oauth?.subscriptionType === 'string' ? oauth.subscriptionType : undefined);
   const expiresAt = parseEpochMs(oauth?.expiresAt);
 
-  if (accessToken) {
-    const expired = expiresAt !== undefined && expiresAt <= now;
+  if (accessToken || refreshToken) {
+    const accessTokenExpired = expiresAt !== undefined && expiresAt <= now;
+    // 有 refreshToken 时 Claude CLI 会在运行时自动续期，不应将短时 accessToken 过期误判为账号已过期
+    const expired = accessTokenExpired && !refreshToken;
     let quota: QuotaView | undefined;
-    if (!expired && includeQuota) {
+    if (!accessTokenExpired && accessToken && includeQuota) {
       quota = await queryClaudeQuota({
         env: { ...env, CLAUDE_CONFIG_DIR: configDir },
         ...(getHttpProxy ? { getHttpProxy } : {}),
@@ -252,18 +260,54 @@ async function inspectCodebuddy(params: {
   readonly configDir: string;
   readonly accountId: string;
   readonly account?: AccountConfig;
+  readonly isActiveSlot?: boolean;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly secrets: SecretStore;
   readonly includeQuota?: boolean;
   readonly getHttpProxy?: () => string | undefined;
 }): Promise<AccountInspectionResult> {
-  const { configDir, accountId, account, env, secrets, includeQuota, getHttpProxy } = params;
+  const { configDir, accountId, account, isActiveSlot, env, secrets, includeQuota, getHttpProxy } = params;
   const savedCookie = (await secrets.get(accountCookieSecretKey(accountId)))?.trim();
   const hasUsageCookie = Boolean(savedCookie);
+  const regionPlan = account?.region === 'ai' ? 'Global' : account?.region === 'internal' ? 'iOA' : account?.region === 'cn' ? 'CN' : undefined;
 
   let identity: string | undefined;
   let authenticated = false;
+  let hasSecret = false;
+  let plan = regionPlan;
 
+  // 1. 优先检查独立账号保存的官方 CODEBUDDY_API_KEY
+  if (!isSystemAccountId(accountId)) {
+    const savedKey = (await secrets.get(accountApiKeySecretKey(accountId)))?.trim();
+    if (savedKey) {
+      authenticated = true;
+      hasSecret = true;
+      identity = maskSecretValue(savedKey);
+      plan = regionPlan ? `${regionPlan} · API Key` : 'API Key';
+    }
+  }
+
+  // 2. 检查 CodeBuddy OAuth 凭据槽位（CodeBuddyExtension/Data/Public/auth/*.info）
+  if (!authenticated) {
+    const slotKey = accountSlotSecretKey(accountId);
+    const storedSlot = (await secrets.get(slotKey))?.trim();
+    let slotRaw = storedSlot;
+    if (isActiveSlot || (!slotRaw && isSystemAccountId(accountId))) {
+      const diskRaw = (await readCodebuddyDiskAuthSnapshot(env))?.trim();
+      if (diskRaw) {
+        slotRaw = diskRaw;
+        if (isActiveSlot && diskRaw !== storedSlot) {
+          await secrets.store(slotKey, diskRaw).catch(() => undefined);
+        }
+      }
+    }
+    if (slotRaw) {
+      authenticated = true;
+      hasSecret = true;
+    }
+  }
+
+  // 3. 兼容检查 configDir 内的旧/自定义 JSON 凭据文件
   for (const name of ['auth.json', 'user.json', '.credentials.json', 'token.json', 'settings.json']) {
     const data = await readJsonFile(join(configDir, name));
     if (!data) continue;
@@ -285,17 +329,21 @@ async function inspectCodebuddy(params: {
     }
   }
 
-  if (!authenticated && env.CODEBUDDY_API_KEY?.trim()) {
+  // 4. 兜底检查环境变量 CODEBUDDY_API_KEY（仅对本机默认账号生效）
+  if (!authenticated && isSystemAccountId(accountId) && env.CODEBUDDY_API_KEY?.trim()) {
     authenticated = true;
+    hasSecret = true;
     identity = maskSecretValue(env.CODEBUDDY_API_KEY);
+    plan = regionPlan ? `${regionPlan} · API Key` : 'API Key';
   }
 
   let quota: QuotaView | undefined;
   if (includeQuota) {
+    const internetEnv = codebuddyInternetEnvForRegion(account?.region);
     const quotaEnv: Record<string, string | undefined> = {
       ...env,
       CODEBUDDY_CONFIG_DIR: configDir,
-      ...(account?.region ? { CODEBUDDY_INTERNET_ENVIRONMENT: account.region } : {}),
+      ...(internetEnv ? { CODEBUDDY_INTERNET_ENVIRONMENT: internetEnv } : {}),
       ...(savedCookie ? { CODEBUDDY_COOKIE: savedCookie } : {}),
     };
     quota = await queryCodebuddyQuota({
@@ -305,13 +353,11 @@ async function inspectCodebuddy(params: {
     if (quota && !authenticated) authenticated = true;
   }
 
-  const regionPlan = account?.region === 'ai' ? 'Global' : account?.region === 'internal' ? 'Internal' : account?.region === 'cn' ? 'CN' : undefined;
-  const dirExists = await pathExists(configDir);
-
   return {
-    status: authenticated ? 'authenticated' : isSystemAccountId(accountId) && dirExists ? 'unknown' : 'unauthenticated',
+    status: authenticated ? 'authenticated' : 'unauthenticated',
     ...(identity ? { identity } : {}),
-    ...(regionPlan ? { plan: regionPlan } : {}),
+    ...(plan ? { plan } : {}),
+    ...(hasSecret ? { hasSecret: true } : {}),
     ...(hasUsageCookie ? { hasUsageCookie: true } : {}),
     ...(quota ? { quota } : {}),
   };
@@ -340,6 +386,7 @@ async function queryAntigravitySlotQuota(params: {
 
 async function inspectAntigravity(params: {
   readonly accountId: string;
+  readonly isActiveSlot?: boolean;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly secrets: SecretStore;
   readonly now: number;
@@ -347,10 +394,21 @@ async function inspectAntigravity(params: {
   readonly getHttpProxy?: () => string | undefined;
   readonly clientVersion?: string;
 }): Promise<AccountInspectionResult> {
-  const { accountId, env, secrets, now, includeQuota, getHttpProxy, clientVersion } = params;
-  let raw = (await secrets.get(accountSlotSecretKey(accountId)))?.trim();
-  if (!raw && isSystemAccountId(accountId)) {
-    raw = (await readAntigravityDiskTokenRaw(env))?.trim();
+  const { accountId, isActiveSlot, env, secrets, now, includeQuota, getHttpProxy, clientVersion } = params;
+  const slotKey = accountSlotSecretKey(accountId);
+  const storedRaw = (await secrets.get(slotKey))?.trim();
+  let raw = storedRaw;
+
+  // 当前激活槽位（或本机默认槽位无快照时）优先读取磁盘最新凭据，
+  // 避免 `agy` 自动续期更新了本地 token 文件后，面板仍读取到 SecretStorage 里的旧过期快照。
+  if (isActiveSlot || (!raw && isSystemAccountId(accountId))) {
+    const diskRaw = (await readAntigravityDiskTokenRaw(env))?.trim();
+    if (diskRaw) {
+      raw = diskRaw;
+      if (isActiveSlot && diskRaw !== storedRaw) {
+        await secrets.store(slotKey, diskRaw).catch(() => undefined);
+      }
+    }
   }
   if (!raw) {
     // 兼容检查两个路径均无凭据
@@ -370,10 +428,18 @@ async function inspectAntigravity(params: {
   }
   const token = rec(json?.token);
   const accessToken = typeof token?.access_token === 'string' ? token.access_token.trim() : '';
-  if (!accessToken) return { status: 'unauthenticated' };
+  const refreshToken =
+    (typeof token?.refresh_token === 'string' && token.refresh_token.trim()) ||
+    (typeof token?.refreshToken === 'string' && token.refreshToken.trim()) ||
+    (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
+    (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
+    '';
+  if (!accessToken && !refreshToken) return { status: 'unauthenticated' };
 
   const expiresAt = parseEpochMs(token?.expiry);
-  const expired = expiresAt !== undefined && expiresAt <= now;
+  const accessTokenExpired = expiresAt !== undefined && expiresAt <= now;
+  // Google OAuth access_token 约 1 小时过期，只要存在 refresh_token，`agy` 运行时会自动刷新，仍为可用登录态
+  const expired = accessTokenExpired && !refreshToken;
   const idPayload = decodeJwtPayloadUnsafe(token?.id_token ?? json?.id_token);
   const email =
     (typeof json?.email === 'string' && json.email.trim()) ||
@@ -381,7 +447,7 @@ async function inspectAntigravity(params: {
     undefined;
 
   let quota: QuotaView | undefined;
-  if (!expired && includeQuota) {
+  if (!accessTokenExpired && accessToken && includeQuota) {
     quota = await queryAntigravitySlotQuota({
       rawTokenJson: raw,
       ...(getHttpProxy ? { getHttpProxy } : {}),
@@ -456,6 +522,7 @@ export async function inspectOfficialAccount(params: {
   readonly backendId: string;
   readonly accountId: string;
   readonly account?: AccountConfig;
+  readonly isActiveSlot?: boolean;
   readonly storageRoot: string;
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
   readonly secrets: SecretStore;
@@ -464,7 +531,7 @@ export async function inspectOfficialAccount(params: {
   readonly clientVersion?: string;
   readonly now?: () => number;
 }): Promise<AccountInspectionResult> {
-  const { backendId, accountId, account, storageRoot, baseEnv, secrets, includeQuota, getHttpProxy, clientVersion } = params;
+  const { backendId, accountId, account, isActiveSlot, storageRoot, baseEnv, secrets, includeQuota, getHttpProxy, clientVersion } = params;
   const now = (params.now ?? Date.now)();
   const normalized = backendId.toLowerCase();
   const userHome = resolveUserHome(baseEnv);
@@ -522,6 +589,7 @@ export async function inspectOfficialAccount(params: {
       configDir,
       accountId,
       ...(account ? { account } : {}),
+      ...(isActiveSlot !== undefined ? { isActiveSlot } : {}),
       env: baseEnv,
       secrets,
       ...(includeQuota !== undefined ? { includeQuota } : {}),
@@ -532,6 +600,7 @@ export async function inspectOfficialAccount(params: {
   if (normalized === 'antigravity') {
     return inspectAntigravity({
       accountId,
+      ...(isActiveSlot !== undefined ? { isActiveSlot } : {}),
       env: baseEnv,
       secrets,
       now,

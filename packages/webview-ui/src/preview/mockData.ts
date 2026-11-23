@@ -234,6 +234,7 @@ export function createInitialSessions(): Record<string, PreviewSessionData> {
           session: { input: 9_620, output: 21_400, cacheRead: 118_000, cacheWrite: 12_900, reasoning: 8_300 },
           requests: 14,
           cost: { amount: 1.284, currency: 'USD' },
+          performance: { ttftMs: 1_240, tokensPerSec: 68.4, durationMs: 4_820 },
         },
         folder: 'harness-deck',
         todos: [

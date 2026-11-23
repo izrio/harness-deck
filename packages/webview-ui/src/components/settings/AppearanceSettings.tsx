@@ -69,7 +69,7 @@ export function AppearanceSettings() {
   const appearance = useView((s) => s.appearance);
   const preferences = useView((s) => s.preferences);
 
-  const currentTheme: ThemeMode = appearance.theme ?? 'system';
+  const currentTheme: ThemeMode = appearance.theme ?? 'dark';
 
   const termSize = appearance.terminalFontSize ?? DEFAULT_TERM_SIZE;
   const termLineHeight = appearance.terminalLineHeight ?? DEFAULT_TERM_LH;
@@ -80,9 +80,7 @@ export function AppearanceSettings() {
   }, [appearance.codeFontFamily]);
 
   const selectTheme = (theme: ThemeMode) => {
-    const next: Record<string, unknown> = { ...appearance };
-    if (theme === 'system') delete next.theme;
-    else next.theme = theme;
+    const next: Record<string, unknown> = { ...appearance, theme };
     setAppearanceLocal(next as AppearanceState);
     postToHost({ type: 'setAppearance', payload: { theme } });
   };

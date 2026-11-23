@@ -1,9 +1,10 @@
 /**
  * 工作台右侧面板（WorkbenchRightPanel）：
  *
- * 包含「文件」与「Git」两个标签页：
- * - 文件：以目录树/搜索列表展示当前工作区文件，点击直接调用宿主 `openFile` 打开，并叠加 Git 改动标记
- * - Git：复用 ChangesView 展示分支、未提交改动、提交、推送与创建 PR
+ * 包含「文件」与「Git」两个 Tabs 标签页：
+ * - 文件：以目录树/搜索列表展示当前工作区文件（默认全部目录收起，按后缀显示对应图标），
+ *   点击后在插件内置查看器中只读查看（不联动外部 IDE 编辑器），并叠加 Git 改动标记
+ * - Git：复用 ChangesView 展示分支、未提交改动、内置 Diff 审阅、提交、推送与创建 PR
  * - 宽屏桌面（>=768px）：停靠在主内容区右侧；窄屏 / 移动端（<768px）：通过 shadcn/ui Sheet 右侧抽屉展开
  */
 import { useEffect, useMemo, useState } from 'react';
@@ -11,7 +12,7 @@ import type { FileCandidate, SourceControlFileView } from '@harness-deck/shared'
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useIsMobile } from '../../hooks/use-mobile.ts';
 import { usePanelPresence } from '../../hooks/usePanelPresence.ts';
 import { useT } from '../../i18n.ts';
@@ -22,13 +23,13 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CloseIcon,
-  FileIcon,
   FilesIcon,
-  FolderIcon,
-  FolderOpenIcon,
+  FileTypeIcon,
   GitBranchIcon,
   RefreshIcon,
   SearchIcon,
+  VscodeFolderIcon,
+  VscodeFolderOpenIcon,
 } from '../icons.tsx';
 import { ChangesView } from './ChangesView.tsx';
 
@@ -108,33 +109,37 @@ export function WorkbenchRightPanel() {
   const changesCount = sourceControl?.available ? sourceControl.files.length : dirtyFiles;
 
   const panelBody = (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-2.5 py-2">
-        <Tabs value={tab} onValueChange={(v) => setRightPanelTab(v as RightPanelTab)} className="min-w-0 flex-1">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger
-              value="files"
-              data-testid="right-panel-tab-files"
-              className="gap-1.5 text-[12px]"
-              onClick={() => setRightPanelTab('files')}
-            >
-              <FilesIcon className="size-3.5 shrink-0" />
-              <span>{t('wb.rightPanel.files')}</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="git"
-              data-testid="right-panel-tab-git"
-              className="gap-1.5 text-[12px]"
-              onClick={() => setRightPanelTab('git')}
-            >
-              <GitBranchIcon className="size-3.5 shrink-0" />
-              <span>{t('wb.rightPanel.git')}</span>
-              {changesCount > 0 ? (
-                <span className="text-[11px] font-normal text-ink-3 tabular-nums">{changesCount}</span>
-              ) : null}
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+    <Tabs
+      value={tab}
+      onValueChange={(v) => setRightPanelTab(v as RightPanelTab)}
+      className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden"
+    >
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-2.5">
+        <TabsList variant="line" className="h-9 gap-2 p-0">
+          <TabsTrigger
+            value="files"
+            data-testid="right-panel-tab-files"
+            className="h-9 flex-none gap-1.5 rounded-none px-2 text-[12.5px] after:bottom-0 after:bg-brand"
+            onClick={() => setRightPanelTab('files')}
+          >
+            <FilesIcon className="size-3.5 shrink-0" />
+            <span>{t('wb.rightPanel.files')}</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="git"
+            data-testid="right-panel-tab-git"
+            className="h-9 flex-none gap-1.5 rounded-none px-2 text-[12.5px] after:bottom-0 after:bg-brand"
+            onClick={() => setRightPanelTab('git')}
+          >
+            <GitBranchIcon className="size-3.5 shrink-0" />
+            <span>{t('wb.rightPanel.git')}</span>
+            {changesCount > 0 ? (
+              <span className="rounded-full bg-field px-1.5 text-[10.5px] font-medium text-ink-2 tabular-nums">
+                {changesCount}
+              </span>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
 
         {!isMobile ? (
           <Button
@@ -152,10 +157,13 @@ export function WorkbenchRightPanel() {
         ) : null}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {tab === 'files' ? <WorkspaceFilesPane /> : <ChangesView compact />}
-      </div>
-    </div>
+      <TabsContent value="files" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+        <WorkspaceFilesPane />
+      </TabsContent>
+      <TabsContent value="git" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+        <ChangesView compact />
+      </TabsContent>
+    </Tabs>
   );
 
   if (isMobile) {
@@ -202,11 +210,14 @@ export function WorkbenchRightPanel() {
 
 function WorkspaceFilesPane() {
   const t = useT();
+  const isMobile = useIsMobile();
   const ready = useView((s) => s.ready);
   const panelFiles = useView((s) => s.panelFiles);
   const sourceControl = useView((s) => s.workbench.sourceControl);
+  const activePreviewPath = useView((s) => (s.diffContent?.kind === 'file' ? s.diffContent.path.replace(/\\/gu, '/') : undefined));
   const [query, setQuery] = useState('');
-  const [collapsedDirs, setCollapsedDirs] = useState<Record<string, boolean>>({});
+  /** 目录默认全部收起，仅记录用户手动展开的目录路径。 */
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!ready) return;
@@ -232,11 +243,12 @@ function WorkspaceFilesPane() {
   const tree = useMemo(() => buildFileTree(panelFiles.items), [panelFiles.items]);
 
   const toggleDir = (dirPath: string) => {
-    setCollapsedDirs((prev) => ({ ...prev, [dirPath]: !prev[dirPath] }));
+    setExpandedDirs((prev) => ({ ...prev, [dirPath]: !prev[dirPath] }));
   };
 
-  const openFile = (path: string) => {
-    postToHost({ type: 'openFile', payload: { path } });
+  const previewFile = (path: string) => {
+    postToHost({ type: 'previewFile', payload: { path } });
+    if (isMobile) setRightPanelOpen(false);
   };
 
   const trimmedQuery = query.trim();
@@ -297,21 +309,25 @@ function WorkspaceFilesPane() {
               const dir = slash >= 0 ? normalized.slice(0, slash) : '';
               const status = statusByPath.get(normalized);
               const badge = status ? STATUS_BADGE_MAP[status] : undefined;
+              const isSelected = item.kind === 'file' && activePreviewPath === normalized;
               return (
                 <button
                   key={`${item.kind}:${normalized}`}
                   type="button"
                   title={normalized}
                   data-testid={`right-panel-file-${normalized}`}
-                  className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors duration-100 hover:bg-hover"
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors duration-100 hover:bg-hover',
+                    isSelected && 'bg-hover font-medium',
+                  )}
                   onClick={() => {
-                    if (item.kind === 'file') openFile(normalized);
+                    if (item.kind === 'file') previewFile(normalized);
                   }}
                 >
                   {item.kind === 'directory' ? (
-                    <FolderIcon className="size-3.5 shrink-0 text-ink-2" />
+                    <VscodeFolderIcon className="size-4 shrink-0" />
                   ) : (
-                    <FileIcon className="size-3.5 shrink-0 text-ink-3" />
+                    <FileTypeIcon path={normalized} className="size-4 shrink-0" />
                   )}
                   <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{name}</span>
                   {dir ? <span className="max-w-28 shrink-0 truncate font-mono text-[11px] text-ink-3">{dir}</span> : null}
@@ -327,10 +343,11 @@ function WorkspaceFilesPane() {
             <FileTreeNodes
               nodes={tree}
               depth={0}
-              collapsedDirs={collapsedDirs}
+              expandedDirs={expandedDirs}
+              activePreviewPath={activePreviewPath}
               statusByPath={statusByPath}
               onToggleDir={toggleDir}
-              onOpenFile={openFile}
+              onPreviewFile={previewFile}
             />
           </div>
         )}
@@ -342,53 +359,57 @@ function WorkspaceFilesPane() {
 function FileTreeNodes({
   nodes,
   depth,
-  collapsedDirs,
+  expandedDirs,
+  activePreviewPath,
   statusByPath,
   onToggleDir,
-  onOpenFile,
+  onPreviewFile,
 }: {
   readonly nodes: readonly FileTreeNode[];
   readonly depth: number;
-  readonly collapsedDirs: Readonly<Record<string, boolean>>;
+  readonly expandedDirs: Readonly<Record<string, boolean>>;
+  readonly activePreviewPath?: string;
   readonly statusByPath: ReadonlyMap<string, SourceControlFileView['status']>;
   readonly onToggleDir: (path: string) => void;
-  readonly onOpenFile: (path: string) => void;
+  readonly onPreviewFile: (path: string) => void;
 }) {
   return (
     <>
       {nodes.map((node) => {
         if (node.kind === 'directory') {
-          const collapsed = Boolean(collapsedDirs[node.path]);
+          const expanded = Boolean(expandedDirs[node.path]);
           return (
             <div key={`dir:${node.path}`} className="flex flex-col">
               <button
                 type="button"
                 title={node.path}
-                aria-expanded={!collapsed}
+                data-testid={`right-panel-dir-${node.path}`}
+                aria-expanded={expanded}
                 style={{ paddingLeft: `${8 + depth * 14}px` }}
                 className="flex w-full items-center gap-1.5 rounded-control py-1 pr-2 text-left text-[12.5px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
                 onClick={() => onToggleDir(node.path)}
               >
-                {collapsed ? (
-                  <ChevronRightIcon className="size-3 shrink-0 text-ink-3" />
-                ) : (
+                {expanded ? (
                   <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
-                )}
-                {collapsed ? (
-                  <FolderIcon className="size-3.5 shrink-0 text-ink-2" />
                 ) : (
-                  <FolderOpenIcon className="size-3.5 shrink-0 text-ink-2" />
+                  <ChevronRightIcon className="size-3 shrink-0 text-ink-3" />
+                )}
+                {expanded ? (
+                  <VscodeFolderOpenIcon className="size-4 shrink-0" />
+                ) : (
+                  <VscodeFolderIcon className="size-4 shrink-0" />
                 )}
                 <span className="min-w-0 flex-1 truncate">{node.name}</span>
               </button>
-              {!collapsed && node.children.length > 0 ? (
+              {expanded && node.children.length > 0 ? (
                 <FileTreeNodes
                   nodes={node.children}
                   depth={depth + 1}
-                  collapsedDirs={collapsedDirs}
+                  expandedDirs={expandedDirs}
+                  activePreviewPath={activePreviewPath}
                   statusByPath={statusByPath}
                   onToggleDir={onToggleDir}
-                  onOpenFile={onOpenFile}
+                  onPreviewFile={onPreviewFile}
                 />
               ) : null}
             </div>
@@ -397,6 +418,7 @@ function FileTreeNodes({
 
         const status = statusByPath.get(node.path);
         const badge = status ? STATUS_BADGE_MAP[status] : undefined;
+        const isSelected = activePreviewPath === node.path;
         return (
           <button
             key={`file:${node.path}`}
@@ -404,10 +426,13 @@ function FileTreeNodes({
             title={node.path}
             data-testid={`right-panel-file-${node.path}`}
             style={{ paddingLeft: `${24 + depth * 14}px` }}
-            className="flex w-full items-center gap-1.5 rounded-control py-1 pr-2 text-left text-[12.5px] text-ink transition-colors duration-100 hover:bg-hover"
-            onClick={() => onOpenFile(node.path)}
+            className={cn(
+              'flex w-full items-center gap-1.5 rounded-control py-1 pr-2 text-left text-[12.5px] text-ink transition-colors duration-100 hover:bg-hover',
+              isSelected && 'bg-hover font-medium',
+            )}
+            onClick={() => onPreviewFile(node.path)}
           >
-            <FileIcon className="size-3.5 shrink-0 text-ink-3" />
+            <FileTypeIcon path={node.path} className="size-4 shrink-0" />
             <span className="min-w-0 flex-1 truncate">{node.name}</span>
             {badge ? (
               <span className={cn('shrink-0 font-mono text-[11px] font-semibold', badge.cls)}>{badge.letter}</span>

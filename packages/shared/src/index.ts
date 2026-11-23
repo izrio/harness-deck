@@ -28,6 +28,7 @@ export type {
   CommandView,
   ConnectionState,
   ContextDetail,
+  RequestPerformance,
   ContextState,
   DiffContentData,
   DiffRef,

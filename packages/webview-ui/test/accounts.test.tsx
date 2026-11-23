@@ -113,10 +113,20 @@ describe('AccountSettings & ModelPicker channel switching', () => {
   it('renders official accounts, switches between official accounts and providers, and disables providers for account-only agents', () => {
     render(<AccountSettings />);
 
-    // 挂载时触发一次状态与额度刷新
+    // 挂载时触发一次状态与额度刷新；不展示筛选条，且每个运行时为独立 Card
     expect(vscodeMock.posted.some((m) => m.type === 'refreshAccounts')).toBe(true);
+    expect(screen.queryByTestId('accounts-filter-bar')).toBeNull();
+    expect(screen.getByTestId('account-backend-card-claude').getAttribute('data-slot')).toBe('card');
+    expect(screen.getByTestId('account-backend-card-antigravity').getAttribute('data-slot')).toBe('card');
     expect(screen.getByTestId('account-row-system:claude')).toBeTruthy();
     expect(screen.getByTestId('account-row-claude-work')).toBeTruthy();
+
+    // 选中账号前面显示绿色圆点（不显示「当前使用」胶囊文字），未选中账号显示灰色圆点
+    const activeDot = screen.getByTestId('account-active-system:claude');
+    expect(activeDot.className).toContain('bg-green');
+    expect(screen.getByTestId('account-row-system:claude').textContent).not.toContain('当前使用');
+    const inactiveDot = screen.getByTestId('account-dot-claude-work');
+    expect(inactiveDot.className).toContain('bg-ink-4');
 
     // Antigravity 为 account-only，服务商按钮置灰
     const agyProviderBtn = screen.getByTestId('channel-provider-antigravity') as HTMLButtonElement;
@@ -176,6 +186,17 @@ describe('AccountSettings & ModelPicker channel switching', () => {
     fireEvent.click(screen.getByTestId('model-channel-toggle'));
     expect(screen.queryByText('管理账号')).toBeNull();
     expect(screen.queryByText('管理服务商')).toBeNull();
+
+    // 默认灰色圆点、选中项绿色圆点，且不显示后面的 plan 文本或勾选图标
+    const activeOfficialBtn = screen.getByTestId('quick-channel-official-system:claude');
+    const inactiveOfficialBtn = screen.getByTestId('quick-channel-official-claude-work');
+    expect(screen.getByTestId('quick-channel-official-dot-system:claude').className).toContain('bg-green');
+    expect(screen.getByTestId('quick-channel-official-dot-claude-work').className).toContain('bg-ink-3/45');
+    expect(screen.getByTestId('quick-channel-provider-dot-volc').className).toContain('bg-ink-3/45');
+    expect(activeOfficialBtn.textContent).not.toContain('Max');
+    expect(inactiveOfficialBtn.textContent).not.toContain('Pro');
+    expect(activeOfficialBtn.querySelector('svg')).toBeNull();
+    expect(screen.getByTestId('quick-channel-provider-volc').querySelector('svg')).toBeNull();
 
     const manageOfficial = screen.getByTestId('quick-channel-official-manage-system:claude');
     expect(manageOfficial.parentElement?.className).toContain('group-hover/channel:opacity-100');

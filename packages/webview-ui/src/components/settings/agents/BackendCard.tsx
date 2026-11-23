@@ -21,6 +21,7 @@ import {
 } from '../../icons.tsx';
 import { ValuePill } from '../../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -115,10 +116,11 @@ export function BackendCard({
   const hasDestructiveActions = showUninstall || showDelete;
 
   return (
-    <div
-      className="flex items-start gap-3 px-3.5 py-3 transition-colors hover:bg-hover/35"
-      data-testid={`settings-backend-${backend.id}`}
-    >
+    <>
+      <Card
+        className="flex-row items-start gap-3 border-line/75 bg-surface/80 px-3.5 py-3 shadow-xs transition-colors hover:border-line-strong/80 hover:bg-surface dark:bg-surface/75"
+        data-testid={`settings-backend-${backend.id}`}
+      >
       <BackendLogo backend={backend} />
 
       <div className="min-w-0 flex-1">
@@ -343,6 +345,7 @@ export function BackendCard({
           </DropdownMenu>
         </div>
       ) : null}
+      </Card>
 
       {backend.npmPackage && backend.npmOwned !== false ? (
         <Dialog open={versionDialogOpen} onOpenChange={setVersionDialogOpen}>
@@ -447,6 +450,6 @@ export function BackendCard({
           </DialogContent>
         </Dialog>
       ) : null}
-    </div>
+    </>
   );
 }

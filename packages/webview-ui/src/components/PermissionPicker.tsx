@@ -101,17 +101,37 @@ function PresetIcon({ preset, name }: { readonly preset: string | undefined; rea
   }
 }
 
-export function PermissionPicker({ disabled }: { disabled: boolean }) {
-  const permissions = useView((s) => s.permissions);
+export interface PermissionPickerProps {
+  readonly disabled: boolean;
+  /** 受控模式：用于新建任务弹窗等独立场景，选中后回传而非改写全局会话权限。 */
+  readonly value?: string | undefined;
+  readonly options?: readonly string[];
+  readonly labels?: Readonly<Record<string, { readonly name: string; readonly description?: string }>>;
+  readonly onSelect?: (preset: string) => void;
+  readonly testId?: string;
+}
+
+export function PermissionPicker({
+  disabled,
+  value,
+  options: controlledOptions,
+  labels: controlledLabels,
+  onSelect: onControlledSelect,
+  testId = 'permission-picker',
+}: PermissionPickerProps) {
+  const storePermissions = useView((s) => s.permissions);
   const clientSurface = useView((s) => s.clientSurface);
   const [open, setOpen] = useState(false);
   const [confirmPreset, setConfirmPreset] = useState<{ readonly preset: string; readonly label: string } | undefined>();
   const close = useCallback(() => setOpen(false), []);
   const t = useT();
-  if (permissions.options.length === 0) return null;
-  const current = permissions.current;
-  const currentLabel = current ? (permissions.labels?.[current]?.name ?? permissionName(current, t)) : t('permission.label');
-  const danger = classifyPermission(current, permissions.labels?.[current ?? '']?.name) === 'danger';
+  const isControlled = onControlledSelect !== undefined;
+  const options = controlledOptions ?? storePermissions.options;
+  const labels = controlledLabels ?? storePermissions.labels;
+  if (options.length === 0) return null;
+  const current = isControlled ? value : storePermissions.current;
+  const currentLabel = current ? (labels?.[current]?.name ?? permissionName(current, t)) : t('permission.label');
+  const danger = classifyPermission(current, labels?.[current ?? '']?.name) === 'danger';
   return (
     <div className="model-picker relative min-w-0">
       <Popover open={open} onOpenChange={setOpen}>
@@ -124,9 +144,9 @@ export function PermissionPicker({ disabled }: { disabled: boolean }) {
             )}
             disabled={disabled}
             title={current ? t('permission.title', currentLabel) : t('permission.label')}
-            data-testid="permission-picker"
+            data-testid={testId}
           >
-            <PresetIcon preset={current} name={permissions.labels?.[current ?? '']?.name} />
+            <PresetIcon preset={current} name={labels?.[current ?? '']?.name} />
             <span className="toolbar-button__text permission-picker__text min-w-0 truncate">{currentLabel}</span>
             <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
           </button>
@@ -140,9 +160,9 @@ export function PermissionPicker({ disabled }: { disabled: boolean }) {
         >
           <div role="menu">
             <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[8px] bg-hover">
-              {permissions.options.map((preset) => {
+              {options.map((preset) => {
                 const active = preset === current;
-                const labelInfo = permissions.labels?.[preset];
+                const labelInfo = labels?.[preset];
                 const label = labelInfo?.name ?? permissionName(preset, t);
                 const description = labelInfo?.description ?? permissionHint(preset, labelInfo?.name, t);
                 const itemDanger = classifyPermission(preset, labelInfo?.name) === 'danger';
@@ -162,6 +182,10 @@ export function PermissionPicker({ disabled }: { disabled: boolean }) {
                     onClick={() => {
                       close();
                       if (preset === current) return;
+                      if (onControlledSelect) {
+                        onControlledSelect(preset);
+                        return;
+                      }
                       if (clientSurface === 'mobile-web' && itemDanger) {
                         setConfirmPreset({ preset, label });
                         return;

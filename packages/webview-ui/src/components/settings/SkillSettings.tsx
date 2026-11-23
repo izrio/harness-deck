@@ -398,11 +398,11 @@ export function SkillSettings() {
             <div className="flex flex-col gap-3">
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.repoUrl')}</span>
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="skill-repo-url"
-                    className="flex-1 font-mono text-[12px]"
+                    className="min-w-0 flex-1 font-mono text-[12px]"
                     value={repoUrl}
                     placeholder={t('settings.skills.dialog.repoUrlPlaceholder')}
                     onChange={(e) => setRepoUrl(e.target.value)}
@@ -410,7 +410,7 @@ export function SkillSettings() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="default"
+                    size="sm"
                     disabled={Boolean(skills.scanning || skills.installing)}
                     data-testid="skill-scan-btn"
                     onClick={handleScan}
@@ -427,7 +427,7 @@ export function SkillSettings() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.ref')}</span>
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="skill-repo-ref"
                     className="font-mono text-[12px]"
                     value={ref}
@@ -438,7 +438,7 @@ export function SkillSettings() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.skills.dialog.subpath')}</span>
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="skill-repo-subpath"
                     className="font-mono text-[12px]"
                     value={subpath}
@@ -565,7 +565,7 @@ export function SkillSettings() {
               <Button
                 type="button"
                 variant="outline"
-                size="default"
+                size="sm"
                 disabled={Boolean(skills.installing)}
                 data-testid="skill-install-cancel"
                 onClick={closeInstallDialog}
@@ -574,7 +574,7 @@ export function SkillSettings() {
               </Button>
               <Button
                 type="button"
-                size="default"
+                size="sm"
                 disabled={Boolean(skills.installing || (hasScannedList && selectedSubpaths.length === 0))}
                 data-testid="skill-install-submit"
                 onClick={handleInstall}

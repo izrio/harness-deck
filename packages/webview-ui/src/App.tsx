@@ -34,7 +34,6 @@ import { Thread } from './components/Thread.tsx';
 import { Toasts } from './components/Toasts.tsx';
 import { AgentsView } from './components/workbench/AgentsView.tsx';
 import { OverviewView } from './components/workbench/OverviewView.tsx';
-import { SchedulesView } from './components/workbench/SchedulesView.tsx';
 import { SessionsView } from './components/workbench/SessionsView.tsx';
 import { TasksView } from './components/workbench/TasksView.tsx';
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel.tsx';
@@ -160,8 +159,8 @@ export function App() {
     apply('--terminal-font-size', appearance.terminalFontSize ? `${appearance.terminalFontSize}px` : undefined);
     apply('--terminal-line-height', appearance.terminalLineHeight ? String(appearance.terminalLineHeight) : undefined);
 
-    // 主题模式（浅色 / 深色 / 跟随系统）
-    applyThemeMode(appearance.theme ?? 'system');
+    // 主题模式（默认深色，支持浅色 / 深色 / 跟随系统）
+    applyThemeMode(appearance.theme ?? 'dark');
   }, [appearance]);
 
   if (transport.mode === 'mobile-web') {
@@ -184,8 +183,8 @@ export function App() {
     }
   }
 
-  const overlayOpen = settingsOpen || hasPreview || hasDiff;
-  const hideChat = overlayOpen || activeModule !== 'sessions';
+  const viewerOpen = !settingsOpen && (hasPreview || hasDiff);
+  const hideChat = settingsOpen || viewerOpen || activeModule !== 'sessions';
 
   return (
     <div className="app" style={{ paddingBottom: 'var(--hd-keyboard-inset, 0px)' }}>
@@ -212,19 +211,13 @@ export function App() {
           {t('mobile.readOnlyBanner')}
         </div>
       ) : null}
-      {hasDiff ? (
-        <DiffViewerModal />
-      ) : hasPreview ? (
-        <MarkdownPreviewModal />
-      ) : settingsOpen ? (
-        <SettingsPage />
-      ) : null}
+      {settingsOpen && hasPreview ? <MarkdownPreviewModal /> : settingsOpen ? <SettingsPage /> : null}
 
       <SidebarProvider
         keyboardShortcut={false}
         persistCookie={false}
-        className={cn('min-h-0 flex-1 flex-row overflow-hidden', overlayOpen && 'hidden')}
-        aria-hidden={overlayOpen || undefined}
+        className={cn('min-h-0 flex-1 flex-row overflow-hidden', settingsOpen && 'hidden')}
+        aria-hidden={settingsOpen || undefined}
         data-testid="workbench-shell"
       >
         <WorkbenchSidebar
@@ -234,7 +227,8 @@ export function App() {
           onNewWorktree={openNewWorktree}
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {!overlayOpen && activeModule === 'overview' ? (
+          {!settingsOpen && hasDiff ? <DiffViewerModal /> : !settingsOpen && hasPreview ? <MarkdownPreviewModal /> : null}
+          {!settingsOpen && !viewerOpen && activeModule === 'overview' ? (
             <div
               id="workbench-panel-overview"
               role="tabpanel"
@@ -244,17 +238,7 @@ export function App() {
               <OverviewView />
             </div>
           ) : null}
-          {!overlayOpen && activeModule === 'schedules' ? (
-            <div
-              id="workbench-panel-schedules"
-              role="tabpanel"
-              aria-labelledby="workbench-tab-schedules"
-              className="flex min-h-0 flex-1 flex-col overflow-hidden"
-            >
-              <SchedulesView />
-            </div>
-          ) : null}
-          {!overlayOpen && activeModule === 'agents' ? (
+          {!settingsOpen && !viewerOpen && activeModule === 'agents' ? (
             <div
               id="workbench-panel-agents"
               role="tabpanel"
@@ -264,7 +248,7 @@ export function App() {
               <AgentsView />
             </div>
           ) : null}
-          {!overlayOpen && activeModule === 'tasks' ? (
+          {!settingsOpen && !viewerOpen && activeModule === 'tasks' ? (
             <div
               id="workbench-panel-tasks"
               role="tabpanel"
@@ -289,7 +273,7 @@ export function App() {
             <Composer />
           </SessionsView>
         </main>
-        {!overlayOpen ? <WorkbenchRightPanel /> : null}
+        {!settingsOpen ? <WorkbenchRightPanel /> : null}
       </SidebarProvider>
 
       <Dialog open={worktreeDialogOpen} onOpenChange={setWorktreeDialogOpen}>

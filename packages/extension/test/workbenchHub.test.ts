@@ -857,3 +857,161 @@ describe('会话列表排序', () => {
     revived.dispose();
   });
 });
+
+describe('带定时设置的看板任务调度', () => {
+  it('未到点前不会由自动顺序队列提前抢跑，到点后由 tickSchedules 自动触发并透传权限与推进下一次时间', async () => {
+    const store = new MemoryStore();
+    let nowMs = new Date('2026-05-04T08:30:00').getTime();
+    const startedReqs: ProgrammaticSessionRequest[] = [];
+    const projects: ProjectsState = {
+      currentPath: '/repo/alpha',
+      recent: [{ path: '/repo/alpha', name: 'alpha', lastOpenedAt: 100, isCurrent: true }],
+      configs: {},
+    };
+    const hub = new WorkbenchHub({
+      globalState: store,
+      runner: { run: async () => ({ status: 'succeeded', output: '' }) } as unknown as UnattendedRunner,
+      locale: () => 'zh',
+      isWorkspaceTrusted: () => true,
+      isWebviewVisible: () => true,
+      workspacePath: () => '/repo/alpha',
+      projects: () => projects,
+      profiles: () => [{ id: 'dsh', kind: 'dsh', name: 'DeepSeek' }],
+      schedulePermission: () => 'workspace-write',
+      activeContext: () => ({
+        backendId: 'dsh',
+        backendName: 'DeepSeek',
+        workspacePath: '/repo/alpha',
+        snapshot: makeBaseSnapshot(),
+        crossProjectSessions: [],
+        latestAssistantText: () => '每日巡检已完成',
+      }),
+      switchProjectAndBackend: async () => undefined,
+      startProgrammaticSession: async (req) => {
+        startedReqs.push(req);
+        return `sess-${startedReqs.length}`;
+      },
+      switchSessionInActive: async () => undefined,
+      openNewSessionInActive: async () => undefined,
+      post: () => undefined,
+      focusView: async () => undefined,
+      openPanel: () => undefined,
+      log: () => undefined,
+      now: () => nowMs,
+      enableTimer: false,
+    });
+
+    await hub.handleMessage({
+      type: 'createTask',
+      payload: {
+        title: '每日巡检',
+        prompt: '运行类型检查',
+        projectPath: '/repo/alpha',
+        backendId: 'dsh',
+        permissionPreset: 'danger-full-access',
+        schedule: { kind: 'daily', time: '09:00' },
+      },
+    });
+
+    // 当前 08:30 未到 09:00，即使 autoRun=true 也不应抢跑
+    expect(startedReqs).toHaveLength(0);
+    const created = hub.state().tasks.items[0]!;
+    expect(created.status).toBe('todo');
+    expect(created.scheduledAt).toBe(new Date('2026-05-04T09:00:00').getTime());
+
+    // 推进到 09:01，tickSchedules 自动触发执行并推进下一次计划到次日 09:00
+    nowMs = new Date('2026-05-04T09:01:00').getTime();
+    await hub.tickSchedules();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(startedReqs).toHaveLength(1);
+    expect(startedReqs[0]?.permissionPreset).toBe('danger-full-access');
+    const runningTask = hub.state().tasks.items[0]!;
+    expect(runningTask.status).toBe('in_progress');
+    expect(runningTask.scheduledAt).toBe(new Date('2026-05-05T09:00:00').getTime());
+    hub.dispose();
+  });
+
+  it('开启独立 Worktree 的任务在执行时自动创建 worktree 并切入该目录启动会话', async () => {
+    const store = new MemoryStore();
+    const switchedTo: { projectPath: string; backendId?: string }[] = [];
+    const preparedCalls: { repoPath: string; branch?: string }[] = [];
+    const projects: ProjectsState = {
+      currentPath: '/repo/alpha',
+      recent: [{ path: '/repo/alpha', name: 'alpha', lastOpenedAt: 1000, isCurrent: true }],
+      configs: {},
+    };
+    let sessionStartedResolve!: () => void;
+    const sessionStarted = new Promise<void>((r) => {
+      sessionStartedResolve = r;
+    });
+    const hub = new WorkbenchHub({
+      globalState: store,
+      runner: { run: async () => ({ status: 'succeeded', output: '' }) } as unknown as UnattendedRunner,
+      locale: () => 'zh',
+      isWorkspaceTrusted: () => true,
+      isWebviewVisible: () => true,
+      workspacePath: () => '/repo/alpha',
+      projects: () => projects,
+      profiles: () => [{ id: 'dsh', kind: 'dsh', name: 'DeepSeek' }],
+      schedulePermission: () => 'workspace-write',
+      activeContext: () => ({
+        backendId: 'dsh',
+        backendName: 'DeepSeek',
+        workspacePath: '/repo/alpha',
+        snapshot: makeBaseSnapshot(),
+        crossProjectSessions: [],
+        latestAssistantText: () => '',
+      }),
+      prepareTaskWorktree: async (repoPath, branch) => {
+        preparedCalls.push({ repoPath, ...(branch ? { branch } : {}) });
+        return {
+          worktreePath: '/repo/alpha-feat-task-wt',
+          branch: branch || 'wt-auto',
+        };
+      },
+      switchProjectAndBackend: async (projectPath, backendId) => {
+        switchedTo.push({ projectPath, ...(backendId ? { backendId } : {}) });
+      },
+      startProgrammaticSession: async () => {
+        sessionStartedResolve();
+        return 'sess-wt-1';
+      },
+      switchSessionInActive: async () => undefined,
+      openNewSessionInActive: async () => undefined,
+      post: () => undefined,
+      focusView: async () => undefined,
+      openPanel: () => undefined,
+      log: () => undefined,
+      now: () => 2000,
+      enableTimer: false,
+    });
+
+    await hub.handleMessage({
+      type: 'createTask',
+      payload: {
+        title: 'Worktree 任务',
+        prompt: '修复构建脚本',
+        projectPath: '/repo/alpha',
+        backendId: 'dsh',
+        useWorktree: true,
+        worktreeBranch: 'feat/task-wt',
+        autoStart: true,
+      },
+    });
+    await sessionStarted;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(preparedCalls).toEqual([{ repoPath: '/repo/alpha', branch: 'feat/task-wt' }]);
+    expect(switchedTo).toEqual([{ projectPath: '/repo/alpha-feat-task-wt', backendId: 'dsh' }]);
+    const task = hub.state().tasks.items[0]!;
+    expect(task.status).toBe('in_progress');
+    expect(task.useWorktree).toBe(true);
+    expect(task.worktreeBranch).toBe('feat/task-wt');
+    expect(task.worktreePath).toBe('/repo/alpha-feat-task-wt');
+    expect(task.sessionId).toBe('sess-wt-1');
+    hub.dispose();
+  });
+});

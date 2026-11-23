@@ -115,6 +115,19 @@ export interface ViewState {
   readonly prefill: { readonly text: string; readonly n: number; readonly mode: 'replace' | 'restore' };
   /** Host 通过文件选择器传入的图片列表；`n` 每次递增，输入框据此追加。 */
   readonly pendingImages: { readonly images: readonly PromptImage[]; readonly n: number };
+  /** Host 通过文件选择器传入的新建任务附件路径；`n` 每次递增，新建任务弹窗据此追加 `@path`。 */
+  readonly pendingTaskFiles: { readonly paths: readonly string[]; readonly n: number };
+  /** 按运行时缓存的模型与权限目录（新建任务切换运行时时动态拉取并缓存）。 */
+  readonly backendModelsCache: Readonly<
+    Record<
+      string,
+      {
+        readonly requestId: number;
+        readonly models: ModelState;
+        readonly permissions?: PermissionState;
+      }
+    >
+  >;
   /** Host 要求聚焦输入框的次数，组件据此触发聚焦。 */
   readonly focusRequests: number;
   readonly appearance: AppearanceState;
@@ -214,6 +227,8 @@ const initialState: ViewState = {
   toasts: [],
   prefill: { text: '', n: 0, mode: 'replace' },
   pendingImages: { images: [], n: 0 },
+  pendingTaskFiles: { paths: [], n: 0 },
+  backendModelsCache: {},
   focusRequests: 0,
   appearance: {},
   preferences: {
@@ -310,8 +325,9 @@ export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRu
     setRightPanelOpen(true, 'git');
     return;
   }
+  const resolved: WorkbenchModule = activeModule === 'schedules' ? 'tasks' : activeModule;
   set({
-    activeModule,
+    activeModule: resolved,
     moduleExplicit: true,
     pendingCreateTask: false,
     settingsOpen: false,
@@ -320,7 +336,7 @@ export function setActiveModule(activeModule: WorkbenchModule, inspectScheduleRu
     inspectScheduleRuleId,
   });
   try {
-    saveState({ activeModule });
+    saveState({ activeModule: resolved });
   } catch {
     // 测试环境中 acquireVsCodeApi 未必已就绪，忽略本地持久化异常
   }
@@ -354,7 +370,7 @@ export function setRightPanelOpen(open: boolean, tab?: RightPanelTab): void {
     rightPanelOpen: open,
     rightPanelTab: nextTab,
     rightPanelExplicit: true,
-    ...(open ? { settingsOpen: false, markdownPreview: undefined, diffContent: undefined } : {}),
+    ...(open ? { settingsOpen: false } : {}),
   });
   try {
     saveState({ rightPanelOpen: open, rightPanelTab: nextTab });
@@ -490,6 +506,8 @@ export function applyHostMessage(message: HostToWebview): void {
             resolvedRightPanelOpen = true;
             resolvedRightPanelTab = 'git';
           }
+        } else if (savedMod === 'schedules') {
+          resolvedModule = 'tasks';
         } else {
           resolvedModule = savedMod ?? (p.workbench !== undefined ? 'overview' : 'sessions');
         }
@@ -620,7 +638,7 @@ export function applyHostMessage(message: HostToWebview): void {
       }
       return;
     case 'diffContent':
-      set({ diffContent: message.payload, openingDiff: undefined });
+      set({ diffContent: message.payload, openingDiff: undefined, settingsOpen: false, markdownPreview: undefined });
       return;
     case 'remote':
       set({ remote: message.payload });
@@ -686,6 +704,27 @@ export function applyHostMessage(message: HostToWebview): void {
       set({
         images: nextImages,
         pendingImages: { images: message.payload.images, n: state.pendingImages.n + 1 },
+      });
+      return;
+    }
+    case 'taskFilesPicked':
+      set({
+        pendingTaskFiles: { paths: message.payload.paths, n: state.pendingTaskFiles.n + 1 },
+      });
+      return;
+    case 'backendModelsFetched': {
+      const { backendId, requestId, models, permissions } = message.payload;
+      const prev = state.backendModelsCache[backendId];
+      if (prev && requestId < prev.requestId) return;
+      set({
+        backendModelsCache: {
+          ...state.backendModelsCache,
+          [backendId]: {
+            requestId,
+            models,
+            ...(permissions ? { permissions } : {}),
+          },
+        },
       });
       return;
     }

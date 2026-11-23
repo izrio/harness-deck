@@ -160,4 +160,66 @@ describe('订阅用量标识', () => {
     );
     expect(screen.queryByTestId('usage-badge')).toBeNull();
   });
+
+  it('同一底层切换官方账号后立即清空旧额度并重新请求新账号额度', () => {
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+          accounts: {
+            items: [
+              { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'authenticated' },
+              { id: 'agy-2', backendId: 'antigravity', label: 'second@gmail.com', isSystemDefault: false, status: 'authenticated' },
+            ],
+            channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+          },
+        }),
+      }),
+    );
+    render(createElement(UsageBadge));
+    const firstReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const firstId = firstReq && firstReq.type === 'fetchQuota' ? firstReq.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: firstId,
+          quota: { windows: [{ kind: 'session', label: 'gemini', usedPercent: 100, remainingPercent: 0 }], queriedAt: Date.now() },
+        },
+      }),
+    );
+    expect(screen.getByTestId('usage-badge').textContent).toContain('0%');
+
+    // 切换到第二个账号
+    vscode.reset();
+    act(() =>
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'authenticated' },
+            { id: 'agy-2', backendId: 'antigravity', label: 'second@gmail.com', isSystemDefault: false, status: 'authenticated' },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'agy-2' } },
+        },
+      }),
+    );
+
+    // 切换瞬间隐藏旧 0% 额度并发起新的 fetchQuota
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+    const secondReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    expect(secondReq).toBeTruthy();
+    const secondId = secondReq && secondReq.type === 'fetchQuota' ? secondReq.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: secondId,
+          quota: { windows: [{ kind: 'session', label: 'gemini', usedPercent: 12, remainingPercent: 88 }], queriedAt: Date.now() },
+        },
+      }),
+    );
+    expect(screen.getByTestId('usage-badge').textContent).toContain('88%');
+  });
 });

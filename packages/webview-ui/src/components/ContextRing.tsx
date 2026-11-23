@@ -3,7 +3,7 @@
  * 随占用比例变色（70% 以上提醒，90% 以上警告），悬停或点击弹出 Popover 展示 token 明细与费用。
  */
 import { useEffect, useRef, useState } from 'react';
-import type { ContextDetail, TokenBreakdown } from '@harness-deck/shared';
+import type { ContextDetail, RequestPerformance, TokenBreakdown } from '@harness-deck/shared';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '../lib/utils.ts';
 import { useT } from '../i18n.ts';
@@ -25,6 +25,34 @@ export function formatTokens(value: number): string {
 function formatCost(amount: number, currency: string): string {
   const body = amount >= 1 ? amount.toFixed(2) : amount.toFixed(4);
   return currency === 'USD' ? `$${body}` : `${body} ${currency}`;
+}
+
+/** 缓存命中比例：cacheRead / (input + cacheRead + cacheWrite) * 100。 */
+export function cacheHitRate(b: TokenBreakdown): number | undefined {
+  const totalInput = b.input + b.cacheRead + b.cacheWrite;
+  if (totalInput <= 0 || b.cacheRead <= 0) return undefined;
+  return (b.cacheRead / totalInput) * 100;
+}
+
+/** 格式化缓存比例：99.95% 及以上取整为 100%，其余保留 1 位小数。 */
+export function formatCacheRate(pct: number): string {
+  if (pct >= 99.95) return '100%';
+  return `${pct.toFixed(1)}%`;
+}
+
+/** 格式化耗时（首字耗时等）：<1s 用 ms，<60s 用 1 位小数秒，其余用分秒。 */
+export function formatDurationMs(ms: number): string {
+  if (ms < 1_000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
+  const totalSecs = Math.round(ms / 1_000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+/** 格式化生成速度（tokens/s）。 */
+export function formatSpeed(tokensPerSec: number): string {
+  return `${tokensPerSec.toFixed(1)} tok/s`;
 }
 
 /** 图标 + 百分比，样式与 UsageBadge 对齐。 */
@@ -76,14 +104,27 @@ function BreakdownBar({ b }: { readonly b: TokenBreakdown }) {
   );
 }
 
-/** 一组用量的逐项数字（与占比条同色的小圆点 + 数值；推理数内联在输出旁）。 */
+/** 一组用量的逐项数字（与占比条同色的小圆点 + 数值；缓存比例与推理数内联在对应行旁）。 */
 function BreakdownRows({ b }: { readonly b: TokenBreakdown }) {
   const t = useT();
+  const rate = cacheHitRate(b);
   const rows = [
     { key: 'input', label: t('context.detail.input'), value: b.input, dot: 'bg-brand' },
-    { key: 'cacheRead', label: t('context.detail.cacheRead'), value: b.cacheRead, dot: 'bg-brand/45' },
+    {
+      key: 'cacheRead',
+      label: t('context.detail.cacheRead'),
+      value: b.cacheRead,
+      dot: 'bg-brand/45',
+      ...(rate !== undefined ? { hint: formatCacheRate(rate), hintTestId: 'context-detail-cache-rate' } : {}),
+    },
     { key: 'cacheWrite', label: t('context.detail.cacheWrite'), value: b.cacheWrite, dot: 'bg-ink-3' },
-    { key: 'output', label: t('context.detail.output'), value: b.output, dot: 'bg-ink', reasoning: b.reasoning },
+    {
+      key: 'output',
+      label: t('context.detail.output'),
+      value: b.output,
+      dot: 'bg-ink',
+      ...(b.reasoning && b.reasoning > 0 ? { hint: t('context.detail.reasoning', formatTokens(b.reasoning)) } : {}),
+    },
   ].filter((r) => r.value > 0);
   return (
     <div className="flex flex-col gap-1">
@@ -92,8 +133,10 @@ function BreakdownRows({ b }: { readonly b: TokenBreakdown }) {
           <span className="flex min-w-0 items-center gap-1.5">
             <span aria-hidden className={cn('size-2 shrink-0 rounded-full', r.dot)} />
             <span className="truncate text-ink-2">{r.label}</span>
-            {r.reasoning && r.reasoning > 0 ? (
-              <span className="shrink-0 text-[10.5px] text-ink-3">({t('context.detail.reasoning', formatTokens(r.reasoning))})</span>
+            {r.hint ? (
+              <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-3" data-testid={r.hintTestId}>
+                ({r.hint})
+              </span>
             ) : null}
           </span>
           <span className="shrink-0 font-mono tabular-nums text-ink">{formatTokens(r.value)}</span>
@@ -106,20 +149,60 @@ function BreakdownRows({ b }: { readonly b: TokenBreakdown }) {
 /** 紧凑两列汇总：当「最近一次请求」已展开完整明细时，用轻量网格展示「本会话累计」。 */
 function CompactBreakdownGrid({ b }: { readonly b: TokenBreakdown }) {
   const t = useT();
-  const items = [
-    { key: 'input', label: t('context.detail.input'), value: b.input },
-    { key: 'cacheRead', label: t('context.detail.cacheRead'), value: b.cacheRead },
-    { key: 'cacheWrite', label: t('context.detail.cacheWrite'), value: b.cacheWrite },
-    { key: 'output', label: t('context.detail.output'), value: b.output },
-  ].filter((r) => r.value > 0);
+  const rate = cacheHitRate(b);
+  const items: { key: string; label: string; text: string; testId?: string }[] = [
+    ...(b.input > 0 ? [{ key: 'input', label: t('context.detail.input'), text: formatTokens(b.input) }] : []),
+    ...(b.cacheRead > 0 ? [{ key: 'cacheRead', label: t('context.detail.cacheRead'), text: formatTokens(b.cacheRead) }] : []),
+    ...(b.cacheWrite > 0 ? [{ key: 'cacheWrite', label: t('context.detail.cacheWrite'), text: formatTokens(b.cacheWrite) }] : []),
+    ...(b.output > 0 ? [{ key: 'output', label: t('context.detail.output'), text: formatTokens(b.output) }] : []),
+    ...(rate !== undefined
+      ? [{ key: 'cacheRate', label: t('context.detail.cacheRate'), text: formatCacheRate(rate), testId: 'context-detail-session-cache-rate' }]
+      : []),
+  ];
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-1">
       {items.map((item) => (
         <div key={item.key} className="flex items-baseline justify-between gap-1 text-[11px] leading-4">
           <span className="truncate text-ink-3">{item.label}</span>
-          <span className="shrink-0 font-mono tabular-nums text-ink-2">{formatTokens(item.value)}</span>
+          <span className="shrink-0 font-mono tabular-nums text-ink-2" data-testid={item.testId}>
+            {item.text}
+          </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** 最近一次请求的响应性能条：首字耗时（TTFT）与生成速度（tok/s）。 */
+function PerformanceStrip({ perf }: { readonly perf: RequestPerformance }) {
+  const t = useT();
+  const hasTtft = perf.ttftMs !== undefined;
+  const hasSpeed = perf.tokensPerSec !== undefined;
+  if (!hasTtft && !hasSpeed) return null;
+  return (
+    <div
+      className={cn(
+        'border-t border-line pt-2 text-[11px] leading-4',
+        hasTtft && hasSpeed ? 'grid grid-cols-2 gap-x-3' : 'flex items-center justify-between',
+      )}
+      data-testid="context-detail-performance"
+    >
+      {hasTtft ? (
+        <div className="flex w-full items-baseline justify-between gap-1">
+          <span className="truncate text-ink-3">{t('context.detail.ttft')}</span>
+          <span className="shrink-0 font-mono tabular-nums text-ink" data-testid="context-detail-ttft">
+            {formatDurationMs(perf.ttftMs!)}
+          </span>
+        </div>
+      ) : null}
+      {hasSpeed ? (
+        <div className="flex w-full items-baseline justify-between gap-1">
+          <span className="truncate text-ink-3">{t('context.detail.speed')}</span>
+          <span className="shrink-0 font-mono tabular-nums text-ink" data-testid="context-detail-speed">
+            {formatSpeed(perf.tokensPerSec!)}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -275,6 +358,7 @@ export function ContextRing({
               compact={showLast}
             />
           ) : null}
+          {detail?.performance ? <PerformanceStrip perf={detail.performance} /> : null}
           {detail?.cost ? (
             <div className="flex items-center justify-between border-t border-line pt-2 text-[11.5px] leading-4">
               <span className="text-ink-3">{t('context.detail.cost')}</span>

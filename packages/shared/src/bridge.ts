@@ -269,6 +269,8 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   }),
   /** 在面板内读取并预览 Markdown 文件。 */
   z.object({ type: z.literal('previewMarkdown'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
+  /** 在插件内置查看器中只读查看工作区文件（不联动宿主 IDE 编辑器，便于独立客户端复用）。 */
+  z.object({ type: z.literal('previewFile'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
   /** 设置页里的通用偏好、定时权限、系统通知与诊断高级设置：写入 VS Code 设置。 */
   z.object({
     type: z.literal('setPreferences'),
@@ -397,7 +399,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       runImmediately: z.boolean().optional(),
     }),
   }),
-  /** 任务看板模块：创建任务、状态流转、顺序调整与顺序自动执行。 */
+  /** 任务看板模块：创建任务（支持可选定时规则与权限模式）、状态流转、顺序调整与顺序自动执行。 */
   z.object({
     type: z.literal('createTask'),
     payload: z.object({
@@ -409,8 +411,21 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       model: z.string().max(200).optional(),
       reasoningEffort: z.string().max(100).optional(),
       agentId: z.string().min(1).max(100).optional(),
+      permissionPreset: z.string().min(1).max(100).optional(),
+      useWorktree: z.boolean().optional(),
+      worktreeBranch: z.string().max(200).optional(),
+      schedule: scheduleFrequencySchema.optional(),
       autoStart: z.boolean().optional(),
     }),
+  }),
+  z.object({
+    type: z.literal('pickTaskFiles'),
+    payload: z.object({ projectPath: z.string().max(4_096).optional() }),
+  }),
+  /** 按需拉取指定运行时的可用模型与权限列表（如新建任务切换运行时时刷新模型列表，不切换当前会话底层）。 */
+  z.object({
+    type: z.literal('fetchBackendModels'),
+    payload: z.object({ requestId: z.number().int(), backendId: z.string().min(1).max(100) }),
   }),
   z.object({
     type: z.literal('updateTaskStatus'),
@@ -764,6 +779,16 @@ export type HostToWebview =
   | { readonly type: 'fileCandidates'; readonly payload: { readonly requestId: number; readonly items: readonly FileCandidate[] } }
   | { readonly type: 'toast'; readonly payload: { readonly level: 'info' | 'error'; readonly text: string } }
   | { readonly type: 'attachImages'; readonly payload: { readonly images: readonly PromptImage[] } }
+  | { readonly type: 'taskFilesPicked'; readonly payload: { readonly paths: readonly string[] } }
+  | {
+      readonly type: 'backendModelsFetched';
+      readonly payload: {
+        readonly requestId: number;
+        readonly backendId: string;
+        readonly models: ModelState;
+        readonly permissions?: PermissionState;
+      };
+    }
   /** 消息没能发出去（没连上、建不了会话…）：输入框发送时已经清空，把文字放回去。 */
   | { readonly type: 'restoreDraft'; readonly payload: { readonly text: string } }
   | { readonly type: 'focusComposer'; readonly payload: Record<string, never> };

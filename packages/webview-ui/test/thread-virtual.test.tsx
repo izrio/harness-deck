@@ -492,4 +492,185 @@ describe('Thread 虚拟滚动与顶部自动无限加载', () => {
     expect(screen.queryByTestId('to-bottom')).toBeNull();
     expect(screen.queryByTestId('thread-loading-older')).toBeNull();
   });
+
+  it('滚到接近底部时上方条目实际高度小于估算且被浏览器钳位，不再二次扣减把滚动条弹回中部', () => {
+    const items: Item[] = Array.from({ length: 40 }, (_, i) => ({
+      kind: 'assistant' as const,
+      id: `shrink-${i}`,
+      markdown: Array.from({ length: 18 }, (__, line) => `第 ${i}-${line} 行内容`).join('\n'),
+      streaming: false,
+    }));
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          session: { id: 'sess-shrink', title: '收缩防回弹', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+          items,
+        }),
+      });
+    });
+
+    const { container } = render(<Thread />);
+    const scroller = container.querySelector('.thread') as HTMLDivElement;
+    const layout = computeVirtualLayout(buildThreadRows(items), new Map(), THREAD_GAP);
+    const oldScrollHeight = layout.totalHeight + 40;
+    const clientHeight = 600;
+    const nearBottomScrollTop = oldScrollHeight - clientHeight - 60;
+
+    const metrics = mockScrollMetrics(scroller, {
+      scrollHeight: oldScrollHeight,
+      clientHeight,
+      scrollTop: nearBottomScrollTop,
+    });
+
+    // 先滚到距底 60px（仍未贴底，stickRef=false）
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+
+    // 模拟上方已挂载条目比估算值矮 400px，同时浏览器因 scrollHeight 缩小把 scrollTop 自动钳位到新底部
+    const aboveIndex = 36;
+    const aboveRow = container.querySelector(`[data-virtual-id="shrink-${aboveIndex}"]`) as HTMLDivElement | null;
+    expect(aboveRow).not.toBeNull();
+    const estimated = layout.sizes[aboveIndex]!;
+    const actualHeight = Math.max(40, estimated - 400);
+    const shrinkDelta = estimated - actualHeight;
+    aboveRow!.getBoundingClientRect = () =>
+      ({
+        height: actualHeight,
+        width: 560,
+        top: 0,
+        bottom: actualHeight,
+        left: 0,
+        right: 560,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const nextScrollHeight = oldScrollHeight - shrinkDelta;
+    metrics.setScrollHeight(nextScrollHeight);
+    const clampedBottom = nextScrollHeight - clientHeight;
+    metrics.setScrollTopRaw(clampedBottom);
+
+    // 触发一次布局测量
+    act(() => {
+      applyHostMessage({
+        type: 'session',
+        payload: { id: 'sess-shrink', title: '收缩防回弹（刷新）', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+      });
+    });
+
+    // 应停留在新底部上方 60px（保留原距底偏移），而不是从 clampedBottom 再减去 shrinkDelta 弹回中部
+    expect(metrics.getScrollTop()).toBeCloseTo(clampedBottom - 60, 0);
+  });
+
+  it('贴底状态下内容异步变高触发 scroll 事件（scrollTop 未减小）时保持贴底，不回弹到中部', () => {
+    const items = makeItems(40, 'grow', 0);
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          session: { id: 'sess-grow', title: '底部变高', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+          items,
+        }),
+      });
+    });
+
+    const { container } = render(<Thread />);
+    const scroller = container.querySelector('.thread') as HTMLDivElement;
+    const layout = computeVirtualLayout(buildThreadRows(items), new Map(), THREAD_GAP);
+    const initialHeight = layout.totalHeight + 40;
+    const clientHeight = 600;
+
+    const metrics = mockScrollMetrics(scroller, {
+      scrollHeight: initialHeight,
+      clientHeight,
+      scrollTop: initialHeight - clientHeight,
+    });
+
+    // 先在底部触发一次 scroll，建立基线（stickRef=true）
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+
+    // 模拟长回复/代码高亮导致 scrollHeight 突增 +1600px，同时在 ResizeObserver 前触发一次 scroll（用户并未上滚）
+    const expandedHeight = initialHeight + 1600;
+    metrics.setScrollHeight(expandedHeight);
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+
+    // 仍应自动贴到新底部，且不显示回底按钮
+    expect(metrics.getScrollTop()).toBe(expandedHeight - clientHeight);
+    expect(screen.queryByTestId('to-bottom')).toBeNull();
+
+    // 用户真正向上滚（scrollTop 减小）时立刻解除贴底
+    act(() => {
+      scroller.scrollTop = 400;
+      fireEvent.scroll(scroller);
+    });
+    expect(metrics.getScrollTop()).toBe(400);
+    expect(screen.getByTestId('to-bottom')).toBeTruthy();
+  });
+
+  it('跨过视口顶线的当前阅读条目首次测量高度变化时，不把 scrollTop 弹离当前位置', () => {
+    const items: Item[] = Array.from({ length: 30 }, (_, i) => ({
+      kind: 'assistant' as const,
+      id: `straddle-${i}`,
+      markdown: Array.from({ length: 14 }, (__, line) => `段落 ${i}-${line}`).join('\n'),
+      streaming: false,
+    }));
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          session: { id: 'sess-straddle', title: '跨顶线条目', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+          items,
+        }),
+      });
+    });
+
+    const { container } = render(<Thread />);
+    const scroller = container.querySelector('.thread') as HTMLDivElement;
+    const layout = computeVirtualLayout(buildThreadRows(items), new Map(), THREAD_GAP);
+    const straddleIndex = 15;
+    // scrollTop 落在该条目的正中间（itemTop < scrollOffset < itemTop + oldHeight）
+    const targetScrollTop = layout.offsets[straddleIndex]! + Math.floor(layout.sizes[straddleIndex]! / 2);
+
+    const metrics = mockScrollMetrics(scroller, {
+      scrollHeight: layout.totalHeight + 40,
+      clientHeight: 600,
+      scrollTop: targetScrollTop,
+    });
+
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+
+    const rowEl = container.querySelector(`[data-virtual-id="straddle-${straddleIndex}"]`) as HTMLDivElement | null;
+    expect(rowEl).not.toBeNull();
+    const actualHeight = layout.sizes[straddleIndex]! + 600;
+    rowEl!.getBoundingClientRect = () =>
+      ({
+        height: actualHeight,
+        width: 560,
+        top: 0,
+        bottom: actualHeight,
+        left: 0,
+        right: 560,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    act(() => {
+      applyHostMessage({
+        type: 'session',
+        payload: { id: 'sess-straddle', title: '跨顶线条目（刷新）', running: false, hasOlder: false, loadingOlder: false, sync: 'live' },
+      });
+    });
+
+    expect(metrics.getScrollTop()).toBeCloseTo(targetScrollTop, 0);
+  });
 });

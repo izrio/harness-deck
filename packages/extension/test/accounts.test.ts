@@ -21,9 +21,12 @@ import {
 import {
   antigravityPrimaryTokenPath,
   clearAccountCredentials,
+  codebuddyAuthDir,
+  codebuddyInternetEnvForRegion,
   prepareAccountLaunchPatch,
   removeIsolatedAccountData,
   switchAntigravityCredentialSlot,
+  switchCodebuddyCredentialSlot,
 } from '../src/accounts/AccountIsolation.ts';
 import { decodeJwtPayloadUnsafe, inspectOfficialAccount } from '../src/accounts/AccountInspector.ts';
 import type { SecretStore } from '../src/host/HostPlatform.ts';
@@ -329,6 +332,180 @@ describe('AccountIsolation & AccountInspector', () => {
       });
       assert.equal(dshInsp.status, 'authenticated');
       assert.equal(dshInsp.identity, 'sk-tea…9876');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('treats expired OAuth access_token with refresh_token as authenticated and refreshes active Antigravity slot from disk', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hd-accounts-refresh-'));
+    try {
+      const fakeHome = join(root, 'home');
+      const storageRoot = join(root, 'storage');
+      const secrets = memorySecrets();
+      const env = { HOME: fakeHome };
+      const nowMs = 1_800_000_000_000;
+
+      // 1. Antigravity：access_token 已过期但存在 refresh_token → 仍为 authenticated
+      const refreshableToken = JSON.stringify({
+        email: 'user@gmail.com',
+        token: {
+          access_token: 'old-access',
+          refresh_token: 'valid-refresh-token',
+          expiry: new Date(nowMs - 3600_000).toISOString(),
+        },
+      });
+      await secrets.store(accountSlotSecretKey('agy-refreshable'), refreshableToken);
+      const agyRefreshable = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: 'agy-refreshable',
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(agyRefreshable.status, 'authenticated');
+      assert.equal(agyRefreshable.identity, 'user@gmail.com');
+
+      // 2. Antigravity：无 refresh_token 且 access_token 已过期 → expired
+      const trulyExpiredToken = JSON.stringify({
+        email: 'expired@gmail.com',
+        token: {
+          access_token: 'dead-access',
+          expiry: new Date(nowMs - 3600_000).toISOString(),
+        },
+      });
+      await secrets.store(accountSlotSecretKey('agy-expired'), trulyExpiredToken);
+      const agyExpired = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: 'agy-expired',
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(agyExpired.status, 'expired');
+
+      // 3. Antigravity 当前激活槽位优先读取磁盘上已被 CLI 刷新的最新 token，并同步回 SecretStorage
+      const tokenPath = antigravityPrimaryTokenPath(env);
+      await mkdir(join(fakeHome, '.gemini', 'antigravity-cli'), { recursive: true });
+      const freshDiskToken = JSON.stringify({
+        email: 'user@gmail.com',
+        token: {
+          access_token: 'fresh-access',
+          refresh_token: 'valid-refresh-token',
+          expiry: new Date(nowMs + 3600_000).toISOString(),
+        },
+      });
+      await writeFile(tokenPath, freshDiskToken, 'utf8');
+      const agyActive = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: 'agy-refreshable',
+        isActiveSlot: true,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(agyActive.status, 'authenticated');
+      assert.equal(agyActive.expiresAt, nowMs + 3600_000);
+      assert.equal(secrets.map.get(accountSlotSecretKey('agy-refreshable')), freshDiskToken);
+
+      // 4. Claude：accessToken 已过期但有 refreshToken → authenticated
+      await mkdir(join(fakeHome, '.claude'), { recursive: true });
+      await writeFile(
+        join(fakeHome, '.claude', '.credentials.json'),
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'old-claude-access',
+            refreshToken: 'valid-claude-refresh',
+            subscriptionType: 'pro',
+            expiresAt: nowMs - 60_000,
+          },
+        }),
+        'utf8',
+      );
+      const claudeRefreshable = await inspectOfficialAccount({
+        backendId: 'claude',
+        accountId: systemAccountId('claude'),
+        storageRoot,
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(claudeRefreshable.status, 'authenticated');
+      assert.equal(claudeRefreshable.plan, 'Pro');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('supports CodeBuddy region mapping, API Key isolation, and OAuth credential slot detection & switching', async () => {
+    assert.equal(codebuddyInternetEnvForRegion('cn'), 'internal');
+    assert.equal(codebuddyInternetEnvForRegion('ai'), 'external');
+    assert.equal(codebuddyInternetEnvForRegion('internal'), 'ioa');
+    assert.equal(codebuddyInternetEnvForRegion(undefined), undefined);
+
+    const root = await mkdtemp(join(tmpdir(), 'hd-accounts-cb-'));
+    try {
+      const fakeHome = join(root, 'home');
+      const storageRoot = join(root, 'storage');
+      const secrets = memorySecrets();
+      const env = { HOME: fakeHome };
+
+      // 1. 独立账号配置 CODEBUDDY_API_KEY + cn 区域：注入正确环境变量且直接识别为已登录
+      await secrets.store(accountApiKeySecretKey('cb-team'), 'cb-secret-api-key-9999');
+      const cbAcc = { id: 'cb-team', backendId: 'codebuddy', label: '团队号', region: 'cn' as const, createdAt: 1 };
+      const patch = await prepareAccountLaunchPatch({
+        backendId: 'codebuddy',
+        accountId: 'cb-team',
+        account: cbAcc,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+      });
+      assert.equal(patch.env.CODEBUDDY_API_KEY, 'cb-secret-api-key-9999');
+      assert.equal(patch.env.CODEBUDDY_INTERNET_ENVIRONMENT, 'internal');
+      assert.ok(patch.configDir);
+
+      const apiKeyInsp = await inspectOfficialAccount({
+        backendId: 'codebuddy',
+        accountId: 'cb-team',
+        account: cbAcc,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+      });
+      assert.equal(apiKeyInsp.status, 'authenticated');
+      assert.equal(apiKeyInsp.identity, 'cb-sec…9999');
+      assert.equal(apiKeyInsp.plan, 'CN · API Key');
+      assert.equal(apiKeyInsp.hasSecret, true);
+
+      // 2. OAuth 凭据槽位（CodeBuddyExtension/Data/Public/auth/*.info）识别与原子切换
+      const authDir = codebuddyAuthDir(env);
+      await mkdir(authDir, { recursive: true });
+      await writeFile(join(authDir, 'abc123.info'), 'encrypted-sys-session', 'utf8');
+      const sysInsp = await inspectOfficialAccount({
+        backendId: 'codebuddy',
+        accountId: systemAccountId('codebuddy'),
+        isActiveSlot: true,
+        storageRoot,
+        baseEnv: env,
+        secrets,
+      });
+      assert.equal(sysInsp.status, 'authenticated');
+
+      const altSnapshot = JSON.stringify({ files: { 'abc123.info': 'encrypted-alt-session' } });
+      await secrets.store(accountSlotSecretKey('cb-alt'), altSnapshot);
+      const sw = await switchCodebuddyCredentialSlot({
+        targetAccountId: 'cb-alt',
+        previousAccountId: systemAccountId('codebuddy'),
+        secrets,
+        env,
+      });
+      assert.equal(sw.activated, true);
+      assert.equal(await readFile(join(authDir, 'abc123.info'), 'utf8'), 'encrypted-alt-session');
+      assert.ok(secrets.map.get(accountSlotSecretKey(systemAccountId('codebuddy')))?.includes('encrypted-sys-session'));
     } finally {
       await rm(root, { recursive: true, force: true });
     }

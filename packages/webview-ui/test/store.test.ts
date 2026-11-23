@@ -51,9 +51,9 @@ describe('webview store', () => {
     expect(getState().fileCandidates.items).toEqual([{ path: 'src/a.ts', kind: 'file' }]);
   });
 
-  it('setActiveModule 与 openSettingsPage 正确切换模块并规范化旧设置页标签', () => {
+  it('setActiveModule 与 openSettingsPage 正确切换模块并规范化旧模块与设置页标签', () => {
     setActiveModule('schedules', 'rule-1');
-    expect(getState().activeModule).toBe('schedules');
+    expect(getState().activeModule).toBe('tasks');
     expect(getState().moduleExplicit).toBe(true);
     expect(getState().inspectScheduleRuleId).toBe('rule-1');
 

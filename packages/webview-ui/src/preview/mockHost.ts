@@ -62,9 +62,10 @@ function resolveLocale(pref: PreferencesState['language']): Locale {
 }
 
 function syncPreviewBodyClass(theme: AppearanceState['theme']): void {
+  const mode = theme ?? 'dark';
   const isDark =
-    theme === 'dark' ||
-    (theme !== 'light' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    mode === 'dark' ||
+    (mode === 'system' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.body.classList.toggle('vscode-dark', isDark);
   document.body.classList.toggle('vscode-light', !isDark);
 }
@@ -100,7 +101,7 @@ function installMockHost(): void {
   let models: ModelState = PREVIEW_MODELS;
   let permissions: PermissionState = PREVIEW_PERMISSIONS;
   let preferences: PreferencesState = PREVIEW_PREFERENCES;
-  let appearance: AppearanceState = { theme: 'system' };
+  let appearance: AppearanceState = { theme: 'dark' };
   let locale: Locale = resolveLocale(preferences.language);
   let projects: ProjectsState = PREVIEW_PROJECTS;
   let workbench: WorkbenchState = createInitialWorkbench();
@@ -742,6 +743,64 @@ function installMockHost(): void {
         postToWebview({ type: 'toast', payload: { level: 'info', text: '浏览器预览模式：Diff 视图需在 IDE 中打开' } });
         return;
 
+      case 'previewFile': {
+        const rawPath = message.payload.path;
+        const title = rawPath.split('/').pop() ?? rawPath;
+        const ext = title.includes('.') ? title.slice(title.lastIndexOf('.') + 1).toLowerCase() : '';
+        const langMap: Record<string, string> = {
+          ts: 'typescript',
+          tsx: 'tsx',
+          js: 'javascript',
+          jsx: 'jsx',
+          css: 'css',
+          json: 'json',
+          md: 'markdown',
+          html: 'html',
+          yml: 'yaml',
+          yaml: 'yaml',
+          sh: 'bash',
+        };
+        const language = langMap[ext];
+        const sample =
+          ext === 'md'
+            ? `# ${title}\n\n这是内置文件查看器展示的 **${rawPath}** 预览内容。\n\n- 支持在「预览」与「源码」视图间切换\n- 不联动外部 IDE，可作为独立客户端基础能力\n`
+            : ext === 'css'
+              ? `/* ${rawPath} */\n:root {\n  --accent: #3b82f6;\n  --surface: #14171c;\n}\n`
+              : ext === 'json'
+                ? `{\n  "file": "${rawPath}",\n  "mode": "inline-preview",\n  "standaloneReady": true\n}\n`
+                : `// ${rawPath}\nexport function previewPlaceholder(): string {\n  return 'Built-in viewer for ${title}';\n}\n`;
+        postToWebview({
+          type: 'diffContent',
+          payload: {
+            path: rawPath,
+            title,
+            ...(language ? { language } : {}),
+            kind: 'file',
+            after: sample,
+            readonly: true,
+          },
+        });
+        return;
+      }
+
+      case 'openSourceControlDiff': {
+        const rawPath = message.payload.path;
+        const title = rawPath.split('/').pop() ?? rawPath;
+        postToWebview({
+          type: 'diffContent',
+          payload: {
+            path: rawPath,
+            title,
+            kind: 'pair',
+            before: `// ${rawPath}\nexport const version = '0.3.0';\nexport const builtinViewer = false;\n`,
+            after: `// ${rawPath}\nexport const version = '0.4.0';\nexport const builtinViewer = true;\n`,
+            additions: 2,
+            deletions: 2,
+          },
+        });
+        return;
+      }
+
       case 'previewMarkdown':
         postToWebview({
           type: 'markdownPreview',
@@ -813,6 +872,17 @@ function installMockHost(): void {
           model: p.model,
           reasoningEffort: p.reasoningEffort,
           agentId: p.agentId,
+          permissionPreset: p.permissionPreset,
+          ...(p.useWorktree
+            ? {
+                useWorktree: true,
+                ...(p.worktreeBranch ? { worktreeBranch: p.worktreeBranch } : {}),
+                ...(p.autoStart
+                  ? { worktreePath: `${p.projectPath}-${(p.worktreeBranch || 'wt-preview').replace(/[^a-zA-Z0-9._-]+/gu, '-')}` }
+                  : {}),
+              }
+            : {}),
+          ...(p.schedule ? { schedule: p.schedule } : {}),
           createdAt: Date.now(),
         };
         workbench = { ...workbench, tasks: { ...workbench.tasks, items: [task, ...workbench.tasks.items] } };

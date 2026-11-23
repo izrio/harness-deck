@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Harness Deck",
   "description": "%extension.description%",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -350,7 +350,7 @@
             "%config.ui.theme.light%",
             "%config.ui.theme.dark%"
           ],
-          "default": "system",
+          "default": "dark",
           "markdownDescription": "%config.ui.theme%"
         },
         "harnessDeck.notifications.enabled": {

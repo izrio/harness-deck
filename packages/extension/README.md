@@ -140,7 +140,7 @@ OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号
 | `harnessDeck.ui.language` | `auto` | 界面语言：跟随 VS Code，或固定 `zh` / `en` |
 | `harnessDeck.ui.fontSize` | `0` | 对话面板字号（px）；`0` 表示比 VS Code 工作台字号大 1px |
 | `harnessDeck.ui.fontFamily` | 空 | 对话面板字体 |
-| `harnessDeck.ui.theme` | `system` | 界面主题：`system`（跟随系统 / VS Code）、`light`（浅色）、`dark`（深色） |
+| `harnessDeck.ui.theme` | `dark` | 界面主题：`dark`（深色，默认）、`light`（浅色）、`system`（跟随系统 / VS Code） |
 | `harnessDeck.ui.codeFontFamily` | 空 | 代码、文件路径和命令输出的字体 |
 | `harnessDeck.ui.showTurnChanges` | `false` | 每轮回复结束时在对话里显示改动文件卡片（dsh） |
 

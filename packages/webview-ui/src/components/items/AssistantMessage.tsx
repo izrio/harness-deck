@@ -3,7 +3,7 @@ import { cn } from '../../lib/utils.ts';
 import { CollapsibleDrawer } from '../beautifului/index.ts';
 import { Markdown } from '../Markdown.tsx';
 import { AssistantActions } from '../RunStatus.tsx';
-import { ChevronDownIcon, SparkleIcon } from '../icons.tsx';
+import { BrainIcon, ChevronDownIcon } from '../icons.tsx';
 import { useT } from '../../i18n.ts';
 import type { Of } from './types.ts';
 
@@ -31,11 +31,10 @@ export function Reasoning({ text, active }: { text: string; active: boolean }) {
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <SparkleIcon
-          width={15}
-          height={15}
-          fill="currentColor"
-          stroke="none"
+        <BrainIcon
+          width={14}
+          height={14}
+          strokeWidth={1.8}
           className={cn('shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}
         />
         <span className={active ? 'text-accent-ink' : undefined}>{active ? t('reasoning.active') : t('reasoning.done')}</span>

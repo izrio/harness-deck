@@ -47,8 +47,11 @@ export function estimateItemHeight(item: Item): number {
     case 'changes':
       return 64 + Math.min(item.files.length, 8) * 28;
     case 'user': {
-      const lines = Math.max(1, item.text.split('\n').length + Math.floor(item.text.length / 60));
-      const textHeight = Math.min(360, 28 + lines * 22);
+      let wrappedLines = 0;
+      for (const line of item.text.split('\n')) {
+        wrappedLines += Math.max(1, Math.ceil(line.length / 56));
+      }
+      const textHeight = Math.min(640, 28 + wrappedLines * 22);
       const imageHeight = item.images?.length ? 88 : 0;
       const attachHeight = item.attachments?.length ? 30 : 0;
       return textHeight + imageHeight + attachHeight;
@@ -57,9 +60,12 @@ export function estimateItemHeight(item: Item): number {
       const md = item.markdown;
       const reasoningHeight = item.reasoning ? 34 : 0;
       if (!md) return Math.max(36, reasoningHeight);
-      const lines = md.split('\n').length + Math.floor(md.length / 72);
+      let wrappedLines = 0;
+      for (const line of md.split('\n')) {
+        wrappedLines += Math.max(1, Math.ceil(line.length / 76));
+      }
       const codeBlocks = Math.floor((md.match(/```/g)?.length ?? 0) / 2);
-      return Math.min(720, reasoningHeight + 24 + lines * 22 + codeBlocks * 48);
+      return Math.min(3600, reasoningHeight + 24 + wrappedLines * 22 + codeBlocks * 48);
     }
   }
 }

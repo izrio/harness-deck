@@ -170,11 +170,39 @@ export function AgentSettings() {
   return (
     <>
       <SettingsSection
-        title={t('settings.backends')}
-        testId="settings-backends"
+        title={t('settings.runtimeEnv')}
+        testId="settings-runtime-env"
         actions={
-          <>
-            <Button type="button" variant="outline" size="sm" data-testid="agent-registry-btn" onClick={() => { setRegistryUrl(backends.registryUrl ?? ''); setRegistryOpen(true); }}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            data-testid="settings-refresh-env"
+            title={t('settings.refresh')}
+            aria-label={t('settings.refresh')}
+            onClick={refreshAll}
+          >
+            <RefreshIcon className="size-3.5 text-ink-2" />
+          </Button>
+        }
+      >
+        <NodeEnvBanner nodeEnv={nodeEnv} />
+      </SettingsSection>
+
+      <div className="flex flex-col gap-2" data-testid="settings-backends">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-0.5">
+          <h3 className="m-0 truncate text-[13px] font-semibold tracking-tight text-ink">{t('settings.backends')}</h3>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="agent-registry-btn"
+              onClick={() => {
+                setRegistryUrl(backends.registryUrl ?? '');
+                setRegistryOpen(true);
+              }}
+            >
               <GlobeIcon className="size-3.5" />
               <span>{t('settings.agents.registry')}</span>
             </Button>
@@ -182,15 +210,10 @@ export function AgentSettings() {
               <PlusIcon className="size-3.5" />
               <span>{t('settings.agents.add')}</span>
             </Button>
-            <Button type="button" variant="ghost" size="icon-sm" data-testid="settings-refresh-env" title={t('settings.refresh')} aria-label={t('settings.refresh')} onClick={refreshAll}>
-              <RefreshIcon className="size-3.5 text-ink-2" />
-            </Button>
-          </>
-        }
-      >
-        <NodeEnvBanner nodeEnv={nodeEnv} />
+          </div>
+        </div>
 
-        <div className="divide-y divide-line/60">
+        <div className="flex flex-col gap-2.5">
           {backends.items.map((backend) => {
             const channel = accounts.channels[backend.id] ?? backend.activeChannel;
             const boundProvider =
@@ -225,7 +248,7 @@ export function AgentSettings() {
             );
           })}
         </div>
-      </SettingsSection>
+      </div>
 
       <Dialog open={Boolean(form)} onOpenChange={(open) => !open && closeForm()}>
         {form ? (
@@ -361,14 +384,14 @@ export function AgentSettings() {
             <DialogDescription>{t('settings.agents.registryHint')}</DialogDescription>
           </DialogHeader>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
             <Input
               size="sm"
               value={registryUrl}
               onChange={(event) => setRegistryUrl(event.target.value)}
               placeholder="https://example.com/acp-registry.json"
               aria-label={t('settings.agents.registryUrl')}
-              className="font-mono text-[12px]"
+              className="min-w-0 flex-1 font-mono text-[12px]"
             />
             <Button
               type="button"
@@ -385,11 +408,11 @@ export function AgentSettings() {
 
           {registry?.error ? <div className="text-[11.5px] text-red">{registry.error}</div> : null}
 
-          <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+          <div className="flex max-h-72 min-w-0 flex-col gap-1.5 overflow-y-auto">
             {(registry?.entries ?? []).map((entry) => {
               const exists = backends.items.some((backend) => backend.id === entry.id);
               return (
-                <div key={entry.id} className="rounded-control border border-line bg-field/60 px-2.5 py-2">
+                <div key={entry.id} className="min-w-0 rounded-control border border-line bg-field/60 px-2.5 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-[12.5px] font-medium text-ink">{entry.name}</div>

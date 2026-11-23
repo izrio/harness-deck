@@ -10,7 +10,7 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, resolve } from 'node:path';
+import { basename, isAbsolute, relative, resolve } from 'node:path';
 import {
   backendCapabilities,
   isProviderReadyForBackend,
@@ -52,10 +52,12 @@ import {
   prepareAccountLaunchPatch,
   removeIsolatedAccountData,
   switchAntigravityCredentialSlot,
+  switchCodebuddyCredentialSlot,
 } from '../accounts/AccountIsolation.ts';
 import {
   accountApiKeySecretKey,
   accountCookieSecretKey,
+  accountSlotSecretKey,
   activeOfficialAccountId,
   deleteAccountSetting,
   effectiveProviderForBackend,
@@ -146,7 +148,13 @@ import {
   updateProjectConfigsMap,
 } from '../projects/ProjectService.ts';
 import { fetchRemoteProviderModels, ProviderProxy } from '../providers/ProviderProxy.ts';
-import { queryAntigravityQuota, queryClaudeQuota, queryCodebuddyQuota, quotaProviderFor } from '../quota/provider.ts';
+import {
+  clearQuotaCacheFor,
+  queryAntigravityQuota,
+  queryClaudeQuota,
+  queryCodebuddyQuota,
+  quotaProviderFor,
+} from '../quota/provider.ts';
 import {
   bindProviderSetting,
   buildProvidersState,
@@ -316,6 +324,41 @@ export function createHarnessHostRuntime(
       }
     }
     clientHub.broadcast(outgoing);
+  };
+
+  const displayInlinePath = (rawPath: string): string => {
+    if (!isAbsolute(rawPath)) return rawPath.replace(/\\/gu, '/');
+    const rel = relative(workspacePath, rawPath);
+    return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel.replace(/\\/gu, '/') : rawPath;
+  };
+
+  const sendInlineFile = async (rawPath: string): Promise<void> => {
+    const fullPath = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspacePath, rawPath);
+    if (!isAbsolute(rawPath)) {
+      const relCheck = relative(workspacePath, fullPath);
+      if (relCheck.startsWith('..') || isAbsolute(relCheck)) {
+        post({
+          type: 'diffContent',
+          payload: buildMobileFileContent(rawPath, undefined, t('open.failed', basename(rawPath), 'EACCES')),
+        });
+        return;
+      }
+    }
+    const content = await platform.workbench.readFile(fullPath);
+    const fileData = buildMobileFileContent(
+      displayInlinePath(rawPath),
+      content,
+      t('open.failed', basename(fullPath), 'ENOENT'),
+    );
+    post({ type: 'diffContent', payload: fileData });
+  };
+
+  const sendInlineDiff = async (request: Parameters<Workbench['openDiff']>[0]): Promise<void> => {
+    const diffData = await buildMobileDiffContent(request, platform.workbench.readFile);
+    post({
+      type: 'diffContent',
+      payload: { ...diffData, path: displayInlinePath(diffData.path) },
+    });
   };
 
   const mobileAwareWorkbench: Workbench = {
@@ -776,8 +819,8 @@ export function createHarnessHostRuntime(
   };
 
   const readAppearance = (): AppearanceState => {
-    const rawTheme = platform.settings.get<string>('ui.theme', 'system');
-    const theme = rawTheme === 'light' || rawTheme === 'dark' ? rawTheme : undefined;
+    const rawTheme = platform.settings.get<string>('ui.theme', 'dark');
+    const theme = rawTheme === 'light' || rawTheme === 'dark' || rawTheme === 'system' ? rawTheme : 'dark';
     const size = platform.settings.get<number>('ui.fontSize', 0);
     const family = platform.settings.get<string>('ui.fontFamily', '').trim();
     const lineHeight = platform.settings.get<number>('ui.lineHeight', 0);
@@ -878,6 +921,7 @@ export function createHarnessHostRuntime(
   const accountRevision = new Map<string, number>();
   let accountsChecking = false;
   let lastActiveAntigravityAccountId: string | undefined;
+  let lastActiveCodebuddyAccountId: string | undefined;
 
   const bumpAccountRevision = (backendId: string): void => {
     accountRevision.set(backendId, (accountRevision.get(backendId) ?? 0) + 1);
@@ -1003,10 +1047,12 @@ export function createHarnessHostRuntime(
     includeQuota = false,
   ): Promise<void> => {
     const clientVersion = installedVersions.get(backendId);
+    const activeAccountId = activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts());
     const res = await inspectOfficialAccount({
       backendId,
       accountId,
       ...(account ? { account } : {}),
+      isActiveSlot: activeAccountId === accountId,
       storageRoot,
       baseEnv: processEnv(),
       secrets: platform.secrets,
@@ -1426,7 +1472,7 @@ export function createHarnessHostRuntime(
       const cleared =
         value === null ||
         value === '' ||
-        (key === 'theme' && value === 'system') ||
+        (key === 'theme' && value === 'dark') ||
         (key === 'paragraphSpacing' && typeof value === 'number' && value < 0) ||
         (key !== 'paragraphSpacing' && typeof value === 'number' && value <= 0);
       await writeSetting('ui', key, cleared ? undefined : value);
@@ -1759,6 +1805,13 @@ export function createHarnessHostRuntime(
       if (binding.mode !== 'official') return undefined;
       const accountId = binding.accountId ?? systemAccountId(backendId);
       const acc = isSystemAccountId(accountId) ? undefined : readAccounts().find((a) => a.id === accountId);
+      const lowerBackend = backendId.toLowerCase();
+      const prevSlotOwner =
+        lowerBackend === 'antigravity'
+          ? lastActiveAntigravityAccountId
+          : lowerBackend === 'codebuddy'
+            ? lastActiveCodebuddyAccountId
+            : undefined;
       const patch = await prepareAccountLaunchPatch({
         backendId,
         accountId,
@@ -1766,13 +1819,13 @@ export function createHarnessHostRuntime(
         storageRoot,
         baseEnv,
         secrets: platform.secrets,
-        activateSlot: backendId.toLowerCase() === 'antigravity',
-        ...(backendId.toLowerCase() === 'antigravity' && lastActiveAntigravityAccountId
-          ? { previousAccountId: lastActiveAntigravityAccountId }
-          : {}),
+        activateSlot: lowerBackend === 'antigravity' || lowerBackend === 'codebuddy',
+        ...(prevSlotOwner ? { previousAccountId: prevSlotOwner } : {}),
       });
-      if (backendId.toLowerCase() === 'antigravity') {
+      if (lowerBackend === 'antigravity') {
         lastActiveAntigravityAccountId = accountId;
+      } else if (lowerBackend === 'codebuddy') {
+        lastActiveCodebuddyAccountId = accountId;
       }
       return patch;
     },
@@ -2388,8 +2441,8 @@ export function createHarnessHostRuntime(
     isBackgroundSchedulerActive: () =>
       platform.schedulerLockDir ? isSchedulerLockHeld(schedulerLockPath(platform.schedulerLockDir), process.pid) : false,
     ...(platform.onSchedulesChanged ? { onSchedulesChanged: platform.onSchedulesChanged } : {}),
-    openFile: (path) => mobileAwareWorkbench.openFile(path),
-    openDiff: (request) => mobileAwareWorkbench.openDiff(request),
+    openFile: (path) => sendInlineFile(path),
+    openDiff: (request) => sendInlineDiff(request),
     workspacePath: () => workspacePath,
     projects: projectsState,
     profiles,
@@ -2408,6 +2461,21 @@ export function createHarnessHostRuntime(
         await switchBackend(targetId);
       }
       startIfNeeded();
+    },
+    prepareTaskWorktree: async (repoPath, branch) => {
+      const normalizedRepo = normalizeProjectPath(repoPath) || repoPath;
+      const configs = parseProjectConfigs(platform.settings.get<unknown>('projects', {}));
+      const config = configs[normalizedRepo] ?? EMPTY_WORKTREE_CONFIG;
+      const result = await createProjectWorktree({
+        repoPath: normalizedRepo,
+        ...(branch?.trim() ? { branch: branch.trim() } : {}),
+        config,
+        log,
+      });
+      await saveRecentProjectPath(result.worktreePath);
+      pushProjects();
+      post({ type: 'toast', payload: { level: 'info', text: t('project.worktreeCreated', result.worktreePath) } });
+      return { worktreePath: result.worktreePath, branch: result.branch };
     },
     startProgrammaticSession: async (req) => {
       startIfNeeded();
@@ -2664,6 +2732,80 @@ export function createHarnessHostRuntime(
   const dispatchWebviewMessage = (message: WebviewToHost): void => {
     const commandId = 'commandId' in message ? message.commandId : undefined;
     if (commandId && !commandReceipts.accept(`${message.type}:${commandId}`)) return;
+    if (message.type === 'fetchBackendModels') {
+      void (async () => {
+        const { requestId, backendId } = message.payload;
+        const profile = profiles().find((p) => p.id === backendId);
+        if (!profile) {
+          post({
+            type: 'backendModelsFetched',
+            payload: { requestId, backendId, models: { options: [] } },
+          });
+          return;
+        }
+        let entry = managedBackends.get(profile.id);
+        if (!entry) {
+          try {
+            entry = createManagedEntry(profile);
+          } catch (error) {
+            log(`获取运行时 ${profile.name} 模型列表失败：${error instanceof Error ? error.message : String(error)}`);
+            post({
+              type: 'backendModelsFetched',
+              payload: { requestId, backendId, models: { options: [] } },
+            });
+            return;
+          }
+        }
+        const deadline = Date.now() + 4_000;
+        while (entry.backend.controller.modelState().options.length === 0 && Date.now() < deadline) {
+          const snap = entry.backend.controller.peekSnapshot?.();
+          if (
+            snap?.models.needsApiKey ||
+            snap?.runtime.kind === 'notInstalled' ||
+            snap?.runtime.kind === 'unsupportedVersion'
+          ) {
+            break;
+          }
+          await new Promise<void>((resolveWait) => setTimeout(resolveWait, 150));
+        }
+        const models = entry.backend.controller.modelState();
+        const permissions = entry.backend.controller.peekSnapshot?.().permissions;
+        post({
+          type: 'backendModelsFetched',
+          payload: {
+            requestId,
+            backendId,
+            models,
+            ...(permissions ? { permissions } : {}),
+          },
+        });
+      })();
+      return;
+    }
+    if (message.type === 'pickTaskFiles') {
+      void (async () => {
+        const basePath = message.payload.projectPath?.trim() || workspacePath;
+        const picked = await platform.pickOpenDialog({
+          canSelectMany: true,
+          canSelectFiles: true,
+          canSelectFolders: true,
+          defaultPath: basePath,
+          title: t('files.pickTitle'),
+        });
+        if (!picked || picked.length === 0) return;
+        const paths = picked.map((rawPath) => {
+          if (basePath) {
+            const rel = relative(basePath, rawPath);
+            if (rel && !rel.startsWith('..') && !isAbsolute(rel)) {
+              return rel.replace(/\\/gu, '/');
+            }
+          }
+          return rawPath.replace(/\\/gu, '/');
+        });
+        post({ type: 'taskFilesPicked', payload: { paths } });
+      })();
+      return;
+    }
     if (WORKBENCH_MESSAGE_TYPES.has(message.type)) {
       void hub?.handleMessage(message);
       return;
@@ -2965,6 +3107,14 @@ export function createHarnessHostRuntime(
           const accCfg = isSystemAccountId(activeAccId)
             ? undefined
             : readAccounts().find((a) => a.id === activeAccId);
+          // Antigravity 切换到尚未登录的新槽位时，磁盘仍保留上一账号的凭据文件；不误读旧账号额度
+          if (providerId === 'antigravity' && !isSystemAccountId(activeAccId)) {
+            const storedSlot = (await platform.secrets.get(accountSlotSecretKey(activeAccId)))?.trim();
+            if (!storedSlot) {
+              post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
+              return;
+            }
+          }
           const accPatch = await prepareAccountLaunchPatch({
             backendId,
             accountId: activeAccId,
@@ -2998,6 +3148,9 @@ export function createHarnessHostRuntime(
               quota,
               checkedAt: Date.now(),
             });
+            if (prev?.quota?.queriedAt !== quota.queriedAt) {
+              pushAccounts();
+            }
           }
           post(
             quota
@@ -3053,6 +3206,9 @@ export function createHarnessHostRuntime(
             accountId: saved.id,
           });
           await writeSetting(undefined, 'backendChannels', nextChannels);
+        }
+        if (payload.setActive || payload.usageCookie !== undefined) {
+          clearQuotaCacheFor(quotaProviderFor(profiles().find((p) => p.id === saved.backendId)));
         }
         await inspectOneAccount(saved.backendId, saved.id, saved, false);
         pushAccounts();
@@ -3114,7 +3270,9 @@ export function createHarnessHostRuntime(
           ...(profile.kind === 'acp' ? { acpCommand: profile.command } : {}),
           ...(profile.id === 'antigravity' && lastActiveAntigravityAccountId
             ? { previousActiveAccountId: lastActiveAntigravityAccountId }
-            : {}),
+            : profile.id === 'codebuddy' && lastActiveCodebuddyAccountId
+              ? { previousActiveAccountId: lastActiveCodebuddyAccountId }
+              : {}),
         });
       })();
       return;
@@ -3200,10 +3358,19 @@ export function createHarnessHostRuntime(
               env: processEnv(),
             });
             lastActiveAntigravityAccountId = targetAccountId;
+          } else if (backendId.toLowerCase() === 'codebuddy') {
+            await switchCodebuddyCredentialSlot({
+              targetAccountId,
+              ...(lastActiveCodebuddyAccountId ? { previousAccountId: lastActiveCodebuddyAccountId } : {}),
+              secrets: platform.secrets,
+              env: processEnv(),
+            });
+            lastActiveCodebuddyAccountId = targetAccountId;
           }
         }
         const nextChannels = setBackendChannelSetting(readBackendChannels(), backendId, nextBinding);
         await writeSetting(undefined, 'backendChannels', nextChannels);
+        clearQuotaCacheFor(quotaProviderFor(profile));
         pushAccounts();
         pushProviders();
         syncManagedBackendsForChannelChange(backendId);
@@ -3694,6 +3861,10 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'selectFolder') {
       void selectFolderCommand();
+      return;
+    }
+    if (message.type === 'previewFile') {
+      void sendInlineFile(message.payload.path);
       return;
     }
     if (message.type === 'previewMarkdown') {

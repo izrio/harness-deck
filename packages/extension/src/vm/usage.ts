@@ -8,7 +8,7 @@
  * - DeepSeek 官方接口：`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`；
  * - AI SDK：`inputTokenDetails.noCacheTokens` / `cacheReadTokens` / `cacheWriteTokens`。
  */
-import type { ContextDetail, TokenBreakdown } from '@harness-deck/shared';
+import type { ContextDetail, RequestPerformance, TokenBreakdown } from '@harness-deck/shared';
 
 type Rec = Record<string, unknown>;
 
@@ -110,16 +110,113 @@ export function costOf(raw: unknown): number | undefined {
   return pick(o, 'total_cost_usd', 'totalCostUsd', 'costUsd', 'cost_usd') ?? pick(cost, 'total', 'amount') ?? num(o.cost);
 }
 
-/** 一个会话的用量记录：最近一次请求、会话累计、请求次数和费用。 */
+const MAX_REASONABLE_TURN_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * 追踪单轮请求的响应性能：首字耗时（TTFT）与生成速度（tokens/s）。
+ * 兼容「先 finish 再上报 usage」与「先上报 usage 再 finish」两种底层事件顺序。
+ */
+export class TurnTimingTracker {
+  private startedAt?: number;
+  private firstTokenAt?: number;
+  private lastFinished?: { readonly ttftMs?: number; readonly genMs: number; readonly totalMs: number };
+  private lastPerf?: RequestPerformance;
+
+  start(now = Date.now()): void {
+    this.startedAt = now;
+    this.firstTokenAt = undefined;
+  }
+
+  markFirstToken(now = Date.now()): void {
+    if (this.startedAt !== undefined && this.firstTokenAt === undefined) {
+      this.firstTokenAt = now;
+    }
+  }
+
+  finish(outputTokens?: number, now = Date.now()): void {
+    if (this.startedAt === undefined) return;
+    const totalMs = Math.max(0, Math.round(now - this.startedAt));
+    if (totalMs > MAX_REASONABLE_TURN_MS) {
+      this.startedAt = undefined;
+      this.firstTokenAt = undefined;
+      return;
+    }
+    const ttftMs =
+      this.firstTokenAt !== undefined ? Math.max(0, Math.round(this.firstTokenAt - this.startedAt)) : undefined;
+    const genMs =
+      this.firstTokenAt !== undefined && now > this.firstTokenAt ? Math.round(now - this.firstTokenAt) : totalMs;
+    this.lastFinished = { ...(ttftMs !== undefined ? { ttftMs } : {}), genMs, totalMs };
+    this.updatePerf(outputTokens);
+    this.startedAt = undefined;
+    this.firstTokenAt = undefined;
+  }
+
+  /** 若 usage 在 endTurn 之后才到达，补算本轮输出速度。 */
+  attachOutputTokens(outputTokens: number | undefined): void {
+    if (!outputTokens || outputTokens <= 0 || !this.lastFinished) return;
+    this.updatePerf(outputTokens);
+  }
+
+  private updatePerf(outputTokens?: number): void {
+    const fin = this.lastFinished;
+    if (!fin) return;
+    const computedTps =
+      outputTokens !== undefined && outputTokens > 0 && fin.genMs >= 50
+        ? Number(((outputTokens / fin.genMs) * 1_000).toFixed(1))
+        : undefined;
+    const tokensPerSec = computedTps !== undefined && computedTps > 0 ? computedTps : undefined;
+    if (fin.ttftMs !== undefined || tokensPerSec !== undefined) {
+      this.lastPerf = {
+        ...(fin.ttftMs !== undefined ? { ttftMs: fin.ttftMs } : {}),
+        ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
+        ...(fin.totalMs > 0 ? { durationMs: fin.totalMs } : {}),
+      };
+    }
+  }
+
+  reset(): void {
+    this.startedAt = undefined;
+    this.firstTokenAt = undefined;
+    this.lastFinished = undefined;
+    this.lastPerf = undefined;
+  }
+
+  performance(): RequestPerformance | undefined {
+    return this.lastPerf;
+  }
+}
+
+/** 一个会话的用量记录：最近一次请求、会话累计、请求次数、费用与响应性能。 */
 export class UsageTracker {
   private last?: TokenBreakdown;
   private session?: TokenBreakdown;
   private requests = 0;
   private cost?: { amount: number; currency: string };
+  private readonly timing = new TurnTimingTracker();
+  private turnOutputTokens = 0;
+
+  startRequest(now = Date.now()): void {
+    this.turnOutputTokens = 0;
+    this.timing.start(now);
+  }
+
+  markFirstToken(now = Date.now()): void {
+    this.timing.markFirstToken(now);
+  }
+
+  finishRequest(outputTokens?: number, now = Date.now()): void {
+    const effectiveOutput = outputTokens ?? (this.turnOutputTokens > 0 ? this.turnOutputTokens : undefined);
+    this.timing.finish(effectiveOutput, now);
+  }
 
   /** 最近一次请求的用量（不累计）。 */
   setLast(b: TokenBreakdown | undefined): void {
-    if (b) this.last = b;
+    if (!b) return;
+    this.last = b;
+    if (b.output > 0) {
+      this.turnOutputTokens = b.output;
+      this.timing.attachOutputTokens(b.output);
+    }
   }
 
   /** 一次请求结束：记为最近一次并累加到会话。 */
@@ -128,6 +225,10 @@ export class UsageTracker {
     this.last = b;
     this.session = addUsage(this.session, b);
     this.requests += 1;
+    if (b.output > 0) {
+      this.turnOutputTokens += b.output;
+      this.timing.attachOutputTokens(b.output);
+    }
   }
 
   /** 只累加到会话（例如 Claude Code 每轮结束的 `result.usage`）。 */
@@ -156,15 +257,19 @@ export class UsageTracker {
     this.session = undefined;
     this.requests = 0;
     this.cost = undefined;
+    this.turnOutputTokens = 0;
+    this.timing.reset();
   }
 
   detail(): ContextDetail | undefined {
-    if (!this.last && !this.session && !this.cost) return undefined;
+    const perf = this.timing.performance();
+    if (!this.last && !this.session && !this.cost && !perf) return undefined;
     return {
       ...(this.last ? { lastRequest: this.last } : {}),
       ...(this.session ? { session: this.session } : {}),
       ...(this.requests ? { requests: this.requests } : {}),
       ...(this.cost ? { cost: { ...this.cost } } : {}),
+      ...(perf ? { performance: perf } : {}),
     };
   }
 }

@@ -301,8 +301,13 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
       },
     });
     render(createElement(SettingsPage));
-    fireEvent.click(screen.getByTestId('settings-tab-agents'));
+    const agentsTab = screen.getByTestId('settings-tab-agents');
+    expect(agentsTab.textContent).toContain('运行时');
+    fireEvent.click(agentsTab);
 
+    expect(screen.getByTestId('settings-runtime-env')).toBeTruthy();
+    expect(screen.getByTestId('settings-backends')).toBeTruthy();
+    expect(screen.getByTestId('settings-backend-dsh').getAttribute('data-slot')).toBe('card');
     expect(screen.getByTestId('node-env-missing')).toBeTruthy();
     openActionsMenu('backend-actions-claude');
     expect(screen.getByTestId('install-backend-menu-claude').getAttribute('aria-disabled')).toBe('true');

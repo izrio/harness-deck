@@ -316,31 +316,71 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
         items: [
           { path: 'src/a.ts', kind: 'file' },
           { path: 'README.md', kind: 'file' },
+          { path: 'package.json', kind: 'file' },
         ],
       },
     });
-    fireEvent.click(screen.getByTestId('right-panel-file-src/a.ts'));
-    expect(posted).toContainEqual({ type: 'openFile', payload: { path: 'src/a.ts' } });
 
-    // 切换到「Git」标签页展示分支与未提交改动
+    // 目录默认全部收起：顶层目录存在，但子文件尚未展开
+    const srcDir = screen.getByTestId('right-panel-dir-src');
+    expect(srcDir.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('right-panel-file-src/a.ts')).toBeNull();
+
+    // 根目录文件按后缀/文件名展示对应的 VS Code 图标
+    expect(screen.getByTestId('right-panel-file-README.md').querySelector('[data-file-icon-kind="markdown"]')).toBeTruthy();
+    expect(screen.getByTestId('right-panel-file-package.json').querySelector('[data-file-icon-kind="npm"]')).toBeTruthy();
+
+    // 手动展开目录后点击文件：发送内置 previewFile（不联动 VS Code openFile）
+    fireEvent.click(srcDir);
+    expect(srcDir.getAttribute('aria-expanded')).toBe('true');
+    const tsFileBtn = screen.getByTestId('right-panel-file-src/a.ts');
+    expect(tsFileBtn.querySelector('[data-file-icon-kind="typescript"]')).toBeTruthy();
+    fireEvent.click(tsFileBtn);
+    expect(posted).toContainEqual({ type: 'previewFile', payload: { path: 'src/a.ts' } });
+    expect(posted.some((m) => (m as { type?: string }).type === 'openFile')).toBe(false);
+
+    // 宿主返回 diffContent 后在插件内置查看器中展示，且桌面右侧面板保持可见便于连续切换文件
+    host({
+      type: 'diffContent',
+      payload: {
+        path: 'src/a.ts',
+        title: 'a.ts',
+        language: 'typescript',
+        kind: 'file',
+        after: 'export const ok = 1;\n',
+        readonly: true,
+      },
+    });
+    expect(screen.getByTestId('diff-viewer-modal')).toBeTruthy();
+    expect(screen.getByTestId('workbench-right-panel')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('diff-viewer-close'));
+    expect(screen.queryByTestId('diff-viewer-modal')).toBeNull();
+
+    // 切换到「Git」标签页展示 IDEA 风格分支、工具栏与变更列表
     fireEvent.click(screen.getByTestId('right-panel-tab-git'));
     const view = screen.getByTestId('workbench-changes');
     expect(view.textContent).toContain('feature/changes');
-    expect(view.textContent).toContain('src/a.ts');
+    expect(screen.getByTestId('changes-file-src/a.ts')).toBeTruthy();
+    expect(view.textContent).toContain('a.ts');
     expect(view.textContent).toContain('+3');
     expect(posted).toContainEqual({ type: 'refreshSourceControl', payload: {} });
 
     // 宿主返回刷新结果后解除初始 busy
     host({ type: 'workbench', payload: { ...workbench, sourceControl: { ...sc, updatedAt: 1_100 } } });
 
-    // 点击文件发送 openSourceControlDiff（而非 openFile）
-    fireEvent.click(screen.getByText('src/a.ts'));
+    // 支持切换按目录分组视图
+    fireEvent.click(screen.getByTestId('changes-group-toggle'));
+    expect(screen.getByTestId('changes-dir-tree-changes')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('changes-group-toggle'));
+
+    // 点击文件发送 openSourceControlDiff（内置查看，不联动 VS Code openFile）
+    fireEvent.click(screen.getByTestId('changes-file-src/a.ts'));
     expect(posted).toContainEqual({ type: 'openSourceControlDiff', payload: { path: 'src/a.ts', staged: false } });
 
-    // 勾选「仅看本会话改过的文件」过滤掉 src/b.ts
+    // 点击图标过滤「仅看本会话改过的文件」过滤掉 src/b.ts
     fireEvent.click(screen.getByTestId('changes-session-filter'));
-    expect(view.textContent).toContain('src/a.ts');
-    expect(view.textContent).not.toContain('src/b.ts');
+    expect(screen.getByTestId('changes-file-src/a.ts')).toBeTruthy();
+    expect(screen.queryByTestId('changes-file-src/b.ts')).toBeNull();
 
     // 点击推送弹出二次确认，确认后才发送 sourceControlPush
     fireEvent.click(screen.getByTestId('changes-push-btn'));
@@ -437,41 +477,18 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect((screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).value).toBe('跨模块保留的草稿');
   });
 
-  it('定时模块：包含「我的」和「模板」两大块，查看规则内嵌历史结果，支持新建规则与跳设置修改默认放行权限', () => {
+  it('已移除独立定时菜单和模块，总览点击定时或排队条目统一跳转任务模块', () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
-    fireEvent.click(screen.getByTestId('workbench-tab-schedules'));
 
-    expect(screen.getByTestId('workbench-schedules')).toBeTruthy();
-    // 展开历史查看结果
-    fireEvent.click(screen.getByTestId('schedule-history-toggle-rule-1'));
-    expect(screen.getByTestId('schedule-history-rule-1').textContent).toContain('体检报告');
+    expect(screen.queryByTestId('workbench-tab-schedules')).toBeNull();
+    expect(screen.queryByTestId('workbench-schedules')).toBeNull();
 
-    // 切换到「模板」并选用模板填充表单创建
-    fireEvent.click(screen.getByTestId('schedules-subtab-templates'));
-    expect(screen.getByTestId('schedules-list-templates')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('use-template-weekly-deps'));
-
-    expect(screen.getByTestId('schedule-form')).toBeTruthy();
-    fireEvent.change(screen.getByTestId('schedule-select-harness'), { target: { value: 'claude' } });
-    fireEvent.click(screen.getByTestId('schedule-submit-btn'));
-
-    expect(posted).toContainEqual(
-      expect.objectContaining({
-        type: 'upsertSchedule',
-        payload: expect.objectContaining({
-          name: '每周依赖与安全审计',
-          backendId: 'claude',
-          projectPath: '/repo/alpha',
-        }),
-      }),
-    );
-
-    // 点击「在设置中修改」跳转到设置页 Agent 分页修改定时任务默认权限
-    fireEvent.click(screen.getByTestId('schedule-open-settings'));
-    expect(screen.getByTestId('pref-schedule-permission')).toBeTruthy();
-    fireEvent.change(screen.getByTestId('pref-schedule-permission'), { target: { value: 'workspace-write' } });
-    expect(posted).toContainEqual({ type: 'setPreferences', payload: { schedulePermission: 'workspace-write' } });
+    // 总览「接下来」区块点击后进入任务模块
+    const upcomingBtn = screen.getByTestId('overview-block-upcoming').querySelector('button') as HTMLElement;
+    expect(upcomingBtn).toBeTruthy();
+    fireEvent.click(upcomingBtn);
+    expect(screen.getByTestId('workbench-tasks')).toBeTruthy();
   });
 
   it('智能体模块：保存专长、指令、模型与工具配置，支持直接开始会话或接受委派', () => {
@@ -541,7 +558,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(screen.queryByTestId('agent-form')).toBeNull();
   });
 
-  it('任务模块：四列看板（待执行/执行中/待验收/已完成），支持弹窗新增任务（标题在第一项）、按顺序执行与验收通过', () => {
+  it('任务模块：扁平四列看板（待执行无+按钮、运行时仅图标），弹窗复用会话输入框并支持文件/模型/Auto与定时设置', () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
     fireEvent.click(screen.getByTestId('workbench-tab-tasks'));
@@ -551,12 +568,33 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(screen.getByTestId('kanban-col-review')).toBeTruthy();
     expect(screen.getByTestId('kanban-col-done')).toBeTruthy();
 
+    // 「待执行」列头右侧已去掉新增图标按钮
+    expect(screen.queryByTestId('kanban-todo-add-btn')).toBeNull();
+
+    // 任务卡片运行时仅用图标展示，不展示文字
+    const reviewCard = screen.getByTestId('task-card-task-r1');
+    const backendIcon = screen.getByTestId('task-backend-icon-task-r1');
+    expect(backendIcon.getAttribute('title')).toBe('DeepSeek');
+    expect(reviewCard.textContent).not.toContain('DeepSeek');
+
     // 默认不内联渲染创建表单，点击「新增任务」打开 Modal 弹窗（支持 Escape 关闭）
     expect(screen.queryByTestId('kanban-task-creator')).toBeNull();
     fireEvent.click(screen.getByTestId('task-new-btn'));
     const taskModal = screen.getByTestId('kanban-task-creator');
     expect(taskModal.getAttribute('role')).toBe('dialog');
     expect(taskModal.getAttribute('aria-modal')).toBe('true');
+    expect(screen.getByTestId('task-dialog-icon')).toBeTruthy();
+
+    // 任务内容复用会话输入框（支持文件、运行时、模型、Auto，不展示用量与上下文）
+    const taskComposer = screen.getByTestId('task-composer');
+    expect(taskComposer.querySelector('[data-testid="usage-badge"]')).toBeNull();
+    expect(taskComposer.querySelector('[data-testid="context-ring"]')).toBeNull();
+    expect(screen.getByTestId('task-attach-btn')).toBeTruthy();
+    const runtimePicker = screen.getByTestId('task-runtime-picker');
+    const modelPicker = screen.getByTestId('task-model-picker');
+    expect(runtimePicker.querySelector('[data-logo="dsh"]')).toBeTruthy();
+    expect(runtimePicker.compareDocumentPosition(modelPicker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('task-permission-picker')).toBeTruthy();
 
     // 验证标题输入框位于任务内容输入之前（表单第一个）
     const titleInput = screen.getByTestId('task-input-title');
@@ -566,27 +604,82 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('kanban-task-creator')).toBeNull();
 
-    // 点击「待执行」列头 + 按钮也可打开新增任务弹窗，填写标题、内容、项目、Harness 与模型后创建并关闭弹窗
-    fireEvent.click(screen.getByTestId('kanban-todo-add-btn'));
+    // 重新打开弹窗：附件选文件、切换运行时并刷新模型列表、选模型与权限、开启定时时间并提交
+    fireEvent.click(screen.getByTestId('task-new-btn'));
     fireEvent.change(screen.getByTestId('task-input-title'), { target: { value: '搜索优化' } });
     fireEvent.change(screen.getByTestId('task-input-prompt'), { target: { value: '实现跨项目会话搜索优化' } });
     fireEvent.change(screen.getByTestId('task-select-project'), { target: { value: '/repo/beta' } });
-    fireEvent.change(screen.getByTestId('task-select-harness'), { target: { value: 'claude' } });
-    fireEvent.change(screen.getByTestId('task-select-model'), { target: { value: 'deepseek::deepseek-reasoner' } });
+
+    // 在模型选择器前面切换运行时到 Claude Code，向宿主拉取该运行时的模型列表
+    fireEvent.click(screen.getByTestId('task-runtime-picker'));
+    fireEvent.click(screen.getByTestId('task-runtime-option-claude'));
+    const fetchReq = posted.find((m) => (m as { type?: string }).type === 'fetchBackendModels') as
+      | { type: 'fetchBackendModels'; payload: { requestId: number; backendId: string } }
+      | undefined;
+    expect(fetchReq?.payload.backendId).toBe('claude');
+    host({
+      type: 'backendModelsFetched',
+      payload: {
+        requestId: fetchReq!.payload.requestId,
+        backendId: 'claude',
+        models: {
+          current: { provider: 'anthropic', model: 'claude-sonnet-4-5' },
+          options: [
+            {
+              provider: 'anthropic',
+              model: 'claude-sonnet-4-5',
+              name: 'Claude Sonnet 4.5',
+              group: 'Anthropic',
+              efforts: [],
+            },
+            {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              name: 'Claude Opus 4.6',
+              group: 'Anthropic',
+              efforts: [],
+            },
+          ],
+        },
+      },
+    });
+
+    // 点击附件按钮请求宿主选文件，并插入返回的 @文件 引用
+    fireEvent.click(screen.getByTestId('task-attach-btn'));
+    expect(posted).toContainEqual({ type: 'pickTaskFiles', payload: { projectPath: '/repo/beta' } });
+    host({ type: 'taskFilesPicked', payload: { paths: ['src/search.ts'] } });
+    expect((screen.getByTestId('task-input-prompt') as HTMLTextAreaElement).value).toContain('@src/search.ts');
+
+    // 在刷新后的模型列表中选择 Claude Opus 4.6，并在权限选择器中切换权限
+    fireEvent.click(screen.getByTestId('task-model-picker'));
+    expect(screen.queryByRole('menuitemradio', { name: 'DeepSeek R1' })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Claude Opus 4.6' }));
+    fireEvent.click(screen.getByTestId('task-permission-picker'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /完全访问/ }));
+
+    // 开启定时执行并设置为每天 09:30
+    fireEvent.click(screen.getByTestId('task-schedule-toggle'));
+    fireEvent.change(screen.getByTestId('task-schedule-freq'), { target: { value: 'daily' } });
+    fireEvent.change(screen.getByTestId('task-schedule-time'), { target: { value: '09:30' } });
+
     fireEvent.click(screen.getByTestId('task-create-btn'));
     expect(screen.queryByTestId('kanban-task-creator')).toBeNull();
 
-    expect(posted).toContainEqual({
-      type: 'createTask',
-      payload: {
-        title: '搜索优化',
-        prompt: '实现跨项目会话搜索优化',
-        projectPath: '/repo/beta',
-        backendId: 'claude',
-        provider: 'deepseek',
-        model: 'deepseek-reasoner',
-      },
-    });
+    expect(posted).toContainEqual(
+      expect.objectContaining({
+        type: 'createTask',
+        payload: expect.objectContaining({
+          title: '搜索优化',
+          prompt: expect.stringContaining('@src/search.ts'),
+          projectPath: '/repo/beta',
+          backendId: 'claude',
+          provider: 'anthropic',
+          model: 'claude-opus-4-6',
+          permissionPreset: 'danger-full-access',
+          schedule: { kind: 'daily', time: '09:30' },
+        }),
+      }),
+    );
 
     // 切换按顺序执行开关
     fireEvent.click(screen.getByTestId('tasks-auto-run-switch'));
@@ -597,21 +690,59 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(posted).toContainEqual({ type: 'updateTaskStatus', payload: { id: 'task-r1', status: 'done' } });
   });
 
-  it('会话模块：按项目分组展示会话列表，支持按项目新建分组会话与切换跨项目会话', async () => {
+  it('会话模块：项目大菜单带展开收起图标且默认首次全部收起，支持展开后按项目新建与切换跨项目会话', async () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
     fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
 
     expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
+
+    // 默认首次「项目」大菜单处于收起态，项目列表不展示
+    const projectsToggle = screen.getByTestId('sidebar-projects-toggle');
+    expect(projectsToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByTestId('sidebar-projects-chevron').getAttribute('class') ?? '').not.toContain('rotate-90');
+    expect(screen.queryByTestId('project-group-alpha')).toBeNull();
+    expect(screen.queryByTestId('project-group-beta')).toBeNull();
+
+    // 搜索时自动展开命中项；清除搜索后恢复原收起态
+    const sidebar = screen.getByTestId('project-sessions-sidebar');
+    fireEvent.click(screen.getByTestId('sidebar-search-toggle'));
+    const searchInput = sidebar.querySelector('input[aria-label="搜索会话"]') as HTMLInputElement;
+    expect(searchInput).toBeTruthy();
+    fireEvent.change(searchInput, { target: { value: 'Claude' } });
+    expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
+    expect(screen.getByTestId('grouped-session-s2')).toBeTruthy();
+    fireEvent.click(sidebar.querySelector('button[aria-label="关闭"]') as HTMLElement);
+    expect(screen.queryByTestId('project-group-alpha')).toBeNull();
+    expect(screen.queryByTestId('grouped-session-s2')).toBeNull();
+
+    // 点击「项目」大菜单的展开图标，展开项目文件夹列表（各项目文件夹首次默认收起，且文件夹上不再放额外箭头图标）
+    fireEvent.click(projectsToggle);
+    expect(projectsToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('sidebar-projects-chevron').getAttribute('class') ?? '').toContain('rotate-90');
     expect(screen.getByTestId('project-group-alpha')).toBeTruthy();
     expect(screen.getByTestId('project-group-beta')).toBeTruthy();
+    expect(screen.queryByTestId('project-chevron-alpha')).toBeNull();
 
-    // 在 beta 项目分组下直接新建分组会话
+    const projectToggle = (name: string) =>
+      screen.getByTestId(`project-group-${name}`).querySelector('button') as HTMLElement;
+    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('false');
+    expect(projectToggle('beta').getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
+    expect(screen.queryByTestId('grouped-session-s2')).toBeNull();
+
+    // 在 beta 项目分组下直接新建分组会话（即使收起状态也可新建）
     fireEvent.click(screen.getByTestId('project-new-session-beta'));
     expect(posted).toContainEqual({
       type: 'startProjectSession',
       payload: { projectPath: '/repo/beta', backendId: 'dsh' },
     });
+
+    // 点击项目文件夹展开 alpha 与 beta 会话列表
+    fireEvent.click(projectToggle('alpha'));
+    fireEvent.click(projectToggle('beta'));
+    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('true');
+    expect(projectToggle('beta').getAttribute('aria-expanded')).toBe('true');
 
     // 点击打开 beta 分组里的会话
     fireEvent.click(screen.getByTestId('grouped-session-s2'));
@@ -629,17 +760,6 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     const s1Button = screen.getByTestId('grouped-session-s1');
     expect(s1Button.textContent).toContain('DeepSeek R1');
     expect(s2Button.textContent).toContain('Claude Sonnet 4.5');
-
-    // 点击左侧搜索图标展开搜索框，过滤并支持一键清除
-    const sidebar = screen.getByTestId('project-sessions-sidebar');
-    fireEvent.click(screen.getByTestId('sidebar-search-toggle'));
-    const searchInput = sidebar.querySelector('input[aria-label="搜索会话"]') as HTMLInputElement;
-    expect(searchInput).toBeTruthy();
-    fireEvent.change(searchInput, { target: { value: 'Claude' } });
-    expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
-    expect(screen.getByTestId('grouped-session-s2')).toBeTruthy();
-    fireEvent.click(sidebar.querySelector('button[aria-label="关闭"]') as HTMLElement);
-    expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
 
     // 左侧工作台导航与会话树在切换模块时持久保留，点击任务右侧 + 直接跳转任务并打开新增弹窗
     fireEvent.click(screen.getByTestId('workbench-tab-overview'));
@@ -664,11 +784,12 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     });
     expect(screen.queryByTestId('delete-session-dialog')).toBeNull();
 
-    // 折叠与展开项目分组
-    const alphaToggle = screen.getByTestId('project-group-alpha').querySelector('button') as HTMLElement;
-    fireEvent.click(alphaToggle);
+    // 再次点击收起与重新展开项目分组
+    fireEvent.click(projectToggle('alpha'));
+    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
-    fireEvent.click(alphaToggle);
+    fireEvent.click(projectToggle('alpha'));
+    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
 
     // 收起与重新展开侧边栏
@@ -692,12 +813,19 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     const actions = screen.getByTestId('header-actions');
     expect(actions.querySelector('[data-testid="settings-button"]')).toBeNull();
 
-    // 3. 设置按钮位于左侧菜单面板左下角，点击进入设置页并保留对话草稿
+    // 3. 设置按钮固定在左侧菜单面板左下角且为 ghost 按钮，点击进入设置页并保留对话草稿
     const sidebar = screen.getByTestId('project-sessions-sidebar');
+    const slideWrapper = sidebar.firstElementChild as HTMLElement;
+    expect(slideWrapper.className).toContain('flex');
+    expect(slideWrapper.className).toContain('flex-col');
+    expect(slideWrapper.className).toContain('h-full');
     const settingsBtn = sidebar.querySelector('[data-testid="settings-button"]') as HTMLElement;
     expect(settingsBtn).toBeTruthy();
+    expect(settingsBtn.getAttribute('data-variant')).toBe('ghost');
 
-    // 4. 项目会话条目不再展示右侧状态圆点
+    // 4. 项目会话条目不再展示右侧状态圆点（先展开「项目」大菜单再展开 beta 分组）
+    fireEvent.click(screen.getByTestId('sidebar-projects-toggle'));
+    fireEvent.click(screen.getByTestId('project-group-beta').querySelector('button') as HTMLElement);
     const s2Button = screen.getByTestId('grouped-session-s2');
     expect(s2Button.querySelector('.bg-orange')).toBeNull();
     expect(s2Button.querySelector('.bg-brand')).toBeNull();
@@ -711,5 +839,65 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('settings-page')).toBeNull();
     expect((screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement).value).toBe('设置页返回后仍在的草稿');
+  });
+
+  it('任务模块：新增任务支持配置独立 Worktree 与分支名，且卡片展示分支与清理入口', () => {
+    const base = workbenchSnapshot();
+    const withWorktreeTask: HostSnapshot = {
+      ...base,
+      workbench: {
+        ...base.workbench!,
+        tasks: {
+          autoRun: false,
+          items: [
+            {
+              id: 'task-wt-1',
+              title: '隔离重构',
+              prompt: '在 worktree 里重构认证层',
+              status: 'review',
+              projectPath: '/repo/alpha',
+              projectName: 'alpha',
+              backendId: 'dsh',
+              useWorktree: true,
+              worktreeBranch: 'feat/auth-refactor',
+              worktreePath: '/repo/alpha-feat-auth-refactor',
+              sessionId: 's-wt-1',
+              createdAt: 1000,
+            },
+          ],
+        },
+      },
+    };
+    render(createElement(App));
+    host({ type: 'snapshot', payload: withWorktreeTask });
+    fireEvent.click(screen.getByTestId('workbench-tab-tasks'));
+
+    // 已有 worktree 任务展示分支标识，并支持一键清理 worktree
+    expect(screen.getByTestId('task-worktree-badge-task-wt-1').textContent).toContain('feat/auth-refactor');
+    fireEvent.click(screen.getByTestId('task-worktree-cleanup-task-wt-1'));
+    expect(posted).toContainEqual({
+      type: 'removeWorktree',
+      payload: { path: '/repo/alpha-feat-auth-refactor' },
+    });
+
+    // 新增任务弹窗支持开启 Worktree 并输入分支名
+    fireEvent.click(screen.getByTestId('task-new-btn'));
+    expect(screen.queryByTestId('task-worktree-branch')).toBeNull();
+    fireEvent.click(screen.getByTestId('task-worktree-toggle'));
+    const branchInput = screen.getByTestId('task-worktree-branch') as HTMLInputElement;
+    fireEvent.change(branchInput, { target: { value: 'feat/task-wt' } });
+    fireEvent.change(screen.getByTestId('task-input-prompt'), { target: { value: '在独立 worktree 中补全单测' } });
+    fireEvent.click(screen.getByTestId('task-create-btn'));
+
+    expect(posted).toContainEqual(
+      expect.objectContaining({
+        type: 'createTask',
+        payload: expect.objectContaining({
+          prompt: '在独立 worktree 中补全单测',
+          useWorktree: true,
+          worktreeBranch: 'feat/task-wt',
+        }),
+      }),
+    );
   });
 });

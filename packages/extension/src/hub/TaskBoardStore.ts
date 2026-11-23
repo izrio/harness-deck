@@ -5,8 +5,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
-import { TASK_COLUMNS, type KanbanTask, type TaskBoardState, type TaskColumn } from '@harness-deck/shared';
+import { TASK_COLUMNS, type KanbanTask, type ScheduleFrequency, type TaskBoardState, type TaskColumn } from '@harness-deck/shared';
 import { normalizeProjectPath } from '../projects/ProjectService.ts';
+import { computeNextRunAt } from './ScheduleEngine.ts';
 
 export const MAX_KANBAN_TASKS = 300;
 
@@ -19,6 +20,20 @@ export interface CreateTaskInput {
   readonly model?: string;
   readonly reasoningEffort?: string;
   readonly agentId?: string;
+  readonly permissionPreset?: string;
+  readonly useWorktree?: boolean;
+  readonly worktreeBranch?: string;
+  readonly schedule?: ScheduleFrequency;
+}
+
+function isScheduleFrequency(value: unknown): value is ScheduleFrequency {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (v.kind === 'daily') return typeof v.time === 'string';
+  if (v.kind === 'weekly') return Array.isArray(v.days) && typeof v.time === 'string';
+  if (v.kind === 'interval') return typeof v.minutes === 'number' && Number.isFinite(v.minutes);
+  if (v.kind === 'once') return typeof v.runAt === 'number' && Number.isFinite(v.runAt);
+  return false;
 }
 
 function isTaskColumn(value: unknown): value is TaskColumn {
@@ -67,6 +82,15 @@ export function parseTaskBoardState(raw: unknown): TaskBoardState {
         ...(typeof t.model === 'string' && t.model ? { model: t.model } : {}),
         ...(typeof t.reasoningEffort === 'string' && t.reasoningEffort ? { reasoningEffort: t.reasoningEffort } : {}),
         ...(typeof t.agentId === 'string' && t.agentId ? { agentId: t.agentId } : {}),
+        ...(typeof t.permissionPreset === 'string' && t.permissionPreset ? { permissionPreset: t.permissionPreset } : {}),
+        ...(t.useWorktree === true ? { useWorktree: true } : {}),
+        ...(typeof t.worktreeBranch === 'string' && t.worktreeBranch.trim() ? { worktreeBranch: t.worktreeBranch.trim() } : {}),
+        ...(typeof t.worktreePath === 'string' && t.worktreePath.trim()
+          ? { worktreePath: normalizeProjectPath(t.worktreePath) || t.worktreePath }
+          : {}),
+        ...(isScheduleFrequency(t.schedule) ? { schedule: t.schedule } : {}),
+        ...(typeof t.scheduledAt === 'number' && Number.isFinite(t.scheduledAt) ? { scheduledAt: t.scheduledAt } : {}),
+        ...(typeof t.lastRunAt === 'number' && Number.isFinite(t.lastRunAt) ? { lastRunAt: t.lastRunAt } : {}),
         ...(typeof t.sessionId === 'string' && t.sessionId ? { sessionId: t.sessionId } : {}),
         createdAt: typeof t.createdAt === 'number' ? t.createdAt : Date.now(),
         ...(typeof t.startedAt === 'number' ? { startedAt: t.startedAt } : {}),
@@ -87,6 +111,7 @@ export function createKanbanTask(
 ): { readonly board: TaskBoardState; readonly task: KanbanTask } {
   const prompt = input.prompt.trim();
   const projectPath = normalizeProjectPath(input.projectPath) || input.projectPath;
+  const scheduledAt = input.schedule ? computeNextRunAt(input.schedule, nowMs) : undefined;
   const task: KanbanTask = {
     id: `task-${randomUUID().slice(0, 8)}`,
     title: deriveTaskTitle(prompt, input.title),
@@ -99,6 +124,11 @@ export function createKanbanTask(
     ...(input.model?.trim() ? { model: input.model.trim() } : {}),
     ...(input.reasoningEffort?.trim() ? { reasoningEffort: input.reasoningEffort.trim() } : {}),
     ...(input.agentId?.trim() ? { agentId: input.agentId.trim() } : {}),
+    ...(input.permissionPreset?.trim() ? { permissionPreset: input.permissionPreset.trim() } : {}),
+    ...(input.useWorktree === true ? { useWorktree: true } : {}),
+    ...(input.useWorktree === true && input.worktreeBranch?.trim() ? { worktreeBranch: input.worktreeBranch.trim() } : {}),
+    ...(input.schedule ? { schedule: input.schedule } : {}),
+    ...(scheduledAt !== undefined ? { scheduledAt } : {}),
     createdAt: nowMs,
   };
   // 新建的待执行任务排在待执行队列末尾，保证按顺序 FIFO 执行
@@ -113,7 +143,14 @@ export function updateKanbanTaskStatus(
   id: string,
   status: TaskColumn,
   nowMs: number,
-  extra?: { readonly sessionId?: string; readonly summary?: string; readonly error?: string; readonly unread?: boolean },
+  extra?: {
+    readonly sessionId?: string;
+    readonly summary?: string;
+    readonly error?: string;
+    readonly unread?: boolean;
+    readonly worktreePath?: string;
+    readonly worktreeBranch?: string;
+  },
 ): TaskBoardState {
   return {
     ...board,
@@ -128,6 +165,8 @@ export function updateKanbanTaskStatus(
         ...(status === 'review' || status === 'done' ? { completedAt: nowMs } : {}),
         ...(extra?.sessionId ? { sessionId: extra.sessionId } : {}),
         ...(extra?.summary !== undefined ? (extra.summary ? { summary: extra.summary } : {}) : {}),
+        ...(extra?.worktreePath ? { worktreePath: normalizeProjectPath(extra.worktreePath) || extra.worktreePath } : {}),
+        ...(extra?.worktreeBranch ? { worktreeBranch: extra.worktreeBranch } : {}),
         ...keepError,
         ...(extra?.unread ? { unread: true } : {}),
       };
@@ -190,7 +229,33 @@ export function activeRunningTask(board: TaskBoardState): KanbanTask | undefined
   return board.items.find((item) => item.status === 'in_progress');
 }
 
-/** 队列中下一个待执行的任务（按列表顺序 FIFO）。 */
-export function nextQueuedTask(board: TaskBoardState): KanbanTask | undefined {
-  return board.items.find((item) => item.status === 'todo');
+/** 队列中下一个待执行的任务（按列表顺序 FIFO；跳过尚未到点的定时任务）。 */
+export function nextQueuedTask(board: TaskBoardState, nowMs = Date.now()): KanbanTask | undefined {
+  return board.items.find(
+    (item) => item.status === 'todo' && (item.scheduledAt === undefined || item.scheduledAt <= nowMs),
+  );
+}
+
+/** 找出已到触发时间且当前未在运行中的定时任务（支持周期任务在完成后再次到期触发）。 */
+export function findDueScheduledTasks(board: TaskBoardState, nowMs: number): KanbanTask[] {
+  return board.items.filter(
+    (item) => item.status !== 'in_progress' && item.scheduledAt !== undefined && item.scheduledAt <= nowMs,
+  );
+}
+
+/** 标记定时任务已被触发：记录 lastRunAt，周期任务推进下一次 scheduledAt，单次任务清除 scheduledAt。 */
+export function markScheduledTaskTriggered(board: TaskBoardState, id: string, nowMs: number): TaskBoardState {
+  return {
+    ...board,
+    items: board.items.map((item) => {
+      if (item.id !== id || !item.schedule) return item;
+      const nextAt = item.schedule.kind === 'once' ? undefined : computeNextRunAt(item.schedule, nowMs);
+      const { scheduledAt: _prevAt, ...rest } = item;
+      return {
+        ...rest,
+        lastRunAt: nowMs,
+        ...(nextAt !== undefined ? { scheduledAt: nextAt } : {}),
+      };
+    }),
+  };
 }

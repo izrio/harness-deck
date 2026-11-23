@@ -6,7 +6,7 @@
 import type { RuntimeStatus } from '@harness-deck/shared';
 import type { StoredSession } from '../acp/AcpController.ts';
 import { t } from '../i18n.ts';
-import { prepareAcpProviderRuntime } from '../providers/ProviderRuntime.ts';
+import { prepareZcodeProviderRuntime } from '../providers/ProviderRuntime.ts';
 import { ZcodeConnection, ZcodeTimeoutError } from '../zcode/connection.ts';
 import { locateZcode, verifyZcodeTarget } from '../zcode/locate.ts';
 import { ZcodeController, type ZcodePreferredModel } from '../zcode/ZcodeController.ts';
@@ -105,14 +105,12 @@ export function createZcodeBackend(
       try {
         const proxy = await host.ensureProviderProxy();
         if (current !== generation) return;
-        const adapted = await prepareAcpProviderRuntime({
-          profile: { id: profile.id, name: profile.name, command: located.command, args: [] },
+        const adapted = await prepareZcodeProviderRuntime({
           provider: boundProvider,
           proxyOrigin: proxy.origin,
           proxyToken: proxy.token,
           storageDir: host.storageRoot,
           baseEnv: spawnEnv,
-          protocolGatewayEnabled: host.isProtocolGatewayEnabled?.() ?? false,
         });
         if (current !== generation) return;
         if (adapted) spawnEnv = adapted.env;

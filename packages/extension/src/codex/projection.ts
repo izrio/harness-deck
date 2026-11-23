@@ -12,6 +12,7 @@ import { splitContext } from '../vm/context.ts';
 import { sumStats } from '../vm/diffs.ts';
 import { displayPath } from '../vm/paths.ts';
 import { summarizeExplore } from '../vm/toolRows.ts';
+import { TurnTimingTracker } from '../vm/usage.ts';
 
 const OUTPUT_LIMIT = 4_000;
 
@@ -125,6 +126,8 @@ export class CodexSessionProjection {
   private totalUsageBreakdown?: TokenBreakdown;
   private lastReportedTotalTokens = 0;
   private usageUpdates = 0;
+  private readonly timing = new TurnTimingTracker();
+  private turnOutputTokens = 0;
 
   version = 0;
   title?: string;
@@ -196,16 +199,20 @@ export class CodexSessionProjection {
     this.totalUsageBreakdown = undefined;
     this.lastReportedTotalTokens = 0;
     this.usageUpdates = 0;
+    this.timing.reset();
+    this.turnOutputTokens = 0;
     this.changed();
   }
 
   /** 悬浮在上下文标识上展示的用量明细（最近一次请求与本会话累计）。 */
   contextDetail(): ContextDetail | undefined {
-    if (!this.lastUsageBreakdown && !this.totalUsageBreakdown) return undefined;
+    const perf = this.timing.performance();
+    if (!this.lastUsageBreakdown && !this.totalUsageBreakdown && !perf) return undefined;
     return {
       ...(this.lastUsageBreakdown ? { lastRequest: this.lastUsageBreakdown } : {}),
       ...(this.totalUsageBreakdown ? { session: this.totalUsageBreakdown } : {}),
       ...(this.usageUpdates > 0 ? { requests: this.usageUpdates } : {}),
+      ...(perf ? { performance: perf } : {}),
     };
   }
 
@@ -225,6 +232,8 @@ export class CodexSessionProjection {
   startTurn(now: number, turnId?: string): void {
     if (this.runningSince === undefined) this.runningSince = now;
     if (turnId) this.activeTurnId = turnId;
+    this.turnOutputTokens = 0;
+    this.timing.start(now);
     this.changed();
   }
 
@@ -232,6 +241,7 @@ export class CodexSessionProjection {
     const startedAt = this.runningSince;
     this.runningSince = undefined;
     this.activeTurnId = undefined;
+    this.timing.finish(this.turnOutputTokens > 0 ? this.turnOutputTokens : undefined, now);
     this.items = this.items.map((item) =>
       item.kind === 'assistant' && item.streaming
         ? { ...item, streaming: false, ...(outcome === 'cancelled' ? { interrupted: true } : {}) }
@@ -273,7 +283,11 @@ export class CodexSessionProjection {
               ? turn.startedAt
               : turn.startedAt * 1000
             : now;
-        this.runningSince ??= startedMs;
+        if (this.runningSince === undefined) {
+          this.runningSince = startedMs;
+          this.turnOutputTokens = 0;
+          this.timing.start(startedMs);
+        }
         if (turnId) this.activeTurnId = turnId;
         this.changed();
         return {};
@@ -317,9 +331,13 @@ export class CodexSessionProjection {
         const delta = typeof params.delta === 'string' ? params.delta : '';
         const itemId = typeof params.itemId === 'string' ? params.itemId : undefined;
         if (delta) {
-          if (this.runningSince === undefined) this.runningSince = now;
+          if (this.runningSince === undefined) {
+            this.runningSince = now;
+            this.turnOutputTokens = 0;
+            this.timing.start(now);
+          }
           if (itemId) this.streamedItems.add(itemId);
-          this.appendAssistant(delta, 'markdown', itemId);
+          this.appendAssistant(delta, 'markdown', itemId, this.running, now);
           this.changed();
         }
         return {};
@@ -329,9 +347,13 @@ export class CodexSessionProjection {
         const delta = typeof params.delta === 'string' ? params.delta : '';
         const itemId = typeof params.itemId === 'string' ? params.itemId : undefined;
         if (delta) {
-          if (this.runningSince === undefined) this.runningSince = now;
+          if (this.runningSince === undefined) {
+            this.runningSince = now;
+            this.turnOutputTokens = 0;
+            this.timing.start(now);
+          }
           if (itemId) this.streamedItems.add(itemId);
-          this.appendAssistant(delta, 'reasoning', itemId);
+          this.appendAssistant(delta, 'reasoning', itemId, this.running, now);
           this.changed();
         }
         return {};
@@ -412,6 +434,10 @@ export class CodexSessionProjection {
         let updated = false;
         if (lastBreakdown) {
           this.lastUsageBreakdown = lastBreakdown;
+          if (lastBreakdown.output > 0) {
+            this.turnOutputTokens = lastBreakdown.output;
+            this.timing.attachOutputTokens(lastBreakdown.output);
+          }
           updated = true;
         }
         if (totalBreakdown) {
@@ -735,8 +761,10 @@ export class CodexSessionProjection {
     field: 'markdown' | 'reasoning',
     itemId?: string,
     streaming = this.running,
+    now = Date.now(),
   ): void {
     if (!text) return;
+    if (streaming) this.timing.markFirstToken(now);
     let at = itemId ? this.itemToViewIndex.get(itemId) : undefined;
     if (at === undefined) {
       const last = this.items.length - 1;

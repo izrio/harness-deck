@@ -139,15 +139,15 @@ describe('Node Sidecar 进程端到端协议验证（模拟 IntelliJ IDEA 宿主
       expect(snap.hostKind).toBe('jetbrains');
       expect(snap.locale).toBe('zh');
 
-      // 修改主题与字号，验证落盘到 ~/.harness-deck/settings.json
+      // 修改主题与字号，验证落盘到 ~/.harness-deck/settings.json（默认主题为 dark，这里切到非默认 light）
       peer.notify('sidecar/webviewMessage', {
-        message: { type: 'setAppearance', payload: { theme: 'dark', fontSize: 15 } },
+        message: { type: 'setAppearance', payload: { theme: 'light', fontSize: 15 } },
       });
-      await waitForMessage('appearance', (m) => m.payload.theme === 'dark' && m.payload.fontSize === 15);
+      await waitForMessage('appearance', (m) => m.payload.theme === 'light' && m.payload.fontSize === 15);
       const savedSettings = JSON.parse(await readFile(join(configRoot, 'settings.json'), 'utf8')) as {
         ui?: { theme?: string; fontSize?: number };
       };
-      expect(savedSettings.ui).toEqual({ theme: 'dark', fontSize: 15 });
+      expect(savedSettings.ui).toEqual({ theme: 'light', fontSize: 15 });
 
       // 添加服务商与 API Key：验证 API Key 通过 ide/secretStore 存入 IDEA PasswordSafe，绝不明文写入 settings.json
       peer.notify('sidecar/webviewMessage', {

@@ -276,6 +276,7 @@ describe('CodexSessionProjection 与 unified diff 解析', () => {
       lastRequest: { input: 600, cacheRead: 1000, cacheWrite: 0, output: 400, reasoning: 120 },
       session: { input: 1500, cacheRead: 2500, cacheWrite: 0, output: 1000, reasoning: 300 },
       requests: 1,
+      performance: { ttftMs: 100, tokensPerSec: 210.5, durationMs: 2000 },
     });
     expect(p.fileChanges()).toMatchObject([{ path: '/w/foo.ts', additions: 2, deletions: 1, created: false }]);
 

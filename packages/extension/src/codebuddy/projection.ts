@@ -11,7 +11,7 @@ import { countLines, lineStats, sumStats } from '../vm/diffs.ts';
 import { displayPath } from '../vm/paths.ts';
 import { canonicalTool } from '../vm/toolNames.ts';
 import { activityLabel, parseArguments, summarizeExplore, toolVariant } from '../vm/toolRows.ts';
-import { addUsage, normalizeUsage, totalOf } from '../vm/usage.ts';
+import { addUsage, normalizeUsage, totalOf, TurnTimingTracker } from '../vm/usage.ts';
 
 const OUTPUT_LIMIT = 4_000;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
@@ -48,6 +48,7 @@ export class CodebuddySessionProjection {
   private turnRecordedUsage = false;
   private lastResultCost?: number;
   private sessionCost?: number;
+  private readonly timing = new TurnTimingTracker();
 
   version = 0;
   sessionId?: string;
@@ -127,6 +128,7 @@ export class CodebuddySessionProjection {
     this.lastMessageId = undefined;
     this.turnSeq = 0;
     this.turnRecordedUsage = false;
+    this.timing.reset();
     this.changed();
   }
 
@@ -138,11 +140,13 @@ export class CodebuddySessionProjection {
       if (b) session = addUsage(session, b);
     }
     const last = this.lastMessageId ? normalizeUsage(this.messageUsage.get(this.lastMessageId)) : undefined;
-    if (!session && this.sessionCost === undefined) return undefined;
+    const perf = this.timing.performance();
+    if (!session && this.sessionCost === undefined && !perf) return undefined;
     return {
       ...(last ? { lastRequest: last } : {}),
       ...(session ? { session, requests: this.messageUsage.size } : {}),
       ...(this.sessionCost !== undefined ? { cost: { amount: this.sessionCost, currency: 'USD' } } : {}),
+      ...(perf ? { performance: perf } : {}),
     };
   }
 
@@ -158,6 +162,8 @@ export class CodebuddySessionProjection {
     this.messageUsage.set(key, merged);
     this.lastMessageId = key;
     this.turnRecordedUsage = true;
+    const b = normalizeUsage(merged);
+    if (b && b.output > 0) this.timing.attachOutputTokens(b.output);
   }
 
   addUserMessage(text: string, images: readonly ImageView[] = []): void {
@@ -179,12 +185,16 @@ export class CodebuddySessionProjection {
     this.streamedThinking = false;
     this.turnSeq += 1;
     this.turnRecordedUsage = false;
+    this.timing.start(now);
     this.changed();
   }
 
   endTurn(now: number, outcome: 'completed' | 'cancelled' | 'failed', errorText?: string): void {
     const startedAt = this.runningSince;
     this.runningSince = undefined;
+    const last =
+      this.turnRecordedUsage && this.lastMessageId ? normalizeUsage(this.messageUsage.get(this.lastMessageId)) : undefined;
+    this.timing.finish(last?.output, now);
     this.streamedText = false;
     this.streamedThinking = false;
     this.items = this.items.map((item) =>
@@ -410,7 +420,10 @@ export class CodebuddySessionProjection {
         if (parentToolId) return;
         const event = raw.event && typeof raw.event === 'object' ? (raw.event as Record<string, unknown>) : undefined;
         if (!event) return;
-        if (this.runningSince === undefined && !isReplay) this.runningSince = now;
+        if (this.runningSince === undefined && !isReplay) {
+          this.runningSince = now;
+          this.timing.start(now);
+        }
         const evType = typeof event.type === 'string' ? event.type : '';
         if (evType === 'message_start') {
           this.streamedText = false;
@@ -440,7 +453,7 @@ export class CodebuddySessionProjection {
         } else if (evType === 'content_block_delta') {
           const delta = event.delta && typeof event.delta === 'object' ? (event.delta as Record<string, unknown>) : undefined;
           if (delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text) {
-            this.appendAssistant(delta.text, 'markdown', true);
+            this.appendAssistant(delta.text, 'markdown', true, now);
             this.streamedText = true;
           } else if (
             (delta?.type === 'thinking_delta' || delta?.type === 'reasoning_delta') &&
@@ -448,7 +461,7 @@ export class CodebuddySessionProjection {
           ) {
             const chunk = (typeof delta.thinking === 'string' ? delta.thinking : (delta.text as string)) ?? '';
             if (chunk) {
-              this.appendAssistant(chunk, 'reasoning', true);
+              this.appendAssistant(chunk, 'reasoning', true, now);
               this.streamedThinking = true;
             }
           }
@@ -493,12 +506,12 @@ export class CodebuddySessionProjection {
           if (bType === 'thinking' || bType === 'reasoning') {
             const text = typeof block.thinking === 'string' ? block.thinking : typeof block.text === 'string' ? block.text : '';
             if (text && !this.streamedThinking) {
-              this.appendAssistant(text, 'reasoning', !isReplay && this.running);
+              this.appendAssistant(text, 'reasoning', !isReplay && this.running, now);
             }
           } else if (bType === 'text' || bType === 'output_text') {
             const text = typeof block.text === 'string' ? block.text : '';
             if (text && !this.streamedText) {
-              this.appendAssistant(text, 'markdown', !isReplay && this.running);
+              this.appendAssistant(text, 'markdown', !isReplay && this.running, now);
             }
           } else if (bType === 'tool_use') {
             const id = typeof block.id === 'string' ? block.id : '';
@@ -675,8 +688,9 @@ export class CodebuddySessionProjection {
     }
   }
 
-  private appendAssistant(text: string, field: 'markdown' | 'reasoning', streaming = this.running): void {
+  private appendAssistant(text: string, field: 'markdown' | 'reasoning', streaming = this.running, now = Date.now()): void {
     if (!text) return;
+    if (streaming) this.timing.markFirstToken(now);
     const last = this.items.length - 1;
     const lastItem = this.items[last];
     let at = lastItem?.kind === 'assistant' ? last : undefined;

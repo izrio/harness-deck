@@ -11,10 +11,10 @@
  * 3. L1 API Key 隔离（DeepSeek dsh）：
  *    每个官方账号的 API Key 存在 SecretStorage 中，通过环境变量 `DEEPSEEK_API_KEY` 注入。
  */
-import { chmod, mkdir, readFile, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import type { AccountConfig } from '@harness-deck/shared';
+import { basename, dirname, join, resolve } from 'node:path';
+import type { AccountConfig, AccountRegion } from '@harness-deck/shared';
 import type { SecretStore } from '../host/HostPlatform.ts';
 import {
   accountApiKeySecretKey,
@@ -113,6 +113,155 @@ export async function writeAntigravityDiskTokenRaw(
   env?: Readonly<Record<string, string | undefined>>,
 ): Promise<void> {
   await writeFileAtomicPrivate(antigravityPrimaryTokenPath(env), raw);
+}
+
+/**
+ * 将账号区域配置映射为 CodeBuddy CLI 真实识别的 `CODEBUDDY_INTERNET_ENVIRONMENT` 值：
+ * - `cn`（国内版 codebuddy.cn）→ `internal`
+ * - `ai`（国际版 codebuddy.ai）→ `external`
+ * - `internal`（iOA 企业版）→ `ioa`
+ */
+export function codebuddyInternetEnvForRegion(region?: AccountRegion): string | undefined {
+  if (region === 'cn') return 'internal';
+  if (region === 'ai') return 'external';
+  if (region === 'internal') return 'ioa';
+  return undefined;
+}
+
+/** CodeBuddy CLI 实际存放 OAuth 登录态文件的目录（由 `os.homedir()` 决定，不随 `CODEBUDDY_CONFIG_DIR` 改变）。 */
+export function codebuddyAuthDir(
+  env?: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const home = resolveUserHome(env);
+  if (platform === 'darwin') {
+    return join(home, 'Library', 'Application Support', 'CodeBuddyExtension', 'Data', 'Public', 'auth');
+  }
+  if (platform === 'win32') {
+    return join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Data', 'Public', 'auth');
+  }
+  return join(home, '.local', 'share', 'CodeBuddyExtension', 'Data', 'Public', 'auth');
+}
+
+/** 读取本机当前有效的 CodeBuddy OAuth 凭据快照（所有无 `.logged-out` 标记的 `.info` 文件）。 */
+export async function readCodebuddyDiskAuthSnapshot(
+  env?: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string | undefined> {
+  const authDir = codebuddyAuthDir(env, platform);
+  let entries: string[];
+  try {
+    entries = await readdir(authDir);
+  } catch {
+    return undefined;
+  }
+  const entrySet = new Set(entries);
+  const files: Record<string, string> = {};
+  for (const name of entries) {
+    if (!name.endsWith('.info')) continue;
+    if (entrySet.has(`${name}.logged-out`)) continue;
+    try {
+      const content = await readFile(join(authDir, name), 'utf8');
+      if (content.trim()) files[name] = content;
+    } catch {
+      // ignore unreadable entry
+    }
+  }
+  if (Object.keys(files).length === 0) return undefined;
+  return JSON.stringify({ files });
+}
+
+/** 清理本机 CodeBuddy OAuth 凭据目录中的 `.info` 与 `.logged-out` 文件（用于切换槽位或重新登录）。 */
+export async function clearCodebuddyDiskAuth(
+  env?: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  const authDir = codebuddyAuthDir(env, platform);
+  let entries: string[];
+  try {
+    entries = await readdir(authDir);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    entries
+      .filter((name) => name.endsWith('.info') || name.endsWith('.info.logged-out'))
+      .map((name) => unlink(join(authDir, name)).catch(() => undefined)),
+  );
+}
+
+/** 将 CodeBuddy OAuth 凭据快照原子写回本机 auth 目录。 */
+export async function writeCodebuddyDiskAuthSnapshot(
+  raw: string,
+  env?: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  let files: Record<string, unknown> | undefined;
+  try {
+    const parsed = JSON.parse(raw) as { files?: unknown };
+    if (parsed && typeof parsed === 'object' && parsed.files && typeof parsed.files === 'object') {
+      files = parsed.files as Record<string, unknown>;
+    }
+  } catch {
+    return false;
+  }
+  if (!files) return false;
+  const validEntries = Object.entries(files).filter(
+    ([name, val]) => basename(name) === name && name.endsWith('.info') && typeof val === 'string' && val.trim().length > 0,
+  ) as [string, string][];
+  if (validEntries.length === 0) return false;
+
+  const authDir = codebuddyAuthDir(env, platform);
+  await clearCodebuddyDiskAuth(env, platform);
+  await mkdir(authDir, { recursive: true });
+  for (const [name, content] of validEntries) {
+    await writeFileAtomicPrivate(join(authDir, name), content);
+  }
+  return true;
+}
+
+/** 备份本机当前 CodeBuddy OAuth 凭据到对应槽位，再激活目标账号槽位（使用 API Key 的账号无需替换磁盘槽位）。 */
+export async function switchCodebuddyCredentialSlot(params: {
+  readonly targetAccountId: string;
+  readonly previousAccountId?: string;
+  readonly secrets: SecretStore;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  readonly platform?: NodeJS.Platform;
+}): Promise<{ readonly activated: boolean; readonly hasStoredSlot: boolean }> {
+  const { targetAccountId, previousAccountId, secrets, env, platform = process.platform } = params;
+  const sysId = systemAccountId('codebuddy');
+
+  // 若目标账号配置了独立官方 API Key，无需改写磁盘 OAuth 槽位
+  if (!isSystemAccountId(targetAccountId)) {
+    const targetApiKey = (await secrets.get(accountApiKeySecretKey(targetAccountId)))?.trim();
+    if (targetApiKey) return { activated: true, hasStoredSlot: true };
+  }
+
+  const currentDisk = await readCodebuddyDiskAuthSnapshot(env, platform);
+  if (currentDisk) {
+    const ownerId = previousAccountId || sysId;
+    if (ownerId !== targetAccountId) {
+      await secrets.store(accountSlotSecretKey(ownerId), currentDisk);
+    } else if (ownerId === sysId) {
+      const existingSys = await secrets.get(accountSlotSecretKey(sysId));
+      if (!existingSys) {
+        await secrets.store(accountSlotSecretKey(sysId), currentDisk);
+      }
+    }
+  }
+
+  const targetRaw = await secrets.get(accountSlotSecretKey(targetAccountId));
+  if (targetRaw?.trim()) {
+    const ok = await writeCodebuddyDiskAuthSnapshot(targetRaw, env, platform);
+    return { activated: ok, hasStoredSlot: ok };
+  }
+
+  if (targetAccountId === sysId && currentDisk) {
+    await secrets.store(accountSlotSecretKey(sysId), currentDisk);
+    return { activated: true, hasStoredSlot: true };
+  }
+
+  return { activated: false, hasStoredSlot: false };
 }
 
 /** 备份本机当前 Antigravity 凭据到对应槽位，再激活目标账号槽位。 */
@@ -238,14 +387,31 @@ export async function prepareAccountLaunchPatch(params: {
     return { env: nextEnv, configDir: dir };
   }
 
-  // 4. CodeBuddy: CODEBUDDY_CONFIG_DIR + region + 可选 usage-cookie
+  // 4. CodeBuddy: CODEBUDDY_CONFIG_DIR + 真实 CODEBUDDY_INTERNET_ENVIRONMENT + 官方 API Key / OAuth 槽位 + 可选 usage-cookie
   if (normalizedBackend === 'codebuddy') {
-    if (account?.region) {
-      nextEnv.CODEBUDDY_INTERNET_ENVIRONMENT = account.region;
+    const internetEnv = codebuddyInternetEnvForRegion(account?.region);
+    if (internetEnv) {
+      nextEnv.CODEBUDDY_INTERNET_ENVIRONMENT = internetEnv;
     }
     const cookie = (await secrets.get(accountCookieSecretKey(accountId)))?.trim();
     if (cookie) {
       nextEnv.CODEBUDDY_COOKIE = cookie;
+    }
+    let hasApiKey = false;
+    if (!isSystem) {
+      const apiKey = (await secrets.get(accountApiKeySecretKey(accountId)))?.trim();
+      if (apiKey) {
+        nextEnv.CODEBUDDY_API_KEY = apiKey;
+        hasApiKey = true;
+      }
+    }
+    if (!hasApiKey && activateSlot) {
+      await switchCodebuddyCredentialSlot({
+        targetAccountId: accountId,
+        ...(previousAccountId ? { previousAccountId } : {}),
+        secrets,
+        env: baseEnv,
+      });
     }
     if (isSystem) {
       return { env: nextEnv };
@@ -371,7 +537,14 @@ export async function clearAccountCredentials(params: {
   }
 
   if (normalizedBackend === 'codebuddy') {
-    await secrets.delete(accountCookieSecretKey(accountId));
+    await Promise.all([
+      secrets.delete(accountApiKeySecretKey(accountId)),
+      secrets.delete(accountCookieSecretKey(accountId)),
+      secrets.delete(accountSlotSecretKey(accountId)),
+    ]);
+    if (isSystem) {
+      await clearCodebuddyDiskAuth(baseEnv);
+    }
     const dir = isSystem
       ? baseEnv.CODEBUDDY_CONFIG_DIR?.trim()
         ? resolve(baseEnv.CODEBUDDY_CONFIG_DIR.trim())

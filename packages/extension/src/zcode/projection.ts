@@ -125,12 +125,14 @@ export class ZcodeSessionProjection {
 
   startTurn(now: number): void {
     if (this.runningSince === undefined) this.runningSince = now;
+    this.usageTracker.startRequest(now);
     this.changed();
   }
 
   endTurn(now: number, outcome: 'completed' | 'cancelled' | 'failed', errorText?: string): void {
     const startedAt = this.runningSince;
     this.runningSince = undefined;
+    this.usageTracker.finishRequest(undefined, now);
     this.items = this.items.map((item) =>
       item.kind === 'assistant' && item.streaming
         ? { ...item, streaming: false, ...(outcome === 'cancelled' ? { interrupted: true } : {}) }
@@ -421,6 +423,7 @@ export class ZcodeSessionProjection {
 
   private appendAssistant(text: string, field: 'markdown' | 'reasoning', streaming = this.running): void {
     if (!text) return;
+    if (streaming) this.usageTracker.markFirstToken();
     const last = this.items.length - 1;
     const lastItem = this.items[last];
     let at = lastItem?.kind === 'assistant' ? last : undefined;

@@ -311,6 +311,16 @@ export interface TokenBreakdown {
   readonly reasoning?: number;
 }
 
+/** 最近一次模型请求的响应性能指标（首字耗时与生成速度）。 */
+export interface RequestPerformance {
+  /** 首字耗时（从发起请求到收到首个模型输出/推理字符的毫秒数）。 */
+  readonly ttftMs?: number;
+  /** 生成速度（输出 token / 秒）。 */
+  readonly tokensPerSec?: number;
+  /** 本轮请求耗时（毫秒）。 */
+  readonly durationMs?: number;
+}
+
 /** 上下文用量明细。 */
 export interface ContextDetail {
   /** 最近一次模型请求的用量。 */
@@ -321,6 +331,8 @@ export interface ContextDetail {
   readonly requests?: number;
   /** 累计费用。 */
   readonly cost?: { readonly amount: number; readonly currency: string };
+  /** 最近一次请求的响应性能（首字耗时、输出速度）。 */
+  readonly performance?: RequestPerformance;
 }
 
 /** 官方订阅的一个限额窗口（5 小时 / 每周 / 按模型的每周 / 计费周期）。百分比均为 0–100。 */
@@ -861,6 +873,16 @@ export interface KanbanTask {
   readonly model?: string;
   readonly reasoningEffort?: string;
   readonly agentId?: string;
+  readonly permissionPreset?: string;
+  /** 是否在独立 git worktree 中执行该任务。 */
+  readonly useWorktree?: boolean;
+  /** 可选的目标分支名（留空时由宿主自动生成）。 */
+  readonly worktreeBranch?: string;
+  /** 实际为该任务创建并绑定的 worktree 路径（供打开会话、验收与清理复用）。 */
+  readonly worktreePath?: string;
+  readonly schedule?: ScheduleFrequency;
+  readonly scheduledAt?: number;
+  readonly lastRunAt?: number;
   readonly sessionId?: string;
   readonly createdAt: number;
   readonly startedAt?: number;

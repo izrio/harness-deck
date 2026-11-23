@@ -1,10 +1,11 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { HostToWebview, Item } from '@harness-deck/shared';
+import type { HostToWebview, Item, ProviderConfig } from '@harness-deck/shared';
 import { UnattendedRunner } from '../src/hub/UnattendedRunner.ts';
 import { setLocale } from '../src/i18n.ts';
+import { prepareZcodeProviderRuntime } from '../src/providers/ProviderRuntime.ts';
 import { ZcodeConnection, ZcodeError, type ZcodeLink } from '../src/zcode/connection.ts';
 import { defaultRuntimePreferences, extractZcodeSessionId } from '../src/zcode/interactions.ts';
 import { locateZcode } from '../src/zcode/locate.ts';
@@ -481,5 +482,157 @@ rl.on('line', (line) => {
       output: '巡检报告：一切正常。',
     });
     expect(hiddenIds).toEqual(['sess_cron_1']);
+  });
+
+  it('绑定自定义服务商时生成 ZCode provider_config.json（schemaVersion=1）并注入 ZCODE_PERSONAL_PROVIDER_CONFIG_FILE', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hd-zcode-provider-'));
+    tempDirs.push(dir);
+    const provider: ProviderConfig = {
+      id: 'aco',
+      name: 'ACO',
+      openaiChatUrl: 'https://api.example.com/v1',
+      models: [{ id: 'GLM-5.3-Flash', name: 'GLM-5.3-Flash', contextWindow: '128k', maxOutputTokens: '16k' }],
+      defaultModel: 'GLM-5.3-Flash',
+      boundBackendIds: ['zcode'],
+    };
+
+    const patch = await prepareZcodeProviderRuntime({
+      provider,
+      proxyOrigin: 'http://127.0.0.1:43123',
+      proxyToken: 'local-proxy-token-only',
+      storageDir: dir,
+      baseEnv: {},
+    });
+
+    expect(patch).toBeTruthy();
+    const configPath = patch?.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE;
+    expect(configPath).toBeTruthy();
+    expect(patch?.env.NO_PROXY).toContain('127.0.0.1');
+
+    const raw = await readFile(configPath!, 'utf8');
+    const parsed = JSON.parse(raw) as {
+      schemaVersion: number;
+      config: {
+        providerConfigRules: { providerRules: Array<{ providerId: string; config: { api: { type: string; baseUrl: string }; access: { apiKey: string }; personalModelIds: string[] } }> };
+        modelConfigRules: { providerModelRules: Array<{ providerId: string; modelId: string }> };
+        defaultModelSelection: { providerId: string; modelId: string };
+      };
+    };
+    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.config.providerConfigRules.providerRules[0]).toMatchObject({
+      providerId: 'aco',
+      config: {
+        access: { apiKey: 'local-proxy-token-only' },
+        api: {
+          type: 'openai-chat-completions',
+          baseUrl: 'http://127.0.0.1:43123/p/aco/openai-chat',
+        },
+        personalModelIds: ['GLM-5.3-Flash'],
+      },
+    });
+    expect(parsed.config.modelConfigRules.providerModelRules[0]).toMatchObject({
+      providerId: 'aco',
+      modelId: 'GLM-5.3-Flash',
+    });
+    expect(parsed.config.defaultModelSelection).toEqual({
+      providerId: 'aco',
+      modelId: 'GLM-5.3-Flash',
+    });
+  });
+
+  it('ZcodeController 从 session/create 解析 settings.model.available 并在 session/send 时自动补齐 reasoningLevel', async () => {
+    const sentRequests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const link: ZcodeLink = {
+      request: async <T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
+        sentRequests.push({ method, params });
+        if (method === 'session/create') {
+          return {
+            session: { sessionId: 'sess_custom_1', model: { providerId: 'aco', modelId: 'GLM-5.3-Flash' } },
+            settings: {
+              model: {
+                available: [
+                  {
+                    ref: { providerId: 'aco', modelId: 'GLM-5.3-Flash' },
+                    label: 'GLM-5.3-Flash',
+                    providerLabel: 'ACO',
+                    reasoning: {
+                      levels: [
+                        { value: 'low', label: 'low' },
+                        { value: 'high', label: 'high' },
+                        { value: 'max', label: 'max' },
+                      ],
+                      defaultLevel: 'max',
+                    },
+                  },
+                ],
+              },
+            },
+          } as T;
+        }
+        return { ok: true } as T;
+      },
+      notify: () => undefined,
+    };
+
+    const provider: ProviderConfig = {
+      id: 'aco',
+      name: 'ACO',
+      openaiChatUrl: 'https://api.example.com/v1',
+      models: [{ id: 'GLM-5.3-Flash', name: 'GLM-5.3-Flash' }],
+      defaultModel: 'GLM-5.3-Flash',
+      boundBackendIds: ['zcode'],
+    };
+
+    const controller = new ZcodeController({
+      workspacePath: '/tmp/ws',
+      workbench: {
+        activeEditor: () => undefined,
+        dirtyFiles: () => [],
+        openFile: async () => undefined,
+        openDiff: async () => undefined,
+        readFile: async () => undefined,
+        writeFile: async () => undefined,
+        deleteFile: async () => undefined,
+        saveAll: async () => undefined,
+        confirm: async () => true,
+        input: async () => undefined,
+        findFiles: async () => [],
+      },
+      post: () => undefined,
+      log: () => undefined,
+      openExternal: () => undefined,
+      showLogs: () => undefined,
+      restartRuntime: () => undefined,
+      loadActiveSessionId: () => undefined,
+      saveActiveSessionId: () => undefined,
+      loadSessions: () => [],
+      saveSessions: () => undefined,
+      loadPreferredModel: () => ({ provider: 'aco', model: 'GLM-5.3-Flash' }),
+      savePreferredModel: () => undefined,
+      loadOpenTabs: () => [],
+      saveOpenTabs: () => undefined,
+      boundProvider: () => provider,
+      backends: () => ({ items: [{ id: 'zcode', name: 'ZCode', kind: 'zcode' }], active: 'zcode' }),
+    });
+    controller.setLink(link);
+
+    await controller.send('你好');
+
+    const sendCall = sentRequests.find((r) => r.method === 'session/send');
+    expect(sendCall?.params.modelSelection).toEqual({
+      providerId: 'aco',
+      modelId: 'GLM-5.3-Flash',
+      options: { reasoningLevel: 'max' },
+    });
+
+    const snap = controller.snapshot();
+    expect(snap.models.options).toHaveLength(1);
+    expect(snap.models.options[0]).toMatchObject({
+      provider: 'aco',
+      model: 'GLM-5.3-Flash',
+      defaultEffort: 'max',
+    });
+
+    controller.dispose();
   });
 });

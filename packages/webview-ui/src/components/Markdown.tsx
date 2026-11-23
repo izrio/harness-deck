@@ -5,6 +5,15 @@
 import { memo, type ComponentProps, type MouseEvent } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { requestMarkdownPreview } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { CodeBlock } from './CodeBlock.tsx';
@@ -33,9 +42,31 @@ const components: Components = {
     return <code className="inline-code">{children}</code>;
   },
   table: ({ children }) => (
-    <div className="table-wrap">
-      <table>{children}</table>
+    <div className="table-wrap w-full overflow-hidden rounded-xl border border-line bg-surface shadow-xs">
+      <Table className="text-[0.92em]">{children}</Table>
     </div>
+  ),
+  thead: ({ children }) => (
+    <TableHeader className="bg-inset/70 [&_tr]:border-b [&_tr]:border-line/70">{children}</TableHeader>
+  ),
+  tbody: ({ children }) => <TableBody>{children}</TableBody>,
+  tfoot: ({ children }) => <TableFooter className="border-line/70 bg-inset/50">{children}</TableFooter>,
+  tr: ({ children }) => <TableRow className="border-line/65 hover:bg-hover/40">{children}</TableRow>,
+  th: ({ children, style }) => (
+    <TableHead
+      style={style}
+      className="h-auto px-3 py-2 text-[0.88em] font-semibold whitespace-normal text-ink-2 [text-wrap:pretty]"
+    >
+      {children}
+    </TableHead>
+  ),
+  td: ({ children, style }) => (
+    <TableCell
+      style={style}
+      className="px-3 py-2 align-top whitespace-normal text-ink [text-wrap:pretty]"
+    >
+      {children}
+    </TableCell>
   ),
   img: ({ alt }) => <ImagePlaceholder alt={alt} />,
 };

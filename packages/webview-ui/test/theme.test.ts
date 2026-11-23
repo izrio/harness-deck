@@ -6,8 +6,12 @@ afterEach(() => {
   document.documentElement.classList.remove('dark');
 });
 
-describe('主题模式（浅色 / 深色 / 跟随系统）', () => {
-  it('theme 模式支持浅色、深色与跟随系统解析并同步 html.dark', () => {
+describe('主题模式（默认深色，支持浅色 / 深色 / 跟随系统）', () => {
+  it('默认深色模式，且支持浅色、深色与跟随系统解析并同步 html.dark', () => {
+    expect(resolveIsDark()).toBe(true);
+    applyThemeMode();
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+
     expect(resolveIsDark('light')).toBe(false);
     expect(resolveIsDark('dark')).toBe(true);
     expect(typeof resolveIsDark('system')).toBe('boolean');

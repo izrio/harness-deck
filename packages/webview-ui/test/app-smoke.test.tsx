@@ -24,8 +24,9 @@ describe('App jsdom 冒烟测试', () => {
 
     expect(screen.getByTestId('suggestions')).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId('workbench-tab-schedules'));
-    expect(screen.getByTestId('workbench-schedules')).toBeTruthy();
+    expect(screen.queryByTestId('workbench-tab-schedules')).toBeNull();
+    fireEvent.click(screen.getByTestId('workbench-tab-tasks'));
+    expect(screen.getByTestId('workbench-tasks')).toBeTruthy();
   });
 
   it('首屏渲染前已调用 loadState 且重复挂载时不会二次调用 acquireVsCodeApi', () => {

@@ -258,7 +258,7 @@ export function ChatCommandSettings() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.commands.form.name')}</span>
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="chat-command-form-name"
                     className="font-mono text-[12px]"
                     value={form.name}
@@ -270,7 +270,7 @@ export function ChatCommandSettings() {
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] font-medium text-ink-2">{t('settings.commands.form.desc')}</span>
                   <Input
-                    size="default"
+                    size="sm"
                     data-testid="chat-command-form-desc"
                     className="text-[12px]"
                     value={form.description}
@@ -300,12 +300,12 @@ export function ChatCommandSettings() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" size="default" data-testid="chat-command-form-cancel" onClick={closeForm}>
+              <Button type="button" variant="outline" size="sm" data-testid="chat-command-form-cancel" onClick={closeForm}>
                 {t('common.cancel')}
               </Button>
               <Button
                 type="button"
-                size="default"
+                size="sm"
                 data-testid="chat-command-form-save"
                 onClick={submitForm}
               >

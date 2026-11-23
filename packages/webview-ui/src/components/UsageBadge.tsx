@@ -122,24 +122,37 @@ function WindowBar({
   );
 }
 
+function quotaScopeOf(state: ReturnType<typeof getState>): string {
+  const active = state.backends.active ?? '';
+  const activeBackend = state.backends.items.find((b) => b.id === active);
+  const channel = active ? (state.accounts.channels[active] ?? activeBackend?.activeChannel) : undefined;
+  if (channel?.mode === 'provider') {
+    return `${active}|provider:${channel.providerId}`;
+  }
+  const accountId = channel?.accountId ?? (active ? `system:${active}` : '');
+  const accountStatus = accountId ? (state.accounts.items.find((a) => a.id === accountId)?.status ?? '') : '';
+  return `${active}|official:${accountId}|${accountStatus}`;
+}
+
 export function UsageBadge() {
   const t = useT();
   const active = useView((s) => s.backends.active);
+  const quotaScope = useView(quotaScopeOf);
   const result = useView((s) => s.quotaFetchResult);
   const [quota, setQuota] = useState<QuotaView | undefined>();
   const [unavailable, setUnavailable] = useState(false);
   const [open, setOpen] = useState(false);
   const requestIdRef = useRef(0);
   const handledIdRef = useRef(0);
-  const fetchedForBackend = useRef<string | undefined>(undefined);
+  const fetchedForScope = useRef<string | undefined>(undefined);
   const probeSent = useRef(false);
-  const lastActive = useRef<string | undefined>(getState().backends.active);
+  const lastScope = useRef<string>(quotaScopeOf(getState()));
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const requestQuota = () => {
     const requestId = ++requestIdRef.current;
-    fetchedForBackend.current = getState().backends.active;
+    fetchedForScope.current = quotaScopeOf(getState());
     postToHost({ type: 'fetchQuota', payload: { requestId } });
   };
 
@@ -155,14 +168,14 @@ export function UsageBadge() {
   }, []);
 
   useEffect(() => {
-    // 切换底层后先隐藏旧额度，再为新底层重新探测（例如从 dsh 切回 Claude）。
-    if (lastActive.current !== active) {
-      lastActive.current = active;
+    // 切换底层、切换官方账号/服务商渠道或登录态变化后先隐藏旧额度，再立即为新作用域重新探测。
+    if (lastScope.current !== quotaScope) {
+      lastScope.current = quotaScope;
       setQuota(undefined);
       setUnavailable(false);
       requestQuota();
     }
-  }, [active]);
+  }, [quotaScope, active]);
 
   useEffect(() => {
     if (!result || result.requestId !== requestIdRef.current || result.requestId <= handledIdRef.current) return;
@@ -176,8 +189,8 @@ export function UsageBadge() {
     }
   }, [result]);
 
-  // 宿主查不到额度、或查询期间用户切到了别的底层：标识彻底消失。
-  if (!quota || unavailable || (fetchedForBackend.current !== undefined && fetchedForBackend.current !== active)) return null;
+  // 宿主查不到额度、或查询期间用户切到了别的底层/账号：标识彻底消失。
+  if (!quota || unavailable || (fetchedForScope.current !== undefined && fetchedForScope.current !== quotaScope)) return null;
 
   const lowestRemaining = quota.windows.reduce((min, w) => Math.min(min, w.remainingPercent), 100);
   const level = lowestRemaining <= 10 ? 'high' : lowestRemaining <= 30 ? 'medium' : 'low';

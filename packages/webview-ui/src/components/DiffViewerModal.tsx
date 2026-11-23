@@ -1,16 +1,19 @@
 /**
- * 移动端内嵌 Diff 审阅与只读文件预览（HD-25）：
- * 接收宿主单播的 `diffContent` 消息，在面板内展示 unified Diff（带行号与增删色块）或只读文件内容。
+ * 插件内置文件与 Diff 查看器（同时服务桌面 IDE 插件、远程 Web 与未来独立客户端）：
+ * 接收宿主单播的 `diffContent` 消息，在主内容区内展示只读代码/Markdown 预览或 unified Diff。
  */
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useT } from '../i18n.ts';
 import { buildUnifiedDiffLines, parseUnifiedPatchLines, type DiffDisplayLine } from '../lib/lineDiff.ts';
 import { cn } from '../lib/utils.ts';
 import { closeDiffContent, useView } from '../store.ts';
 import { ValuePill } from './beautifului/index.ts';
 import { CodeBlock } from './CodeBlock.tsx';
-import { ArrowLeftIcon, DiffIcon, FileIcon, InfoIcon } from './icons.tsx';
+import { ArrowLeftIcon, DiffIcon, FileTypeIcon, InfoIcon } from './icons.tsx';
+import { Markdown } from './Markdown.tsx';
+import { isMarkdownPath } from './MarkdownPreviewModal.tsx';
 
 function DiffLinesView({ lines }: { readonly lines: readonly DiffDisplayLine[] }) {
   const t = useT();
@@ -66,6 +69,11 @@ function DiffLinesView({ lines }: { readonly lines: readonly DiffDisplayLine[] }
 export function DiffViewerModal() {
   const diff = useView((s) => s.diffContent);
   const t = useT();
+  const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview');
+
+  useEffect(() => {
+    setMarkdownMode('preview');
+  }, [diff?.path, diff?.kind]);
 
   useEffect(() => {
     if (!diff) return;
@@ -90,6 +98,7 @@ export function DiffViewerModal() {
   if (!diff) return null;
 
   const isFile = diff.kind === 'file';
+  const isMarkdownFile = isFile && isMarkdownPath(diff.path);
 
   return (
     <div
@@ -106,7 +115,7 @@ export function DiffViewerModal() {
 
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {isFile ? (
-            <FileIcon className="size-3.5 shrink-0 text-accent-ink" />
+            <FileTypeIcon path={diff.path} className="size-3.5 shrink-0" />
           ) : (
             <DiffIcon className="size-3.5 shrink-0 text-accent-ink" />
           )}
@@ -115,6 +124,28 @@ export function DiffViewerModal() {
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
+          {isMarkdownFile ? (
+            <Tabs value={markdownMode} onValueChange={(v) => setMarkdownMode(v as 'preview' | 'source')}>
+              <TabsList className="h-6 p-0.5">
+                <TabsTrigger
+                  value="preview"
+                  className="px-2 py-0 text-[11px]"
+                  data-testid="diff-markdown-preview-tab"
+                  onClick={() => setMarkdownMode('preview')}
+                >
+                  {t('diff.modal.preview')}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="source"
+                  className="px-2 py-0 text-[11px]"
+                  data-testid="diff-markdown-source-tab"
+                  onClick={() => setMarkdownMode('source')}
+                >
+                  {t('diff.modal.source')}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          ) : null}
           {diff.readonly ? <ValuePill tone="neutral">{t('diff.modal.readonly')}</ValuePill> : null}
           {diff.additions !== undefined ? <span className="text-[11.5px] font-medium text-green tabular-nums">+{diff.additions}</span> : null}
           {diff.deletions !== undefined ? <span className="text-[11.5px] font-medium text-red tabular-nums">−{diff.deletions}</span> : null}
@@ -132,10 +163,19 @@ export function DiffViewerModal() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <div className="mx-auto w-full max-w-[var(--content-width)] overflow-hidden rounded-card bg-surface shadow-card">
+        <div
+          className={cn(
+            'mx-auto w-full overflow-hidden rounded-card bg-surface shadow-card',
+            isMarkdownFile && markdownMode === 'preview' ? 'max-w-[var(--content-width)] p-4' : '',
+          )}
+        >
           {diff.kind === 'cannotPreview' ? (
             <div className="p-4 text-[13px] text-ink-2" data-testid="diff-cannot-preview">
               {diff.message ?? t('diff.modal.empty')}
+            </div>
+          ) : isMarkdownFile && markdownMode === 'preview' ? (
+            <div data-testid="diff-markdown-preview">
+              <Markdown text={diff.after ?? ''} />
             </div>
           ) : diff.kind === 'file' ? (
             <div className="p-2" data-testid="diff-file-preview">

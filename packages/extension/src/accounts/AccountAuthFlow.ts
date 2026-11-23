@@ -21,9 +21,12 @@ import { locatePi } from '../pi/locate.ts';
 import { locateZcode } from '../zcode/locate.ts';
 import { accountSlotSecretKey, isSystemAccountId, systemAccountId } from './AccountStore.ts';
 import {
+  clearCodebuddyDiskAuth,
   prepareAccountLaunchPatch,
   readAntigravityDiskTokenRaw,
+  readCodebuddyDiskAuthSnapshot,
   writeAntigravityDiskTokenRaw,
+  writeCodebuddyDiskAuthSnapshot,
 } from './AccountIsolation.ts';
 import { inspectOfficialAccount } from './AccountInspector.ts';
 
@@ -180,6 +183,7 @@ export class AccountAuthFlowManager {
       accountId,
       ...(account ? { account } : {}),
       ...(acpCommand ? { acpCommand } : {}),
+      ...(previousActiveAccountId ? { previousActiveAccountId } : {}),
       baseEnv,
     });
   }
@@ -460,11 +464,26 @@ export class AccountAuthFlowManager {
     readonly accountId: string;
     readonly account?: AccountConfig;
     readonly acpCommand?: string;
+    readonly previousActiveAccountId?: string;
     readonly baseEnv: Readonly<Record<string, string | undefined>>;
   }): Promise<void> {
-    const { backendId, backendName, accountId, account, acpCommand, baseEnv } = params;
+    const { backendId, backendName, accountId, account, acpCommand, previousActiveAccountId, baseEnv } = params;
     const normalized = backendId.toLowerCase();
     const resolved = await this.resolveCommandForBackend(backendId, acpCommand, baseEnv);
+
+    // CodeBuddy OAuth 凭据存放在用户级 CodeBuddyExtension/Data/Public/auth/*.info（不随 CODEBUDDY_CONFIG_DIR 隔离）；
+    // 登录独立新账号前先备份原磁盘凭据并清理旧槽位，避免 CLI 直接复用已有账号而不弹出登录。
+    let backupCodebuddyDiskAuth: string | undefined;
+    if (normalized === 'codebuddy' && !isSystemAccountId(accountId)) {
+      backupCodebuddyDiskAuth = await readCodebuddyDiskAuthSnapshot(baseEnv);
+      if (backupCodebuddyDiskAuth) {
+        const owner = previousActiveAccountId || systemAccountId('codebuddy');
+        if (owner !== accountId) {
+          await this.deps.secrets.store(accountSlotSecretKey(owner), backupCodebuddyDiskAuth);
+        }
+        await clearCodebuddyDiskAuth(baseEnv);
+      }
+    }
 
     const patch = await prepareAccountLaunchPatch({
       backendId,
@@ -473,6 +492,7 @@ export class AccountAuthFlowManager {
       storageRoot: this.deps.storageRoot,
       baseEnv,
       secrets: this.deps.secrets,
+      activateSlot: false,
     });
 
     // 收集该账号特有的隔离环境变量（仅传差异项，避免污染用户终端的 PATH 等）
@@ -542,12 +562,19 @@ export class AccountAuthFlowManager {
       backendId,
       accountId,
       ...(account ? { account } : {}),
+      isActiveSlot: normalized === 'codebuddy',
       storageRoot: this.deps.storageRoot,
       baseEnv,
       secrets: this.deps.secrets,
     });
     const startedAuthenticated = initialCheck.status === 'authenticated';
     let stopped = false;
+
+    const restoreCodebuddyIfNeeded = async () => {
+      if (normalized === 'codebuddy' && backupCodebuddyDiskAuth && !(await readCodebuddyDiskAuthSnapshot(baseEnv))) {
+        await writeCodebuddyDiskAuthSnapshot(backupCodebuddyDiskAuth, baseEnv).catch(() => undefined);
+      }
+    };
 
     const pollTimer = setInterval(() => {
       if (stopped) return;
@@ -556,6 +583,7 @@ export class AccountAuthFlowManager {
           backendId,
           accountId,
           ...(account ? { account } : {}),
+          isActiveSlot: normalized === 'codebuddy',
           storageRoot: this.deps.storageRoot,
           baseEnv,
           secrets: this.deps.secrets,
@@ -584,6 +612,7 @@ export class AccountAuthFlowManager {
       stopped = true;
       clearInterval(pollTimer);
       this.active = undefined;
+      void restoreCodebuddyIfNeeded();
       this.emit(undefined);
     }, LOGIN_TIMEOUT_MS);
     timeoutTimer.unref?.();
@@ -596,6 +625,7 @@ export class AccountAuthFlowManager {
         stopped = true;
         clearInterval(pollTimer);
         clearTimeout(timeoutTimer);
+        void restoreCodebuddyIfNeeded();
       },
     };
   }

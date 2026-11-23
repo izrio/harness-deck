@@ -15,8 +15,35 @@ import { useT } from '../i18n.ts';
 
 const keyOf = (o: { provider: string; model: string }) => `${o.provider}/${o.model}`;
 
-export function ModelPicker({ disabled }: { disabled: boolean }) {
-  const models = useView((s) => s.models);
+export interface ModelPickerSelection {
+  readonly provider?: string;
+  readonly model: string;
+  readonly reasoningEffort?: string;
+}
+
+export interface ModelPickerProps {
+  readonly disabled: boolean;
+  /** 受控模式：用于新建任务等独立场景，选中后回传而非直接修改当前会话模型。 */
+  readonly value?: ModelPickerSelection | undefined;
+  readonly options?: readonly ModelOption[];
+  readonly onSelect?: (selection: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }) => void;
+  readonly hideChannelSwitcher?: boolean;
+  readonly loading?: boolean;
+  readonly placeholder?: string;
+  readonly testId?: string;
+}
+
+export function ModelPicker({
+  disabled,
+  value,
+  options: controlledOptions,
+  onSelect: onControlledSelect,
+  hideChannelSwitcher = false,
+  loading: controlledLoading = false,
+  placeholder,
+  testId = 'model-picker',
+}: ModelPickerProps) {
+  const storeModels = useView((s) => s.models);
   const backends = useView((s) => s.backends);
   const providers = useView((s) => s.providers);
   const accounts = useView((s) => s.accounts);
@@ -27,16 +54,24 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
     setChannelExpanded(false);
   }, []);
   const t = useT();
-  const current = models.current;
-  const option = models.options.find((o) => o.provider === current?.provider && o.model === current?.model);
+  const isControlled = onControlledSelect !== undefined;
+  const options = controlledOptions ?? storeModels.options;
+  const current = isControlled ? value : storeModels.current;
+  const option = options.find((o) =>
+    current
+      ? (current.provider ? o.provider === current.provider : true) && o.model === current.model
+      : false,
+  );
   const effort = option?.efforts.find((e) => e.id === current?.reasoningEffort);
   const connected = useView((s) => s.connection === 'connected');
-  const loading = (!connected || models.options.length === 0) && !models.needsApiKey;
+  const loading = isControlled
+    ? controlledLoading && options.length === 0
+    : (!connected || options.length === 0) && !storeModels.needsApiKey;
   const label = option
     ? `${option.name}${effort && option.efforts.length > 1 ? ` · ${effort.name}` : ''}`
     : loading
       ? t('model.loading')
-      : (current?.model ?? t('model.default'));
+      : (current?.model ?? placeholder ?? t('model.default'));
 
   const activeBackend = useMemo(
     () => backends.items.find((b) => b.id === backends.active),
@@ -67,21 +102,33 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
     return acc ? t('model.channel.official', acc.label) : undefined;
   }, [activeBackend, activeChannel, providers.items, backendAccounts, t]);
 
-  const showChannelSwitcher = Boolean(activeBackend && (backendAccounts.length > 0 || compatibleProviders.length > 0));
+  const showChannelSwitcher =
+    !hideChannelSwitcher &&
+    !isControlled &&
+    Boolean(activeBackend && (backendAccounts.length > 0 || compatibleProviders.length > 0));
 
   const select = useCallback(
     (o: ModelOption, reasoningEffort?: string, shouldClose = false) => {
       if (shouldClose) close();
+      if (onControlledSelect) {
+        onControlledSelect({
+          provider: o.provider,
+          model: o.model,
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+        });
+        return;
+      }
       postToHost({
         type: 'selectModel',
         payload: { provider: o.provider, model: o.model, ...(reasoningEffort ? { reasoningEffort } : {}) },
       });
     },
-    [close],
+    [close, onControlledSelect],
   );
 
-  const isCurrent = (o: ModelOption) => o.provider === current?.provider && o.model === current?.model;
-  const groups = [...new Set(models.options.map((o) => o.group))];
+  const isCurrent = (o: ModelOption) =>
+    Boolean(current && (current.provider ? o.provider === current.provider : true) && o.model === current.model);
+  const groups = [...new Set(options.map((o) => o.group))];
   const showEfforts = Boolean(option && option.efforts.length > 1);
 
   return (
@@ -91,9 +138,9 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
           <button
             type="button"
             className="toolbar-button inline-flex h-7 max-w-full items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-55"
-            disabled={disabled || models.options.length === 0}
+            disabled={disabled || options.length === 0}
             title={t('model.switch')}
-            data-testid="model-picker"
+            data-testid={testId}
           >
             {loading && !option ? (
               <SpinnerIcon className="size-3.5 shrink-0 text-ink-3" />
@@ -172,18 +219,13 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
                               )}
                             >
                               <span
+                                data-testid={`quick-channel-official-dot-${acc.id}`}
                                 className={cn(
                                   'size-1.5 shrink-0 rounded-full',
-                                  acc.status === 'authenticated'
-                                    ? 'bg-green'
-                                    : acc.status === 'expired'
-                                      ? 'bg-orange'
-                                      : 'bg-ink-3/40',
+                                  isCur ? 'bg-green' : 'bg-ink-3/45',
                                 )}
                               />
                               <span className="min-w-0 flex-1 truncate">{acc.label}</span>
-                              {acc.plan ? <span className="shrink-0 text-[10.5px] text-ink-3">{acc.plan}</span> : null}
-                              {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
                             </button>
                             <div className="flex shrink-0 items-center pr-0.5 opacity-0 transition-opacity duration-100 group-focus-within/channel:opacity-100 group-hover/channel:opacity-100">
                               <Button
@@ -235,9 +277,14 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
                                 isCur ? 'font-medium text-ink' : 'text-ink-2',
                               )}
                             >
-                              <KeyIcon className="size-3 shrink-0 text-ink-3" />
+                              <span
+                                data-testid={`quick-channel-provider-dot-${p.id}`}
+                                className={cn(
+                                  'size-1.5 shrink-0 rounded-full',
+                                  isCur ? 'bg-green' : 'bg-ink-3/45',
+                                )}
+                              />
                               <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                              {isCur ? <CheckIcon className="size-3 shrink-0 text-accent-ink" /> : null}
                             </button>
                             <div className="flex shrink-0 items-center pr-0.5 opacity-0 transition-opacity duration-100 group-focus-within/channel:opacity-100 group-hover/channel:opacity-100">
                               <Button
@@ -270,7 +317,7 @@ export function ModelPicker({ disabled }: { disabled: boolean }) {
               {groups.map((group) => (
                 <div key={group} className="model-menu__group">
                   {groups.length > 1 ? <div className="menu-heading px-2 pt-1.5 pb-0.5 text-[11px] font-medium text-ink-3">{group}</div> : null}
-                  {models.options
+                  {options
                     .filter((o) => o.group === group)
                     .map((o) => {
                       const active = isCurrent(o);

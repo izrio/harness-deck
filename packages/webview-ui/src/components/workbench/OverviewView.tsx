@@ -166,7 +166,7 @@ export function OverviewView() {
                       size="xs"
                       onClick={() => {
                         if (item.kind === 'schedule') {
-                          setActiveModule('schedules', item.ruleId);
+                          setActiveModule('tasks');
                         } else if (item.sessionId) {
                           openSession(item.projectPath, item.sessionId, item.backendId);
                         } else {
@@ -174,7 +174,7 @@ export function OverviewView() {
                         }
                       }}
                     >
-                      {item.kind === 'schedule' ? t('wb.overview.viewHistory') : t('wb.overview.openSession')}
+                      {item.kind === 'schedule' ? t('wb.overview.openTasks') : t('wb.overview.openSession')}
                     </Button>
                   </div>
                 ))
@@ -250,9 +250,7 @@ export function OverviewView() {
                     key={item.id}
                     type="button"
                     className="flex items-center justify-between gap-2 rounded-control px-2 py-1.5 text-left transition-colors duration-100 hover:bg-hover"
-                    onClick={() =>
-                      item.kind === 'schedule' ? setActiveModule('schedules', item.ruleId) : setActiveModule('tasks')
-                    }
+                    onClick={() => setActiveModule('tasks')}
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[12.5px] font-medium text-ink">{item.title}</span>
@@ -261,7 +259,7 @@ export function OverviewView() {
                       </span>
                     </span>
                     <span className="shrink-0 rounded-chip bg-field px-2 py-0.5 font-mono text-[11px] text-ink-2 shadow-hairline">
-                      {item.kind === 'schedule' && item.nextRunAt
+                      {item.nextRunAt
                         ? formatShortTime(item.nextRunAt, t)
                         : t('wb.overview.queuePos', item.queuePosition ?? 1)}
                     </span>
@@ -309,9 +307,7 @@ export function OverviewView() {
                       className="min-w-0 flex-1 text-left"
                       onClick={() => {
                         postToHost({ type: 'markUnreadRead', payload: { id: item.id } });
-                        if (item.kind === 'schedule-run') {
-                          setActiveModule('schedules', item.ruleId);
-                        } else if (item.kind === 'task-review') {
+                        if (item.kind === 'schedule-run' || item.kind === 'task-review') {
                           setActiveModule('tasks');
                         } else {
                           openSession(item.projectPath, item.sessionId, item.backendId);

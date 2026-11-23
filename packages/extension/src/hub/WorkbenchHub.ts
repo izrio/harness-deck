@@ -68,7 +68,9 @@ import {
   clearDoneKanbanTasks,
   createKanbanTask,
   deleteKanbanTask,
+  findDueScheduledTasks,
   markKanbanTaskRead,
+  markScheduledTaskTriggered,
   nextQueuedTask,
   parseTaskBoardState,
   reorderKanbanTask,
@@ -140,6 +142,11 @@ export interface WorkbenchHubHost {
   readonly liveContexts?: () => readonly ActiveControllerContext[];
   readonly backendContext?: (backendId: string) => ActiveControllerContext | undefined;
   readonly switchProjectAndBackend: (projectPath: string, backendId?: string) => Promise<void>;
+  /** 当任务勾选了独立 worktree 时，在执行前创建或准备对应的 git worktree。 */
+  readonly prepareTaskWorktree?: (
+    repoPath: string,
+    branch?: string,
+  ) => Promise<{ readonly worktreePath: string; readonly branch: string }>;
   readonly startProgrammaticSession: (req: ProgrammaticSessionRequest) => Promise<string | undefined>;
   readonly switchSessionInActive: (sessionId: string) => Promise<void>;
   readonly openNewSessionInActive: () => Promise<void>;
@@ -768,13 +775,19 @@ export class WorkbenchHub {
     }
   }
 
-  /** 定时轮询入口（测试也可直接调用）。 */
+  /** 定时轮询入口（测试也可直接调用）：同时触发到期定时规则与到期的定时看板任务。 */
   async tickSchedules(): Promise<void> {
     if (this.abort.signal.aborted || !this.host.isWorkspaceTrusted()) return;
-    if (this.host.isBackgroundSchedulerActive?.()) return;
-    const due = findDueRules(this.scheduleData.rules, this.now(), this.runningRuleIds);
-    for (const rule of due) {
-      void this.executeScheduleRule(rule.id);
+    const now = this.now();
+    if (!this.host.isBackgroundSchedulerActive?.()) {
+      const due = findDueRules(this.scheduleData.rules, now, this.runningRuleIds);
+      for (const rule of due) {
+        void this.executeScheduleRule(rule.id);
+      }
+    }
+    const dueTasks = findDueScheduledTasks(this.taskBoard, now);
+    if (dueTasks.length > 0 && !activeRunningTask(this.taskBoard)) {
+      void this.pumpTaskQueue(dueTasks[0]!.id, true);
     }
   }
 
@@ -917,7 +930,7 @@ export class WorkbenchHub {
   }
 
   /** 按顺序调度下一个待执行看板任务（同一时刻最多运行 1 条任务）。 */
-  private async pumpTaskQueue(explicitTaskId?: string): Promise<void> {
+  private async pumpTaskQueue(explicitTaskId?: string, allowScheduledReRun = false): Promise<void> {
     if (this.taskDispatching || this.abort.signal.aborted) return;
     if (activeRunningTask(this.taskBoard)) return;
     if (!this.host.isWorkspaceTrusted()) return;
@@ -926,9 +939,12 @@ export class WorkbenchHub {
     const ctx = this.host.activeContext();
     if (ctx?.snapshot.session.running && !explicitTaskId) return;
 
+    const now = this.now();
     const target = explicitTaskId
-      ? this.taskBoard.items.find((t) => t.id === explicitTaskId && t.status === 'todo')
-      : nextQueuedTask(this.taskBoard);
+      ? this.taskBoard.items.find(
+          (t) => t.id === explicitTaskId && (t.status === 'todo' || (allowScheduledReRun && t.status !== 'in_progress')),
+        )
+      : nextQueuedTask(this.taskBoard, now);
     if (!target) return;
 
     this.taskDispatching = true;
@@ -936,12 +952,34 @@ export class WorkbenchHub {
       const agents = resolveAgentProfiles(this.agentData, this.host.locale());
       const agent: AgentProfile | undefined = target.agentId ? agents.find((a) => a.id === target.agentId) : undefined;
       const fullPrompt = agent ? composeAgentPrompt(agent, target.prompt) : target.prompt;
+      const resolvedPermission = normalizeTaskPermissionPreset(target.permissionPreset) ?? agent?.tools.permissionPreset;
 
-      this.taskBoard = updateKanbanTaskStatus(this.taskBoard, target.id, 'in_progress', this.now());
+      if (target.schedule) {
+        this.taskBoard = markScheduledTaskTriggered(this.taskBoard, target.id, now);
+      }
+      this.taskBoard = updateKanbanTaskStatus(this.taskBoard, target.id, 'in_progress', now);
       await this.saveTaskBoard();
       this.pushNow();
 
-      await this.host.switchProjectAndBackend(target.projectPath, target.backendId);
+      let executionProjectPath = target.projectPath;
+      let resolvedWorktreePath = target.worktreePath;
+      let resolvedWorktreeBranch = target.worktreeBranch;
+      if (target.useWorktree && !resolvedWorktreePath && this.host.prepareTaskWorktree) {
+        const wt = await this.host.prepareTaskWorktree(target.projectPath, target.worktreeBranch);
+        resolvedWorktreePath = wt.worktreePath;
+        resolvedWorktreeBranch = wt.branch;
+        executionProjectPath = wt.worktreePath;
+        this.taskBoard = updateKanbanTaskStatus(this.taskBoard, target.id, 'in_progress', now, {
+          worktreePath: wt.worktreePath,
+          worktreeBranch: wt.branch,
+        });
+        await this.saveTaskBoard();
+        this.pushNow();
+      } else if (resolvedWorktreePath) {
+        executionProjectPath = resolvedWorktreePath;
+      }
+
+      await this.host.switchProjectAndBackend(executionProjectPath, target.backendId);
       const sessionId = await this.host.startProgrammaticSession({
         prompt: fullPrompt,
         title: target.title,
@@ -954,7 +992,7 @@ export class WorkbenchHub {
               },
             }
           : {}),
-        ...(agent ? { permissionPreset: agent.tools.permissionPreset } : {}),
+        ...(resolvedPermission ? { permissionPreset: resolvedPermission } : {}),
         skipPermissionConfirm: true,
       });
 
@@ -972,9 +1010,13 @@ export class WorkbenchHub {
       }
 
       if (agent) {
-        this.recordAgentOnSession(target.backendId, sessionId, target.projectPath, target.title, agent.name);
+        this.recordAgentOnSession(target.backendId, sessionId, executionProjectPath, target.title, agent.name);
       }
-      this.taskBoard = updateKanbanTaskStatus(this.taskBoard, target.id, 'in_progress', this.now(), { sessionId });
+      this.taskBoard = updateKanbanTaskStatus(this.taskBoard, target.id, 'in_progress', this.now(), {
+        sessionId,
+        ...(resolvedWorktreePath ? { worktreePath: resolvedWorktreePath } : {}),
+        ...(resolvedWorktreeBranch ? { worktreeBranch: resolvedWorktreeBranch } : {}),
+      });
       this.activeTaskTracker = { taskId: target.id, sessionId, sawRunning: false };
       await this.saveTaskBoard();
       this.pushNow();
@@ -1460,9 +1502,9 @@ export class WorkbenchHub {
       }
     }
 
-    // 4. 接下来（upcoming）：已启用的定时规则（按 nextRunAt 升序）+ 排队中的顺序看板任务
+    // 4. 接下来（upcoming）：已启用的定时规则 + 排队中或带定时的看板任务
     const upcoming: OverviewUpcomingItem[] = [];
-    const queuedTasks = this.taskBoard.items.filter((t) => t.status === 'todo');
+    const queuedTasks = this.taskBoard.items.filter((t) => t.status === 'todo' || t.scheduledAt !== undefined);
     queuedTasks.forEach((task, index) => {
       upcoming.push({
         id: `up-task:${task.id}`,
@@ -1470,7 +1512,7 @@ export class WorkbenchHub {
         title: task.title,
         backendName: backendNameOf(task.backendId),
         projectName: task.projectName,
-        queuePosition: index + 1,
+        ...(task.scheduledAt !== undefined ? { nextRunAt: task.scheduledAt } : { queuePosition: index + 1 }),
         taskId: task.id,
       });
     });
@@ -1599,6 +1641,18 @@ export class WorkbenchHub {
   private now(): number {
     return this.host.now ? this.host.now() : Date.now();
   }
+}
+
+function normalizeTaskPermissionPreset(
+  preset?: string,
+): 'read-only' | 'workspace-write' | 'danger-full-access' | undefined {
+  const value = preset?.trim().toLowerCase();
+  if (!value) return undefined;
+  if (/^(?:read[-_ ]?only|readonly|plan|plan[-_ ]?mode|architect)$/u.test(value)) return 'read-only';
+  if (/^(?:danger[-_ ]?full[-_ ]?access|bypass[-_ ]?permissions?|bypass|yolo|dont[-_ ]?ask|full[-_ ]?access|unrestricted|always[-_ ]?allow)$/u.test(value)) {
+    return 'danger-full-access';
+  }
+  return 'workspace-write';
 }
 
 function firstLineText(markdown: string): string {

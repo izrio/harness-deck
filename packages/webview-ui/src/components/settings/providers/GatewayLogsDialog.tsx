@@ -25,7 +25,7 @@ export function GatewayLogsDialog({
           <DialogDescription>{t('settings.providers.gatewayLogsDesc')}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-1">
+        <div className="flex max-h-[55vh] min-w-0 flex-col gap-2 overflow-y-auto pr-1">
           {logs.length === 0 ? (
             <div
               className="rounded-control bg-field px-3 py-6 text-center text-[12px] text-ink-3 shadow-hairline"
@@ -51,7 +51,7 @@ export function GatewayLogsDialog({
                 <div
                   key={entry.id}
                   data-testid={`provider-gateway-log-${entry.id}`}
-                  className="flex flex-col gap-1 rounded-control bg-field/70 px-3 py-2 text-[11.5px] shadow-hairline"
+                  className="flex min-w-0 flex-col gap-1 rounded-control bg-field/70 px-3 py-2 text-[11.5px] shadow-hairline"
                 >
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[10.5px] text-ink-3">
@@ -99,7 +99,7 @@ export function GatewayLogsDialog({
           <Button
             type="button"
             variant="outline"
-            size="default"
+            size="sm"
             disabled={logs.length === 0}
             data-testid="provider-gateway-clear-logs-btn"
             onClick={() => postToHost({ type: 'clearProtocolGatewayLogs', payload: {} })}
@@ -111,14 +111,14 @@ export function GatewayLogsDialog({
             <Button
               type="button"
               variant="outline"
-              size="default"
+              size="sm"
               data-testid="provider-gateway-open-output-btn"
               onClick={() => postToHost({ type: 'showLogs', payload: {} })}
             >
               <LogIcon className="size-3" />
               <span>{t('settings.providers.gatewayOpenOutputBtn')}</span>
             </Button>
-            <Button type="button" size="default" onClick={() => onOpenChange(false)}>
+            <Button type="button" size="sm" onClick={() => onOpenChange(false)}>
               {t('common.close')}
             </Button>
           </div>

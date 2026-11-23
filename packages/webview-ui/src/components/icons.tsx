@@ -13,6 +13,7 @@ import arrowUpIcon from '@iconify-icons/lucide/arrow-up';
 import bellIcon from '@iconify-icons/lucide/bell';
 import bookOpenIcon from '@iconify-icons/lucide/book-open';
 import botIcon from '@iconify-icons/lucide/bot';
+import brainIcon from '@iconify-icons/lucide/brain';
 import bugIcon from '@iconify-icons/lucide/bug';
 import chartPieIcon from '@iconify-icons/lucide/chart-pie';
 import checkIcon from '@iconify-icons/lucide/check';
@@ -33,12 +34,15 @@ import fileIcon from '@iconify-icons/lucide/file';
 import filePenLineIcon from '@iconify-icons/lucide/file-pen-line';
 import fileTextIcon from '@iconify-icons/lucide/file-text';
 import filesIcon from '@iconify-icons/lucide/files';
+import filterIcon from '@iconify-icons/lucide/filter';
 import flaskConicalIcon from '@iconify-icons/lucide/flask-conical';
 import folderIcon from '@iconify-icons/lucide/folder';
 import folderOpenIcon from '@iconify-icons/lucide/folder-open';
 import folderTreeIcon from '@iconify-icons/lucide/folder-tree';
 import gaugeIcon from '@iconify-icons/lucide/gauge';
 import gitBranchIcon from '@iconify-icons/lucide/git-branch';
+import gitCommitHorizontalIcon from '@iconify-icons/lucide/git-commit-horizontal';
+import gitPullRequestCreateIcon from '@iconify-icons/lucide/git-pull-request-create';
 import globeIcon from '@iconify-icons/lucide/globe';
 import historyIcon from '@iconify-icons/lucide/history';
 import imageIcon from '@iconify-icons/lucide/image';
@@ -91,12 +95,74 @@ import targetIcon from '@iconify-icons/lucide/target';
 import terminalIcon from '@iconify-icons/lucide/terminal';
 import textSelectIcon from '@iconify-icons/lucide/text-select';
 import trash2Icon from '@iconify-icons/lucide/trash-2';
+import uploadIcon from '@iconify-icons/lucide/upload';
 import usersIcon from '@iconify-icons/lucide/users';
 import wifiIcon from '@iconify-icons/lucide/wifi';
 import wifiOffIcon from '@iconify-icons/lucide/wifi-off';
 import wrenchIcon from '@iconify-icons/lucide/wrench';
 import xIcon from '@iconify-icons/lucide/x';
 import zapIcon from '@iconify-icons/lucide/zap';
+
+// VS Code 官方风格文件与目录图标（静态按需打包，零网络请求）
+import vscodeDefaultFileIcon from '@iconify-icons/vscode-icons/default-file';
+import vscodeDefaultFolderIcon from '@iconify-icons/vscode-icons/default-folder';
+import vscodeDefaultFolderOpenedIcon from '@iconify-icons/vscode-icons/default-folder-opened';
+import vscodeAudioIcon from '@iconify-icons/vscode-icons/file-type-audio';
+import vscodeCIcon from '@iconify-icons/vscode-icons/file-type-c';
+import vscodeCppIcon from '@iconify-icons/vscode-icons/file-type-cpp';
+import vscodeCsharpIcon from '@iconify-icons/vscode-icons/file-type-csharp';
+import vscodeCssIcon from '@iconify-icons/vscode-icons/file-type-css';
+import vscodeCsvIcon from '@iconify-icons/vscode-icons/file-type-csv';
+import vscodeDiffIcon from '@iconify-icons/vscode-icons/file-type-diff';
+import vscodeDockerIcon from '@iconify-icons/vscode-icons/file-type-docker2';
+import vscodeDotenvIcon from '@iconify-icons/vscode-icons/file-type-dotenv';
+import vscodeEslintIcon from '@iconify-icons/vscode-icons/file-type-eslint';
+import vscodeExcelIcon from '@iconify-icons/vscode-icons/file-type-excel';
+import vscodeFontIcon from '@iconify-icons/vscode-icons/file-type-font';
+import vscodeGitIcon from '@iconify-icons/vscode-icons/file-type-git';
+import vscodeGoIcon from '@iconify-icons/vscode-icons/file-type-go';
+import vscodeGradleIcon from '@iconify-icons/vscode-icons/file-type-gradle';
+import vscodeGraphqlIcon from '@iconify-icons/vscode-icons/file-type-graphql';
+import vscodeHtmlIcon from '@iconify-icons/vscode-icons/file-type-html';
+import vscodeImageIcon from '@iconify-icons/vscode-icons/file-type-image';
+import vscodeIniIcon from '@iconify-icons/vscode-icons/file-type-ini';
+import vscodeJavaIcon from '@iconify-icons/vscode-icons/file-type-java';
+import vscodeJsIcon from '@iconify-icons/vscode-icons/file-type-js-official';
+import vscodeJsonIcon from '@iconify-icons/vscode-icons/file-type-json-official';
+import vscodeKeyIcon from '@iconify-icons/vscode-icons/file-type-key';
+import vscodeKotlinIcon from '@iconify-icons/vscode-icons/file-type-kotlin';
+import vscodeLessIcon from '@iconify-icons/vscode-icons/file-type-less';
+import vscodeLicenseIcon from '@iconify-icons/vscode-icons/file-type-license';
+import vscodeMarkdownIcon from '@iconify-icons/vscode-icons/file-type-markdown';
+import vscodeNpmIcon from '@iconify-icons/vscode-icons/file-type-npm';
+import vscodePdfIcon from '@iconify-icons/vscode-icons/file-type-pdf2';
+import vscodePhpIcon from '@iconify-icons/vscode-icons/file-type-php';
+import vscodePnpmIcon from '@iconify-icons/vscode-icons/file-type-pnpm';
+import vscodePrettierIcon from '@iconify-icons/vscode-icons/file-type-prettier';
+import vscodePrismaIcon from '@iconify-icons/vscode-icons/file-type-prisma';
+import vscodePythonIcon from '@iconify-icons/vscode-icons/file-type-python';
+import vscodeReactJsIcon from '@iconify-icons/vscode-icons/file-type-reactjs';
+import vscodeReactTsIcon from '@iconify-icons/vscode-icons/file-type-reactts';
+import vscodeRubyIcon from '@iconify-icons/vscode-icons/file-type-ruby';
+import vscodeRustIcon from '@iconify-icons/vscode-icons/file-type-rust';
+import vscodeScssIcon from '@iconify-icons/vscode-icons/file-type-scss';
+import vscodeShellIcon from '@iconify-icons/vscode-icons/file-type-shell';
+import vscodeSqlIcon from '@iconify-icons/vscode-icons/file-type-sql';
+import vscodeSvelteIcon from '@iconify-icons/vscode-icons/file-type-svelte';
+import vscodeSvgIcon from '@iconify-icons/vscode-icons/file-type-svg';
+import vscodeSwiftIcon from '@iconify-icons/vscode-icons/file-type-swift';
+import vscodeTextIcon from '@iconify-icons/vscode-icons/file-type-text';
+import vscodeTomlIcon from '@iconify-icons/vscode-icons/file-type-toml';
+import vscodeTsconfigIcon from '@iconify-icons/vscode-icons/file-type-tsconfig-official';
+import vscodeTsIcon from '@iconify-icons/vscode-icons/file-type-typescript-official';
+import vscodeVideoIcon from '@iconify-icons/vscode-icons/file-type-video';
+import vscodeViteIcon from '@iconify-icons/vscode-icons/file-type-vite';
+import vscodeVitestIcon from '@iconify-icons/vscode-icons/file-type-vitest';
+import vscodeVueIcon from '@iconify-icons/vscode-icons/file-type-vue';
+import vscodeXmlIcon from '@iconify-icons/vscode-icons/file-type-xml';
+import vscodeYamlIcon from '@iconify-icons/vscode-icons/file-type-yaml';
+import vscodeYarnIcon from '@iconify-icons/vscode-icons/file-type-yarn';
+import vscodeZipIcon from '@iconify-icons/vscode-icons/file-type-zip2';
 
 export type IconProps = Omit<IconifyReactProps, 'icon' | 'ref'>;
 
@@ -197,6 +263,7 @@ export const SendIcon = createIcon(sendIcon);
 export const SaveIcon = createIcon(saveIcon);
 export const ChatIcon = createIcon(messageSquareIcon);
 export const SparkleIcon = createIcon(sparkleIcon);
+export const BrainIcon = createIcon(brainIcon);
 export const ChartPieIcon = createIcon(chartPieIcon);
 export const GaugeIcon = createIcon(gaugeIcon);
 export const FastForwardIcon = createIcon(fastForwardIcon);
@@ -223,6 +290,10 @@ export const SunIcon = createIcon(sunIcon);
 export const MoonIcon = createIcon(moonIcon);
 export const MonitorIcon = createIcon(monitorIcon);
 export const GitBranchIcon = createIcon(gitBranchIcon);
+export const GitCommitIcon = createIcon(gitCommitHorizontalIcon);
+export const GitPullRequestIcon = createIcon(gitPullRequestCreateIcon);
+export const UploadIcon = createIcon(uploadIcon);
+export const FilterIcon = createIcon(filterIcon);
 export const SlidersIcon = createIcon(slidersHorizontalIcon);
 export const SlidersVerticalIcon = createIcon(slidersVerticalIcon);
 export const ListIcon = createIcon(listIcon);
@@ -247,3 +318,332 @@ export const LogOutIcon = createIcon(logOutIcon);
 export const ShieldOffIcon = createIcon(shieldOffIcon);
 export const LinkIcon = createIcon(link2Icon);
 export const RouteIcon = createIcon(routeIcon);
+export const VscodeFolderIcon = createIcon(vscodeDefaultFolderIcon);
+export const VscodeFolderOpenIcon = createIcon(vscodeDefaultFolderOpenedIcon);
+
+export type FileIconKind =
+  | 'typescript'
+  | 'tsx'
+  | 'javascript'
+  | 'jsx'
+  | 'json'
+  | 'markdown'
+  | 'css'
+  | 'scss'
+  | 'less'
+  | 'html'
+  | 'xml'
+  | 'vue'
+  | 'svelte'
+  | 'python'
+  | 'go'
+  | 'rust'
+  | 'java'
+  | 'kotlin'
+  | 'gradle'
+  | 'c'
+  | 'cpp'
+  | 'csharp'
+  | 'ruby'
+  | 'php'
+  | 'swift'
+  | 'shell'
+  | 'yaml'
+  | 'toml'
+  | 'dotenv'
+  | 'ini'
+  | 'docker'
+  | 'git'
+  | 'npm'
+  | 'pnpm'
+  | 'yarn'
+  | 'tsconfig'
+  | 'vite'
+  | 'vitest'
+  | 'eslint'
+  | 'prettier'
+  | 'sql'
+  | 'graphql'
+  | 'prisma'
+  | 'svg'
+  | 'image'
+  | 'pdf'
+  | 'archive'
+  | 'csv'
+  | 'excel'
+  | 'audio'
+  | 'video'
+  | 'font'
+  | 'key'
+  | 'diff'
+  | 'license'
+  | 'text'
+  | 'file';
+
+/** 根据文件名与扩展名推断 VS Code 图标分类。 */
+export function resolveFileIconKind(path?: string): FileIconKind {
+  const normalized = (path ?? '').replace(/\\/gu, '/');
+  const name = (normalized.slice(normalized.lastIndexOf('/') + 1) || normalized).toLowerCase();
+
+  // 特殊配置文件名优先匹配
+  if (name === 'package.json' || name === 'package-lock.json' || name === '.npmrc' || name === '.npmignore') return 'npm';
+  if (name === 'pnpm-lock.yaml' || name === 'pnpm-workspace.yaml' || name === '.pnpmfile.cjs') return 'pnpm';
+  if (name === 'yarn.lock' || name === '.yarnrc' || name === '.yarnrc.yml') return 'yarn';
+  if (/^tsconfig(?:\..+)?\.json$/u.test(name) || /^jsconfig(?:\..+)?\.json$/u.test(name)) return 'tsconfig';
+  if (/^vite\.config\./u.test(name)) return 'vite';
+  if (/^vitest\.config\./u.test(name)) return 'vitest';
+  if (/^(?:eslint\.config\.|\.eslintrc)/u.test(name)) return 'eslint';
+  if (/^(?:prettier\.config\.|\.prettierrc|\.prettierignore)/u.test(name)) return 'prettier';
+  if (name === 'dockerfile' || name.startsWith('dockerfile.') || name === '.dockerignore' || /^docker-compose.*\.(?:ya?ml)$/u.test(name)) {
+    return 'docker';
+  }
+  if (name === '.gitignore' || name === '.gitattributes' || name === '.gitmodules' || name === '.gitkeep') return 'git';
+  if (name === '.env' || name.startsWith('.env.')) return 'dotenv';
+  if (name === 'license' || name.startsWith('license.') || name === 'copying') return 'license';
+  if (name === 'build.gradle' || name === 'build.gradle.kts' || name === 'settings.gradle' || name === 'settings.gradle.kts') {
+    return 'gradle';
+  }
+
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1) : '';
+  switch (ext) {
+    case 'ts':
+    case 'mts':
+    case 'cts':
+      return 'typescript';
+    case 'tsx':
+      return 'tsx';
+    case 'js':
+    case 'mjs':
+    case 'cjs':
+      return 'javascript';
+    case 'jsx':
+      return 'jsx';
+    case 'json':
+    case 'jsonc':
+    case 'json5':
+    case 'ndjson':
+      return 'json';
+    case 'md':
+    case 'mdx':
+    case 'markdown':
+      return 'markdown';
+    case 'css':
+      return 'css';
+    case 'scss':
+    case 'sass':
+      return 'scss';
+    case 'less':
+      return 'less';
+    case 'html':
+    case 'htm':
+    case 'xhtml':
+      return 'html';
+    case 'xml':
+    case 'plist':
+      return 'xml';
+    case 'vue':
+      return 'vue';
+    case 'svelte':
+      return 'svelte';
+    case 'py':
+    case 'pyi':
+      return 'python';
+    case 'go':
+      return 'go';
+    case 'rs':
+      return 'rust';
+    case 'java':
+      return 'java';
+    case 'kt':
+    case 'kts':
+      return 'kotlin';
+    case 'gradle':
+      return 'gradle';
+    case 'c':
+    case 'h':
+      return 'c';
+    case 'cpp':
+    case 'cc':
+    case 'cxx':
+    case 'hpp':
+    case 'hh':
+      return 'cpp';
+    case 'cs':
+      return 'csharp';
+    case 'rb':
+      return 'ruby';
+    case 'php':
+      return 'php';
+    case 'swift':
+      return 'swift';
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+    case 'fish':
+    case 'ps1':
+    case 'bat':
+    case 'cmd':
+      return 'shell';
+    case 'yml':
+    case 'yaml':
+      return 'yaml';
+    case 'toml':
+      return 'toml';
+    case 'ini':
+    case 'cfg':
+    case 'conf':
+    case 'properties':
+    case 'editorconfig':
+      return 'ini';
+    case 'sql':
+    case 'sqlite':
+    case 'db':
+      return 'sql';
+    case 'graphql':
+    case 'gql':
+      return 'graphql';
+    case 'prisma':
+      return 'prisma';
+    case 'svg':
+      return 'svg';
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+    case 'gif':
+    case 'webp':
+    case 'ico':
+    case 'bmp':
+    case 'avif':
+      return 'image';
+    case 'pdf':
+      return 'pdf';
+    case 'zip':
+    case 'tar':
+    case 'gz':
+    case 'tgz':
+    case '7z':
+    case 'rar':
+    case 'vsix':
+    case 'jar':
+      return 'archive';
+    case 'csv':
+    case 'tsv':
+      return 'csv';
+    case 'xls':
+    case 'xlsx':
+      return 'excel';
+    case 'mp3':
+    case 'wav':
+    case 'ogg':
+    case 'flac':
+    case 'm4a':
+      return 'audio';
+    case 'mp4':
+    case 'mov':
+    case 'webm':
+    case 'avi':
+    case 'mkv':
+      return 'video';
+    case 'woff':
+    case 'woff2':
+    case 'ttf':
+    case 'otf':
+    case 'eot':
+      return 'font';
+    case 'pem':
+    case 'key':
+    case 'crt':
+    case 'cer':
+    case 'pub':
+    case 'p12':
+      return 'key';
+    case 'diff':
+    case 'patch':
+      return 'diff';
+    case 'txt':
+    case 'rst':
+    case 'adoc':
+    case 'log':
+      return 'text';
+    default:
+      return 'file';
+  }
+}
+
+const VSCODE_FILE_ICON_MAP: Record<FileIconKind, IconifyIcon> = {
+  typescript: vscodeTsIcon,
+  tsx: vscodeReactTsIcon,
+  javascript: vscodeJsIcon,
+  jsx: vscodeReactJsIcon,
+  json: vscodeJsonIcon,
+  markdown: vscodeMarkdownIcon,
+  css: vscodeCssIcon,
+  scss: vscodeScssIcon,
+  less: vscodeLessIcon,
+  html: vscodeHtmlIcon,
+  xml: vscodeXmlIcon,
+  vue: vscodeVueIcon,
+  svelte: vscodeSvelteIcon,
+  python: vscodePythonIcon,
+  go: vscodeGoIcon,
+  rust: vscodeRustIcon,
+  java: vscodeJavaIcon,
+  kotlin: vscodeKotlinIcon,
+  gradle: vscodeGradleIcon,
+  c: vscodeCIcon,
+  cpp: vscodeCppIcon,
+  csharp: vscodeCsharpIcon,
+  ruby: vscodeRubyIcon,
+  php: vscodePhpIcon,
+  swift: vscodeSwiftIcon,
+  shell: vscodeShellIcon,
+  yaml: vscodeYamlIcon,
+  toml: vscodeTomlIcon,
+  dotenv: vscodeDotenvIcon,
+  ini: vscodeIniIcon,
+  docker: vscodeDockerIcon,
+  git: vscodeGitIcon,
+  npm: vscodeNpmIcon,
+  pnpm: vscodePnpmIcon,
+  yarn: vscodeYarnIcon,
+  tsconfig: vscodeTsconfigIcon,
+  vite: vscodeViteIcon,
+  vitest: vscodeVitestIcon,
+  eslint: vscodeEslintIcon,
+  prettier: vscodePrettierIcon,
+  sql: vscodeSqlIcon,
+  graphql: vscodeGraphqlIcon,
+  prisma: vscodePrismaIcon,
+  svg: vscodeSvgIcon,
+  image: vscodeImageIcon,
+  pdf: vscodePdfIcon,
+  archive: vscodeZipIcon,
+  csv: vscodeCsvIcon,
+  excel: vscodeExcelIcon,
+  audio: vscodeAudioIcon,
+  video: vscodeVideoIcon,
+  font: vscodeFontIcon,
+  key: vscodeKeyIcon,
+  diff: vscodeDiffIcon,
+  license: vscodeLicenseIcon,
+  text: vscodeTextIcon,
+  file: vscodeDefaultFileIcon,
+};
+
+/** 按文件路径/后缀渲染离线 Iconify VS Code 图标（`@iconify-icons/vscode-icons`）。 */
+export function FileTypeIcon({
+  path,
+  className,
+  ...rest
+}: IconProps & { readonly path?: string }) {
+  const kind = resolveFileIconKind(path);
+  return (
+    <AppIcon
+      icon={VSCODE_FILE_ICON_MAP[kind]}
+      data-file-icon-kind={kind}
+      className={className}
+      {...rest}
+    />
+  );
+}

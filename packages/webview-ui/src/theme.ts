@@ -5,7 +5,7 @@
  */
 export type ThemeMode = 'system' | 'light' | 'dark';
 
-let currentThemeMode: ThemeMode = 'system';
+let currentThemeMode: ThemeMode = 'dark';
 
 export function detectDarkTheme(): boolean {
   if (typeof document !== 'undefined') {
@@ -18,15 +18,15 @@ export function detectDarkTheme(): boolean {
     : false;
 }
 
-/** 根据主题模式解析最终是否为暗色。 */
-export function resolveIsDark(mode: ThemeMode = 'system'): boolean {
+/** 根据主题模式解析最终是否为暗色（默认深色）。 */
+export function resolveIsDark(mode: ThemeMode = 'dark'): boolean {
   if (mode === 'dark') return true;
   if (mode === 'light') return false;
   return detectDarkTheme();
 }
 
-/** 将指定主题模式立即应用到 `html.dark`（不影响阅读与聊天排版参数）。 */
-export function applyThemeMode(mode: ThemeMode = 'system'): void {
+/** 将指定主题模式立即应用到 `html.dark`（默认深色，不影响阅读与聊天排版参数）。 */
+export function applyThemeMode(mode: ThemeMode = 'dark'): void {
   currentThemeMode = mode;
   if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('dark', resolveIsDark(mode));

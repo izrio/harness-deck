@@ -15,6 +15,7 @@ import {
   type QuotaWindowView,
 } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -27,6 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
+import { cn } from '../../lib/utils.ts';
 import { useT } from '../../i18n.ts';
 import { setSettingsTab, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
@@ -49,7 +51,6 @@ import {
   TrashIcon,
   UsersIcon,
 } from '../icons.tsx';
-import { SettingsSection } from './SettingsSection.tsx';
 
 interface AccountEditorState {
   readonly isNew: boolean;
@@ -129,7 +130,6 @@ export function AccountSettings() {
   const protocolGatewayEnabled = useView((s) => s.providers.protocolGatewayEnabled === true);
   const accountsState = useView((s) => s.accounts);
 
-  const [filterBackendId, setFilterBackendId] = useState<string>('all');
   const [editor, setEditor] = useState<AccountEditorState | undefined>();
   const [formError, setFormError] = useState<string | undefined>();
   const [pendingDelete, setPendingDelete] = useState<AccountView | undefined>();
@@ -168,11 +168,6 @@ export function AccountSettings() {
         return cap?.supported !== false && cap?.multiAccount === true;
       }),
     [backends],
-  );
-
-  const visibleBackends = useMemo(
-    () => (filterBackendId === 'all' ? backends : backends.filter((b) => b.id === filterBackendId)),
-    [backends, filterBackendId],
   );
 
   const accountsByBackend = useMemo(() => {
@@ -219,7 +214,7 @@ export function AccountSettings() {
         label: editor.isSystemDefault ? editor.label : label,
         ...(editorAccountCap?.supportsSessionIsolation ? { isolateSessions: editor.isolateSessions } : {}),
         ...(editorAccountCap?.supportsRegion && editor.region ? { region: editor.region } : {}),
-        ...(editorAccountCap?.loginKind === 'api-key' && editor.apiKey.trim()
+        ...((editorAccountCap?.loginKind === 'api-key' || editorAccountCap?.supportsRegion) && editor.apiKey.trim()
           ? { apiKey: editor.apiKey.trim() }
           : {}),
         ...(editorAccountCap?.supportsRegion && editor.usageCookie.trim()
@@ -228,7 +223,8 @@ export function AccountSettings() {
         ...(editor.setActive ? { setActive: true } : {}),
       },
     });
-    if (andLogin && editorAccountCap?.loginKind !== 'api-key') {
+    const hasInlineApiKey = Boolean(editor.apiKey.trim());
+    if (andLogin && editorAccountCap?.loginKind !== 'api-key' && !hasInlineApiKey) {
       if (editor.id) {
         postToHost({ type: 'loginAccount', payload: { id: editor.id, backendId: editor.backendId } });
       } else {
@@ -277,67 +273,43 @@ export function AccountSettings() {
 
   return (
     <>
-      <SettingsSection
-        title={t('settings.accounts.title')}
-        testId="settings-accounts"
-        actions={
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={accountsState.checking === true}
-              data-testid="accounts-refresh"
-              onClick={() => postToHost({ type: 'refreshAccounts', payload: { includeQuota: true } })}
-            >
-              {accountsState.checking ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
-              <span>{accountsState.checking ? t('settings.accounts.refreshing') : t('settings.accounts.refresh')}</span>
-            </Button>
-            {multiAccountBackends.length > 0 ? (
+      <div className="flex flex-col gap-2.5" data-testid="settings-accounts">
+        <div className="flex min-w-0 flex-col gap-1 px-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="m-0 truncate text-[13px] font-semibold tracking-tight text-ink">
+              {t('settings.accounts.title')}
+            </h3>
+            <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1.5">
               <Button
                 type="button"
-                variant="default"
+                variant="outline"
                 size="sm"
-                data-testid="accounts-add"
-                onClick={() => openAdd(filterBackendId !== 'all' ? filterBackendId : undefined)}
+                disabled={accountsState.checking === true}
+                data-testid="accounts-refresh"
+                onClick={() => postToHost({ type: 'refreshAccounts', payload: { includeQuota: true } })}
               >
-                <PlusIcon className="size-3.5" />
-                <span>{t('settings.accounts.add')}</span>
+                {accountsState.checking ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
+                <span>{accountsState.checking ? t('settings.accounts.refreshing') : t('settings.accounts.refresh')}</span>
               </Button>
-            ) : null}
-          </div>
-        }
-      >
-        <div className="flex flex-col gap-2 border-b border-line/60 bg-inset/35 px-3.5 py-2.5">
-          <p className="m-0 text-[12px] leading-relaxed text-ink-2">{t('settings.accounts.desc')}</p>
-
-          {backends.length > 1 ? (
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="accounts-filter-bar">
-              <Button
-                type="button"
-                variant={filterBackendId === 'all' ? 'secondary' : 'ghost'}
-                size="xs"
-                onClick={() => setFilterBackendId('all')}
-              >
-                {t('settings.accounts.filterAll')}
-              </Button>
-              {backends.map((b) => (
+              {multiAccountBackends.length > 0 ? (
                 <Button
-                  key={b.id}
                   type="button"
-                  variant={filterBackendId === b.id ? 'secondary' : 'ghost'}
-                  size="xs"
-                  onClick={() => setFilterBackendId(b.id)}
+                  variant="default"
+                  size="sm"
+                  data-testid="accounts-add"
+                  onClick={() => openAdd()}
                 >
-                  {b.name}
+                  <PlusIcon className="size-3.5" />
+                  <span>{t('settings.accounts.add')}</span>
                 </Button>
-              ))}
+              ) : null}
             </div>
-          ) : null}
+          </div>
+          <p className="m-0 text-[12px] leading-relaxed text-ink-3">{t('settings.accounts.desc')}</p>
         </div>
 
-        <div className="divide-y divide-line/60">
-          {visibleBackends.map((backend) => (
+        <div className="flex flex-col gap-2.5">
+          {backends.map((backend) => (
             <BackendAccountCard
               key={backend.id}
               backend={backend}
@@ -351,7 +323,7 @@ export function AccountSettings() {
             />
           ))}
         </div>
-      </SettingsSection>
+      </div>
 
       {/* 添加 / 编辑官方账号弹窗 */}
       <Dialog open={Boolean(editor)} onOpenChange={(open) => (!open ? closeEditor() : undefined)}>
@@ -366,7 +338,7 @@ export function AccountSettings() {
           </DialogHeader>
 
           {editor ? (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 [&_[data-slot=native-select-wrapper]]:w-full">
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.backend')}</span>
                 <NativeSelect
@@ -417,9 +389,13 @@ export function AccountSettings() {
                 </label>
               ) : null}
 
-              {editorAccountCap?.loginKind === 'api-key' && !editor.isSystemDefault ? (
+              {(editorAccountCap?.loginKind === 'api-key' || editorAccountCap?.supportsRegion) && !editor.isSystemDefault ? (
                 <label className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.apiKey')}</span>
+                  <span className="text-[12px] font-medium text-ink-2">
+                    {editorAccountCap?.supportsRegion
+                      ? t('settings.accounts.form.codebuddyApiKey')
+                      : t('settings.accounts.form.apiKey')}
+                  </span>
                   <Input
                     size="sm"
                     type="password"
@@ -428,7 +404,9 @@ export function AccountSettings() {
                     placeholder={
                       editor.hasSecret
                         ? t('settings.accounts.form.apiKeyKeep')
-                        : t('settings.accounts.form.apiKeyPlaceholder')
+                        : editorAccountCap?.supportsRegion
+                          ? t('settings.accounts.form.codebuddyApiKeyPlaceholder')
+                          : t('settings.accounts.form.apiKeyPlaceholder')
                     }
                     onChange={(e) => setEditor({ ...editor, apiKey: e.target.value })}
                   />
@@ -493,7 +471,7 @@ export function AccountSettings() {
             <Button type="button" variant="outline" size="sm" onClick={closeEditor}>
               {t('settings.accounts.form.cancel')}
             </Button>
-            {editor && editor.isNew && editorAccountCap?.loginKind !== 'api-key' ? (
+            {editor && editor.isNew && editorAccountCap?.loginKind !== 'api-key' && !editor.apiKey.trim() ? (
               <>
                 <Button type="button" variant="secondary" size="sm" onClick={() => submitEditor(false)}>
                   {t('settings.accounts.form.save')}
@@ -594,10 +572,10 @@ export function AccountSettings() {
           </DialogHeader>
 
           {loginProgress ? (
-            <div className="flex flex-col gap-2.5">
+            <div className="flex min-w-0 flex-col gap-2.5">
               {loginProgress.deviceCode ? (
-                <div className="flex items-center justify-between gap-2 rounded-control border border-line bg-inset/60 px-3 py-2">
-                  <div>
+                <div className="flex min-w-0 items-center justify-between gap-2 rounded-control border border-line bg-inset/60 px-3 py-2">
+                  <div className="min-w-0">
                     <div className="text-[11px] text-ink-3">{t('settings.accounts.loginModal.deviceCode')}</div>
                     <div className="font-mono text-[15px] font-semibold tracking-wider text-ink">
                       {loginProgress.deviceCode}
@@ -616,8 +594,13 @@ export function AccountSettings() {
               ) : null}
 
               {loginProgress.authUrl ? (
-                <div className="flex flex-col gap-1.5 rounded-control border border-line bg-inset/45 p-2.5">
-                  <div className="truncate font-mono text-[11.5px] text-ink-2">{loginProgress.authUrl}</div>
+                <div className="flex min-w-0 flex-col gap-2 rounded-control border border-line bg-inset/45 p-2.5">
+                  <div
+                    className="min-w-0 truncate font-mono text-[11.5px] text-ink-2"
+                    title={loginProgress.authUrl}
+                  >
+                    {loginProgress.authUrl}
+                  </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <Button
                       type="button"
@@ -643,7 +626,7 @@ export function AccountSettings() {
 
               {needsAuthCode ? (
                 <form
-                  className="flex flex-col gap-1.5"
+                  className="flex min-w-0 flex-col gap-1.5"
                   data-testid="account-login-code-form"
                   onSubmit={(event) => {
                     event.preventDefault();
@@ -653,7 +636,7 @@ export function AccountSettings() {
                   <Label htmlFor="account-login-code" className="text-[11px] text-ink-3">
                     {t('settings.accounts.loginModal.authCodeLabel')}
                   </Label>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex min-w-0 items-center gap-1.5">
                     <Input
                       id="account-login-code"
                       size="sm"
@@ -681,13 +664,13 @@ export function AccountSettings() {
               ) : null}
 
               {loginProgress.command ? (
-                <div className="flex flex-col gap-1.5 rounded-control border border-line bg-inset/45 p-2.5">
+                <div className="flex min-w-0 flex-col gap-1.5 rounded-control border border-line bg-inset/45 p-2.5">
                   <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
                     <TerminalIcon className="size-3" />
                     <span>{t('settings.accounts.loginModal.command')}</span>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <code className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink">
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <code className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink" title={loginProgress.command}>
                       {loginProgress.command}
                     </code>
                     <Button
@@ -814,7 +797,10 @@ function BackendAccountCard({
   };
 
   return (
-    <div className="flex flex-col" data-testid={`account-backend-card-${backend.id}`}>
+    <Card
+      className="gap-0 overflow-hidden border-line/75 bg-surface/80 py-0 shadow-xs dark:bg-surface/75"
+      data-testid={`account-backend-card-${backend.id}`}
+    >
       {/* 顶部：智能体信息 + 渠道模式切换（官方 ↔ 服务商） */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
@@ -930,16 +916,18 @@ function BackendAccountCard({
                 className="flex items-center justify-between gap-2 px-3.5 py-2 transition-colors hover:bg-hover/35"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[12.5px] font-medium text-ink">{acc.label}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={cn('size-2 shrink-0 rounded-full', isCurrent ? 'bg-green' : 'bg-ink-4')}
+                      data-testid={isCurrent ? `account-active-${acc.id}` : `account-dot-${acc.id}`}
+                      aria-label={isCurrent ? t('settings.accounts.activeBadge') : undefined}
+                      title={isCurrent ? t('settings.accounts.activeBadge') : undefined}
+                    />
+                    <span className={cn('text-[12.5px]', isCurrent ? 'font-semibold text-ink' : 'font-medium text-ink-2')}>
+                      {acc.label}
+                    </span>
                     {acc.isSystemDefault ? (
                       <ValuePill className="text-[10.5px]">{t('settings.accounts.systemBadge')}</ValuePill>
-                    ) : null}
-                    {isCurrent ? (
-                      <ValuePill tone="accent" className="text-[10.5px]" data-testid={`account-active-${acc.id}`}>
-                        <CheckIcon className="size-2.5" />
-                        <span>{t('settings.accounts.activeBadge')}</span>
-                      </ValuePill>
                     ) : null}
                     <ValuePill tone={statusTone(acc.status)} className="text-[10.5px]">
                       {acc.status === 'logging-in' ? <SpinnerIcon className="size-2.5" /> : null}
@@ -952,7 +940,7 @@ function BackendAccountCard({
                   </div>
 
                   {acc.identity || (acc.quota && acc.quota.windows.length > 0) ? (
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-ink-3">
+                    <div className="mt-1 flex flex-wrap items-center gap-2 pl-4 text-[11.5px] text-ink-3">
                       {acc.identity ? <span className="truncate font-mono">{acc.identity}</span> : null}
                       {acc.quota?.windows.slice(0, 3).map((win, idx) => (
                         <span
@@ -1050,6 +1038,6 @@ function BackendAccountCard({
           })}
         </div>
       ) : null}
-    </div>
+    </Card>
   );
 }

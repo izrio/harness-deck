@@ -257,6 +257,7 @@ export class AcpSessionProjection {
 
   startTurn(now: number): void {
     this.runningSince = now;
+    this.usageTracker.startRequest(now);
     this.changed();
   }
 
@@ -268,6 +269,7 @@ export class AcpSessionProjection {
   endTurn(now: number, stopReason: string | undefined, error?: string): void {
     const startedAt = this.runningSince;
     this.runningSince = undefined;
+    this.usageTracker.finishRequest(undefined, now);
     this.items = this.items.map((item) => (item.kind === 'assistant' && item.streaming ? { ...item, streaming: false, ...(stopReason === 'cancelled' ? { interrupted: true } : {}) } : item));
     // 还在运行的工具调用：随这一轮结束
     for (const [id, call] of this.tools) {
@@ -408,6 +410,7 @@ export class AcpSessionProjection {
   private appendAssistant(update: Record<string, unknown>, field: 'markdown' | 'reasoning'): void {
     const text = blockText(update.content);
     if (!text) return;
+    if (this.running) this.usageTracker.markFirstToken();
     const messageId = typeof update.messageId === 'string' ? update.messageId : undefined;
     let at = messageId ? this.messageIndex.get(messageId) : undefined;
     const last = this.items.length - 1;

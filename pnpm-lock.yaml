@@ -84,6 +84,9 @@ importers:
       '@iconify-icons/lucide':
         specifier: ^2.0.32
         version: 2.0.32
+      '@iconify-icons/vscode-icons':
+        specifier: ^2.0.27
+        version: 2.0.27
       '@iconify/react':
         specifier: ^6.0.4
         version: 6.0.4(react@19.3.1)
@@ -707,6 +710,9 @@ packages:
 
   '@iconify-icons/lucide@2.0.32':
     resolution: {integrity: sha512-7tW2yypBZwd+4YNCeDWiO6PCwTlVsTQBX4u1MdeMI8vHU4c/P8/lgdqmmkdPARtlIT2cjExw7bfsG0NsTjuIhA==}
+
+  '@iconify-icons/vscode-icons@2.0.27':
+    resolution: {integrity: sha512-mNzZWMumworKSqgMWmWw7UxsvhCHsl2FlZRIZTvwBycUVbwvlAwEcSILT+TVbGbnDzigrzBGlYWTu4PIKoRQjw==}
 
   '@iconify/react@6.0.4':
     resolution: {integrity: sha512-7nKd1eF52E1QGIl46eDWfMNPuTQHUxsXoK2Evgtu5jr386jCWTuWFLHM9vfsTNbUcKp+uq6ao+3skNUalDhH/w==}
@@ -4474,6 +4480,10 @@ snapshots:
   '@humanwhocodes/retry@0.4.3': {}
 
   '@iconify-icons/lucide@2.0.32':
+    dependencies:
+      '@iconify/types': 2.0.0
+
+  '@iconify-icons/vscode-icons@2.0.27':
     dependencies:
       '@iconify/types': 2.0.0
 

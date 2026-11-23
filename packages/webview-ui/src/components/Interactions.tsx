@@ -19,14 +19,16 @@ import {
   CloseIcon,
   EyeIcon,
   FastForwardIcon,
+  FileEditIcon,
   PencilIcon,
   PlanIcon,
   QuestionIcon,
   ReplyIcon,
   SaveIcon,
   SendIcon,
-  ShieldIcon,
   SpinnerIcon,
+  TerminalIcon,
+  ToolIcon,
 } from './icons.tsx';
 import { useT } from '../i18n.ts';
 
@@ -137,6 +139,14 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
     postToHost({ type: 'respondApproval', commandId: `approval:${item.id}:${decision}`, payload: { id: item.id, decision } });
   };
   const title = item.subjectKind === 'command' ? t('approval.command') : item.subjectKind === 'file' ? t('approval.file') : t('approval.tool', item.toolName);
+  const approvalIcon =
+    item.subjectKind === 'command' ? (
+      <TerminalIcon className="size-3.5" />
+    ) : item.subjectKind === 'file' ? (
+      <FileEditIcon className="size-3.5" />
+    ) : (
+      <ToolIcon className="size-3.5" />
+    );
   return (
     <section
       className="interaction interaction--approval overflow-hidden rounded-xl border border-line/85 bg-surface shadow-xs"
@@ -147,7 +157,7 @@ function ApprovalCard({ item }: { item: Of<'approval'> }) {
       <div className="primitive-card-pad flex flex-col gap-2.5">
         <header className="interaction__header flex items-center gap-2 text-[14px] font-medium text-ink">
           <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-orange-tint text-orange">
-            <ShieldIcon className="size-3.5" />
+            {approvalIcon}
           </span>
           <span>{title}</span>
         </header>

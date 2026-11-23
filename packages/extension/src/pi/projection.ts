@@ -143,6 +143,7 @@ export class PiSessionProjection {
 
   startTurn(now: number): void {
     if (this.runningSince === undefined) this.runningSince = now;
+    this.usageTracker.startRequest(now);
     this.streamedText = false;
     this.streamedThinking = false;
     this.pendingTurnError = undefined;
@@ -152,6 +153,7 @@ export class PiSessionProjection {
   endTurn(now: number, outcome: 'completed' | 'cancelled' | 'failed', errorText?: string): void {
     const startedAt = this.runningSince;
     this.runningSince = undefined;
+    this.usageTracker.finishRequest(undefined, now);
     this.streamedText = false;
     this.streamedThinking = false;
     this.pendingTurnError = undefined;
@@ -442,6 +444,7 @@ export class PiSessionProjection {
 
   private appendAssistant(text: string, field: 'markdown' | 'reasoning', streaming = this.running): void {
     if (!text) return;
+    if (streaming) this.usageTracker.markFirstToken();
     const last = this.items.length - 1;
     const lastItem = this.items[last];
     let at = lastItem?.kind === 'assistant' ? last : undefined;

@@ -658,6 +658,151 @@ export function prepareCodexProviderRuntime(params: {
   };
 }
 
+/** 生成原生 ZCode (`zcode app-server --stdio`) 的 `provider_config.json`（schemaVersion: 1）。 */
+export function buildZcodeProviderConfigJson(
+  provider: ProviderConfig,
+  proxyOrigin: string,
+  proxyToken: string,
+): string | undefined {
+  let protocol: ProviderProtocol | undefined;
+  let zcodeApiType: 'openai-chat-completions' | 'anthropic-messages' | 'openai-responses' | undefined;
+  let maxTokensMap = '{"max_tokens": maxOutputTokens}';
+
+  if (provider.openaiChatUrl?.trim()) {
+    protocol = 'openai-chat';
+    zcodeApiType = 'openai-chat-completions';
+    maxTokensMap = '{"max_tokens": maxOutputTokens}';
+  } else if (provider.anthropicUrl?.trim()) {
+    protocol = 'anthropic';
+    zcodeApiType = 'anthropic-messages';
+    maxTokensMap = '{"max_tokens": maxOutputTokens}';
+  } else if (provider.openaiResponsesUrl?.trim()) {
+    protocol = 'openai-responses';
+    zcodeApiType = 'openai-responses';
+    maxTokensMap = '{"max_output_tokens": maxOutputTokens}';
+  }
+  if (!protocol || !zcodeApiType) return undefined;
+
+  const models = effectiveModels(provider);
+  const modelIds = models.map((m) => m.id);
+  const defaultModel =
+    (provider.defaultModel && modelIds.includes(provider.defaultModel) ? provider.defaultModel : undefined) ??
+    modelIds[0];
+
+  const payload = {
+    schemaVersion: 1,
+    config: {
+      providerConfigRules: {
+        providerRules: [
+          {
+            providerId: provider.id,
+            templateId: null,
+            providerName: provider.name || provider.id,
+            enabled: true,
+            config: {
+              group: 'standard-personal',
+              logo: null,
+              access: {
+                type: 'api-key',
+                apiKey: proxyToken,
+                apiKeyManagementUrl: null,
+              },
+              api: {
+                type: zcodeApiType,
+                baseUrl: proxyUrl(proxyOrigin, provider.id, protocol),
+                headers: {},
+              },
+              personalModelIds: modelIds,
+              modelOrder: modelIds,
+              visibility: 'visible',
+            },
+          },
+        ],
+      },
+      modelConfigRules: {
+        providerModelRules: models.map((m) => {
+          const ctx = parseTokenLimit(m.contextWindow) ?? 128_000;
+          const maxOut = parseTokenLimit(m.maxOutputTokens) ?? 16_384;
+          const efforts = [...new Set((m.efforts ?? []).map((e) => e.trim()).filter(Boolean))];
+          return {
+            providerId: provider.id,
+            modelId: m.id,
+            config: {
+              enabled: true,
+              properties: {
+                contextWindow: ctx,
+                inputFormat: {
+                  supportsText: true,
+                  supportsImage: m.vision === true,
+                },
+                outputFormat: {
+                  supportsText: true,
+                },
+                supportsToolCall: true,
+              },
+              optionSpecs: {
+                maxOutputTokens: {
+                  max: maxOut,
+                  map: maxTokensMap,
+                },
+                ...(efforts.length > 0
+                  ? {
+                      reasoningLevel: {
+                        values: efforts,
+                        map: 'reasoningLevel == "disabled" ? {} : {"reasoning_effort": reasoningLevel}',
+                      },
+                    }
+                  : {}),
+              },
+            },
+          };
+        }),
+        manualProviderModelRules: [],
+      },
+      providerOrder: [provider.id],
+      ...(defaultModel
+        ? {
+            defaultModelSelection: {
+              providerId: provider.id,
+              modelId: defaultModel,
+            },
+          }
+        : {}),
+    },
+  };
+
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+/** 为原生 ZCode (`zcode app-server --stdio`) 写入隔离的 `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`（仅含本机回环代理地址与一次性令牌）。 */
+export async function prepareZcodeProviderRuntime(params: {
+  readonly provider: ProviderConfig;
+  readonly proxyOrigin: string;
+  readonly proxyToken: string;
+  readonly storageDir: string;
+  readonly baseEnv: Readonly<Record<string, string | undefined>>;
+}): Promise<AcpProviderLaunchPatch | undefined> {
+  const { provider, proxyOrigin, proxyToken, storageDir, baseEnv } = params;
+  if (!isProviderReadyForBackend(provider, { id: 'zcode', kind: 'zcode', name: 'ZCode' })) {
+    return undefined;
+  }
+  const configJson = buildZcodeProviderConfigJson(provider, proxyOrigin, proxyToken);
+  if (!configJson) return undefined;
+
+  await mkdir(storageDir, { recursive: true });
+  const safeId = provider.id.replace(/[^a-zA-Z0-9._-]+/gu, '_') || 'provider';
+  const configPath = join(storageDir, `zcode-provider-${safeId}.json`);
+  await writeFile(configPath, configJson, { encoding: 'utf8', mode: 0o600 });
+
+  return {
+    args: [],
+    env: withLoopbackNoProxy({
+      ...baseEnv,
+      ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: configPath,
+    }),
+  };
+}
+
 /**
  * 为原生 CodeBuddy（`codebuddy -p`）准备第三方服务商代理环境变量（OpenAI Chat Completions）。
  */

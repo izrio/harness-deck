@@ -39,6 +39,10 @@ export interface PersistedState {
   readonly activeModule?: WorkbenchModule;
   /** 会话模块左侧按项目分组面板是否展开。 */
   readonly sessionsSidebarOpen?: boolean;
+  /** 左侧「项目」大菜单下的项目列表是否展开（默认首次收起）。 */
+  readonly projectsExpanded?: boolean;
+  /** 左侧项目树中用户主动展开的项目路径集合（默认首次全部收起）。 */
+  readonly expandedProjectPaths?: Readonly<Record<string, boolean>>;
   /** 右侧文件/Git 面板是否展开。 */
   readonly rightPanelOpen?: boolean;
   /** 右侧面板当前激活的标签页。 */

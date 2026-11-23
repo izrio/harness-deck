@@ -112,6 +112,8 @@ export function useVirtualThread({
   const viewportHeightRef = useRef(DEFAULT_VIEWPORT_HEIGHT);
   const lastClientWidthRef = useRef(0);
   const lastClientHeightRef = useRef(0);
+  const lastScrollTopRef = useRef(0);
+  const lastScrollHeightRef = useRef(0);
   const listOffsetTopRef = useRef(0);
 
   const loadOlderPendingRef = useRef(false);
@@ -254,7 +256,11 @@ export function useVirtualThread({
 
     const listEl = listRef.current;
     const currentListOffset = listEl ? listEl.offsetTop : listOffsetTopRef.current;
-    const scrollOffset = Math.max(0, scroller.scrollTop - currentListOffset);
+    const preLayoutScrollTop = lastScrollTopRef.current;
+    // 若浏览器因内容变矮已自动把 scrollTop 向上钳位，用钳位前的 scrollTop 判定上方条目并计算补偿，防止二次扣减把视口弹回中部
+    const referenceScrollTop =
+      preLayoutScrollTop > scroller.scrollTop ? preLayoutScrollTop : scroller.scrollTop;
+    const scrollOffset = Math.max(0, referenceScrollTop - currentListOffset);
 
     const idsToCheck = targetIds ?? Array.from(rowElementsRef.current.keys());
     let changed = false;
@@ -278,15 +284,19 @@ export function useVirtualThread({
 
       if (!stickRef.current && !scrollingToBottomRef.current) {
         const itemTop = currentLayout.offsets[index]!;
+        // 只对完全位于视口顶线上方的条目做锚定补偿；跨过视口顶线的当前阅读条目自身起点未动，不补偿其高度差
         const isStrictlyAbove = itemTop + oldHeight <= scrollOffset + 1;
-        const isUnmeasuredAbove = !wasMeasured && itemTop < scrollOffset;
-        if (isStrictlyAbove || isUnmeasuredAbove) {
+        if (isStrictlyAbove) {
           scrollAdjustment += delta;
         }
       }
     }
 
-    if (!changed) return;
+    if (!changed) {
+      lastScrollTopRef.current = scroller.scrollTop;
+      lastScrollHeightRef.current = scroller.scrollHeight;
+      return;
+    }
 
     if (stickRef.current) {
       if (scrollingToBottomRef.current) {
@@ -295,11 +305,27 @@ export function useVirtualThread({
         scroller.scrollTop = scroller.scrollHeight;
       }
     } else if (Math.abs(scrollAdjustment) >= HEIGHT_EPSILON) {
-      const nextScrollTop = Math.max(0, scroller.scrollTop + scrollAdjustment);
-      scroller.scrollTop = nextScrollTop;
-      setAnchorScrollTop(nextScrollTop);
+      const baseScrollTop =
+        scrollAdjustment < 0 && preLayoutScrollTop > scroller.scrollTop
+          ? preLayoutScrollTop
+          : scroller.scrollTop;
+      const distanceNow = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      // 已紧贴底部且内容净收缩时保持贴底，不向回弹到中部
+      if (scrollAdjustment < 0 && distanceNow < STICK_THRESHOLD && baseScrollTop + scrollAdjustment >= scroller.scrollTop - STICK_THRESHOLD) {
+        scroller.scrollTop = scroller.scrollHeight;
+        stickRef.current = true;
+        setStickToBottom(true);
+        setFarFromBottom(false);
+        setUnseen(false);
+      } else {
+        const nextScrollTop = Math.max(0, baseScrollTop + scrollAdjustment);
+        scroller.scrollTop = nextScrollTop;
+        setAnchorScrollTop(nextScrollTop);
+      }
     }
 
+    lastScrollTopRef.current = scroller.scrollTop;
+    lastScrollHeightRef.current = scroller.scrollHeight;
     setMeasureVersion((v) => v + 1);
   }, []);
 
@@ -315,6 +341,8 @@ export function useVirtualThread({
     const el = scrollerRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+      lastScrollHeightRef.current = el.scrollHeight;
     }
   }, [sessionKey, clearSmoothScroll, resetLoadOlderState]);
 
@@ -327,6 +355,8 @@ export function useVirtualThread({
     const el = scrollerRef.current;
     if (el && stickRef.current) {
       el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+      lastScrollHeightRef.current = el.scrollHeight;
     }
   }, [appearanceKey]);
 
@@ -352,6 +382,8 @@ export function useVirtualThread({
           scroller.scrollTop = nextScrollTop;
           setAnchorScrollTop(nextScrollTop);
         }
+        lastScrollTopRef.current = scroller.scrollTop;
+        lastScrollHeightRef.current = scroller.scrollHeight;
         // 已成功向前追加：立即解除 loadOlder 挂起锁
         if (loadOlderPendingRef.current) {
           resetLoadOlderState();
@@ -362,9 +394,13 @@ export function useVirtualThread({
           const nextScrollTop = Math.max(0, scroller.scrollTop + headerDelta);
           scroller.scrollTop = nextScrollTop;
           setAnchorScrollTop(nextScrollTop);
+          lastScrollTopRef.current = scroller.scrollTop;
+          lastScrollHeightRef.current = scroller.scrollHeight;
         }
       } else if (stickRef.current && !scrollingToBottomRef.current) {
         scroller.scrollTop = scroller.scrollHeight;
+        lastScrollTopRef.current = scroller.scrollTop;
+        lastScrollHeightRef.current = scroller.scrollHeight;
       }
     }
 
@@ -509,12 +545,16 @@ export function useVirtualThread({
 
           if ((prevHeight === 0 || stickRef.current) && stickRef.current && !scrollingToBottomRef.current) {
             scroller.scrollTop = scroller.scrollHeight;
+            lastScrollTopRef.current = scroller.scrollTop;
+            lastScrollHeightRef.current = scroller.scrollHeight;
           }
 
           maybeLoadOlder();
         } else if (entry.target === footer) {
           if (stickRef.current && !scrollingToBottomRef.current) {
             scroller.scrollTop = scroller.scrollHeight;
+            lastScrollTopRef.current = scroller.scrollTop;
+            lastScrollHeightRef.current = scroller.scrollHeight;
           }
         }
       }
@@ -531,8 +571,13 @@ export function useVirtualThread({
     if (!el) return;
 
     const cancelSmoothScroll = () => {
-      if (scrollingToBottomRef.current) {
-        clearSmoothScroll();
+      if (!scrollingToBottomRef.current) return;
+      clearSmoothScroll();
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distance >= STICK_THRESHOLD) {
+        stickRef.current = false;
+        setStickToBottom(false);
+        setAnchorScrollTop(el.scrollTop);
       }
     };
 
@@ -544,6 +589,8 @@ export function useVirtualThread({
       if (!scrollingToBottomRef.current) return;
       clearSmoothScroll();
       el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+      lastScrollHeightRef.current = el.scrollHeight;
       stickRef.current = true;
       setStickToBottom(true);
       setFarFromBottom(false);
@@ -551,9 +598,13 @@ export function useVirtualThread({
     };
 
     const onScroll = () => {
+      const prevScrollTop = lastScrollTopRef.current;
+      const prevScrollHeight = lastScrollHeightRef.current;
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
 
       if (scrollingToBottomRef.current) {
+        lastScrollTopRef.current = el.scrollTop;
+        lastScrollHeightRef.current = el.scrollHeight;
         if (distance < STICK_THRESHOLD) {
           clearSmoothScroll();
           stickRef.current = true;
@@ -562,6 +613,30 @@ export function useVirtualThread({
           setUnseen(false);
         }
         return;
+      }
+
+      // 若原先处于贴底态且因内容异步/新挂载变高（如长回复渲染、代码高亮）导致 distance 骤增，
+      // 但用户并未向上滚动（scrollTop 未减小），则继续贴底而不误判为用户上翻回弹到中部
+      if (
+        stickRef.current &&
+        distance >= STICK_THRESHOLD &&
+        lastClientHeightRef.current > 0 &&
+        prevScrollHeight > 0 &&
+        el.scrollHeight > prevScrollHeight + 1 &&
+        el.scrollTop >= prevScrollTop - 1
+      ) {
+        el.scrollTop = el.scrollHeight;
+        lastScrollTopRef.current = el.scrollTop;
+        lastScrollHeightRef.current = el.scrollHeight;
+        setFarFromBottom(false);
+        setUnseen(false);
+        return;
+      }
+
+      lastScrollTopRef.current = el.scrollTop;
+      lastScrollHeightRef.current = el.scrollHeight;
+      if (el.clientHeight > 0) {
+        lastClientHeightRef.current = el.clientHeight;
       }
 
       const nextStick = distance < STICK_THRESHOLD;
@@ -638,6 +713,8 @@ export function useVirtualThread({
       if (!scrollingToBottomRef.current) return;
       scrollingToBottomRef.current = false;
       el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+      lastScrollHeightRef.current = el.scrollHeight;
       setFarFromBottom(false);
     }, SMOOTH_SCROLL_SETTLE_MS);
   }, [clearSmoothScroll]);

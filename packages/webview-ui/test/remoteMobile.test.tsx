@@ -447,6 +447,28 @@ describe('HD-25 内嵌 Diff 审阅与无 IDE 弹窗降级', () => {
     expect(screen.getByText('typescript')).toBeTruthy();
   });
 
+  it('DiffViewerModal 预览 Markdown 文件时支持在渲染预览与源码之间切换', () => {
+    act(() =>
+      applyHostMessage({
+        type: 'diffContent',
+        payload: {
+          path: 'README.md',
+          title: 'README.md',
+          language: 'markdown',
+          kind: 'file',
+          after: '# Hello\n\nBuilt-in preview',
+          readonly: true,
+        },
+      }),
+    );
+
+    render(<DiffViewerModal />);
+    expect(screen.getByTestId('diff-markdown-preview')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('diff-markdown-source-tab'));
+    expect(screen.getByTestId('diff-file-preview')).toBeTruthy();
+    expect(screen.getByText('markdown')).toBeTruthy();
+  });
+
   it('mobile-web 端：隐藏 IDE 专属按钮，切换危险权限先弹确认框，390px 下使用 Sheet 会话抽屉', () => {
     window.innerWidth = 390;
     render(<App />);

@@ -28,6 +28,7 @@ const detail: ContextDetail = {
   session: { input: 9_620, output: 21_400, cacheRead: 118_000, cacheWrite: 12_900 },
   requests: 14,
   cost: { amount: 1.284, currency: 'USD' },
+  performance: { ttftMs: 1_240, tokensPerSec: 68.4, durationMs: 4_820 },
 };
 
 describe('上下文圆环用量明细', () => {
@@ -61,7 +62,26 @@ describe('上下文圆环用量明细', () => {
     expect(body.textContent).toContain('缓存写入');
     expect(body.textContent).toContain('输出');
     expect(body.textContent).toContain('36.4k / 128.0k tokens');
+    expect(screen.getByTestId('context-detail-cache-rate').textContent).toBe('(82.1%)');
+    expect(screen.getByTestId('context-detail-session-cache-rate').textContent).toBe('84.0%');
+    expect(screen.getByTestId('context-detail-ttft').textContent).toBe('1.2s');
+    expect(screen.getByTestId('context-detail-speed').textContent).toBe('68.4 tok/s');
     expect(screen.getByTestId('context-detail-cost').textContent).toBe('$1.28');
+  });
+
+  it('首字耗时小于 1 秒显示毫秒，仅上报单指标时正常渲染', () => {
+    const fastDetail: ContextDetail = {
+      lastRequest: { input: 100, output: 200, cacheRead: 9_900, cacheWrite: 0 },
+      session: { input: 100, output: 200, cacheRead: 9_900, cacheWrite: 0 },
+      requests: 1,
+      performance: { ttftMs: 480 },
+    };
+    render(createElement(ContextRing, { usage: 0.1, detail: fastDetail }));
+    fireEvent.click(screen.getByTestId('context-ring'));
+
+    expect(screen.getByTestId('context-detail-cache-rate').textContent).toBe('(99.0%)');
+    expect(screen.getByTestId('context-detail-ttft').textContent).toBe('480ms');
+    expect(screen.queryByTestId('context-detail-speed')).toBeNull();
   });
 
   it('首轮请求与会话累计一致时自动去重，只展示一节明细', () => {

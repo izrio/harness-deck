@@ -49,11 +49,11 @@ import { useT, type MessageKey } from '../../i18n.ts';
 import { relativeTime } from '../../lib/time.ts';
 import { cn } from '../../lib/utils.ts';
 import { requestCreateTask, setActiveModule, toggleSettingsPage, useView } from '../../store.ts';
-import { postToHost } from '../../vscode.ts';
+import { loadState, postToHost, saveState } from '../../vscode.ts';
 import { BackendLogo } from '../BackendLogo.tsx';
 import {
   CheckIcon,
-  ClockIcon,
+  ChevronRightIcon,
   CloseIcon,
   FolderIcon,
   FolderTreeIcon,
@@ -68,7 +68,7 @@ import {
   UsersIcon,
 } from '../icons.tsx';
 
-export const SIDEBAR_MODULES = ['overview', 'schedules', 'agents', 'tasks', 'sessions'] as const;
+export const SIDEBAR_MODULES = ['overview', 'tasks', 'agents', 'sessions'] as const;
 export type SidebarModule = (typeof SIDEBAR_MODULES)[number];
 
 type SessionFilter = 'all' | 'running' | 'attention' | 'unread';
@@ -103,7 +103,6 @@ export function WorkbenchSidebar({
   const backends = useView((s) => s.backends);
   const overview = useView((s) => s.workbench.overview);
   const tasks = useView((s) => s.workbench.tasks.items);
-  const schedules = useView((s) => s.workbench.schedules);
   const sessionGroups = useView((s) => s.workbench.sessionGroups);
   const currentModelLabel = useView((s) => {
     const current = s.models.current;
@@ -117,7 +116,10 @@ export function WorkbenchSidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>('all');
-  const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({});
+  const [projectsExpanded, setProjectsExpanded] = useState<boolean>(() => loadState().projectsExpanded ?? false);
+  const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>(() => ({
+    ...(loadState().expandedProjectPaths ?? {}),
+  }));
   const [pendingDelete, setPendingDelete] = useState<GroupedSessionItem | undefined>(undefined);
 
   useEffect(() => {
@@ -128,7 +130,6 @@ export function WorkbenchSidebar({
 
   const overviewBadge = overview.waiting.length + overview.unread.length;
   const tasksActiveCount = tasks.filter((item) => item.status === 'in_progress' || item.status === 'review').length;
-  const schedulesRunning = schedules.some((r) => r.lastStatus === 'running');
 
   const activeBackendId = backends.active;
   const activeBackendName = backends.items.find((b) => b.id === activeBackendId)?.name ?? activeBackendId;
@@ -197,8 +198,20 @@ export function WorkbenchSidebar({
       .filter((entry) => entry.visible);
   }, [effectiveGroups, q, sessionFilter]);
 
+  const toggleProjectsSection = () => {
+    setProjectsExpanded((prev) => {
+      const next = !prev;
+      saveState({ projectsExpanded: next });
+      return next;
+    });
+  };
+
   const toggleGroup = (path: string) => {
-    setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }));
+    setExpandedPaths((prev) => {
+      const next = { ...prev, [path]: !prev[path] };
+      saveState({ expandedProjectPaths: next });
+      return next;
+    });
   };
 
   const onNavKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -220,8 +233,6 @@ export function WorkbenchSidebar({
     switch (mod) {
       case 'overview':
         return <ListIcon className="size-4 shrink-0" />;
-      case 'schedules':
-        return <ClockIcon className="size-4 shrink-0" />;
       case 'agents':
         return <UsersIcon className="size-4 shrink-0" />;
       case 'tasks':
@@ -239,7 +250,7 @@ export function WorkbenchSidebar({
   };
 
   const renderSidebarInner = (onPicked?: () => void) => (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       {/* 顶部工作台模块导航（总览 / 定时 / 智能体 / 任务 / 项目） */}
       <div
         role="tablist"
@@ -294,13 +305,6 @@ export function WorkbenchSidebar({
                   >
                     {overviewBadge}
                   </span>
-                ) : null}
-
-                {mod === 'schedules' && schedulesRunning ? (
-                  <span
-                    className="ml-auto size-1.5 rounded-full bg-brand"
-                    style={{ animation: 'pulse 1.4s ease-in-out infinite' }}
-                  />
                 ) : null}
 
                 {mod === 'tasks' && tasksActiveCount > 0 ? (
@@ -427,6 +431,26 @@ export function WorkbenchSidebar({
                   >
                     <PlusIcon className="size-3.5" />
                   </Button>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    data-testid="sidebar-projects-toggle"
+                    aria-expanded={projectsExpanded || q.length > 0 || sessionFilter !== 'all'}
+                    aria-label={t('wb.sessions.toggleProjects')}
+                    title={t('wb.sessions.toggleProjects')}
+                    className="text-ink-2 hover:bg-hover-2 hover:text-ink"
+                    onClick={toggleProjectsSection}
+                  >
+                    <ChevronRightIcon
+                      data-testid="sidebar-projects-chevron"
+                      className={cn(
+                        'size-3.5 transition-transform duration-150',
+                        (projectsExpanded || q.length > 0 || sessionFilter !== 'all') && 'rotate-90',
+                      )}
+                    />
+                  </Button>
                 </div>
               ) : null}
             </div>
@@ -488,37 +512,46 @@ export function WorkbenchSidebar({
         </div>
       ) : null}
 
-      {/* 项目会话树：直接承接在「项目」导航项下方，按项目分组 */}
+      {/* 项目会话树：直接承接在「项目」大菜单下方，受「项目」大菜单展开/收起控制 */}
       <SidebarContent className="gap-1 px-2.5 pt-0.5 pb-3">
-        {effectiveGroups.length === 0 ? (
-          <div className="px-2.5 py-4 text-[12px] text-ink-3">{t('wb.sessions.noSessions')}</div>
-        ) : visibleGroups.length === 0 ? (
-          <div className="px-2.5 py-6 text-center text-[12px] text-ink-3">{t('header.noMatch')}</div>
-        ) : (
-          visibleGroups.map(({ group, filteredSessions }) => (
-            <ProjectSessionGroupBlock
-              key={group.projectPath || '__no_project__'}
-              group={group}
-              filteredSessions={filteredSessions}
-              collapsed={Boolean(collapsedPaths[group.projectPath || '__no_project__'])}
-              hasFilter={q.length > 0 || sessionFilter !== 'all'}
-              currentSessionId={currentSessionId}
-              activeBackendId={activeBackendId}
-              isSessionsModule={activeModule === 'sessions' && !settingsOpen}
-              currentModelLabel={currentModelLabel}
-              remoteReadOnly={remoteReadOnly}
-              onToggle={() => toggleGroup(group.projectPath || '__no_project__')}
-              onRequestDelete={setPendingDelete}
-              {...(onPicked ? { onPicked } : {})}
-            />
-          ))
-        )}
+        {projectsExpanded || q.length > 0 || sessionFilter !== 'all' ? (
+          effectiveGroups.length === 0 ? (
+            <div className="px-2.5 py-4 text-[12px] text-ink-3">{t('wb.sessions.noSessions')}</div>
+          ) : visibleGroups.length === 0 ? (
+            <div className="px-2.5 py-6 text-center text-[12px] text-ink-3">{t('header.noMatch')}</div>
+          ) : (
+            visibleGroups.map(({ group, filteredSessions }) => {
+              const groupKey = group.projectPath || '__no_project__';
+              const hasFilter = q.length > 0 || sessionFilter !== 'all';
+              const collapsed = hasFilter ? false : !expandedPaths[groupKey];
+              return (
+                <ProjectSessionGroupBlock
+                  key={groupKey}
+                  group={group}
+                  filteredSessions={filteredSessions}
+                  collapsed={collapsed}
+                  hasFilter={hasFilter}
+                  currentSessionId={currentSessionId}
+                  activeBackendId={activeBackendId}
+                  isSessionsModule={activeModule === 'sessions' && !settingsOpen}
+                  currentModelLabel={currentModelLabel}
+                  remoteReadOnly={remoteReadOnly}
+                  onToggle={() => toggleGroup(groupKey)}
+                  onRequestDelete={setPendingDelete}
+                  {...(onPicked ? { onPicked } : {})}
+                />
+              );
+            })
+          )
+        ) : null}
       </SidebarContent>
 
       {/* 左下角固定设置入口 */}
-      <SidebarFooter className="shrink-0 border-t border-sidebar-border px-2.5 py-2">
-        <button
+      <SidebarFooter className="mt-auto shrink-0 border-t border-sidebar-border px-2.5 py-2">
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           data-testid="settings-button"
           aria-label={t('header.settings')}
           title={t('header.settings')}
@@ -528,15 +561,15 @@ export function WorkbenchSidebar({
             onPicked?.();
           }}
           className={cn(
-            'flex w-full items-center gap-2.5 rounded-control px-2.5 py-2 text-left text-[13px] leading-5 transition-colors duration-100',
+            'w-full justify-start gap-2.5 rounded-control px-2.5 text-[13px] font-normal',
             settingsOpen
-              ? 'bg-surface font-medium text-ink shadow-hairline dark:bg-white/[0.07]'
+              ? 'bg-surface font-medium text-ink shadow-hairline hover:bg-surface dark:bg-white/[0.07]'
               : 'text-ink-2 hover:bg-hover hover:text-ink',
           )}
         >
           <SettingsIcon className="size-4 shrink-0" />
           <span className="truncate">{t('header.settings')}</span>
-        </button>
+        </Button>
       </SidebarFooter>
     </div>
   );
@@ -570,7 +603,7 @@ export function WorkbenchSidebar({
         >
           <div
             className={cn(
-              'h-full w-64 transition-transform duration-[260ms] ease-[var(--ease-drawer)]',
+              'flex h-full min-h-0 w-64 flex-col transition-transform duration-[260ms] ease-[var(--ease-drawer)]',
               panelPresence.shown ? 'translate-x-0' : '-translate-x-full',
             )}
           >
@@ -848,14 +881,15 @@ function SessionListItemRow({
 
       {!isFallback ? (
         <SidebarMenuAction
-          showOnHover
           disabled={!canDelete}
           title={deleteTitle}
           aria-label={deleteTitle}
           data-testid={`delete-session-${session.id}`}
           className={cn(
-            'top-1.5 right-1.5 text-ink-3 opacity-0 hover:bg-hover-2 hover:text-ink focus-visible:opacity-100 group-focus-within/menu-item:opacity-100 disabled:pointer-events-none disabled:opacity-40',
-            canDelete && 'group-hover/menu-item:opacity-100',
+            'top-1.5 right-1.5 text-ink-3 hover:bg-hover-2 hover:text-ink',
+            canDelete
+              ? 'opacity-0 focus-visible:opacity-100 group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100'
+              : 'hidden',
           )}
           onClick={() => onRequestDelete(session)}
         >

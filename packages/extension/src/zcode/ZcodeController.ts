@@ -119,6 +119,7 @@ export class ZcodeController implements ChatBackendController {
   private readonly queues = new Map<string, QueuedPrompt[]>();
   private queueCounter = 0;
   private modelOptions: ModelOption[] = [];
+  private hasRuntimeModelCatalog = false;
   private selectedModel: ZcodePreferredModel | undefined;
   private draftMode = 'auto';
   private agentCommands: CommandView[] = [];
@@ -599,13 +600,15 @@ export class ZcodeController implements ChatBackendController {
     const projection = this.projectionFor(sessionId);
     this.scheduleRender();
     try {
-      await link.request('session/resume', { sessionId }).catch(() => undefined);
+      const resumed = await link.request<Record<string, unknown> | null>('session/resume', { sessionId }).catch(() => null);
+      this.applySessionModelCatalog(resumed);
       await link.request('session/subscribe', { sessionId, deliveryKind: ZCODE_DELIVERY_KIND });
       this.subscribed.add(sessionId);
       const [readState, messagesRes] = await Promise.all([
         link.request<Record<string, unknown> | null>('session/read', { sessionId }).catch(() => null),
         link.request<unknown>('session/messages', { sessionId }).catch(() => undefined),
       ]);
+      this.applySessionModelCatalog(readState);
       projection.applySnapshot(readState, messagesRes);
       if (projection.title) this.remember(sessionId, projection.title);
     } catch (error) {
@@ -634,6 +637,7 @@ export class ZcodeController implements ChatBackendController {
       const projection = this.projectionFor(sessionId);
       if (created && typeof created === 'object') {
         projection.applyMetadata(created);
+        this.applySessionModelCatalog(created);
       }
       if (this.draftMode !== 'auto') {
         projection.mode = this.draftMode;
@@ -649,7 +653,8 @@ export class ZcodeController implements ChatBackendController {
 
   private async ensureSessionActive(link: ZcodeLink, sessionId: string): Promise<void> {
     if (this.subscribed.has(sessionId)) return;
-    await link.request('session/resume', { sessionId }).catch(() => undefined);
+    const resumed = await link.request<Record<string, unknown> | null>('session/resume', { sessionId }).catch(() => null);
+    this.applySessionModelCatalog(resumed);
     await link.request('session/subscribe', { sessionId, deliveryKind: ZCODE_DELIVERY_KIND });
     this.subscribed.add(sessionId);
   }
@@ -700,7 +705,12 @@ export class ZcodeController implements ChatBackendController {
       link.request<unknown>('skills/list', {}).catch(() => undefined),
     ]);
     const parsedModels = parseZcodeModels(modelsRes);
-    this.modelOptions = parsedModels.length > 0 ? parsedModels : fallbackGlmModels();
+    if (parsedModels.length > 0) {
+      this.modelOptions = parsedModels;
+      this.hasRuntimeModelCatalog = true;
+    } else if (!this.hasRuntimeModelCatalog && this.modelOptions.length === 0) {
+      this.modelOptions = fallbackGlmModels();
+    }
     if (!this.selectedModel && this.modelOptions[0]) {
       const first = this.modelOptions[0];
       this.selectedModel = {
@@ -802,6 +812,9 @@ export class ZcodeController implements ChatBackendController {
           }))
         : undefined;
 
+    const resolvedEffort = this.selectedModel
+      ? this.resolveReasoningLevel(this.selectedModel.provider, this.selectedModel.model, this.selectedModel.effort)
+      : undefined;
     const sendParams: Record<string, unknown> = {
       sessionId,
       content: wireText,
@@ -811,7 +824,7 @@ export class ZcodeController implements ChatBackendController {
             modelSelection: {
               providerId: this.selectedModel.provider,
               modelId: this.selectedModel.model,
-              ...(this.selectedModel.effort ? { options: { reasoningLevel: this.selectedModel.effort } } : {}),
+              ...(resolvedEffort ? { options: { reasoningLevel: resolvedEffort } } : {}),
             },
           }
         : {}),
@@ -819,6 +832,17 @@ export class ZcodeController implements ChatBackendController {
 
     try {
       await this.ensureSessionActive(link, sessionId);
+      // ensureSessionActive 可能刚刚从 session/resume 拿到完整的模型与默认思考档位目录，发消息前补全一次 reasoningLevel
+      if (this.selectedModel && !resolvedEffort) {
+        const refreshedEffort = this.resolveReasoningLevel(
+          this.selectedModel.provider,
+          this.selectedModel.model,
+          this.selectedModel.effort,
+        );
+        if (refreshedEffort && sendParams.modelSelection && typeof sendParams.modelSelection === 'object') {
+          (sendParams.modelSelection as Record<string, unknown>).options = { reasoningLevel: refreshedEffort };
+        }
+      }
       try {
         await link.request('session/send', sendParams);
       } catch (error) {
@@ -900,23 +924,72 @@ export class ZcodeController implements ChatBackendController {
 
   // ---------------------------------------------------------------- 模型与模式
 
+  private applySessionModelCatalog(raw: unknown): void {
+    const parsed = parseZcodeSessionModels(raw);
+    if (parsed.length === 0) return;
+    this.modelOptions = parsed;
+    this.hasRuntimeModelCatalog = true;
+    if (!this.selectedModel) {
+      const bound = this.options.boundProvider?.();
+      const preferred =
+        (bound
+          ? parsed.find((o) => o.provider === bound.id && (!bound.defaultModel || o.model === bound.defaultModel)) ??
+            parsed.find((o) => o.provider === bound.id)
+          : undefined) ?? parsed[0];
+      if (preferred) {
+        this.selectedModel = {
+          provider: preferred.provider,
+          model: preferred.model,
+          ...(preferred.defaultEffort ? { effort: preferred.defaultEffort } : {}),
+        };
+      }
+    } else if (!this.selectedModel.effort) {
+      const matched = parsed.find((o) => o.provider === this.selectedModel?.provider && o.model === this.selectedModel?.model);
+      if (matched?.defaultEffort) {
+        this.selectedModel = { ...this.selectedModel, effort: matched.defaultEffort };
+      }
+    }
+    this.scheduleRender();
+  }
+
+  private resolveReasoningLevel(provider: string, model: string, explicitEffort?: string): string | undefined {
+    const matched = this.modelOptions.find((o) => o.provider === provider && o.model === model);
+    if (explicitEffort) {
+      if (!matched || matched.efforts.length === 0 || matched.efforts.some((e) => e.id === explicitEffort)) {
+        return explicitEffort;
+      }
+    }
+    return matched?.defaultEffort ?? matched?.efforts[0]?.id ?? explicitEffort;
+  }
+
   private buildModelState(): ModelState {
     const bound = this.options.boundProvider?.();
+    const runtimeByKey = new Map(this.modelOptions.map((o) => [`${o.provider}/${o.model}`, o] as const));
     const boundOpts: ModelOption[] =
       bound && bound.models.length > 0
         ? bound.models.map((m) => {
-            const efforts = (m.efforts ?? []).map((e) => ({ id: e, name: e }));
+            const runtimeMatch = runtimeByKey.get(`${bound.id}/${m.id}`);
+            const configuredEfforts = (m.efforts ?? []).map((e) => ({ id: e, name: e }));
+            const efforts = configuredEfforts.length > 0 ? configuredEfforts : (runtimeMatch?.efforts ?? []);
+            const defaultEffort =
+              configuredEfforts.length > 0
+                ? configuredEfforts[0]?.id
+                : (runtimeMatch?.defaultEffort ?? efforts[0]?.id);
             return {
               provider: bound.id,
               model: m.id,
               name: m.name || m.id,
               group: bound.name,
               efforts,
-              ...(efforts[0] ? { defaultEffort: efforts[0].id } : {}),
+              ...(defaultEffort ? { defaultEffort } : {}),
             };
           })
         : [];
-    const options = boundOpts.length > 0 ? [...boundOpts, ...this.modelOptions] : this.modelOptions;
+    const boundKeys = new Set(boundOpts.map((o) => `${o.provider}/${o.model}`));
+    const extraRuntimeOpts = this.hasRuntimeModelCatalog
+      ? this.modelOptions.filter((o) => !boundKeys.has(`${o.provider}/${o.model}`))
+      : [];
+    const options = boundOpts.length > 0 ? [...boundOpts, ...extraRuntimeOpts] : this.modelOptions;
     if (options.length === 0) return { options: [] };
     const defaultFromBound: ZcodePreferredModel | undefined =
       bound && (bound.defaultModel || bound.models[0]?.id)
@@ -924,6 +997,7 @@ export class ZcodeController implements ChatBackendController {
         : undefined;
     const fallbackFirst: ZcodePreferredModel = { provider: options[0]!.provider, model: options[0]!.model };
     const current: ZcodePreferredModel = this.selectedModel ?? defaultFromBound ?? fallbackFirst;
+    const resolvedEffort = this.resolveReasoningLevel(current.provider, current.model, current.effort);
     const exists = options.some((o) => o.provider === current.provider && o.model === current.model);
     const mergedOptions = exists
       ? options
@@ -933,7 +1007,7 @@ export class ZcodeController implements ChatBackendController {
       current: {
         provider: current.provider,
         model: current.model,
-        ...(current.effort ? { reasoningEffort: current.effort } : {}),
+        ...(resolvedEffort ? { reasoningEffort: resolvedEffort } : {}),
       },
     };
   }
@@ -943,7 +1017,8 @@ export class ZcodeController implements ChatBackendController {
     if (bound && provider === bound.id) {
       this.options.onProviderModelSelected?.(bound.id, model);
     }
-    this.selectedModel = { provider, model, ...(effort ? { effort } : {}) };
+    const resolvedEffort = this.resolveReasoningLevel(provider, model, effort);
+    this.selectedModel = { provider, model, ...(resolvedEffort ? { effort: resolvedEffort } : {}) };
     this.options.savePreferredModel?.(this.selectedModel);
     if (this.activeId && this.link) {
       await this.link
@@ -952,7 +1027,7 @@ export class ZcodeController implements ChatBackendController {
           model: {
             providerId: provider,
             modelId: model,
-            ...(effort ? { options: { reasoningLevel: effort } } : {}),
+            ...(resolvedEffort ? { options: { reasoningLevel: resolvedEffort } } : {}),
           },
         })
         .catch(() => undefined);
@@ -1293,23 +1368,87 @@ function isSessionEvictedError(error: unknown): boolean {
   return /session is not active|session not active|not found in active/iu.test(msg);
 }
 
+function parseZcodeModelEntry(m: Record<string, unknown> | undefined): ModelOption | undefined {
+  if (!m) return undefined;
+  const ref = m.ref && typeof m.ref === 'object' ? (m.ref as Record<string, unknown>) : undefined;
+  const model =
+    typeof ref?.modelId === 'string'
+      ? ref.modelId
+      : typeof m.id === 'string'
+        ? m.id
+        : typeof m.modelId === 'string'
+          ? m.modelId
+          : typeof m.model === 'string'
+            ? m.model
+            : '';
+  if (!model) return undefined;
+  const provider =
+    typeof ref?.providerId === 'string'
+      ? ref.providerId
+      : typeof m.providerId === 'string'
+        ? m.providerId
+        : typeof m.provider === 'string'
+          ? m.provider
+          : 'zai';
+  const name =
+    typeof m.label === 'string' && m.label
+      ? m.label
+      : typeof m.name === 'string' && m.name
+        ? m.name
+        : model;
+  const group =
+    typeof m.providerLabel === 'string' && m.providerLabel
+      ? m.providerLabel
+      : typeof m.providerName === 'string' && m.providerName
+        ? m.providerName
+        : provider;
+  const desc = typeof m.description === 'string' && m.description ? m.description : undefined;
+  const reasoning = m.reasoning && typeof m.reasoning === 'object' ? (m.reasoning as Record<string, unknown>) : undefined;
+  const rawLevels = Array.isArray(reasoning?.levels) ? (reasoning.levels as Record<string, unknown>[]) : [];
+  const efforts = rawLevels.flatMap((lvl) => {
+    const id = typeof lvl?.value === 'string' ? lvl.value.trim() : typeof lvl?.id === 'string' ? lvl.id.trim() : '';
+    if (!id) return [];
+    const label = typeof lvl?.label === 'string' && lvl.label.trim() ? lvl.label.trim() : id;
+    return [{ id, name: label }];
+  });
+  const defaultEffort =
+    typeof reasoning?.defaultLevel === 'string' && reasoning.defaultLevel.trim()
+      ? reasoning.defaultLevel.trim()
+      : efforts[0]?.id;
+  return {
+    provider,
+    model,
+    name,
+    group,
+    ...(desc ? { description: desc } : {}),
+    efforts,
+    ...(defaultEffort ? { defaultEffort } : {}),
+  };
+}
+
 function parseZcodeModels(raw: unknown): ModelOption[] {
   if (!raw) return [];
   const list = Array.isArray(raw)
     ? (raw as Record<string, unknown>[])
     : raw && typeof raw === 'object'
-      ? ((raw as { models?: unknown; items?: unknown }).models ?? (raw as { items?: unknown }).items)
+      ? ((raw as { models?: unknown; items?: unknown; available?: unknown }).models ??
+        (raw as { items?: unknown }).items ??
+        (raw as { available?: unknown }).available)
       : undefined;
   if (!Array.isArray(list)) return [];
   return (list as Record<string, unknown>[]).flatMap((m): ModelOption[] => {
-    const model = typeof m?.id === 'string' ? m.id : typeof m?.modelId === 'string' ? m.modelId : typeof m?.model === 'string' ? m.model : '';
-    if (!model) return [];
-    const provider = typeof m?.providerId === 'string' ? m.providerId : typeof m?.provider === 'string' ? m.provider : 'zai';
-    const name = typeof m?.name === 'string' && m.name ? m.name : model;
-    const group = typeof m?.providerName === 'string' && m.providerName ? m.providerName : provider;
-    const desc = typeof m?.description === 'string' && m.description ? m.description : undefined;
-    return [{ provider, model, name, group, ...(desc ? { description: desc } : {}), efforts: [] }];
+    const parsed = parseZcodeModelEntry(m);
+    return parsed ? [parsed] : [];
   });
+}
+
+function parseZcodeSessionModels(raw: unknown): ModelOption[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const settings = (raw as { settings?: unknown }).settings;
+  if (!settings || typeof settings !== 'object') return [];
+  const modelSection = (settings as { model?: unknown }).model;
+  if (!modelSection || typeof modelSection !== 'object') return [];
+  return parseZcodeModels(modelSection);
 }
 
 function fallbackGlmModels(): ModelOption[] {

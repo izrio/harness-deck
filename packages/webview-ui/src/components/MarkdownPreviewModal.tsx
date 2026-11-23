@@ -6,7 +6,7 @@ import { useEffect } from 'react';
 import { useT } from '../i18n.ts';
 import { closeMarkdownPreview, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
-import { ArrowLeftIcon, FileIcon, SpinnerIcon } from './icons.tsx';
+import { ArrowLeftIcon, FileTypeIcon, SpinnerIcon } from './icons.tsx';
 import { Markdown } from './Markdown.tsx';
 import { ValuePill } from './beautifului/index.ts';
 import { Button } from '@/components/ui/button';
@@ -44,7 +44,7 @@ export function MarkdownPreviewModal() {
           <span>{t('common.close')}</span>
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <FileIcon className="size-3.5 shrink-0 text-accent-ink" />
+          <FileTypeIcon path={preview.path} className="size-3.5 shrink-0" />
           <span className="truncate text-[13px] font-semibold text-ink">{preview.title}</span>
           <ValuePill className="hidden truncate font-mono text-[10.5px] sm:inline-flex">{preview.path}</ValuePill>
         </div>
