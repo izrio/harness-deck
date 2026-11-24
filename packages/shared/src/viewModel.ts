@@ -695,7 +695,7 @@ export interface ProjectsState {
 // 设置 -> 扩展（技能 Skills + MCP 服务器统一管理）
 // ────────────────────────────────────────────────────────────
 
-/** 从 Git 仓库安装的 Agent Skill（SKILL.md）。 */
+/** 从 Git 仓库或本地目录安装的 Agent Skill（SKILL.md）。 */
 export interface InstalledSkillView {
   /** 唯一标识（规范化目录名）。 */
   readonly id: string;
@@ -703,8 +703,12 @@ export interface InstalledSkillView {
   readonly name: string;
   /** SKILL.md 中的描述。 */
   readonly description: string;
-  /** 来源 Git 仓库地址。 */
+  /** 来源 Git 仓库地址或本地目录路径。 */
   readonly repoUrl: string;
+  /** 来源类型：默认 git，本地导入为 local。 */
+  readonly sourceKind?: 'git' | 'local';
+  /** 本地导入来源标记（如 Claude Code、Codex、本地目录等）。 */
+  readonly importedFrom?: string;
   /** 分支、Tag 或 Commit 引用（可选）。 */
   readonly ref?: string;
   /** 仓库内的相对子目录路径（根目录为空或 undefined）。 */
@@ -731,6 +735,42 @@ export interface DiscoveredGitSkill {
   readonly subpath: string;
 }
 
+/** 从本机各 Agent 技能目录或用户选择的本地目录扫描出的可导入 SKILL.md 候选。 */
+export interface SkillImportCandidate {
+  readonly key: string;
+  readonly name: string;
+  readonly description: string;
+  /** 技能目录绝对路径（内含 SKILL.md）。 */
+  readonly sourceDir: string;
+  readonly sourceAgentId: string;
+  readonly sourceAgentName: string;
+  /** 当前已安装技能列表中是否已存在同 ID 技能。 */
+  readonly conflict?: boolean;
+}
+
+export type SkillMarketCategory = 'dev' | 'frontend' | 'docs' | 'design';
+
+/** 技能市场中的单个可安装技能条目（支持宿主在线实时拉取与离线精选兜底）。 */
+export interface SkillMarketItem {
+  readonly id: string;
+  readonly name: string;
+  readonly repo: string;
+  readonly ref: string;
+  readonly subpath: string;
+  readonly category: SkillMarketCategory;
+  readonly description: string;
+  readonly descZh?: string;
+  readonly descEn?: string;
+}
+
+export interface SkillMarketState {
+  readonly items: readonly SkillMarketItem[];
+  readonly loading?: boolean;
+  readonly source: 'online' | 'fallback';
+  readonly updatedAt?: number;
+  readonly error?: string;
+}
+
 export interface SkillsState {
   readonly items: readonly InstalledSkillView[];
   readonly installing?: boolean;
@@ -740,6 +780,10 @@ export interface SkillsState {
     readonly ref?: string;
     readonly skills: readonly DiscoveredGitSkill[];
   };
+  readonly scanningImport?: boolean;
+  readonly importCandidates?: readonly SkillImportCandidate[];
+  readonly scannedSources?: readonly string[];
+  readonly market?: SkillMarketState;
   readonly error?: string;
 }
 
@@ -787,11 +831,41 @@ export interface McpImportCandidate {
   readonly conflict?: boolean;
 }
 
+export type McpMarketCategory = 'dev' | 'web' | 'data' | 'collab';
+
+/** MCP 市场中的单个服务器条目（来自官方 MCP Registry 实时拉取或离线精选兜底）。 */
+export interface McpMarketItem {
+  readonly id: string;
+  readonly name: string;
+  readonly transport: McpTransport;
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly envKeys?: readonly string[];
+  readonly url?: string;
+  readonly needsConfig?: boolean;
+  readonly category: McpMarketCategory;
+  readonly description: string;
+  readonly descZh?: string;
+  readonly descEn?: string;
+  readonly version?: string;
+  readonly repositoryUrl?: string;
+}
+
+export interface McpMarketState {
+  readonly items: readonly McpMarketItem[];
+  readonly loading?: boolean;
+  readonly source: 'online' | 'fallback';
+  readonly query?: string;
+  readonly updatedAt?: number;
+  readonly error?: string;
+}
+
 export interface McpState {
   readonly servers: readonly McpServerConfig[];
   readonly scanningImport?: boolean;
   readonly importCandidates?: readonly McpImportCandidate[];
   readonly scannedSources?: readonly string[];
+  readonly market?: McpMarketState;
 }
 
 export interface ExtensionsState {
@@ -928,6 +1002,8 @@ export interface GroupedSessionItem {
   readonly agentName?: string;
   /** 该会话最近一次使用的模型显示名；从未上报过模型的会话没有。 */
   readonly model?: string;
+  /** 该会话所在仓库的 Git 分支名（若有）。 */
+  readonly branch?: string;
 }
 
 /** 按项目归组的会话集合。 */
@@ -1375,4 +1451,51 @@ export interface DiffContentData {
   /** 若来自 Git 工作区改动，记录相对路径与暂存态以支持按 Hunk 暂存/撤销。 */
   readonly sourceControlPath?: string;
   readonly staged?: boolean;
+}
+
+/** 右侧面板内置浏览器状态与 AI MCP 连接信息。 */
+export type BrowserStatus = 'stopped' | 'starting' | 'running' | 'error';
+
+export type BrowserViewportPreset = 'responsive' | 'desktop' | 'mobile';
+
+export interface BrowserConsoleEntry {
+  readonly id: number;
+  readonly level: 'log' | 'info' | 'warn' | 'error';
+  readonly text: string;
+  readonly timestamp: number;
+}
+
+export interface BrowserAiActionView {
+  readonly tool: string;
+  readonly summary: string;
+  readonly at: number;
+  readonly x?: number;
+  readonly y?: number;
+}
+
+export interface BrowserState {
+  readonly status: BrowserStatus;
+  readonly url: string;
+  readonly title: string;
+  readonly loading: boolean;
+  readonly canGoBack: boolean;
+  readonly canGoForward: boolean;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly viewportPreset: BrowserViewportPreset;
+  /** 是否自动将内置浏览器作为 MCP 工具注入到 AI 智能体（默认 true）。 */
+  readonly aiEnabled: boolean;
+  /** 本地 MCP HTTP 端点（127.0.0.1），可供外部或 AI 代理连接。 */
+  readonly mcpUrl?: string;
+  /** 本地 CDP 调试地址（如 http://127.0.0.1:9222），支持外部工具直连。 */
+  readonly cdpUrl?: string;
+  /** 当前运行中的浏览器可执行路径或附着的远程地址。 */
+  readonly executablePath?: string;
+  /** 本机自动检测到的浏览器路径。 */
+  readonly detectedExecutable?: string;
+  /** 最近一次 AI 操作浏览器的摘要与坐标（用于在画面上展示操作高亮）。 */
+  readonly lastAiAction?: BrowserAiActionView;
+  /** 最近控制台日志与未捕获异常（环形缓冲）。 */
+  readonly consoleLogs: readonly BrowserConsoleEntry[];
+  readonly error?: string;
 }

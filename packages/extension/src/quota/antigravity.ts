@@ -41,9 +41,10 @@ function geminiDir(env: Readonly<Record<string, string | undefined>>): string {
   return join(env.HOME ?? env.USERPROFILE ?? homedir(), '.gemini');
 }
 
-/** 依次尝试 CLI / IDE 的凭据文件；过期或缺失时跳过。 */
+/** 依次尝试 CLI / IDE 的凭据文件；若 CLI 主凭据文件存在且含有效结构但 access_token 已过期，不回退 IDE 凭据以免多账号切换时串号。 */
 async function readAccessToken(env: Readonly<Record<string, string | undefined>>, now: number): Promise<string | undefined> {
-  for (const file of CREDENTIAL_FILES) {
+  for (let i = 0; i < CREDENTIAL_FILES.length; i += 1) {
+    const file = CREDENTIAL_FILES[i]!;
     let raw: string;
     try {
       raw = await readFile(join(geminiDir(env), file), 'utf8');
@@ -58,9 +59,21 @@ async function readAccessToken(env: Readonly<Record<string, string | undefined>>
     }
     const token = rec(json?.token);
     const accessToken = token?.access_token;
-    if (typeof accessToken !== 'string' || !accessToken.trim()) continue;
+    const refreshToken =
+      (typeof token?.refresh_token === 'string' && token.refresh_token.trim()) ||
+      (typeof token?.refreshToken === 'string' && token.refreshToken.trim()) ||
+      (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
+      (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
+      '';
+    if (typeof accessToken !== 'string' || !accessToken.trim()) {
+      if (i === 0 && refreshToken) return undefined;
+      continue;
+    }
     const expiry = parseEpochMs(token?.expiry);
-    if (expiry !== undefined && expiry <= now) continue;
+    if (expiry !== undefined && expiry <= now) {
+      if (i === 0 && refreshToken) return undefined;
+      continue;
+    }
     return accessToken.trim();
   }
   return undefined;

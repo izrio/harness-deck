@@ -40,7 +40,7 @@ class HarnessDeckLogService(private val project: Project) {
                 }
 
                 init {
-                    title = "Harness Deck Logs"
+                    title = "Halo Logs"
                     init()
                 }
 

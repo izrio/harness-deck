@@ -54,7 +54,7 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
     private val lock = Any()
 
     @Volatile
-    private var statusSnapshot = StatusBarSnapshot("Harness Deck", "idle", null)
+    private var statusSnapshot = StatusBarSnapshot("Halo", "idle", null)
     private var resourceServer: WebviewResourceServer? = null
     private var sidecar: SidecarProcessManager? = null
     private var editorSync: EditorStateSync? = null
@@ -97,7 +97,7 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
     fun focusChatView(): CompletableFuture<Void> {
         val future = CompletableFuture<Void>()
         ApplicationManager.getApplication().invokeLater {
-            val tw = ToolWindowManager.getInstance(project).getToolWindow("Harness Deck")
+            val tw = ToolWindowManager.getInstance(project).getToolWindow("Halo")
             if (tw != null) {
                 tw.activate({ future.complete(null) }, true, true)
             } else {
@@ -135,7 +135,7 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
             val configuredNode = HarnessDeckAppSettings.getInstance().nodeExecutablePath
             val nodeExe = NodeLocator.findNodeExecutable(configuredNode)
             if (nodeExe == null) {
-                val msg = "Node.js (>= 20) executable was not found. Configure it in Settings | Tools | Harness Deck."
+                val msg = "Node.js (>= 20) executable was not found. Configure it in Settings | Tools | Halo."
                 logService.append("host", msg)
                 workbench.showMessage("error", msg, listOf("Open Settings")).thenAccept { action ->
                     if (action == "Open Settings") openHostSettings()
@@ -228,7 +228,7 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
                 fem.openFile(existing, true)
                 return@invokeLater
             }
-            val vf = HarnessDeckWorkbenchVirtualFile(title.ifBlank { "Harness Deck Workbench" })
+            val vf = HarnessDeckWorkbenchVirtualFile(title.ifBlank { "Halo Workbench" })
             workbenchFile = vf
             fem.openFile(vf, true)
         }
@@ -252,14 +252,14 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
                 logService.append(channel, line, stream)
             }
             "ide/openWorkbenchPanel" -> {
-                val title = params.get("title")?.asStringOrNull() ?: "Harness Deck Workbench"
+                val title = params.get("title")?.asStringOrNull() ?: "Halo Workbench"
                 openWorkbenchPanel(title)
             }
             "ide/openHostSettings" -> openHostSettings()
             "ide/showLogs" -> logService.showDialog()
             "ide/progressStart" -> {
                 val progressId = params.get("progressId")?.asStringOrNull() ?: return
-                val title = params.get("title")?.asStringOrNull() ?: "Harness Deck"
+                val title = params.get("title")?.asStringOrNull() ?: "Halo"
                 val latch = CountDownLatch(1)
                 activeProgress[progressId] = latch
                 ProgressManager.getInstance().run(
@@ -395,7 +395,7 @@ class HarnessDeckProjectService(private val project: Project) : Disposable {
                 workbench.openProjectWindow(path).thenApply { JsonObject() }
             }
             "ide/runInTerminal" -> {
-                val name = params.get("name")?.asStringOrNull() ?: "Harness Deck"
+                val name = params.get("name")?.asStringOrNull() ?: "Halo"
                 val cwd = params.get("cwd")?.asStringOrNull() ?: workbench.projectBasePath()
                 val cmds = params.getAsJsonArray("commands")?.map { it.asString } ?: emptyList()
                 val envObj = params.getAsJsonObject("env")

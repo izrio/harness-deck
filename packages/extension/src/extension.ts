@@ -51,6 +51,8 @@ const WATCHED_SETTING_KEYS = [
   'context',
   'context.includeActiveEditor',
   'ui.theme',
+  'ui.preset',
+  'ui.highContrast',
   'ui.fontSize',
   'ui.fontFamily',
   'ui.lineHeight',
@@ -71,6 +73,7 @@ const WATCHED_SETTING_KEYS = [
   'protocolGateway',
   'accounts',
   'backendChannels',
+  'browser.executablePath',
 ] as const;
 
 const ALL_COMMANDS: readonly HostCommandId[] = [
@@ -100,8 +103,8 @@ const ALL_COMMANDS: readonly HostCommandId[] = [
 let runtimeInstance: HarnessHostRuntime | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
-  const output = vscode.window.createOutputChannel('Harness Deck', { log: true });
-  const runtimeOutput = vscode.window.createOutputChannel('Harness Deck: Backend', { log: true });
+  const output = vscode.window.createOutputChannel('Halo', { log: true });
+  const runtimeOutput = vscode.window.createOutputChannel('Halo: Backend', { log: true });
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   status.command = command('openChat');
   context.subscriptions.push(output, runtimeOutput, status);
@@ -343,7 +346,7 @@ function renderStatusBar(item: vscode.StatusBarItem, snap: StatusBarSnapshot): v
   item.show();
 }
 
-/** 改名前的扩展。它和 Harness Deck 是两个扩展 id，没卸载时编辑器右键菜单里还有「DSH」，侧边栏里也多一个面板。 */
+/** 改名前的扩展。它和 Halo 是两个扩展 id，没卸载时编辑器右键菜单里还有「DSH」，侧边栏里也多一个面板。 */
 const OLD_EXTENSION_ID = 'izrio.dsh-copilot';
 
 async function offerUninstallOldExtension(log: (line: string) => void): Promise<void> {

@@ -1,4 +1,4 @@
-# Harness Deck 项目开发规范
+# Halo 项目开发规范
 
 ## 术语
 

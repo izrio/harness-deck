@@ -128,6 +128,14 @@ describe('AccountSettings & ModelPicker channel switching', () => {
     const inactiveDot = screen.getByTestId('account-dot-claude-work');
     expect(inactiveDot.className).toContain('bg-ink-4');
 
+    // 官方/第三方分段切换具备明确的选中态（aria-pressed 与主品牌高亮）
+    const claudeOfficialBtn = screen.getByTestId('channel-official-claude');
+    const claudeProviderBtn = screen.getByTestId('channel-provider-claude');
+    expect(claudeOfficialBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(claudeOfficialBtn.getAttribute('data-variant')).toBe('default');
+    expect(claudeProviderBtn.getAttribute('aria-pressed')).toBe('false');
+    expect(claudeProviderBtn.getAttribute('data-variant')).toBe('ghost');
+
     // Antigravity 为 account-only，服务商按钮置灰
     const agyProviderBtn = screen.getByTestId('channel-provider-antigravity') as HTMLButtonElement;
     expect(agyProviderBtn.disabled).toBe(true);
@@ -153,6 +161,8 @@ describe('AccountSettings & ModelPicker channel switching', () => {
     vscodeMock.reset();
 
     fireEvent.click(screen.getByTestId('add-account-claude'));
+    const backendTrigger = screen.getByTestId('account-form-backend');
+    expect(backendTrigger.querySelector('[data-logo="claude"]')).toBeTruthy();
     const labelInput = screen.getByTestId('account-form-label');
     fireEvent.change(labelInput, { target: { value: '备用号' } });
     fireEvent.click(screen.getByTestId('account-form-save-login'));

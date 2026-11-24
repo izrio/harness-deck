@@ -1,7 +1,7 @@
 {
-  "name": "Harness Deck",
-  "short_name": "Harness Deck",
-  "description": "Remote mobile companion for Harness Deck coding agents",
+  "name": "Halo",
+  "short_name": "Halo",
+  "description": "Remote mobile companion for Halo coding agents",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -514,6 +514,10 @@ describe('HD-25 内嵌 Diff 审阅与无 IDE 弹窗降级', () => {
     expect(screen.getByTestId('mobile-conn-pill')).toBeTruthy();
     expect(screen.queryByTestId('open-workbench-panel-btn')).toBeNull();
 
+    // 移动端底部输入框与上下文状态条保留安全区与额外底边距
+    expect(screen.getByTestId('composer-dock').className).toContain('calc(env(safe-area-inset-bottom,0px)+0.75rem)');
+    expect(screen.getByTestId('composer-footer').className).toContain('pb-3');
+
     // 390px 窄屏使用移动端会话抽屉按钮而非堆叠侧栏
     expect(screen.getByTestId('mobile-sessions-drawer-btn')).toBeTruthy();
     fireEvent.click(screen.getByTestId('mobile-sessions-drawer-btn'));

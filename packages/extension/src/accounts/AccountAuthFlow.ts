@@ -531,7 +531,7 @@ export class AccountAuthFlowManager {
     const envPrefix = buildTerminalEnvPrefix(isolatedEnv);
     const displayCommand = `${envPrefix}${cliCommand}`;
 
-    const termName = `Harness Deck: ${backendName}${account ? ` (${account.label})` : ''}`;
+    const termName = `Halo: ${backendName}${account ? ` (${account.label})` : ''}`;
     try {
       await this.deps.runInTerminal({
         name: termName,

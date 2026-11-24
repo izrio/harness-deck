@@ -1,5 +1,6 @@
-import type { McpServerConfig } from '@harness-deck/shared';
-import { CheckIcon, MoreIcon, PencilIcon, TrashIcon } from '../../icons.tsx';
+import type { BackendView, McpServerConfig } from '@harness-deck/shared';
+import { GlobeIcon, MoreIcon, PencilIcon, TerminalIcon, TrashIcon } from '../../icons.tsx';
+import { BackendLogo } from '../../BackendLogo.tsx';
 import { ValuePill } from '../../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,9 +11,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '../../../lib/utils.ts';
 import { serverSummary } from './mcpParsers.ts';
-import type { BackendView } from '@harness-deck/shared';
 import { useT } from '../../../i18n.ts';
 
 export function McpServerCard({
@@ -33,33 +34,64 @@ export function McpServerCard({
   const t = useT();
   const envCount = server.env ? Object.keys(server.env).length : 0;
   const headerCount = server.headers ? Object.keys(server.headers).length : 0;
+  const summary = serverSummary(server);
+  const isRemote = server.transport !== 'stdio';
+
   return (
     <div
       className={cn(
-        'flex flex-col gap-1.5 px-3.5 py-3 transition-colors hover:bg-hover/35',
-        server.enabled ? '' : 'opacity-70',
+        'flex flex-col gap-2 rounded-xl border border-line/75 bg-surface/80 px-4 py-3.5 shadow-xs transition-colors hover:border-line-strong dark:bg-surface/75',
+        server.enabled ? '' : 'opacity-65',
       )}
       data-testid={`mcp-server-${server.id}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-mono text-[13px] font-semibold text-ink">{server.name}</span>
-            <ValuePill tone="accent" className="font-mono text-[10px] uppercase">
-              {server.transport}
-            </ValuePill>
-            {server.importedFrom ? (
-              <ValuePill className="text-[10.5px]">
-                {t('settings.mcp.importedFrom', server.importedFrom)}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+          <div
+            className={cn(
+              'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border',
+              isRemote
+                ? 'border-brand/25 bg-accent-tint/70 text-accent-ink'
+                : 'border-line/70 bg-field text-ink-2',
+            )}
+            aria-hidden="true"
+          >
+            {isRemote ? <GlobeIcon className="size-3.5" /> : <TerminalIcon className="size-3.5" />}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="truncate font-mono text-[13px] font-semibold text-ink">
+                {server.name}
+              </span>
+              <ValuePill
+                tone={isRemote ? 'accent' : 'neutral'}
+                className="font-mono text-[10px] uppercase"
+              >
+                {server.transport}
               </ValuePill>
-            ) : null}
-            {envCount > 0 ? (
-              <ValuePill className="text-[10.5px]">{t('settings.mcp.envCount', envCount)}</ValuePill>
-            ) : null}
-            {headerCount > 0 ? (
-              <ValuePill className="text-[10.5px]">
-                {t('settings.mcp.headerCount', headerCount)}
-              </ValuePill>
+              {server.importedFrom ? (
+                <ValuePill className="text-[10.5px]">
+                  {t('settings.mcp.importedFrom', server.importedFrom)}
+                </ValuePill>
+              ) : null}
+              {envCount > 0 ? (
+                <ValuePill className="text-[10.5px]">{t('settings.mcp.envCount', envCount)}</ValuePill>
+              ) : null}
+              {headerCount > 0 ? (
+                <ValuePill className="text-[10.5px]">
+                  {t('settings.mcp.headerCount', headerCount)}
+                </ValuePill>
+              ) : null}
+            </div>
+
+            {summary ? (
+              <div
+                className="mt-0.5 truncate font-mono text-[11.5px] text-ink-3"
+                title={summary}
+              >
+                {summary}
+              </div>
             ) : null}
           </div>
         </div>
@@ -110,33 +142,48 @@ export function McpServerCard({
         </div>
       </div>
 
-      <div className="truncate font-mono text-[11.5px] text-ink-3">{serverSummary(server)}</div>
-
-      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-        <span className="text-[11px] text-ink-3">{t('settings.mcp.agentsLabel')}</span>
-        {agents.map((agent) => {
-          const selected = server.agents.includes(agent.id);
-          return (
-            <button
-              key={agent.id}
-              type="button"
-              data-testid={`mcp-agent-${server.id}-${agent.id}`}
-              onClick={() => toggleServerAgent(server, agent.id)}
-              className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2 py-0.5 text-[11px] transition-colors ${
-                selected
-                  ? 'border-brand bg-accent-tint font-medium text-accent-ink'
-                  : 'border-line bg-surface text-ink-3 hover:bg-hover'
-              }`}
-            >
-              {selected ? <CheckIcon className="size-2.5" /> : null}
-              <span>{agent.name}</span>
-            </button>
-          );
-        })}
-        {server.agents.length === 0 ? (
-          <span className="text-[11px] text-ink-4">{t('settings.mcp.noAgentsSelected')}</span>
-        ) : null}
-      </div>
+      <TooltipProvider delayDuration={150}>
+        <div className="flex flex-wrap items-center gap-1.5 sm:pl-10.5">
+          <span className="mr-0.5 text-[11px] text-ink-3">{t('settings.mcp.agentsLabel')}</span>
+          {agents.map((agent) => {
+            const selected = server.agents.includes(agent.id);
+            return (
+              <Tooltip key={agent.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid={`mcp-agent-${server.id}-${agent.id}`}
+                    aria-label={agent.name}
+                    aria-pressed={selected}
+                    title={agent.name}
+                    onClick={() => toggleServerAgent(server, agent.id)}
+                    className={cn(
+                      'relative inline-flex size-7 cursor-pointer items-center justify-center rounded-md border transition-all',
+                      selected
+                        ? 'border-brand/70 bg-accent-tint/90 ring-1 ring-inset ring-brand/20'
+                        : 'border-line/60 bg-field/45 opacity-45 grayscale hover:border-line-strong hover:bg-hover hover:opacity-90 hover:grayscale-0',
+                    )}
+                  >
+                    <BackendLogo backend={agent} size="sm" />
+                    {selected ? (
+                      <span
+                        className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-brand ring-1 ring-surface"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="px-2 py-1 text-[11px]">
+                  {agent.name}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+          {server.agents.length === 0 ? (
+            <span className="ml-1 text-[11px] text-ink-4">{t('settings.mcp.noAgentsSelected')}</span>
+          ) : null}
+        </div>
+      </TooltipProvider>
     </div>
   );
 }

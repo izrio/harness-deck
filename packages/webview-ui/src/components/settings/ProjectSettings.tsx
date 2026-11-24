@@ -268,7 +268,6 @@ export function ProjectSettings() {
           <div className="primitive-card-pad flex flex-col gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.copyFiles')}</span>
-              <span className="text-[11.5px] text-ink-3">{t('settings.projects.copyFilesHint')}</span>
               <Textarea
                 data-testid="project-copy-files"
                 rows={3}
@@ -282,7 +281,6 @@ export function ProjectSettings() {
 
             <label className="flex flex-col gap-1">
               <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.setupCommands')}</span>
-              <span className="text-[11.5px] text-ink-3">{t('settings.projects.setupCommandsHint')}</span>
               <Textarea
                 data-testid="project-setup-commands"
                 rows={2}
@@ -296,7 +294,6 @@ export function ProjectSettings() {
 
             <label className="flex flex-col gap-1">
               <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.verifyCommands')}</span>
-              <span className="text-[11.5px] text-ink-3">{t('settings.projects.verifyCommandsHint')}</span>
               <Textarea
                 data-testid="project-verify-commands"
                 rows={2}

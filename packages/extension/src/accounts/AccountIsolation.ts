@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { AccountConfig, AccountRegion } from '@harness-deck/shared';
 import type { SecretStore } from '../host/HostPlatform.ts';
+import { parseEpochMs, rec, type Rec } from '../quota/util.ts';
 import {
   accountApiKeySecretKey,
   accountCookieSecretKey,
@@ -264,6 +265,95 @@ export async function switchCodebuddyCredentialSlot(params: {
   return { activated: false, hasStoredSlot: false };
 }
 
+function decodeJwtEmailUnsafe(jwt: unknown): string | undefined {
+  if (typeof jwt !== 'string') return undefined;
+  const parts = jwt.trim().split('.');
+  if (parts.length < 2 || !parts[1]) return undefined;
+  try {
+    const normalized = parts[1].replace(/-/gu, '+').replace(/_/gu, '/');
+    const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    const decoded = Buffer.from(`${normalized}${pad}`, 'base64').toString('utf8');
+    const payload: Rec | undefined = rec(JSON.parse(decoded));
+    return typeof payload?.email === 'string' && payload.email.trim() ? payload.email.trim().toLowerCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseAntigravityTokenMeta(raw: string): {
+  readonly refreshToken?: string;
+  readonly email?: string;
+  readonly expiryMs?: number;
+} {
+  try {
+    const json = rec(JSON.parse(raw));
+    const token = rec(json?.token);
+    const refreshToken =
+      (typeof token?.refresh_token === 'string' && token.refresh_token.trim()) ||
+      (typeof token?.refreshToken === 'string' && token.refreshToken.trim()) ||
+      (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
+      (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
+      undefined;
+    const email =
+      (typeof json?.email === 'string' && json.email.trim().toLowerCase()) ||
+      decodeJwtEmailUnsafe(token?.id_token ?? json?.id_token) ||
+      undefined;
+    const expiryMs = parseEpochMs(token?.expiry);
+    return {
+      ...(refreshToken ? { refreshToken } : {}),
+      ...(email ? { email } : {}),
+      ...(expiryMs !== undefined ? { expiryMs } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** 判断两份 Antigravity OAuth 凭据是否属于同一账号（避免把其他账号的磁盘凭据串写到当前槽位）。 */
+export function antigravityTokensSameAccount(a: string, b: string): boolean {
+  const fa = parseAntigravityTokenMeta(a);
+  const fb = parseAntigravityTokenMeta(b);
+  if (fa.refreshToken && fb.refreshToken && fa.refreshToken !== fb.refreshToken) return false;
+  if (fa.email && fb.email && fa.email !== fb.email) return false;
+  return true;
+}
+
+/** 判断 candidate 是否不比 existing 更旧（避免用已过期的旧快照倒灌覆盖磁盘上已被 CLI 续期的新 token）。 */
+function isNotOlderAntigravityToken(candidate: string, existing: string): boolean {
+  const candidateExp = parseAntigravityTokenMeta(candidate).expiryMs;
+  const existingExp = parseAntigravityTokenMeta(existing).expiryMs;
+  if (candidateExp !== undefined && existingExp !== undefined) {
+    return candidateExp >= existingExp;
+  }
+  return true;
+}
+
+/** 若磁盘上的 Antigravity 凭据与当前激活槽位同账号且更新，则同步回 SecretStorage。 */
+export async function syncActiveAntigravitySlotFromDisk(params: {
+  readonly accountId: string;
+  readonly secrets: SecretStore;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+}): Promise<void> {
+  const { accountId, secrets, env } = params;
+  const diskRaw = await readAntigravityDiskTokenRaw(env);
+  if (!diskRaw?.trim()) return;
+  const slotKey = accountSlotSecretKey(accountId);
+  const existingRaw = await secrets.get(slotKey);
+  if (existingRaw?.trim()) {
+    if (
+      diskRaw.trim() !== existingRaw.trim() &&
+      antigravityTokensSameAccount(existingRaw, diskRaw) &&
+      isNotOlderAntigravityToken(diskRaw, existingRaw)
+    ) {
+      await secrets.store(slotKey, diskRaw);
+    }
+    return;
+  }
+  if (isSystemAccountId(accountId)) {
+    await secrets.store(slotKey, diskRaw);
+  }
+}
+
 /** 备份本机当前 Antigravity 凭据到对应槽位，再激活目标账号槽位。 */
 export async function switchAntigravityCredentialSlot(params: {
   readonly targetAccountId: string;
@@ -274,29 +364,43 @@ export async function switchAntigravityCredentialSlot(params: {
   const { targetAccountId, previousAccountId, secrets, env } = params;
   const sysId = systemAccountId('antigravity');
 
-  // 1. 先把当前磁盘凭据写回上一个激活槽位（若尚未记录，兜底备份到系统默认槽位，避免丢失用户原始登录）
+  // 1. 先把当前磁盘凭据写回上一个激活槽位（若尚未记录，兜底备份到系统默认槽位，避免丢失用户原始登录；
+  //    同一槽位重激活时若磁盘凭据已被 CLI 续期得更新，则同步回 SecretStorage 并保留磁盘文件，避免旧快照倒灌）
   const currentDisk = await readAntigravityDiskTokenRaw(env);
-  if (currentDisk) {
+  if (currentDisk?.trim()) {
     const ownerId = previousAccountId || sysId;
+    const existingOwner = await secrets.get(accountSlotSecretKey(ownerId));
     if (ownerId !== targetAccountId) {
-      await secrets.store(accountSlotSecretKey(ownerId), currentDisk);
-    } else if (ownerId === sysId) {
-      const existingSys = await secrets.get(accountSlotSecretKey(sysId));
-      if (!existingSys) {
-        await secrets.store(accountSlotSecretKey(sysId), currentDisk);
+      const canSaveToOwner = existingOwner?.trim()
+        ? antigravityTokensSameAccount(existingOwner, currentDisk) && isNotOlderAntigravityToken(currentDisk, existingOwner)
+        : ownerId === sysId;
+      if (canSaveToOwner && currentDisk.trim() !== existingOwner?.trim()) {
+        await secrets.store(accountSlotSecretKey(ownerId), currentDisk);
       }
+    } else if (existingOwner?.trim()) {
+      if (antigravityTokensSameAccount(existingOwner, currentDisk) && isNotOlderAntigravityToken(currentDisk, existingOwner)) {
+        if (currentDisk.trim() !== existingOwner.trim()) {
+          await secrets.store(accountSlotSecretKey(targetAccountId), currentDisk);
+        }
+        return { activated: true, hasStoredSlot: true };
+      }
+    } else if (ownerId === sysId) {
+      await secrets.store(accountSlotSecretKey(sysId), currentDisk);
+      return { activated: true, hasStoredSlot: true };
     }
   }
 
   // 2. 读取目标槽位并激活到磁盘
   const targetRaw = await secrets.get(accountSlotSecretKey(targetAccountId));
   if (targetRaw?.trim()) {
-    await writeAntigravityDiskTokenRaw(targetRaw, env);
+    if (currentDisk?.trim() !== targetRaw.trim()) {
+      await writeAntigravityDiskTokenRaw(targetRaw, env);
+    }
     return { activated: true, hasStoredSlot: true };
   }
 
   // 目标是系统默认账号且磁盘已有凭据时，视为已激活
-  if (targetAccountId === sysId && currentDisk) {
+  if (targetAccountId === sysId && currentDisk?.trim()) {
     await secrets.store(accountSlotSecretKey(sysId), currentDisk);
     return { activated: true, hasStoredSlot: true };
   }

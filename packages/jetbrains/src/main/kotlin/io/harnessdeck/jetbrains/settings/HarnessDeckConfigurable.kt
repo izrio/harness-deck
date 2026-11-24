@@ -12,13 +12,13 @@ import javax.swing.JPanel
 class HarnessDeckConfigurable : Configurable {
     private var nodePathField: TextFieldWithBrowseButton? = null
 
-    override fun getDisplayName(): String = "Harness Deck"
+    override fun getDisplayName(): String = "Halo"
 
     override fun createComponent(): JComponent {
         val field = TextFieldWithBrowseButton().apply {
             addBrowseFolderListener(
                 "Select Node.js Executable",
-                "Path to Node.js (>= 20) executable used by Harness Deck sidecar",
+                "Path to Node.js (>= 20) executable used by Halo sidecar",
                 null,
                 FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor(),
             )

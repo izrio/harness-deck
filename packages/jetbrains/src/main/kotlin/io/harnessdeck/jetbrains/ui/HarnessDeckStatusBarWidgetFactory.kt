@@ -13,7 +13,7 @@ import java.awt.event.MouseEvent
 class HarnessDeckStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun getId(): String = WIDGET_ID
 
-    override fun getDisplayName(): String = "Harness Deck"
+    override fun getDisplayName(): String = "Halo"
 
     override fun isAvailable(project: Project): Boolean = true
 
@@ -30,7 +30,7 @@ private class HarnessDeckStatusBarWidget(private val project: Project) :
 
     private var statusBar: StatusBar? = null
     @Volatile
-    private var snapshot: StatusBarSnapshot = StatusBarSnapshot("Harness Deck", "idle", null)
+    private var snapshot: StatusBarSnapshot = StatusBarSnapshot("Halo", "idle", null)
 
     override fun ID(): String = HarnessDeckStatusBarWidgetFactory.WIDGET_ID
 
@@ -73,7 +73,7 @@ private class HarnessDeckStatusBarWidget(private val project: Project) :
     override fun getAlignment(): Float = 0.0f
 
     override fun getTooltipText(): String =
-        "Harness Deck: ${snapshot.backendName} (${snapshot.statusKind}) — Click to open chat"
+        "Halo: ${snapshot.backendName} (${snapshot.statusKind}) — Click to open chat"
 
     override fun getClickConsumer(): Consumer<MouseEvent> = Consumer {
         project.getService(HarnessDeckProjectService::class.java).focusChatView()

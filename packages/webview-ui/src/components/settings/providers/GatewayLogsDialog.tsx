@@ -22,7 +22,7 @@ export function GatewayLogsDialog({
       <DialogContent className="sm:max-w-2xl" data-testid="provider-gateway-logs-dialog">
         <DialogHeader>
           <DialogTitle>{t('settings.providers.gatewayLogsTitle')}</DialogTitle>
-          <DialogDescription>{t('settings.providers.gatewayLogsDesc')}</DialogDescription>
+          <DialogDescription className="sr-only">{t('settings.providers.gatewayLogsDesc')}</DialogDescription>
         </DialogHeader>
 
         <div className="flex max-h-[55vh] min-w-0 flex-col gap-2 overflow-y-auto pr-1">

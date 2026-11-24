@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.harnessdeck"
-version = "0.14.0"
+version = "0.15.0"
 
 repositories {
     mavenCentral()
@@ -59,7 +59,7 @@ tasks.named("processResources") {
 intellijPlatform {
     pluginConfiguration {
         id = "io.github.izrio.harnessdeck"
-        name = "Harness Deck"
+        name = "Halo"
         version = project.version.toString()
         description = """
             Multi-backend AI coding agent deck for JetBrains IDEs (IntelliJ IDEA, WebStorm, PyCharm, GoLand, Rider, etc.):

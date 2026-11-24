@@ -1,12 +1,12 @@
 # Design Tokens: Colors, Surfaces, Glass & Grain
 
-Extracted from `t3code` (`apps/web/src/index.css` and `packages/shared/src/themePalettes.ts`) and mapped onto Harness Deck's token architecture (`packages/webview-ui/src/styles/beautifului-foundation.css`).
+Core design tokens for **Halo** (`packages/webview-ui/src/styles/beautifului-foundation.css`).
 
 ## 1. Core Default Palettes (Light & Dark)
 
 ### Light Theme — "Quiet Zinc"
 
-| Role | T3 Code Value | Visual Purpose | Harness Deck Token |
+| Role | Halo Value | Visual Purpose | Halo Token |
 | --- | --- | --- | --- |
 | Canvas / Chrome / Toolbar | `#fcfcfc` (`zinc-25`) | Ultra-clean off-white page backdrop | `--canvas` / `--page` |
 | Sidebar | `#fafafa` (`zinc-50`) | One subtle step cooler than canvas; row hover `#fcfcfc`, selected `#ffffff` | `--inset` / `--sidebar` |
@@ -21,9 +21,9 @@ Extracted from `t3code` (`apps/web/src/index.css` and `packages/shared/src/theme
 
 ### Dark Theme — "Cool Slate + Soft Hairlines"
 
-Harness Deck adapts T3 Code's dark polarity to a softer, layered **cool slate-gray** palette (avoiding harsh `#000000` / `#0a0a0a` OLED black in IDE sidebars) while keeping crisp elevation steps and 1px hairline separation:
+Halo adapts Halo's dark polarity to a softer, layered **cool slate-gray** palette (avoiding harsh `#000000` / `#0a0a0a` OLED black in IDE sidebars) while keeping crisp elevation steps and 1px hairline separation:
 
-| Role | Harness Deck Value | Visual Purpose | Harness Deck Token |
+| Role | Halo Value | Visual Purpose | Halo Token |
 | --- | --- | --- | --- |
 | Page Backdrop | `oklch(0.198 0.007 264)` | Deep slate-gray outer backdrop | `--page` |
 | Canvas / Chrome / Toolbar | `oklch(0.222 0.008 264)` | Soft dark slate-gray main reading/chat surface (avoids harsh `#000`) | `--canvas` |
@@ -38,7 +38,7 @@ Harness Deck adapts T3 Code's dark polarity to a softer, layered **cool slate-gr
 
 ## 2. Frosted Glass Surfaces (`surface-glass`, `dialog-glass`, `dropdown-glass`)
 
-T3 Code uses translucent frosted glass on floating chrome, attached composer banners, dialogs, and popovers, with automatic solid fallbacks:
+Halo uses translucent frosted glass on floating chrome, attached composer banners, dialogs, and popovers, with automatic solid fallbacks:
 
 ```css
 :root {
@@ -80,7 +80,7 @@ Instead of heavy blurred shadows on buttons/inputs, use 1px top/bottom highlight
 
 ## 4. Micro-Grain Surface Texture (`surface-grain`)
 
-T3 Code applies an ultra-subtle tactile grain directly on `body` and floating chrome surfaces (never as a fixed full-screen overlay, avoiding GPU re-blending on animations):
+Halo applies an ultra-subtle tactile grain directly on `body` and floating chrome surfaces (never as a fixed full-screen overlay, avoiding GPU re-blending on animations):
 
 ```css
 :root {
@@ -92,11 +92,11 @@ T3 Code applies an ultra-subtle tactile grain directly on `body` and floating ch
 
 ## 5. Curated OKLCH Editorial Theme Seeds
 
-T3 Code defines 5 curated OKLCH themes (`T3 Chat`, `Grove`, `Ocean`, `Ember`, `Iris`) for users who want tinted drafting-paper or deep-ink workspaces:
+Halo defines 5 curated OKLCH themes (`Rose`, `Grove`, `Ocean`, `Ember`, `Iris`) for users who want tinted drafting-paper or deep-ink workspaces:
 
 | Theme | Vibe | Light Canvas | Dark Canvas | Light Accent / Action | Dark Accent / Action |
 | --- | --- | --- | --- | --- | --- |
-| **T3 Chat** | Rose vellum / plum ink | `oklch(0.982 0.010 325.7)` | `oklch(0.228 0.020 307.5)` | `oklch(0.592 0.218 0.6)` | `oklch(0.461 0.185 4.1)` |
+| **Rose** | Rose vellum / plum ink | `oklch(0.982 0.010 325.7)` | `oklch(0.228 0.020 307.5)` | `oklch(0.592 0.218 0.6)` | `oklch(0.461 0.185 4.1)` |
 | **Grove** | Forest drafting paper | `oklch(0.972 0.005 157.2)` | `oklch(0.261 0.022 162.8)` | `oklch(0.523 0.112 158.1)` / ochre | `oklch(0.796 0.133 157.3)` / ochre |
 | **Ocean** | Marine cyanotype | `oklch(0.974 0.003 241.6)` | `oklch(0.243 0.024 250.6)` | `oklch(0.537 0.120 247.0)` / teal | `oklch(0.759 0.106 241.5)` / cyan |
 | **Ember** | Warm copper paper | `oklch(0.977 0.003 60.7)` | `oklch(0.246 0.019 42.0)` | `oklch(0.553 0.129 44.7)` | `oklch(0.762 0.124 52.1)` |
@@ -105,4 +105,4 @@ T3 Code defines 5 curated OKLCH themes (`T3 Chat`, `Grove`, `Ocean`, `Ember`, `I
 ## 6. Diff & Semantic Color Discipline
 
 - **Modified file icons** use a muted info blue (`color-mix(in srgb, var(--accent-ink) 50%, var(--ink-2))` light; `65%` mixed with transparent in dark so it does not glow too brightly on dark canvas) so **Added** (green) and **Deleted** (red) lead visually.
-- **High-contrast accessibility boost**: T3 Code computes `--contrast-foreground` and `--contrast-border` via `color-mix(in oklab, ...)` toward `--appearance-contrast-target` (`black` in light, `white` in dark). In Harness Deck, keep semantic `--ink`, `--ink-2`, `--line`, and `--line-strong` tokens central in `beautifului-foundation.css` so global contrast adjustments propagate everywhere cleanly.
+- **High-contrast accessibility boost**: Halo computes `--contrast-foreground` and `--contrast-border` via `color-mix(in oklab, ...)` toward `--appearance-contrast-target` (`black` in light, `white` in dark). In Halo, keep semantic `--ink`, `--ink-2`, `--line`, and `--line-strong` tokens central in `beautifului-foundation.css` so global contrast adjustments propagate everywhere cleanly.

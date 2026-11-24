@@ -33,6 +33,8 @@ import {
   type HostToWebview,
   type InstalledSkillView,
   type McpImportCandidate,
+  type McpMarketState,
+  type McpServerConfig,
   type NodeEnvState,
   type NotificationPreferences,
   type PreferencesState,
@@ -42,6 +44,8 @@ import {
   type RemoteScope,
   type RemoteState,
   type RuntimeStatus,
+  type SkillImportCandidate,
+  type SkillMarketState,
   type TabsState,
   type ThemePreset,
   type WebviewToHost,
@@ -54,6 +58,12 @@ import {
   restoreTurnCheckpoint,
 } from '../git/CheckpointManager.ts';
 import { EmbeddedTerminalManager } from '../terminal/EmbeddedTerminalManager.ts';
+import {
+  BrowserMcpServer,
+  buildBuiltinBrowserMcpConfig,
+  ensureBrowserMcpBridgeScript,
+} from '../browser/BrowserMcpServer.ts';
+import { EmbeddedBrowserManager } from '../browser/EmbeddedBrowserManager.ts';
 import { AccountAuthFlowManager } from '../accounts/AccountAuthFlow.ts';
 import { inspectOfficialAccount, type AccountInspectionResult } from '../accounts/AccountInspector.ts';
 import {
@@ -62,6 +72,7 @@ import {
   removeIsolatedAccountData,
   switchAntigravityCredentialSlot,
   switchCodebuddyCredentialSlot,
+  syncActiveAntigravitySlotFromDisk,
 } from '../accounts/AccountIsolation.ts';
 import {
   accountApiKeySecretKey,
@@ -133,12 +144,16 @@ import {
 } from '../extensions/mcpService.ts';
 import {
   deleteInstalledSkill,
+  importLocalSkills,
   installSkillsFromGit,
   loadInstalledSkills,
+  scanAgentSkills,
+  scanLocalSkillDirectory,
   scanSkillsFromGit,
   syncInstalledSkill,
   updateSkillEntry,
 } from '../extensions/skillService.ts';
+import { fetchOnlineMcpMarket, fetchOnlineSkillMarket } from '../extensions/marketService.ts';
 import { UnattendedRunner, type SchedulePermissionPreset } from '../hub/UnattendedRunner.ts';
 import { WorkbenchHub } from '../hub/WorkbenchHub.ts';
 import { getLocale, resolveLocale, setLocale, t, type HostMessageKey } from '../i18n.ts';
@@ -401,6 +416,35 @@ export function createHarnessHostRuntime(
     onOutput: (event) => post({ type: 'terminalOutput', payload: event }),
     log,
   });
+
+  const BROWSER_AI_ENABLED_KEY = 'harnessDeck.browserAiEnabled';
+  let browserMcpBridgePath: string | undefined;
+  const browserManager = new EmbeddedBrowserManager({
+    storageRoot: platform.storageRoot,
+    initialAiEnabled: platform.globalState.get<boolean>(BROWSER_AI_ENABLED_KEY) ?? true,
+    configuredExecutablePath: () => platform.settings.get<string>('browser.executablePath', '') || undefined,
+    onStateChange: (state) => post({ type: 'browserState', payload: state }),
+    onFrame: (frame) => post({ type: 'browserFrame', payload: frame }),
+    onAiEnabledChange: (enabled) => {
+      void platform.globalState.update(BROWSER_AI_ENABLED_KEY, enabled);
+    },
+    log,
+  });
+  const browserMcpServer = new BrowserMcpServer(browserManager, {
+    version: platform.extensionVersion,
+    log,
+  });
+  const ensureBrowserMcpReady = async (): Promise<void> => {
+    if (!browserManager.isAiEnabled()) return;
+    try {
+      await browserMcpServer.ensureStarted();
+      if (!browserMcpBridgePath) {
+        browserMcpBridgePath = await ensureBrowserMcpBridgeScript(platform.storageRoot);
+      }
+    } catch (error) {
+      log(`启动内置浏览器 MCP 服务失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   const refreshSessionCheckpoints = async (cwd: string, sessionId: string | undefined): Promise<readonly number[]> => {
     if (!sessionId) return [];
@@ -697,6 +741,7 @@ export function createHarnessHostRuntime(
       },
       tabs: buildUnifiedTabsState(),
       terminal: terminalManager.getState(),
+      browser: browserManager.getState(),
     };
   };
 
@@ -946,7 +991,7 @@ export function createHarnessHostRuntime(
           await pushService.dispatch(
             {
               kind: event.kind,
-              title: 'Harness Deck',
+              title: 'Halo',
               body: event.message,
               ...(event.sessionId
                 ? { sessionId: event.sessionId, url: `/?session=${encodeURIComponent(event.sessionId)}` }
@@ -1400,12 +1445,32 @@ export function createHarnessHostRuntime(
   let skillsScanned:
     | { readonly repoUrl: string; readonly ref?: string; readonly skills: readonly DiscoveredGitSkill[] }
     | undefined;
+  let skillsScanningImport = false;
+  let skillImportCandidates: readonly SkillImportCandidate[] | undefined;
+  let skillScannedSources: readonly string[] | undefined;
   let skillsError: string | undefined;
 
   const readMcpServers = () => parseMcpServersSetting(platform.settings.get<unknown>('mcpServers', []));
+  const readEffectiveMcpServers = (): readonly McpServerConfig[] => {
+    const userServers = readMcpServers();
+    if (!browserManager.isAiEnabled() || !browserMcpServer.url) return userServers;
+    const allAgents = profiles().map((p) => p.id);
+    return [
+      ...userServers,
+      buildBuiltinBrowserMcpConfig({
+        mcpUrl: browserMcpServer.url,
+        token: browserMcpServer.token,
+        ...(browserMcpBridgePath ? { bridgeScriptPath: browserMcpBridgePath } : {}),
+        agents: allAgents,
+      }),
+    ];
+  };
   let mcpScanningImport = false;
   let mcpImportCandidates: readonly McpImportCandidate[] | undefined;
   let mcpScannedSources: readonly string[] | undefined;
+  let skillMarket: SkillMarketState | undefined;
+  let mcpMarket: McpMarketState | undefined;
+  let mcpMarketSeq = 0;
 
   const extensionsState = (): ExtensionsState => ({
     skills: {
@@ -1416,6 +1481,10 @@ export function createHarnessHostRuntime(
       ...(skillsInstalling ? { installing: true } : {}),
       ...(skillsScanning ? { scanning: true } : {}),
       ...(skillsScanned ? { scanned: skillsScanned } : {}),
+      ...(skillsScanningImport ? { scanningImport: true } : {}),
+      ...(skillImportCandidates !== undefined ? { importCandidates: skillImportCandidates } : {}),
+      ...(skillScannedSources !== undefined ? { scannedSources: skillScannedSources } : {}),
+      ...(skillMarket ? { market: skillMarket } : {}),
       ...(skillsError ? { error: skillsError } : {}),
     },
     mcp: {
@@ -1423,6 +1492,7 @@ export function createHarnessHostRuntime(
       ...(mcpScanningImport ? { scanningImport: true } : {}),
       ...(mcpImportCandidates !== undefined ? { importCandidates: mcpImportCandidates } : {}),
       ...(mcpScannedSources !== undefined ? { scannedSources: mcpScannedSources } : {}),
+      ...(mcpMarket ? { market: mcpMarket } : {}),
     },
   });
 
@@ -1739,6 +1809,7 @@ export function createHarnessHostRuntime(
     ...(hub ? { workbench: hub.state() } : {}),
     ...(remoteBridgeBox.current ? { remote: remoteBridgeBox.current.getState() } : {}),
     terminal: terminalManager.getState(),
+    browser: browserManager.getState(),
   });
 
   const selectFolderCommand = async (): Promise<void> => {
@@ -1771,6 +1842,7 @@ export function createHarnessHostRuntime(
       pushUnifiedTabs(true);
     }
     pushProjects();
+    void hub?.refreshSourceControl();
   };
 
   const postForBackend = (backendId: string, message: HostToWebview): void => {
@@ -1888,6 +1960,7 @@ export function createHarnessHostRuntime(
       accounts: accountsState,
       projects: projectsState,
       extensions: extensionsState,
+      runtimeMcpServers: readEffectiveMcpServers,
       showTurnChanges: () => platform.settings.get<boolean>('ui.showTurnChanges', false),
       openSettings: () => platform.openHostSettings(),
       setAppearance: applyAppearancePatch,
@@ -2051,13 +2124,15 @@ export function createHarnessHostRuntime(
     onProviderModelSelected: (providerId, model) => {
       selectedProviderModels.set(providerId, model);
     },
-    prepareBackendLaunch: (targetProfile) =>
-      prepareBackendLaunch({
+    prepareBackendLaunch: async (targetProfile) => {
+      await ensureBrowserMcpReady();
+      return prepareBackendLaunch({
         storageRoot,
         profile: targetProfile,
         skills: installedSkills,
-        mcpServers: readMcpServers(),
-      }),
+        mcpServers: readEffectiveMcpServers(),
+      });
+    },
   });
 
   const create = (profile: BackendProfile): RunningBackend => {
@@ -2251,6 +2326,7 @@ export function createHarnessHostRuntime(
       pushUnifiedTabs(true);
     }
     pushProjects();
+    void hub?.refreshSourceControl();
   };
 
   const openSessionInActive = (
@@ -2631,13 +2707,15 @@ export function createHarnessHostRuntime(
       env: processEnv(),
     }),
     getEnvForProfile: (profileEnv) => processEnv(profileEnv),
-    prepareBackendLaunch: (targetProfile) =>
-      prepareBackendLaunch({
+    prepareBackendLaunch: async (targetProfile) => {
+      await ensureBrowserMcpReady();
+      return prepareBackendLaunch({
         storageRoot,
         profile: targetProfile,
         skills: installedSkills,
-        mcpServers: readMcpServers(),
-      }),
+        mcpServers: readEffectiveMcpServers(),
+      });
+    },
     extensionVersion: platform.extensionVersion,
     log,
     runtimeLog,
@@ -2809,27 +2887,27 @@ export function createHarnessHostRuntime(
         else post({ type: 'preferences', payload: readPreferences() });
       };
       if (affects('dsh')) {
-        log('dsh 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        log('dsh 运行时设置已修改，执行「Halo：重启智能体」后生效');
         pushPreferences();
       }
       if (affects('zcode')) {
-        log('ZCode 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        log('ZCode 运行时设置已修改，执行「Halo：重启智能体」后生效');
         pushPreferences();
       }
       if (affects('claude')) {
-        log('Claude Code 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        log('Claude Code 运行时设置已修改，执行「Halo：重启智能体」后生效');
         pushPreferences();
       }
       if (affects('pi')) {
-        log('Pi 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        log('Pi 运行时设置已修改，执行「Halo：重启智能体」后生效');
         pushPreferences();
       }
       if (affects('codex')) {
-        log('Codex 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        log('Codex 运行时设置已修改，执行「Halo：重启智能体」后生效');
         pushPreferences();
       }
       if (affects('codebuddy')) {
-        log('CodeBuddy 运行时设置已修改，执行「Harness Deck：重启智能体」后生效');
+        log('CodeBuddy 运行时设置已修改，执行「Halo：重启智能体」后生效');
         pushPreferences();
       }
       if (affects('defaultBackend')) {
@@ -3342,8 +3420,9 @@ export function createHarnessHostRuntime(
       void (async () => {
         // Claude / Antigravity / CodeBuddy 分别有自己的订阅额度来源；其它底层直接回 unavailable，
         // 不读凭据、不发请求。绑定第三方服务商时（Claude / CodeBuddy）实际消耗的是编程套餐额度，
-        // 官方订阅额度不再适用，同样隐藏。启动初期 active 可能还没建好，按默认后端判断。
-        const backendId = active?.backend.profile.id ?? defaultBackendId;
+        // 官方订阅额度不再适用，同样隐藏。切换账号/重启底层期间 active 会短暂置空，必须按 targetBackendId
+        // 解析当前目标底层，避免误回退到 defaultBackendId（如 dsh）导致额度标识永久消失。
+        const backendId = active?.backend.profile.id ?? targetBackendId;
         const profile = active?.backend.profile ?? profiles().find((p) => p.id === backendId);
         const providerId = quotaProviderFor(profile);
         if (!providerId || (providerId !== 'antigravity' && effectiveProviderFor(backendId))) {
@@ -3387,6 +3466,13 @@ export function createHarnessHostRuntime(
             ...(clientVersion ? { clientVersion } : {}),
           });
           if (quota) {
+            if (providerId === 'antigravity') {
+              await syncActiveAntigravitySlotFromDisk({
+                accountId: activeAccId,
+                secrets: platform.secrets,
+                env: accPatch.env,
+              }).catch(() => undefined);
+            }
             const prev = accountInspections.get(activeAccId);
             accountInspections.set(activeAccId, {
               status: prev?.status ?? 'authenticated',
@@ -3482,13 +3568,14 @@ export function createHarnessHostRuntime(
             });
             if (sw.activated) lastActiveCodebuddyAccountId = saved.id;
           }
+          clearQuotaCacheFor(quotaProviderFor(profiles().find((p) => p.id === saved.backendId)));
           const nextChannels = setBackendChannelSetting(readBackendChannels(), saved.backendId, {
             mode: 'official',
             accountId: saved.id,
           });
           await writeSetting(undefined, 'backendChannels', nextChannels);
         }
-        if (payload.setActive || payload.usageCookie !== undefined) {
+        if (payload.usageCookie !== undefined) {
           clearQuotaCacheFor(quotaProviderFor(profiles().find((p) => p.id === saved.backendId)));
         }
         await inspectOneAccount(saved.backendId, saved.id, saved, false);
@@ -3647,9 +3734,9 @@ export function createHarnessHostRuntime(
             if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
           }
         }
+        clearQuotaCacheFor(quotaProviderFor(profile));
         const nextChannels = setBackendChannelSetting(readBackendChannels(), backendId, nextBinding);
         await writeSetting(undefined, 'backendChannels', nextChannels);
-        clearQuotaCacheFor(quotaProviderFor(profile));
         pushAccounts();
         pushProviders();
         syncManagedBackendsForChannelChange(backendId);
@@ -3805,6 +3892,89 @@ export function createHarnessHostRuntime(
       })();
       return;
     }
+    if (message.type === 'scanAgentSkills') {
+      void (async () => {
+        if (skillsScanningImport) return;
+        skillsScanningImport = true;
+        pushExtensions();
+        try {
+          const existingIds = new Set(installedSkills.map((s) => s.id));
+          const scanned = await scanAgentSkills({
+            workspacePath,
+            storageRoot,
+            existingIds,
+          });
+          skillImportCandidates = scanned.items;
+          skillScannedSources = scanned.scannedSources;
+        } finally {
+          skillsScanningImport = false;
+          pushExtensions();
+        }
+      })();
+      return;
+    }
+    if (message.type === 'pickLocalSkillDir') {
+      void (async () => {
+        const picked = await platform.pickOpenDialog({
+          canSelectMany: false,
+          canSelectFiles: false,
+          canSelectFolders: true,
+          defaultPath: workspacePath,
+          title: t('skills.pickDirTitle'),
+        });
+        const folderPath = picked[0];
+        if (!folderPath) return;
+        const existingIds = new Set(installedSkills.map((s) => s.id));
+        const fromDir = await scanLocalSkillDirectory(folderPath, existingIds).catch(() => []);
+        if (fromDir.length === 0) {
+          post({ type: 'toast', payload: { level: 'info', text: t('skills.noSkillsInDir') } });
+          return;
+        }
+        const prev = skillImportCandidates ?? [];
+        const newKeys = new Set(fromDir.map((item) => item.key));
+        skillImportCandidates = [...fromDir, ...prev.filter((item) => !newKeys.has(item.key))];
+        skillScannedSources = [...new Set([...(skillScannedSources ?? []), folderPath])];
+        pushExtensions();
+      })();
+      return;
+    }
+    if (message.type === 'importLocalSkills') {
+      void (async () => {
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        if (skillsInstalling) return;
+        skillsInstalling = true;
+        skillsError = undefined;
+        pushExtensions();
+        try {
+          const res = await importLocalSkills({
+            storageRoot,
+            skills: message.payload.skills,
+            ...(message.payload.agents ? { agents: message.payload.agents } : {}),
+          });
+          installedSkills = res.all;
+          skillImportCandidates = undefined;
+          post({
+            type: 'toast',
+            payload: {
+              level: 'info',
+              text: t('skills.imported', res.installed.length, res.installed.map((s) => s.name).join(', ')),
+            },
+          });
+          reloadActiveIfExtensionsChanged();
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          skillsError = msg;
+          post({ type: 'toast', payload: { level: 'error', text: t('skills.importFailed', msg) } });
+        } finally {
+          skillsInstalling = false;
+          pushExtensions();
+        }
+      })();
+      return;
+    }
     if (message.type === 'upsertMcpServer') {
       void (async () => {
         const next = upsertMcpServerSetting(platform.settings.get<unknown>('mcpServers', []), message.payload);
@@ -3895,6 +4065,42 @@ export function createHarnessHostRuntime(
       })();
       return;
     }
+    if (message.type === 'fetchSkillMarket') {
+      void (async () => {
+        if (skillMarket?.loading && !message.payload.force) return;
+        skillMarket = {
+          items: skillMarket?.items ?? [],
+          source: skillMarket?.source ?? 'fallback',
+          loading: true,
+          ...(skillMarket?.updatedAt ? { updatedAt: skillMarket.updatedAt } : {}),
+        };
+        pushExtensions();
+        skillMarket = await fetchOnlineSkillMarket({ force: message.payload.force });
+        pushExtensions();
+      })();
+      return;
+    }
+    if (message.type === 'fetchMcpMarket') {
+      void (async () => {
+        const seq = ++mcpMarketSeq;
+        mcpMarket = {
+          items: mcpMarket?.items ?? [],
+          source: mcpMarket?.source ?? 'fallback',
+          loading: true,
+          ...(message.payload.query ? { query: message.payload.query } : {}),
+          ...(mcpMarket?.updatedAt ? { updatedAt: mcpMarket.updatedAt } : {}),
+        };
+        pushExtensions();
+        const next = await fetchOnlineMcpMarket({
+          query: message.payload.query,
+          force: message.payload.force,
+        });
+        if (seq !== mcpMarketSeq) return;
+        mcpMarket = next;
+        pushExtensions();
+      })();
+      return;
+    }
     if (message.type === 'importMcpServers') {
       void (async () => {
         const next = importMcpServersSetting(
@@ -3953,24 +4159,12 @@ export function createHarnessHostRuntime(
     if (message.type === 'openProject') {
       void (async () => {
         const targetPath = normalizeProjectPath(message.payload.path) || message.payload.path;
-        await saveRecentProjectPath(targetPath);
-        pushProjects();
         const matching = folders().find((f) => (normalizeProjectPath(f.path) || f.path) === targetPath);
-        if (matching) {
-          workspacePath = normalizeProjectPath(matching.path) || matching.path;
-          await platform.workspaceState.update(FOLDER_KEY, workspacePath);
-          unifiedTabsRestored = false;
-          if (active) {
-            active.workspacePath = workspacePath;
-            active.lastObservedSessionId = undefined;
-            notifierFor(active.backend.profile.id).reset();
-            active.backend.controller.setWorkspace(workspacePath);
-            ensureUnifiedTabsRestored(active);
-            active.backend.controller.backendsChanged();
-            pushUnifiedTabs(true);
-          }
-          pushProjects();
+        if (message.payload.inPlace || matching) {
+          await switchWorkspace(matching ? (normalizeProjectPath(matching.path) || matching.path) : targetPath);
         } else {
+          await saveRecentProjectPath(targetPath);
+          pushProjects();
           await platform.openProjectWindow(targetPath);
         }
       })();
@@ -4362,6 +4556,88 @@ export function createHarnessHostRuntime(
       }
       return;
     }
+    if (message.type === 'browserLaunch') {
+      if (!platform.isWorkspaceTrusted()) {
+        post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+        return;
+      }
+      void (async () => {
+        await ensureBrowserMcpReady();
+        await browserManager.launch(message.payload);
+      })();
+      return;
+    }
+    if (message.type === 'browserStop') {
+      void browserManager.stop();
+      return;
+    }
+    if (message.type === 'browserNavigate') {
+      if (!platform.isWorkspaceTrusted()) {
+        post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+        return;
+      }
+      void (async () => {
+        try {
+          await ensureBrowserMcpReady();
+          await browserManager.navigate(message.payload.url);
+        } catch (error) {
+          post({
+            type: 'toast',
+            payload: { level: 'error', text: error instanceof Error ? error.message : String(error) },
+          });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'browserBack') {
+      void browserManager.goBack().catch(() => undefined);
+      return;
+    }
+    if (message.type === 'browserForward') {
+      void browserManager.goForward().catch(() => undefined);
+      return;
+    }
+    if (message.type === 'browserReload') {
+      void browserManager.reload().catch(() => undefined);
+      return;
+    }
+    if (message.type === 'browserResize') {
+      void browserManager.resize(message.payload.width, message.payload.height, message.payload.preset);
+      return;
+    }
+    if (message.type === 'browserMouse') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void browserManager.dispatchMouse(message.payload).catch(() => undefined);
+      return;
+    }
+    if (message.type === 'browserKey') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void browserManager.dispatchKey(message.payload).catch(() => undefined);
+      return;
+    }
+    if (message.type === 'browserSetAiEnabled') {
+      browserManager.setAiEnabled(message.payload.enabled);
+      if (message.payload.enabled) {
+        void ensureBrowserMcpReady().then(() => pushExtensions());
+      } else {
+        pushExtensions();
+      }
+      return;
+    }
+    if (message.type === 'browserClearConsole') {
+      browserManager.clearConsole();
+      return;
+    }
+    if (message.type === 'browserRequestFrame') {
+      if (browserManager.isAiEnabled() && !browserMcpServer.url) {
+        void ensureBrowserMcpReady();
+      }
+      const frame = browserManager.getLastFrame();
+      if (frame) {
+        post({ type: 'browserFrame', payload: frame });
+      }
+      return;
+    }
     if (message.type === 'previewMarkdown') {
       void (async () => {
         const rawPath = message.payload.path;
@@ -4446,7 +4722,7 @@ export function createHarnessHostRuntime(
         .dispatch(
           {
             kind: 'test',
-            title: 'Harness Deck',
+            title: 'Halo',
             body: t('remote.pushTestBody'),
           },
           { ignoreFocusCheck: true },
@@ -4487,6 +4763,9 @@ export function createHarnessHostRuntime(
       }
       clientRequestContext.exit(() => {
         startIfNeeded();
+        if (hub && !hub.state().sourceControl) {
+          void hub.refreshSourceControl();
+        }
       });
       if (!active) {
         post({ type: 'snapshot', payload: idleSnapshot() });
@@ -4739,6 +5018,8 @@ export function createHarnessHostRuntime(
       }
       accountAuthFlow.dispose();
       terminalManager.dispose();
+      await browserMcpServer.stop();
+      await browserManager.dispose();
       for (const dispose of disposers.splice(0)) dispose();
       await remoteBridge.stop();
       clientHub.dispose();

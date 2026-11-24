@@ -1,5 +1,5 @@
 /**
- * Harness Deck Oxlint JS 插件（迁移自 eslint-rules/test-discipline.mjs + UI 边界约束）：
+ * Halo Oxlint JS 插件（迁移自 eslint-rules/test-discipline.mjs + UI 边界约束）：
  * - `no-sleep-in-tests`：测试里不要用 sleep / 定时器等真实时间
  * - `no-wall-clock-in-tests`：不要用 Date.now() / performance.now() 的差值做断言
  * - `quarantine-needs-issue`：it.skip / describe.skip / it.todo 必须在上方写 `// quarantine: #<issue> <原因>`

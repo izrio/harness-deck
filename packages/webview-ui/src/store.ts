@@ -7,6 +7,7 @@ import { loadState, postToHost, saveState } from './vscode.ts';
 import type {
   AccountsState,
   AppearanceState,
+  BrowserState,
   ClientSurface,
   CommandView,
   DiffContentData,
@@ -56,7 +57,14 @@ export type SettingsTab =
   | 'projects'
   | 'other';
 
-export type RightPanelTab = 'files' | 'git' | 'terminal';
+export type RightPanelTab = 'files' | 'git' | 'terminal' | 'browser';
+
+export interface BrowserFrameEvent {
+  readonly data: string;
+  readonly width: number;
+  readonly height: number;
+  readonly timestamp: number;
+}
 
 export interface Toast {
   readonly id: number;
@@ -141,6 +149,7 @@ export interface ViewState {
   readonly inspectScheduleRuleId?: string;
   readonly rightPanelOpen: boolean;
   readonly rightPanelTab: RightPanelTab;
+  readonly rightPanelWidth?: number;
   readonly rightPanelExplicit: boolean;
   readonly settingsOpen: boolean;
   readonly settingsTab: SettingsTab;
@@ -148,6 +157,7 @@ export interface ViewState {
   readonly diffContent?: DiffContentData;
   readonly remote?: RemoteState;
   readonly terminal: TerminalState;
+  readonly browser: BrowserState;
   readonly fileSavedResult?: { readonly path: string; readonly ok: boolean; readonly error?: string; readonly n: number };
   readonly draftGeneratedResult?: {
     readonly requestId: number;
@@ -209,6 +219,20 @@ function readInitialClientSurface(): ClientSurface {
     ? 'mobile-web'
     : 'ide';
 }
+
+const emptyBrowser: BrowserState = {
+  status: 'stopped',
+  url: 'about:blank',
+  title: '',
+  loading: false,
+  canGoBack: false,
+  canGoForward: false,
+  viewportWidth: 1024,
+  viewportHeight: 720,
+  viewportPreset: 'responsive',
+  aiEnabled: true,
+  consoleLogs: [],
+};
 
 const initialState: ViewState = {
   hostKind: readInitialHostKind(),
@@ -273,6 +297,7 @@ const initialState: ViewState = {
   settingsOpen: false,
   settingsTab: 'appearance',
   terminal: { sessions: [] },
+  browser: emptyBrowser,
   images: {},
 };
 
@@ -291,6 +316,18 @@ export function subscribeTerminalOutput(
 
 export function getTerminalBuffer(id: string): string {
   return terminalBuffers.get(id) ?? '';
+}
+
+const browserFrameListeners = new Set<(frame: BrowserFrameEvent) => void>();
+let lastBrowserFrame: BrowserFrameEvent | undefined;
+
+export function subscribeBrowserFrame(listener: (frame: BrowserFrameEvent) => void): () => void {
+  browserFrameListeners.add(listener);
+  return () => browserFrameListeners.delete(listener);
+}
+
+export function getLastBrowserFrame(): BrowserFrameEvent | undefined {
+  return lastBrowserFrame;
 }
 let toastId = 0;
 let nextPanelSearchId = 1_000_000;
@@ -418,6 +455,16 @@ export function setRightPanelTab(tab: RightPanelTab): void {
   }
 }
 
+export function setRightPanelWidth(width: number | undefined): void {
+  const normalized = width !== undefined && Number.isFinite(width) ? Math.round(width) : undefined;
+  set({ rightPanelWidth: normalized });
+  try {
+    saveState({ rightPanelWidth: normalized });
+  } catch {
+    // ignore in test env
+  }
+}
+
 export function requestPanelFiles(query: string): void {
   const requestId = ++nextPanelSearchId;
   pendingPanelSearchIds.add(requestId);
@@ -519,6 +566,7 @@ export function applyHostMessage(message: HostToWebview): void {
       let resolvedModule = state.activeModule;
       let resolvedRightPanelOpen = state.rightPanelOpen;
       let resolvedRightPanelTab = state.rightPanelTab;
+      let resolvedRightPanelWidth = state.rightPanelWidth;
       if (!state.moduleExplicit) {
         let savedMod: WorkbenchModule | undefined;
         try {
@@ -543,6 +591,9 @@ export function applyHostMessage(message: HostToWebview): void {
           const persisted = loadState();
           if (persisted.rightPanelOpen !== undefined) resolvedRightPanelOpen = persisted.rightPanelOpen;
           if (persisted.rightPanelTab !== undefined) resolvedRightPanelTab = persisted.rightPanelTab;
+          if (typeof persisted.rightPanelWidth === 'number' && Number.isFinite(persisted.rightPanelWidth)) {
+            resolvedRightPanelWidth = persisted.rightPanelWidth;
+          }
         } catch {
           // ignore
         }
@@ -573,6 +624,7 @@ export function applyHostMessage(message: HostToWebview): void {
         activeModule: resolvedModule,
         rightPanelOpen: resolvedRightPanelOpen,
         rightPanelTab: resolvedRightPanelTab,
+        ...(resolvedRightPanelWidth !== undefined ? { rightPanelWidth: resolvedRightPanelWidth } : {}),
         ...(p.preferences ? { preferences: p.preferences } : {}),
         ...(p.providers ? { providers: p.providers } : {}),
         ...(p.accounts ? { accounts: p.accounts } : {}),
@@ -581,6 +633,7 @@ export function applyHostMessage(message: HostToWebview): void {
         ...(p.workbench ? { workbench: p.workbench } : {}),
         ...(p.remote !== undefined ? { remote: p.remote } : {}),
         ...(p.terminal ? { terminal: p.terminal } : {}),
+        ...(p.browser ? { browser: p.browser } : {}),
       });
       return;
     }
@@ -783,6 +836,13 @@ export function applyHostMessage(message: HostToWebview): void {
       for (const listener of terminalOutputListeners) listener(message.payload);
       return;
     }
+    case 'browserState':
+      set({ browser: message.payload });
+      return;
+    case 'browserFrame':
+      lastBrowserFrame = message.payload;
+      for (const listener of browserFrameListeners) listener(message.payload);
+      return;
     case 'sessionCheckpoints':
       if (state.session.id === message.payload.sessionId) {
         set({
@@ -801,4 +861,5 @@ export function resetStoreForTests(): void {
   state = initialState;
   pendingPanelSearchIds.clear();
   terminalBuffers.clear();
+  lastBrowserFrame = undefined;
 }

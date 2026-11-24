@@ -12,15 +12,15 @@ import ohMyPi from '../assets/backends/oh-my-pi.svg?inline';
 import opencode from '../assets/backends/opencode.svg?inline';
 import zcode from '../assets/backends/zcode.svg?inline';
 
-const LOGOS: Readonly<Record<string, { readonly src: string; readonly tile?: boolean }>> = {
-  dsh: { src: deepseek, tile: true },
+const LOGOS: Readonly<Record<string, { readonly src: string; readonly invertInDark?: boolean }>> = {
+  dsh: { src: deepseek },
   pi: { src: ohMyPi },
   'oh-my-pi': { src: ohMyPi },
   codebuddy: { src: codebuddy },
-  claude: { src: claude, tile: true },
-  codex: { src: codex, tile: true },
+  claude: { src: claude },
+  codex: { src: codex, invertInDark: true },
   opencode: { src: opencode },
-  antigravity: { src: antigravity, tile: true },
+  antigravity: { src: antigravity },
   zcode: { src: zcode },
 };
 
@@ -34,12 +34,16 @@ export function BackendLogo({ backend, size = 'md' }: { readonly backend: Pick<B
           'backend-logo inline-flex shrink-0 items-center justify-center overflow-hidden',
           `backend-logo--${size}`,
           sizeCls,
-          logo.tile && cn('backend-logo--tile bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]', size === 'sm' ? 'p-[1px]' : 'p-[5px]'),
         )}
         aria-hidden="true"
         data-logo={backend.id}
       >
-        <img src={logo.src} alt="" draggable={false} className="block size-full object-contain" />
+        <img
+          src={logo.src}
+          alt=""
+          draggable={false}
+          className={cn('block size-full object-contain', logo.invertInDark && 'dark:invert')}
+        />
       </span>
     );
   }

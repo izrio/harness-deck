@@ -40,11 +40,10 @@ const THEME_PRESETS: readonly { readonly id: ThemePreset; readonly swatch: strin
 const THEME_CARDS: readonly {
   readonly mode: ThemeMode;
   readonly titleKey: MessageKey;
-  readonly descKey: MessageKey;
 }[] = [
-  { mode: 'light', titleKey: 'settings.appearance.theme.light', descKey: 'settings.appearance.theme.lightDesc' },
-  { mode: 'dark', titleKey: 'settings.appearance.theme.dark', descKey: 'settings.appearance.theme.darkDesc' },
-  { mode: 'system', titleKey: 'settings.appearance.theme.system', descKey: 'settings.appearance.theme.systemDesc' },
+  { mode: 'light', titleKey: 'settings.appearance.theme.light' },
+  { mode: 'dark', titleKey: 'settings.appearance.theme.dark' },
+  { mode: 'system', titleKey: 'settings.appearance.theme.system' },
 ];
 
 const LIGHT_PREVIEW = {
@@ -143,92 +142,86 @@ export function AppearanceSettings() {
     <div className="flex flex-col gap-5" data-testid="settings-appearance">
       {/* 1. 主题 */}
       <SettingsSection id="appearance-sec-theme" title={t('settings.appearance.theme')}>
-        <div className="primitive-card-pad">
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label={t('settings.appearance.theme')}>
-            {THEME_CARDS.map(({ mode, titleKey, descKey }) => {
-              const active = currentTheme === mode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  data-testid={`theme-card-${mode}`}
-                  onClick={() => selectTheme(mode)}
-                  className={cn(
-                    'group flex flex-col gap-2 rounded-card p-2.5 text-left transition-all duration-150',
-                    active
-                      ? 'bg-inset shadow-[inset_0_0_0_1.5px_var(--accent)]'
-                      : 'bg-field shadow-hairline hover:bg-hover',
-                  )}
-                >
-                  <ThemePreview mode={mode} />
-                  <div className="flex items-center justify-between gap-1.5">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className={cn('inline-flex shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}>
-                        {mode === 'light' ? <SunIcon className="size-3.5" /> : mode === 'dark' ? <MoonIcon className="size-3.5" /> : <MonitorIcon className="size-3.5" />}
-                      </span>
-                      <span className="truncate text-[12.5px] font-medium text-ink">{t(titleKey)}</span>
+        <div className="divide-y divide-line/60">
+          <div className="px-4 py-3.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label={t('settings.appearance.theme')}>
+              {THEME_CARDS.map(({ mode, titleKey }) => {
+                const active = currentTheme === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    data-testid={`theme-card-${mode}`}
+                    onClick={() => selectTheme(mode)}
+                    className={cn(
+                      'group flex flex-col gap-2 rounded-card p-2.5 text-left transition-all duration-150',
+                      active
+                        ? 'bg-inset shadow-[inset_0_0_0_1.5px_var(--accent)]'
+                        : 'bg-field shadow-hairline hover:bg-hover',
+                    )}
+                  >
+                    <ThemePreview mode={mode} />
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className={cn('inline-flex shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}>
+                          {mode === 'light' ? <SunIcon className="size-3.5" /> : mode === 'dark' ? <MoonIcon className="size-3.5" /> : <MonitorIcon className="size-3.5" />}
+                        </span>
+                        <span className="truncate text-[12.5px] font-medium text-ink">{t(titleKey)}</span>
+                      </div>
+                      {active ? (
+                        <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
+                          <CheckIcon className="size-2.5" />
+                        </span>
+                      ) : null}
                     </div>
-                    {active ? (
-                      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
-                        <CheckIcon className="size-2.5" />
-                      </span>
-                    ) : null}
-                  </div>
-                  <span className="text-[11px] leading-snug text-ink-3">
-                    {t(mode === 'system' && hostKind === 'jetbrains' ? 'settings.appearance.theme.systemDescIde' : descKey)}
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="mt-4 flex flex-col gap-3 border-t border-line pt-3.5">
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.preset')}</span>
-              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('settings.appearance.preset')}>
-                {THEME_PRESETS.map(({ id, swatch, labelKey }) => {
-                  const active = currentPreset === id;
-                  return (
-                    <Button
-                      key={id}
-                      type="button"
-                      size="xs"
-                      variant={active ? 'secondary' : 'outline'}
-                      role="radio"
-                      aria-checked={active}
-                      data-testid={`theme-preset-${id}`}
-                      className={cn(active && 'border-brand ring-1 ring-brand/40')}
-                      onClick={() => selectPreset(id)}
-                    >
-                      <span
-                        className="inline-block size-2.5 rounded-full"
-                        style={{ backgroundColor: swatch }}
-                        aria-hidden="true"
-                      />
-                      <span>{t(labelKey)}</span>
-                    </Button>
-                  );
-                })}
-              </div>
+          <div className="flex flex-col gap-2 px-4 py-3">
+            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.preset')}</span>
+            <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('settings.appearance.preset')}>
+              {THEME_PRESETS.map(({ id, swatch, labelKey }) => {
+                const active = currentPreset === id;
+                return (
+                  <Button
+                    key={id}
+                    type="button"
+                    size="xs"
+                    variant={active ? 'secondary' : 'outline'}
+                    role="radio"
+                    aria-checked={active}
+                    data-testid={`theme-preset-${id}`}
+                    className={cn(active && 'border-brand ring-1 ring-brand/40')}
+                    onClick={() => selectPreset(id)}
+                  >
+                    <span
+                      className="inline-block size-2.5 rounded-full"
+                      style={{ backgroundColor: swatch }}
+                      aria-hidden="true"
+                    />
+                    <span>{t(labelKey)}</span>
+                  </Button>
+                );
+              })}
             </div>
+          </div>
 
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-2">
-                <ContrastIcon className="mt-0.5 size-3.5 shrink-0 text-ink-3" />
-                <div className="min-w-0">
-                  <div className="text-[12.5px] font-medium text-ink">{t('settings.appearance.highContrast')}</div>
-                  <div className="text-[11px] text-ink-3">{t('settings.appearance.highContrastDesc')}</div>
-                </div>
-              </div>
-              <Switch
-                checked={highContrast}
-                data-testid="theme-high-contrast-switch"
-                aria-label={t('settings.appearance.highContrast')}
-                onCheckedChange={toggleHighContrast}
-              />
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <ContrastIcon className="size-3.5 shrink-0 text-ink-3" />
+              <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.highContrast')}</span>
             </div>
+            <Switch
+              checked={highContrast}
+              data-testid="theme-high-contrast-switch"
+              aria-label={t('settings.appearance.highContrast')}
+              onCheckedChange={toggleHighContrast}
+            />
           </div>
         </div>
       </SettingsSection>
@@ -239,9 +232,7 @@ export function AppearanceSettings() {
         testId="appearance-reading-chat"
         title={t('settings.appearance.reading')}
       >
-        <div className="primitive-card-pad">
-          <AppearancePanel />
-        </div>
+        <AppearancePanel />
       </SettingsSection>
 
       {/* 3. 终端 */}
@@ -250,8 +241,8 @@ export function AppearanceSettings() {
         testId="appearance-terminal"
         title={t('settings.appearance.terminal')}
       >
-        <div className="primitive-card-pad flex flex-col gap-3">
-          <label className="flex flex-col gap-1">
+        <div className="divide-y divide-line/60">
+          <label className="flex flex-col gap-1.5 px-4 py-3">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalFont')}</span>
             <Input
               size="sm"
@@ -265,7 +256,7 @@ export function AppearanceSettings() {
             />
           </label>
 
-          <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalSize')}</span>
             <div className="flex items-center gap-2">
               {appearance.terminalFontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
@@ -284,7 +275,7 @@ export function AppearanceSettings() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalLineHeight')}</span>
             <div className="flex items-center gap-2">
               {appearance.terminalLineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
@@ -303,17 +294,19 @@ export function AppearanceSettings() {
             </div>
           </div>
 
-          <pre
-            data-testid="terminal-live-preview"
-            className="terminal-surface m-0 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink-2 shadow-hairline [overflow-wrap:anywhere]"
-          >
-            {'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
-          </pre>
+          <div className="flex flex-col gap-2.5 px-4 py-3">
+            <pre
+              data-testid="terminal-live-preview"
+              className="terminal-surface m-0 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink-2 shadow-hairline [overflow-wrap:anywhere]"
+            >
+              {'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
+            </pre>
 
-          <div className="flex items-center justify-end">
-            <Button type="button" variant="ghost" size="sm" data-testid="terminal-reset" onClick={resetTerminal}>
-              {t('settings.appearance.resetTerminal')}
-            </Button>
+            <div className="flex items-center justify-end">
+              <Button type="button" variant="ghost" size="sm" data-testid="terminal-reset" onClick={resetTerminal}>
+                {t('settings.appearance.resetTerminal')}
+              </Button>
+            </div>
           </div>
         </div>
       </SettingsSection>
@@ -324,7 +317,7 @@ export function AppearanceSettings() {
         testId="appearance-language"
         title={t('settings.appearance.language')}
       >
-        <div className="primitive-card-pad flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.language')}</span>
           <div className="w-44">
             <Select

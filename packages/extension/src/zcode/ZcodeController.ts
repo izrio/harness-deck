@@ -624,7 +624,7 @@ export class ZcodeController implements ChatBackendController {
   private async createBackendSession(link: ZcodeLink): Promise<string | undefined> {
     try {
       const mcpServers = toAcpMcpServers(
-        mcpServersForBackend(this.options.extensions?.().mcp.servers ?? [], 'zcode'),
+        mcpServersForBackend(this.options.runtimeMcpServers?.() ?? this.options.extensions?.().mcp.servers ?? [], 'zcode'),
       );
       const created = await link.request<Record<string, unknown> | null>('session/create', {
         workspace: { workspacePath: this.workspacePath, workspaceKey: this.workspacePath },

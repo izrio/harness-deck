@@ -95,6 +95,10 @@ describe('订阅用量标识', () => {
 
     const badge = screen.getByTestId('usage-badge');
     expect(badge.textContent).toContain('58%'); // 只取 5 小时窗口，不被每周/单模型窗口拉低
+    // 双圆环：外环周用量（24%），内环 5 小时用量（58%）
+    expect(screen.getByTestId('usage-dual-ring')).toBeTruthy();
+    expect(screen.getByTestId('usage-ring-outer').getAttribute('data-percent')).toBe('24');
+    expect(screen.getByTestId('usage-ring-inner').getAttribute('data-percent')).toBe('58');
     expect(screen.queryByTestId('usage-popover')).toBeNull();
 
     fireEvent.pointerEnter(badge);
@@ -102,6 +106,8 @@ describe('订阅用量标识', () => {
       await vi.advanceTimersByTimeAsync(300);
     });
     const body = screen.getByTestId('usage-popover');
+    expect(screen.getByTestId('usage-ring-legend').textContent).toContain('外环：每周');
+    expect(screen.getByTestId('usage-ring-legend').textContent).toContain('内环：5 小时');
     expect(body.textContent).toContain('5 小时');
     expect(body.textContent).toContain('每周');
     expect(body.textContent).toContain('Fable');
@@ -127,8 +133,10 @@ describe('订阅用量标识', () => {
     const requestId = mount();
     act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId, quota: poolQuota } }));
 
-    // 徽标只展示 5 小时（gemini）剩余 88%，不被每周 3p(8%) 或单模型(9%) 拉低
+    // 徽标只展示 5 小时（gemini）剩余 88%，外环周用量取非 3p 池最低值 96%，内环 5 小时 88%
     expect(screen.getByTestId('usage-badge').textContent).toContain('88%');
+    expect(screen.getByTestId('usage-ring-outer').getAttribute('data-percent')).toBe('96');
+    expect(screen.getByTestId('usage-ring-inner').getAttribute('data-percent')).toBe('88');
 
     fireEvent.pointerEnter(screen.getByTestId('usage-badge'));
     await act(async () => {
@@ -224,5 +232,116 @@ describe('订阅用量标识', () => {
       }),
     );
     expect(screen.getByTestId('usage-badge').textContent).toContain('88%');
+  });
+
+  it('切换账号时首次探测因旧 token 过期返回 unavailable，底层重连与模型加载后自动补查并恢复展示', () => {
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          connection: 'connected',
+          models: { options: [{ provider: 'antigravity', model: 'gemini-4-neon', name: 'Gemini 4 Neon', group: 'Gemini', efforts: [] }] },
+          backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+          accounts: {
+            items: [
+              { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'authenticated' },
+              { id: 'agy-2', backendId: 'antigravity', label: 'second@gmail.com', isSystemDefault: false, status: 'authenticated' },
+            ],
+            channels: { antigravity: { mode: 'official', accountId: 'agy-2' } },
+          },
+        }),
+      }),
+    );
+    render(createElement(UsageBadge));
+    const initReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const initId = initReq && initReq.type === 'fetchQuota' ? initReq.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: initId,
+          quota: { windows: [{ kind: 'session', label: 'gemini', usedPercent: 10, remainingPercent: 90 }], queriedAt: Date.now() },
+        },
+      }),
+    );
+    expect(screen.getByTestId('usage-badge').textContent).toContain('90%');
+
+    // 切回本机默认账号，首次探测时该账号存储的 access_token 已过期，宿主返回 unavailable
+    vscode.reset();
+    act(() =>
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'authenticated' },
+            { id: 'agy-2', backendId: 'antigravity', label: 'second@gmail.com', isSystemDefault: false, status: 'authenticated' },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+        },
+      }),
+    );
+    const switchReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const switchId = switchReq && switchReq.type === 'fetchQuota' ? switchReq.payload.requestId : -1;
+    act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: switchId, error: 'unavailable' } }));
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+
+    // 底层重启：先断开、清空模型列表
+    vscode.reset();
+    act(() => {
+      store.applyHostMessage({ type: 'connection', payload: 'idle' });
+      store.applyHostMessage({ type: 'models', payload: { options: [] } });
+    });
+    expect(vscode.posted.filter((m) => m.type === 'fetchQuota')).toHaveLength(0);
+
+    // 底层重新连接后自动补查；若此时 CLI 还未刷新完 token（仍 unavailable），拉回模型列表后再补查一次并成功展示
+    act(() => store.applyHostMessage({ type: 'connection', payload: 'connected' }));
+    const reconnectReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    expect(reconnectReq).toBeTruthy();
+    const reconnectId = reconnectReq && reconnectReq.type === 'fetchQuota' ? reconnectReq.payload.requestId : -1;
+    act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: reconnectId, error: 'unavailable' } }));
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+
+    vscode.reset();
+    act(() =>
+      store.applyHostMessage({
+        type: 'models',
+        payload: {
+          options: [{ provider: 'antigravity', model: 'gemini-4-neon', name: 'Gemini 4 Neon', group: 'Gemini', efforts: [] }],
+        },
+      }),
+    );
+    const modelsReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    expect(modelsReq).toBeTruthy();
+    const modelsId = modelsReq && modelsReq.type === 'fetchQuota' ? modelsReq.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: modelsId,
+          quota: { windows: [{ kind: 'session', label: 'gemini', usedPercent: 25, remainingPercent: 75 }], queriedAt: Date.now() },
+        },
+      }),
+    );
+    expect(screen.getByTestId('usage-badge').textContent).toContain('75%');
+  });
+
+  it('组件卸载重挂（如从设置页切完账号返回对话）时请求号持续递增，不会被 store 中的旧结果撞车吞掉', () => {
+    act(() => store.applyHostMessage({ type: 'snapshot', payload: claudeSnapshot() }));
+    const firstRender = render(createElement(UsageBadge));
+    const firstReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const firstId = firstReq && firstReq.type === 'fetchQuota' ? firstReq.payload.requestId : -1;
+    act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: firstId, error: 'unavailable' } }));
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+
+    // 模拟切换到设置页卸载 UsageBadge，再返回对话重新挂载
+    firstRender.unmount();
+    vscode.reset();
+    render(createElement(UsageBadge));
+    const secondReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const secondId = secondReq && secondReq.type === 'fetchQuota' ? secondReq.payload.requestId : -1;
+    expect(secondId).toBeGreaterThan(firstId);
+
+    act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: secondId, quota } }));
+    expect(screen.getByTestId('usage-badge').textContent).toContain('58%');
   });
 });

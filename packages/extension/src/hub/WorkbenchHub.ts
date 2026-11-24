@@ -126,6 +126,8 @@ interface StoredRegistrySession {
   readonly agentName?: string;
   /** 该会话最近一次使用的模型显示名，随会话打开时记录。 */
   readonly model?: string;
+  /** 该会话所在仓库的 Git 分支名，随会话打开或源码控制同步时记录。 */
+  readonly branch?: string;
 }
 
 export interface ActiveControllerContext {
@@ -1466,6 +1468,7 @@ export class WorkbenchHub {
       ...(existing?.unread ? { unread: true } : {}),
       ...(existing?.unreadSummary ? { unreadSummary: existing.unreadSummary } : {}),
       ...(existing?.model ? { model: existing.model } : {}),
+      ...(existing?.branch ? { branch: existing.branch } : {}),
       agentName,
     });
     this.persistRegistry();
@@ -1491,6 +1494,7 @@ export class WorkbenchHub {
           ...(prev?.unreadSummary ? { unreadSummary: prev.unreadSummary } : {}),
           ...(prev?.agentName ? { agentName: prev.agentName } : {}),
           ...(prev?.model ? { model: prev.model } : {}),
+          ...(prev?.branch ? { branch: prev.branch } : {}),
         });
         dirty = true;
       }
@@ -1520,19 +1524,34 @@ export class WorkbenchHub {
       if (targetProject) upsert(s.id, s.title, targetProject, ctx.backendId, s.updatedAt);
     }
 
-    // 当前打开的会话能拿到正在使用的模型：记到注册表里，供会话列表逐条展示
+    // 当前打开的会话能拿到正在使用的模型与当前分支：记到注册表里，供会话列表逐条展示
     const activeSessionId = ctx.snapshot.session.id;
     const currentModel = ctx.snapshot.models.current;
-    if (activeSessionId && currentModel) {
+    if (activeSessionId) {
       const key = `${ctx.backendId}:${activeSessionId}`;
       const rec = this.registry.get(key);
-      const option = ctx.snapshot.models.options.find(
-        (o) => o.provider === currentModel.provider && o.model === currentModel.model,
-      );
-      const modelLabel = option?.name ?? currentModel.model;
-      if (rec && modelLabel && rec.model !== modelLabel) {
-        this.registry.set(key, { ...rec, model: modelLabel });
-        dirty = true;
+      if (rec) {
+        let nextRec = rec;
+        if (currentModel) {
+          const option = ctx.snapshot.models.options.find(
+            (o) => o.provider === currentModel.provider && o.model === currentModel.model,
+          );
+          const modelLabel = option?.name ?? currentModel.model;
+          if (modelLabel && nextRec.model !== modelLabel) {
+            nextRec = { ...nextRec, model: modelLabel };
+          }
+        }
+        const activeBranch =
+          this.sourceControl?.available && this.sourceControl.branch && rec.projectPath === currentProject
+            ? this.sourceControl.branch
+            : undefined;
+        if (activeBranch && nextRec.branch !== activeBranch) {
+          nextRec = { ...nextRec, branch: activeBranch };
+        }
+        if (nextRec !== rec) {
+          this.registry.set(key, nextRec);
+          dirty = true;
+        }
       }
     }
 
@@ -1587,6 +1606,9 @@ export class WorkbenchHub {
       if (!targetProject) continue;
       const live = liveMap.get(key);
       createdAtByKey.set(key, rec.createdAt);
+      const branch =
+        rec.branch ??
+        (targetProject === currentPath && this.sourceControl?.available ? this.sourceControl.branch : undefined);
       grouped.get(targetProject)!.push({
         id: rec.id,
         title: live?.title || rec.title,
@@ -1599,6 +1621,7 @@ export class WorkbenchHub {
         ...(rec.unread ? { unread: true } : {}),
         ...(rec.agentName ? { agentName: rec.agentName } : {}),
         ...(rec.model ? { model: rec.model } : {}),
+        ...(branch ? { branch } : {}),
       });
     }
 
@@ -1954,6 +1977,7 @@ export class WorkbenchHub {
         ...(typeof r.unreadSummary === 'string' && r.unreadSummary ? { unreadSummary: r.unreadSummary } : {}),
         ...(typeof r.agentName === 'string' && r.agentName ? { agentName: r.agentName } : {}),
         ...(typeof r.model === 'string' && r.model ? { model: r.model } : {}),
+        ...(typeof r.branch === 'string' && r.branch ? { branch: r.branch } : {}),
       });
     }
     if (needsPersist) this.persistRegistry();

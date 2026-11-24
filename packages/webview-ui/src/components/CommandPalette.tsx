@@ -28,6 +28,7 @@ import { postToHost } from '../vscode.ts';
 import {
   FilesIcon,
   GitBranchIcon,
+  GlobeIcon,
   LayoutDashboardIcon,
   ListTodoIcon,
   MonitorIcon,
@@ -167,6 +168,17 @@ export function CommandPalette({ open, onOpenChange, onNewWorktree }: CommandPal
             <TerminalIcon className="size-3.5" />
             <span>{t('cmdPalette.openTerminal')}</span>
             <CommandShortcut>Ctrl+J</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            onSelect={() =>
+              run(() => {
+                setRightPanelTab('browser');
+                setRightPanelOpen(true);
+              })
+            }
+          >
+            <GlobeIcon className="size-3.5" />
+            <span>{t('cmdPalette.openBrowser')}</span>
           </CommandItem>
         </CommandGroup>
 

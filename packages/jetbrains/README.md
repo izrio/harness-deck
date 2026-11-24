@@ -1,4 +1,4 @@
-# Harness Deck — JetBrains IDE Plugin (`packages/jetbrains`)
+# Halo — JetBrains IDE Plugin (`packages/jetbrains`)
 
 IntelliJ Platform (2024.2+) plugin for IntelliJ IDEA, WebStorm, PyCharm, GoLand, Rider, and other JetBrains IDEs.
 

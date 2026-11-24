@@ -1,6 +1,6 @@
-<p align="center"><img src="https://raw.githubusercontent.com/izrio/dsh-vscode-copilot/HEAD/packages/extension/media/icon.png" width="96" alt="Harness Deck"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/izrio/dsh-vscode-copilot/HEAD/packages/extension/media/icon.png" width="96" alt="Halo"></p>
 
-# Harness Deck
+# Halo
 
 编程代理（coding agent）的 VS Code 对话面板：侧边栏对话、逐字流式回复、紧凑的工具活动行、审批与提问、用 VS Code Diff 查看每次改动。
 
@@ -78,14 +78,14 @@ Agent 能力（读写文件、执行命令、审批、会话、模型）都由�
 
 ## 使用
 
-- **打开对话**：右侧辅助侧边栏（Secondary Side Bar）里的 Harness Deck 视图，或命令「Harness Deck: 打开对话」。Enter 发送，Shift+Enter 换行；回复时继续发送的消息会排队。
+- **打开对话**：右侧辅助侧边栏（Secondary Side Bar）里的 Halo 视图，或命令「Halo: 打开对话」。Enter 发送，Shift+Enter 换行；回复时继续发送的消息会排队。
 - **切换底层**：第一次打开面板时会让你选底层（显示每个底层是否已安装、没装时的安装命令）；之后在首页点底层标签，或「…」→「底层」切换。同一时间运行一个底层，每个底层的会话分开保存。
 - **上下文**：输入框上方显示当前编辑器——有选区时附带选中的代码和行号，否则只附带文件路径。点一下标签这条消息就不附带。
 - **标签**：顶部标签可以拖动调整顺序；右键标签可关闭当前、左侧、右侧、其他或全部标签。关闭只是收起标签，会话仍保留，可从会话列表重新打开。
 - **删除会话**：工作台「会话」按项目分组列出历史会话；悬停条目右侧的删除按钮，或右键选择「删除会话」，确认后从列表移除并关闭对应标签（运行中的会话需要结束后才能删除）。删除只影响面板列表，不会删除底层（`~/.claude`、`~/.codebuddy` 等）的历史文件。
 - **会话排序**：项目内的会话按首次创建时间倒序排列；之后无论哪个会话有新活动，列表位置都不再变化。
 - **`@` 引用文件、`/` 命令**：`/explain`、`/fix`、`/test`、`/new`，以及底层自己的命令。
-- **编辑器右键「Harness Deck」**：解释、修复、写测试、添加到对话。
+- **编辑器右键「Halo」**：解释、修复、写测试、添加到对话。
 - **图片**：在输入框里粘贴截图或图片（底层支持时）。
 - **改动**：修改文件的那一行显示增删行数，点击在 Diff 编辑器里查看。
 - **审批**：底层要执行需要确认的操作时，对话末尾出现审批卡片。
@@ -148,16 +148,16 @@ OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号
 
 ## 常见问题
 
-- **右键菜单里还有「DSH」、侧边栏多一个面板**：旧版扩展 DSH Copilot 还装着。Harness Deck 启动时会提示卸载，也可以在扩展视图里搜索 DSH Copilot 卸载。
+- **右键菜单里还有「DSH」、侧边栏多一个面板**：旧版扩展 DSH Copilot 还装着。Halo 启动时会提示卸载，也可以在扩展视图里搜索 DSH Copilot 卸载。
 - **「找不到 dsh / omp / codebuddy / claude-agent-acp」**：确认终端里能运行；VS Code 从图形界面启动时可能读不到 shell 里设置的 `PATH`，这时写完整路径（`harnessDeck.dsh.path`，或在 `harnessDeck.backends` 里用相同 `id` 覆盖内置项，写上 `command` 的完整路径）。
-- **启动失败**：「…」→「查看日志」看插件日志；底层自己的输出在输出面板的「Harness Deck: Backend」里（令牌和 Key 已脱敏）。
+- **启动失败**：「…」→「查看日志」看插件日志；底层自己的输出在输出面板的「Halo: Backend」里（令牌和 Key 已脱敏）。
 - **oh-my-pi 回复报错**：多半是模型提供方没配好，在终端里运行 `omp` 先确认能对话。
 - **Claude 提示需要登录**：在终端运行 `claude` 并输入 `/login`，或给内置的 `claude` 配置 `ANTHROPIC_API_KEY`（见上面的「用 Claude」）。
 - **CodeBuddy 登录**：取消了登录方式选择或进度，下次发消息时会再问。浏览器登录不方便时用 `CODEBUDDY_API_KEY`（见上面的「用 CodeBuddy」）。
 
 ## 手机端远程互通（PWA + 局域网 / Tailscale / 隧道）
 
-- **开启与配对**：在「设置 → 远程互通」（或命令面板「Harness Deck: 开启/关闭手机端远程互通」）启用宿主内嵌 HTTP/WS 桥接（默认关闭）；点击「生成配对二维码」后用手机扫码打开，一次性短效配对码通过 URL `#fragment` 传递（不落访问日志）并在换取 `HttpOnly` 设备 Cookie 后立即作废。
+- **开启与配对**：在「设置 → 远程互通」（或命令面板「Halo: 开启/关闭手机端远程互通」）启用宿主内嵌 HTTP/WS 桥接（默认关闭）；点击「生成配对二维码」后用手机扫码打开，一次性短效配对码通过 URL `#fragment` 传递（不落访问日志）并在换取 `HttpOnly` 设备 Cookie 后立即作废。
 - **跨网与 HTTPS**：局域网下可在设置页切换物理网卡 IP；离桌 4G/5G 场景支持只读探测本机 `tailscale status --json` 并启用 `tailscale serve` 获取 MagicDNS HTTPS 入口，或填写自带 HTTPS 隧道（`cloudflared` / `frp` / 反向代理）。
 - **权限与安全边界**：支持 `read-only`（只读查看会话与 Diff）和 `operate`（对话、审批、Git 提交/推送/PR）两种作用域；安装底层、修改服务商/MCP/技能/高级宿主机配置等高危操作默认在远程屏蔽。支持在设置页查看并一键吊销单个设备或全部断开。
 - **移动端体验与推送**：内置响应式布局、PWA 主屏安装、内嵌 Diff 审阅、面板内确认/输入弹窗（不阻塞桌面 IDE），以及免自建中继的本地 VAPID Web Push 和 Bark/ntfy/自定义 Webhook 兜底推送（默认在桌面 IDE 聚焦时静默）。
@@ -189,6 +189,6 @@ A VS Code chat panel for coding agents: streaming replies, compact tool rows, ap
 
 **Official Accounts & Channel Switching**: manage multiple official accounts per agent under Settings → Agent → Accounts (isolated config directories / credential slots / official API keys with optional isolated sessions and per-account subscription quota) and switch any agent between official accounts and third-party providers from Settings, the Model Picker header, or the Command Palette (`Switch Model Channel / Official Account`). For sign-ins that require pasting an authorization code (e.g. Antigravity), the sign-in dialog asks for the code (or the callback page URL) after browser authorization and only reports success once it is submitted.
 
-**Mobile Remote Access (PWA + LAN / Tailscale / BYO Tunnel)**: disabled by default. Enable in Settings → Mobile Remote (or command `Harness Deck: Toggle Mobile Remote Access`), generate a 5-minute single-use QR pairing link (`#code=` fragment), and connect from your phone browser or installed PWA. Supports `read-only` and `operate` device scopes, per-device revocation, in-app Diff review, local VAPID Web Push & Webhook fallback (suppressed while IDE is focused), Tailscale `serve` / custom HTTPS tunnel routing, and standalone headless mode via `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`.
+**Mobile Remote Access (PWA + LAN / Tailscale / BYO Tunnel)**: disabled by default. Enable in Settings → Mobile Remote (or command `Halo: Toggle Mobile Remote Access`), generate a 5-minute single-use QR pairing link (`#code=` fragment), and connect from your phone browser or installed PWA. Supports `read-only` and `operate` device scopes, per-device revocation, in-app Diff review, local VAPID Web Push & Webhook fallback (suppressed while IDE is focused), Tailscale `serve` / custom HTTPS tunnel routing, and standalone headless mode via `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`.
 
 **Privacy**: the extension itself makes no network requests; the backend makes all model requests. Only the context chips you see above the input box are attached to a message.

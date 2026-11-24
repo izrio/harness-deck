@@ -167,7 +167,7 @@ export function formatWebhookRequest(
       body: JSON.stringify({
         title: payload.title,
         body: payload.body,
-        group: 'Harness Deck',
+        group: 'Halo',
         ...(payload.url ? { url: payload.url } : {}),
       }),
     };

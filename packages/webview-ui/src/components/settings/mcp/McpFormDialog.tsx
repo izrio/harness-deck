@@ -1,5 +1,6 @@
 import type { McpTransport } from '@harness-deck/shared';
 import { CheckIcon, PlugIcon } from '../../icons.tsx';
+import { BackendLogo } from '../../BackendLogo.tsx';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -186,7 +187,6 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                   </Button>
                 </div>
               </div>
-              <span className="text-[11px] text-ink-3">{t('settings.mcp.form.agentsHint')}</span>
               <div className="flex flex-wrap items-center gap-1.5">
                 {agents.map((agent) => {
                   const selected = form.agents.includes(agent.id);
@@ -196,14 +196,15 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                       type="button"
                       data-testid={`mcp-form-agent-${agent.id}`}
                       onClick={() => toggleFormAgent(agent.id)}
-                      className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
                         selected
                           ? 'border-brand bg-accent-tint font-medium text-accent-ink'
                           : 'border-line bg-field text-ink-2 hover:bg-hover'
                       }`}
                     >
-                      {selected ? <CheckIcon className="size-3" /> : null}
+                      <BackendLogo backend={agent} size="sm" />
                       <span>{agent.name}</span>
+                      {selected ? <CheckIcon className="size-3" /> : null}
                     </button>
                   );
                 })}

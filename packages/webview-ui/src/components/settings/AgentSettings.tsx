@@ -343,10 +343,7 @@ export function AgentSettings() {
               </label>
 
               <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-field/60 px-3 py-2">
-                <span className="flex flex-col text-[12px]">
-                  <span className="font-medium text-ink">{t('settings.agents.form.singleSession')}</span>
-                  <span className="text-[11px] text-ink-3">{t('settings.agents.form.singleSessionHint')}</span>
-                </span>
+                <span className="text-[12px] font-medium text-ink">{t('settings.agents.form.singleSession')}</span>
                 <Switch
                   data-testid="agent-form-single-session"
                   aria-label={t('settings.agents.form.singleSession')}
@@ -381,7 +378,7 @@ export function AgentSettings() {
               <GlobeIcon className="size-4 text-accent-ink" />
               <span>{t('settings.agents.registry')}</span>
             </DialogTitle>
-            <DialogDescription>{t('settings.agents.registryHint')}</DialogDescription>
+            <DialogDescription className="sr-only">{t('settings.agents.registryHint')}</DialogDescription>
           </DialogHeader>
 
           <div className="flex min-w-0 items-center gap-1.5">

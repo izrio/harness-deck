@@ -52,14 +52,14 @@ export const PREVIEW_BACKENDS: BackendsState = {
   workspace: 'harness-deck',
   nodeEnv: { checked: true, hasNode: true, hasNpm: true, nodeVersion: 'v22.14.0', npmVersion: '10.9.2' },
   items: [
-    { id: 'dsh', name: 'DeepSeek', kind: 'dsh', capabilities: backendCapabilities({ id: 'dsh', kind: 'dsh' }), builtin: true, available: true, version: '0.9.4', npmPackage: '@deepseek-ai/dsh' },
-    { id: 'claude', name: 'Claude Code', kind: 'claude', capabilities: backendCapabilities({ id: 'claude', kind: 'claude' }), builtin: true, available: true, version: '1.0.32', npmPackage: '@anthropic-ai/claude-code' },
+    { id: 'dsh', name: 'DeepSeek', kind: 'dsh', capabilities: { ...backendCapabilities({ id: 'dsh', kind: 'dsh' }), quota: 'claude' }, builtin: true, available: true, alive: true, running: true, version: '0.9.4', npmPackage: '@deepseek-ai/dsh' },
+    { id: 'claude', name: 'Claude Code', kind: 'claude', capabilities: backendCapabilities({ id: 'claude', kind: 'claude' }), builtin: true, available: true, alive: true, version: '1.0.32', npmPackage: '@anthropic-ai/claude-code' },
     { id: 'codex', name: 'Codex', kind: 'codex', capabilities: backendCapabilities({ id: 'codex', kind: 'codex' }), builtin: true, available: true, version: '0.125.0', npmPackage: '@openai/codex' },
     { id: 'pi', name: 'Pi', kind: 'pi', capabilities: backendCapabilities({ id: 'pi', kind: 'pi' }), builtin: true, available: true, version: '0.6.1', npmPackage: '@earendil-works/pi-coding-agent' },
     { id: 'zcode', name: 'ZCode', kind: 'zcode', capabilities: backendCapabilities({ id: 'zcode', kind: 'zcode' }), builtin: true, available: false, installHint: 'npm install -g zcode-app-cli' },
     { id: 'codebuddy', name: 'CodeBuddy', kind: 'codebuddy', capabilities: backendCapabilities({ id: 'codebuddy', kind: 'codebuddy' }), builtin: true, available: true, version: '2.185.0', npmPackage: '@tencent-ai/codebuddy-code' },
     { id: 'opencode', name: 'OpenCode', kind: 'acp', capabilities: backendCapabilities({ id: 'opencode', kind: 'acp', command: 'opencode acp' }), builtin: true, available: true, version: '0.4.8', command: 'opencode acp' },
-    { id: 'antigravity', name: 'Antigravity', kind: 'acp', capabilities: backendCapabilities({ id: 'antigravity', kind: 'acp', command: 'agy acp' }), builtin: true, available: true, version: '1.5.12', command: 'agy acp' },
+    { id: 'antigravity', name: 'Antigravity', kind: 'acp', capabilities: backendCapabilities({ id: 'antigravity', kind: 'acp', command: 'agy acp' }), builtin: true, available: true, alive: true, version: '1.5.12', command: 'agy acp' },
   ],
 };
 

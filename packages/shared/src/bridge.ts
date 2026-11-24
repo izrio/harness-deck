@@ -5,6 +5,7 @@ import type {
   AccountLoginProgress,
   AccountsState,
   AppearanceState,
+  BrowserState,
   ClientSurface,
   CommandView,
   DiffContentData,
@@ -239,6 +240,59 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('terminalRestart'), payload: z.object({ id: z.string().min(1).max(100) }) }),
   z.object({ type: z.literal('terminalClear'), payload: z.object({ id: z.string().min(1).max(100) }) }),
   z.object({ type: z.literal('terminalSelect'), payload: z.object({ id: z.string().min(1).max(100) }) }),
+  /** 右侧栏内置浏览器控制与交互（CDP 实时画面 + AI MCP 连接）。 */
+  z.object({
+    type: z.literal('browserLaunch'),
+    payload: z.object({
+      url: z.string().max(4_096).optional(),
+      cdpUrl: z.string().max(1_024).optional(),
+      executablePath: z.string().max(1_024).optional(),
+      width: z.number().int().min(320).max(2_560).optional(),
+      height: z.number().int().min(240).max(2_000).optional(),
+    }),
+  }),
+  z.object({ type: z.literal('browserStop'), payload: empty }),
+  z.object({ type: z.literal('browserNavigate'), payload: z.object({ url: z.string().min(1).max(4_096) }) }),
+  z.object({ type: z.literal('browserBack'), payload: empty }),
+  z.object({ type: z.literal('browserForward'), payload: empty }),
+  z.object({ type: z.literal('browserReload'), payload: empty }),
+  z.object({
+    type: z.literal('browserResize'),
+    payload: z.object({
+      width: z.number().int().min(320).max(2_560),
+      height: z.number().int().min(240).max(2_000),
+      preset: z.enum(['responsive', 'desktop', 'mobile']).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserMouse'),
+    payload: z.object({
+      action: z.enum(['move', 'down', 'up', 'wheel']),
+      x: z.number().min(0).max(10_000),
+      y: z.number().min(0).max(10_000),
+      button: z.enum(['left', 'middle', 'right', 'none']).optional(),
+      clickCount: z.number().int().min(1).max(3).optional(),
+      deltaX: z.number().min(-5_000).max(5_000).optional(),
+      deltaY: z.number().min(-5_000).max(5_000).optional(),
+      modifiers: z.number().int().min(0).max(15).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserKey'),
+    payload: z.object({
+      action: z.enum(['down', 'up', 'char']),
+      key: z.string().max(64),
+      code: z.string().max(64).optional(),
+      text: z.string().max(256).optional(),
+      modifiers: z.number().int().min(0).max(15).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserSetAiEnabled'),
+    payload: z.object({ enabled: z.boolean() }),
+  }),
+  z.object({ type: z.literal('browserClearConsole'), payload: empty }),
+  z.object({ type: z.literal('browserRequestFrame'), payload: empty }),
   z.object({
     type: z.literal('sendMessage'),
     ...commandMeta,
@@ -425,8 +479,11 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('addRecentProject'), payload: empty }),
   /** 从最近项目列表中移除（不删除磁盘文件）。 */
   z.object({ type: z.literal('removeRecentProject'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
-  /** 在 VS Code 中打开对应项目目录。 */
-  z.object({ type: z.literal('openProject'), payload: z.object({ path: z.string().min(1).max(4_096) }) }),
+  /** 在当前会话或新窗口中打开对应项目目录；`inPlace: true` 表示在当前面板内就地切换工作区。 */
+  z.object({
+    type: z.literal('openProject'),
+    payload: z.object({ path: z.string().min(1).max(4_096), inPlace: z.boolean().optional() }),
+  }),
   /** 为项目创建 git worktree 并执行复制文件与准备命令。 */
   z.object({
     type: z.literal('createWorktree'),
@@ -594,6 +651,27 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('syncSkill'), payload: z.object({ id: z.string().min(1).max(120) }) }),
   z.object({ type: z.literal('deleteSkill'), payload: z.object({ id: z.string().min(1).max(120) }) }),
+  z.object({ type: z.literal('scanAgentSkills'), payload: empty }),
+  z.object({ type: z.literal('pickLocalSkillDir'), payload: empty }),
+  z.object({
+    type: z.literal('fetchSkillMarket'),
+    payload: z.object({ force: z.boolean().optional() }),
+  }),
+  z.object({
+    type: z.literal('importLocalSkills'),
+    payload: z.object({
+      skills: z
+        .array(
+          z.object({
+            sourceDir: z.string().min(1).max(2_000),
+            importedFrom: z.string().max(200).optional(),
+          }),
+        )
+        .min(1)
+        .max(200),
+      agents: z.array(z.string().min(1).max(100)).max(100).optional(),
+    }),
+  }),
   /** 设置 -> 扩展 -> MCP 服务器统一管理与导入。 */
   z.object({ type: z.literal('upsertMcpServer'), payload: mcpServerPayloadSchema }),
   z.object({
@@ -607,6 +685,13 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('deleteMcpServer'), payload: z.object({ id: z.string().min(1).max(120) }) }),
   z.object({ type: z.literal('scanAgentMcpConfigs'), payload: empty }),
   z.object({ type: z.literal('pickMcpConfigFile'), payload: empty }),
+  z.object({
+    type: z.literal('fetchMcpMarket'),
+    payload: z.object({
+      query: z.string().max(200).optional(),
+      force: z.boolean().optional(),
+    }),
+  }),
   z.object({
     type: z.literal('importMcpServers'),
     payload: z.object({
@@ -829,6 +914,7 @@ export interface HostSnapshot {
   readonly workbench?: WorkbenchState;
   readonly remote?: RemoteState;
   readonly terminal?: TerminalState;
+  readonly browser?: BrowserState;
 }
 
 /**
@@ -912,6 +998,16 @@ export type HostToWebview =
     }
   | { readonly type: 'terminalState'; readonly payload: TerminalState }
   | { readonly type: 'terminalOutput'; readonly payload: { readonly id: string; readonly data: string; readonly reset?: boolean } }
+  | { readonly type: 'browserState'; readonly payload: BrowserState }
+  | {
+      readonly type: 'browserFrame';
+      readonly payload: {
+        readonly data: string;
+        readonly width: number;
+        readonly height: number;
+        readonly timestamp: number;
+      };
+    }
   | { readonly type: 'sessionCheckpoints'; readonly payload: { readonly sessionId: string; readonly turns: readonly number[] } };
 
 /**

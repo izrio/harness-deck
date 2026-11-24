@@ -316,7 +316,7 @@ export function buildWslPortProxyCommand(port: number, wslAddress: string): stri
   return [
     `netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=${port} 2>$null`,
     `netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=${port} connectaddress=${wslAddress} connectport=${port}`,
-    `if (-not (Get-NetFirewallRule -DisplayName "Harness Deck Remote (${port})" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName "Harness Deck Remote (${port})" -Direction Inbound -LocalPort ${port} -Protocol TCP -Action Allow | Out-Null }`,
+    `if (-not (Get-NetFirewallRule -DisplayName "Halo Remote (${port})" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName "Halo Remote (${port})" -Direction Inbound -LocalPort ${port} -Protocol TCP -Action Allow | Out-Null }`,
   ].join('; ');
 }
 

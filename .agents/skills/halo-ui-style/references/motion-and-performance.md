@@ -1,10 +1,10 @@
 # Motion & Webview Performance Rules
 
-T3 Code is engineered for high-refresh-rate displays (120Hz+) and low idle GPU overhead. Apply these exact patterns in Harness Deck (`packages/webview-ui`).
+Halo is engineered for high-refresh-rate displays (120Hz+) and low idle GPU overhead. Apply these exact patterns in Halo (`packages/webview-ui`).
 
 ## 1. Stepped Duty-Cycled Animations (Anti-GPU-Spike Rule)
 
-Continuous CSS animations (`linear` / `ease-in-out` infinite) force the browser compositor to repaint on every vsync (up to 120–240 frames/sec). T3 Code replaces smooth infinite loops with **stepped duty-cycled keyframes** (`steps(...)`):
+Continuous CSS animations (`linear` / `ease-in-out` infinite) force the browser compositor to repaint on every vsync (up to 120–240 frames/sec). Halo replaces smooth infinite loops with **stepped duty-cycled keyframes** (`steps(...)`):
 
 ### Skeleton Loading Breath
 Hold solid, then step cleanly to `0.55` opacity and back:

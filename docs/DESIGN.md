@@ -38,7 +38,7 @@
 | v0.6 | M3 完成：编辑器上下文（当前文件/选区标签）、`@` 文件引用补全、斜杠命令（插件模板 + dsh 原生命令）、右键菜单（[对接说明第 11 节](./DSH-INTEGRATION.md#11-m3-验证结果)）。确定上下文的线上格式：dsh 的 prompt 没有附件概念，上下文作为 `<ide_context>` 块拼在消息末尾，显示时解析成标签；`@路径` 沿用 dsh 自己的语法。第 5.6、8 节按实现更新 |
 | v0.7 | M4 完成：排队消息（dsh 的 `inbox` 队列：编辑、删除、插队、停止后现在发送）、计划审阅卡片、待办和目标状态条、会话重命名、API Key 配置引导、多根工作区选择文件夹、长会话性能（持久事件投影缓存、按对象比较增量、`content-visibility`）（[对接说明第 12 节](./DSH-INTEGRATION.md#12-m4-验证结果)）。会话搜索：dsh 的全文搜索在默认部署里关闭，保留按标题过滤。中英文界面推迟到 M5 |
 | **v0.8** | M5 完成：中英文界面、多版本兼容 CI（冒烟 + 界面端到端 + 真实 VS Code）、安全与界面原则自查（结果见 7.1、3.1.1）、用户文档和 CHANGELOG，版本 0.1.0。第 5.6 节的 `locale` 消息、第 8 节的 `dsh.ui.language` 已补上 |
-| **v0.9** | 多底层：插件改名 Harness Deck；dsh 成为底层之一，另可接入 ACP（Agent Client Protocol）代理，内置 oh-my-pi 和 CodeBuddy。结构见第 15 节，CodeBuddy 的适配见 15.1；设置从 `dsh.*` 改为 `harnessDeck.*`（第 8 节的旧名自动迁移） |
+| **v0.9** | 多底层：插件改名 Halo；dsh 成为底层之一，另可接入 ACP（Agent Client Protocol）代理，内置 oh-my-pi 和 CodeBuddy。结构见第 15 节，CodeBuddy 的适配见 15.1；设置从 `dsh.*` 改为 `harnessDeck.*`（第 8 节的旧名自动迁移） |
 | **v1.0** | 全面审查后的修复（第 16 节）：底层生命周期（启动、切换、中止、子进程回收）、ACP 与 dsh 的保护对齐、发送失败不丢输入；两种控制器共用标签和上下文模块，dsh 的投影和控制器移到 `src/dsh/view/`；输入框上方合并成一行状态栏；对比度、点击区域、读屏；ESLint 和多平台单测。本文档里与实现不符的地方一并改正 |
 
 ---
@@ -732,7 +732,7 @@ dsh 负责沙箱、审批和文件/命令边界，插件负责下面这些：
 | `harnessDeck.dsh.path` | string / `""` | 指定 dsh 可执行文件；为空时在 `PATH` 中查找（`machine-overridable`，远程场景写在远端的 Machine 设置里） |
 | `harnessDeck.dsh.profile` | string / `"web"` | 启动用的 dsh profile；只接受字母、数字和 `. _ -`，其他值退回 `web` |
 | `harnessDeck.backends` | array / `[]` | 额外的 ACP 底层：`name`、`command`、`args`、`env`、`installHint`、`singleSession`；`id` 与内置项相同时覆盖内置项 |
-| `harnessDeck.backendTrace` | boolean / `false` | 把收发的 ACP 消息（脱敏后）写到「Harness Deck: Backend」输出面板 |
+| `harnessDeck.backendTrace` | boolean / `false` | 把收发的 ACP 消息（脱敏后）写到「Halo: Backend」输出面板 |
 | `harnessDeck.context.includeActiveEditor` | boolean / `true` | 发送时默认附带当前编辑器：有选区时附带代码和行号，否则只附带路径 |
 | `harnessDeck.ui.language` | `auto` / `zh` / `en`，默认 `auto` | 界面语言；`auto` 跟随 VS Code 的显示语言 |
 | `harnessDeck.ui.fontSize` | number / `0` | 对话面板字号（px）；`0` 跟随 VS Code，比工作台字号大 1px |
@@ -744,21 +744,21 @@ dsh 负责沙箱、审批和文件/命令边界，插件负责下面这些：
 
 | 命令 ID | 标题 | 入口 |
 | --- | --- | --- |
-| `harnessDeck.openChat` | Harness Deck：打开对话 | 命令面板、状态栏 |
-| `harnessDeck.newSession` | Harness Deck：新建对话 | 命令面板 |
-| `harnessDeck.explainSelection` | Harness Deck：解释这段代码 | 命令面板、编辑器右键「DSH」 |
-| `harnessDeck.fixSelection` | Harness Deck：修复这段代码 | 命令面板、编辑器右键「DSH」 |
-| `harnessDeck.testSelection` | Harness Deck：为这段代码写测试 | 命令面板、编辑器右键「DSH」 |
-| `harnessDeck.addToChat` | Harness Deck：添加到对话 | 命令面板、编辑器右键「DSH」 |
-| `harnessDeck.renameSession` | Harness Deck：重命名会话 | 命令面板、更多菜单 |
-| `harnessDeck.configureApiKey` | Harness Deck：配置 API Key | 命令面板、更多菜单、空状态、缺少 Key 的提示 |
-| `harnessDeck.selectFolder` | Harness Deck：选择对话对应的文件夹 | 命令面板（多根工作区）、更多菜单 |
-| `harnessDeck.interrupt` | Harness Deck：停止生成 | 命令面板 |
-| `harnessDeck.selectModel` | Harness Deck：切换模型 | 命令面板 |
-| `harnessDeck.openWebUI` | Harness Deck：在浏览器中打开 dsh | 命令面板、更多菜单 |
-| `harnessDeck.restartRuntime` | Harness Deck：重启 dsh | 命令面板、状态提示 |
-| `harnessDeck.selectBackend` | Harness Deck：切换底层 | 命令面板 |
-| `harnessDeck.showLogs` | Harness Deck：查看日志 | 命令面板、更多菜单 |
+| `harnessDeck.openChat` | Halo：打开对话 | 命令面板、状态栏 |
+| `harnessDeck.newSession` | Halo：新建对话 | 命令面板 |
+| `harnessDeck.explainSelection` | Halo：解释这段代码 | 命令面板、编辑器右键「DSH」 |
+| `harnessDeck.fixSelection` | Halo：修复这段代码 | 命令面板、编辑器右键「DSH」 |
+| `harnessDeck.testSelection` | Halo：为这段代码写测试 | 命令面板、编辑器右键「DSH」 |
+| `harnessDeck.addToChat` | Halo：添加到对话 | 命令面板、编辑器右键「DSH」 |
+| `harnessDeck.renameSession` | Halo：重命名会话 | 命令面板、更多菜单 |
+| `harnessDeck.configureApiKey` | Halo：配置 API Key | 命令面板、更多菜单、空状态、缺少 Key 的提示 |
+| `harnessDeck.selectFolder` | Halo：选择对话对应的文件夹 | 命令面板（多根工作区）、更多菜单 |
+| `harnessDeck.interrupt` | Halo：停止生成 | 命令面板 |
+| `harnessDeck.selectModel` | Halo：切换模型 | 命令面板 |
+| `harnessDeck.openWebUI` | Halo：在浏览器中打开 dsh | 命令面板、更多菜单 |
+| `harnessDeck.restartRuntime` | Halo：重启 dsh | 命令面板、状态提示 |
+| `harnessDeck.selectBackend` | Halo：切换底层 | 命令面板 |
+| `harnessDeck.showLogs` | Halo：查看日志 | 命令面板、更多菜单 |
 
 计划中：在编辑器中打开对话。
 
@@ -1009,7 +1009,7 @@ fixture 录制方法：用真实 dsh 跑典型场景（纯问答、改文件、�
 
 ## 15. 多底层（dsh + ACP）
 
-插件改名为 Harness Deck 后，对话面板背后的「底层」可以切换。界面和视图模型（`shared/viewModel`）与底层无关；每种底层有自己的控制器，实现同一个接口 `ChatBackendController`（`backend/types.ts`），把底层的数据投影成视图模型、处理 Webview 消息。
+插件改名为 Halo 后，对话面板背后的「底层」可以切换。界面和视图模型（`shared/viewModel`）与底层无关；每种底层有自己的控制器，实现同一个接口 `ChatBackendController`（`backend/types.ts`），把底层的数据投影成视图模型、处理 Webview 消息。
 
 ```
 extension.ts ── 底层列表（dsh + 内置 ACP 代理 + 设置 harnessDeck.backends）── 当前底层 RunningBackend

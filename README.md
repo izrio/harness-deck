@@ -1,6 +1,6 @@
-<p align="center"><img src="packages/extension/media/logo.svg" width="96" alt="Harness Deck"></p>
+<p align="center"><img src="packages/extension/media/logo.svg" width="96" alt="Halo"></p>
 
-<h1 align="center">Harness Deck</h1>
+<h1 align="center">Halo</h1>
 
 <p align="center">
   编程代理的 VS Code 对话面板：一个界面，换着用不同的底层。<br>
@@ -73,14 +73,14 @@
    ```
 
 2. 至少装好一个底层（见上表）。
-3. 打开右侧辅助侧边栏里的 Harness Deck（或命令「Harness Deck: 打开对话」）。第一次打开时会让你选底层，之后在首页点底层标签或「…」→「底层」切换。
+3. 打开右侧辅助侧边栏里的 Halo（或命令「Halo: 打开对话」）。第一次打开时会让你选底层，之后在首页点底层标签或「…」→「底层」切换。
 
-从 DSH Copilot 升级：原来的 `dsh.*` 设置会自动搬到 `harnessDeck.*` 下；Harness Deck 是新的扩展 id，装好后可以卸载 DSH Copilot。
+从 DSH Copilot 升级：原来的 `dsh.*` 设置会自动搬到 `harnessDeck.*` 下；Halo 是新的扩展 id，装好后可以卸载 DSH Copilot。
 
 ## 工作方式
 
 ```
-VS Code 插件（Harness Deck）
+VS Code 插件（Halo）
 ├── 界面：侧边栏 Webview（React），只认识与底层无关的视图模型
 └── 底层控制器（同一个接口，把底层的数据投影成视图模型）
     ├── dsh：启动 dsh Host 子进程 ── HTTP /api + WebSocket ──▶ dsh
@@ -101,7 +101,7 @@ VS Code 插件（Harness Deck）
 | [packages/extension/README.md](./packages/extension/README.md) | 使用说明：各底层的准备、功能差别、设置、常见问题 |
 | [docs/DESIGN.md](./docs/DESIGN.md) | 整体方案：架构、模块、界面设计原则、运行时管理、安全、测试、里程碑；第 15 节是多底层与各 ACP 代理的适配 |
 | [docs/DSH-INTEGRATION.md](./docs/DSH-INTEGRATION.md) | dsh 调研：启动与认证、线上格式、Remote 方法、会话事件、版本策略 |
-| [ROADMAP.md](./ROADMAP.md) | 对标 T3 Code 的改进计划、进度与决策记录 |
+| [ROADMAP.md](./ROADMAP.md) | 产品改进计划、进度与决策记录 |
 | [CHANGELOG](./packages/extension/CHANGELOG.md) | 更新记录 |
 
 ## 开发
@@ -197,7 +197,7 @@ packages/
 | --- | --- |
 | M0–M5（v0.1） | dsh 对接：协议客户端与运行时管理，对话界面，工具行、审批与提问、Diff，VS Code 上下文与右键菜单，排队与计划审阅，中英文界面，多版本兼容 CI |
 | v0.2 | 会话改动栏、多开标签、输入框拖动、主题强调色、浏览器打开 dsh、待办与提问卡片美化、运行状态和用时、粘贴图片、字体设置、子代理 |
-| v0.3 | 改名 Harness Deck，多底层：dsh + ACP（oh-my-pi、CodeBuddy），第一次打开时选底层，新首页和标志 |
+| v0.3 | 改名 Halo，多底层：dsh + ACP（oh-my-pi、CodeBuddy），第一次打开时选底层，新首页和标志 |
 | v0.3.1 | Claude 底层；ACP 代理发消息时要求登录的处理；内部包改名 `@harness-deck/*`，README 重写 |
 | v0.3.2 | ACP 底层的多开标签和会话改动栏，新对话沿用模型，dsh 改叫 DeepSeek，护眼配色，滚动到底部，skill 补全，界面打磨 |
 | v0.4.0 | 全面审查后的修复：底层启动与切换、ACP 审批保护与 dsh 对齐、发送失败不丢输入；输入框上方合并成一行状态栏；对比度、点击区域、读屏；两种底层共用标签和上下文模块，ESLint 和多平台单测 |
@@ -219,7 +219,7 @@ packages/
 
 ## English
 
-**Harness Deck** is a VS Code chat panel for coding agents with a switchable backend: [dsh (DeepSeek Harness)](https://github.com/deepseek-ai/deepseek-harness), [oh-my-pi](https://github.com/can1357/oh-my-pi), [CodeBuddy](https://www.codebuddy.ai/cli), [Claude Code](https://github.com/agentclientprotocol/claude-agent-acp), or any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com). It streams replies, shows compact tool rows, asks before actions that need approval, and opens every change in the VS Code diff editor.
+**Halo** is a VS Code chat panel for coding agents with a switchable backend: [dsh (DeepSeek Harness)](https://github.com/deepseek-ai/deepseek-harness), [oh-my-pi](https://github.com/can1357/oh-my-pi), [CodeBuddy](https://www.codebuddy.ai/cli), [Claude Code](https://github.com/agentclientprotocol/claude-agent-acp), or any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com). It streams replies, shows compact tool rows, asks before actions that need approval, and opens every change in the VS Code diff editor.
 
 - **Install**: download `harness-deck-<version>.vsix` from [Releases](https://github.com/izrio/dsh-vscode-copilot/releases/latest) and run `code --install-extension harness-deck-<version>.vsix`, then install at least one backend (see the table above). The panel asks which backend to use on first open.
 - **Usage, backend differences and settings**: [packages/extension/README.md](./packages/extension/README.md).

@@ -284,4 +284,116 @@ describe('输入框上方的状态栏', () => {
     host({ type: 'session', payload: { ...running, changes: { ...changes, additions: 9 } } });
     expect(screen.getByTestId('session-changes')).toBeTruthy();
   });
+
+  it('输入框下方左侧提供项目与分支切换，右侧展示双圆环用量标识', () => {
+    render(createElement(Composer));
+    host({
+      type: 'snapshot',
+      payload: snapshot({
+        backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+        projects: {
+          currentPath: '/repo/harness-deck',
+          recent: [
+            { path: '/repo/harness-deck', name: 'harness-deck', lastOpenedAt: 2 },
+            { path: '/repo/other-app', name: 'other-app', lastOpenedAt: 1 },
+          ],
+          configs: {},
+        },
+        workbench: {
+          overview: { waiting: [], todos: [], running: [], upcoming: [], unread: [] },
+          schedules: [],
+          agents: [],
+          tasks: { items: [], autoRun: false },
+          sessionGroups: [],
+          sourceControl: {
+            available: true,
+            root: '/repo/harness-deck',
+            branch: 'main',
+            branches: ['main', 'feat/composer-footer'],
+            remote: 'origin',
+            files: [],
+            additions: 0,
+            deletions: 0,
+            updatedAt: Date.now(),
+          },
+        },
+      }),
+    });
+
+    const footer = screen.getByTestId('composer-footer');
+    expect(footer).toBeTruthy();
+
+    // 1. 切换项目（就地切换 inPlace: true）
+    const projectBtn = screen.getByTestId('composer-project-trigger');
+    expect(projectBtn.textContent).toContain('harness-deck');
+    fireEvent.click(projectBtn);
+    fireEvent.click(screen.getByTestId('composer-project-item-other-app'));
+    expect(posted.at(-1)).toEqual({
+      type: 'openProject',
+      payload: { path: '/repo/other-app', inPlace: true },
+    });
+
+    // 2. 切换分支与新建分支
+    const branchBtn = screen.getByTestId('composer-branch-trigger');
+    expect(branchBtn.textContent).toContain('main');
+    fireEvent.click(branchBtn);
+    fireEvent.click(screen.getByTestId('composer-branch-item-feat/composer-footer'));
+    expect(posted.at(-1)).toEqual({
+      type: 'sourceControlCheckoutBranch',
+      payload: { branch: 'feat/composer-footer' },
+    });
+
+    // 模拟 checkout 完成后再新建分支
+    host({
+      type: 'workbench',
+      payload: {
+        overview: { waiting: [], todos: [], running: [], upcoming: [], unread: [] },
+        schedules: [],
+        agents: [],
+        tasks: { items: [], autoRun: false },
+        sessionGroups: [],
+        sourceControl: {
+          available: true,
+          root: '/repo/harness-deck',
+          branch: 'feat/composer-footer',
+          branches: ['main', 'feat/composer-footer'],
+          remote: 'origin',
+          files: [],
+          additions: 0,
+          deletions: 0,
+          lastAction: { kind: 'checkout', ok: true, at: Date.now() },
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    fireEvent.click(screen.getByTestId('composer-branch-trigger'));
+    fireEvent.change(screen.getByTestId('composer-new-branch-input'), { target: { value: 'feat/new-ui' } });
+    fireEvent.click(screen.getByTestId('composer-create-branch-btn'));
+    expect(posted.at(-1)).toEqual({
+      type: 'sourceControlCreateBranch',
+      payload: { branch: 'feat/new-ui' },
+    });
+
+    // 3. 右侧双圆环用量标识位于 composer-footer 内，不在 .composer__toolbar 内
+    const fetchReq = [...posted].reverse().find((m) => m.type === 'fetchQuota');
+    const requestId = (fetchReq?.payload as { requestId: number } | undefined)?.requestId ?? -1;
+    host({
+      type: 'quotaFetched',
+      payload: {
+        requestId,
+        quota: {
+          windows: [
+            { kind: 'weekly', label: 'gemini', usedPercent: 20, remainingPercent: 80 },
+            { kind: 'session', label: 'gemini', usedPercent: 35, remainingPercent: 65 },
+          ],
+          queriedAt: Date.now(),
+        },
+      },
+    });
+    const badge = screen.getByTestId('usage-badge');
+    expect(footer.contains(badge)).toBe(true);
+    expect(document.querySelector('.composer__toolbar')?.contains(badge)).toBe(false);
+    expect(screen.getByTestId('usage-ring-outer').getAttribute('data-percent')).toBe('80');
+    expect(screen.getByTestId('usage-ring-inner').getAttribute('data-percent')).toBe('65');
+  });
 });

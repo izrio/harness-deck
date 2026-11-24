@@ -3,13 +3,13 @@
  * 挂载时探测一次；悬浮时复用 5 分钟缓存刷新并展开 Popover，按模型池/窗口展示剩余额度与重置时间。
  */
 import { useEffect, useRef, useState } from 'react';
-import type { QuotaView, QuotaWindowView } from '@harness-deck/shared';
+import { backendCapabilities, type QuotaView, type QuotaWindowView } from '@harness-deck/shared';
+import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '../lib/utils.ts';
 import { getState, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { useT } from '../i18n.ts';
-import { GaugeIcon } from './icons.tsx';
 
 /** 与宿主的额度缓存同频，缓存有效期内悬浮不再重复请求。 */
 const QUOTA_CACHE_MS = 300_000;
@@ -84,6 +84,137 @@ function buildSections(windows: readonly QuotaWindowView[]): readonly WindowSect
   });
 }
 
+/** 双同心圆环几何参数（viewBox 20×20，外环每周、内环 5h）。 */
+const RING_CENTER = 10;
+const OUTER_RADIUS = 8.25;
+const INNER_RADIUS = 4.65;
+const RING_STROKE = 2.1;
+const OUTER_CIRCUMFERENCE = 2 * Math.PI * OUTER_RADIUS;
+const INNER_CIRCUMFERENCE = 2 * Math.PI * INNER_RADIUS;
+
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
+function ringToneClass(remaining: number, normalClass: string): string {
+  if (remaining <= 10) return 'text-red';
+  if (remaining <= 30) return 'text-orange';
+  return normalClass;
+}
+
+/**
+ * 双圆环订阅用量可视化：外层展示周用量（或无周/5h 时回退周期用量），内层展示 5 小时用量。
+ */
+function DualUsageRing({
+  outerPercent,
+  innerPercent,
+}: {
+  readonly outerPercent?: number;
+  readonly innerPercent?: number;
+}) {
+  const outer = outerPercent !== undefined ? clampPercent(outerPercent) : undefined;
+  const inner = innerPercent !== undefined ? clampPercent(innerPercent) : undefined;
+
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="size-[18px] shrink-0"
+      aria-hidden="true"
+      data-testid="usage-dual-ring"
+    >
+      {/* 外环轨道（周用量） */}
+      <circle
+        cx={RING_CENTER}
+        cy={RING_CENTER}
+        r={OUTER_RADIUS}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={RING_STROKE}
+        className="text-ink-3/25"
+      />
+      {outer !== undefined ? (
+        <circle
+          cx={RING_CENTER}
+          cy={RING_CENTER}
+          r={OUTER_RADIUS}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={RING_STROKE}
+          strokeDasharray={OUTER_CIRCUMFERENCE}
+          strokeDashoffset={OUTER_CIRCUMFERENCE * (1 - outer / 100)}
+          strokeLinecap="round"
+          strokeOpacity={outer > 0 ? 1 : 0}
+          transform={`rotate(-90 ${RING_CENTER} ${RING_CENTER})`}
+          data-testid="usage-ring-outer"
+          data-percent={Math.round(outer)}
+          className={cn(
+            'transition-[stroke-dashoffset] duration-300 ease-out',
+            ringToneClass(outer, 'text-accent-ink'),
+          )}
+        />
+      ) : null}
+
+      {/* 内环轨道（5h 用量） */}
+      <circle
+        cx={RING_CENTER}
+        cy={RING_CENTER}
+        r={INNER_RADIUS}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={RING_STROKE}
+        className="text-ink-3/25"
+      />
+      {inner !== undefined ? (
+        <circle
+          cx={RING_CENTER}
+          cy={RING_CENTER}
+          r={INNER_RADIUS}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={RING_STROKE}
+          strokeDasharray={INNER_CIRCUMFERENCE}
+          strokeDashoffset={INNER_CIRCUMFERENCE * (1 - inner / 100)}
+          strokeLinecap="round"
+          strokeOpacity={inner > 0 ? 1 : 0}
+          transform={`rotate(-90 ${RING_CENTER} ${RING_CENTER})`}
+          data-testid="usage-ring-inner"
+          data-percent={Math.round(inner)}
+          className={cn(
+            'transition-[stroke-dashoffset] duration-300 ease-out',
+            ringToneClass(inner, 'text-green'),
+          )}
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+/** 提取主窗口的最低剩余百分比，默认排除 Antigravity 3p 池以免掩盖主模型池剩余额度。 */
+function minPrimaryRemaining(windows: readonly QuotaWindowView[]): number | undefined {
+  if (windows.length === 0) return undefined;
+  const non3p = windows.filter((w) => w.label.trim().toLowerCase() !== '3p');
+  const pool = non3p.length > 0 ? non3p : windows;
+  return pool.reduce((min, w) => Math.min(min, clampPercent(w.remainingPercent)), 100);
+}
+
+/** 宿主查不到额度时隐藏；查到后以外层周用量 + 内层 5h 用量双圆环渲染。 */
+function resolveRingMetrics(windows: readonly QuotaWindowView[]): {
+  readonly weeklyRemaining?: number;
+  readonly sessionRemaining?: number;
+  readonly fallbackRemaining?: number;
+} {
+  const sessionRemaining = minPrimaryRemaining(windows.filter((w) => w.kind === 'session'));
+  const weeklyAll = windows.filter((w) => w.kind === 'weekly');
+  const weeklyRemaining =
+    minPrimaryRemaining(weeklyAll) ?? minPrimaryRemaining(windows.filter((w) => w.kind === 'weeklyModel'));
+  const fallbackRemaining = minPrimaryRemaining(windows);
+  return {
+    ...(weeklyRemaining !== undefined ? { weeklyRemaining } : {}),
+    ...(sessionRemaining !== undefined ? { sessionRemaining } : {}),
+    ...(fallbackRemaining !== undefined ? { fallbackRemaining } : {}),
+  };
+}
+
 function WindowBar({
   title,
   window: w,
@@ -122,6 +253,9 @@ function WindowBar({
   );
 }
 
+/** 全局递增请求号：防止组件卸载重挂（如从设置页切完账号返回对话）时复用 requestId=1 撞上 store 里的旧结果。 */
+let nextQuotaRequestId = 0;
+
 function quotaScopeOf(state: ReturnType<typeof getState>): string {
   const active = state.backends.active ?? '';
   const activeBackend = state.backends.items.find((b) => b.id === active);
@@ -134,24 +268,45 @@ function quotaScopeOf(state: ReturnType<typeof getState>): string {
   return `${active}|official:${accountId}|${accountStatus}`;
 }
 
+function supportsQuotaOf(state: ReturnType<typeof getState>): boolean {
+  const active = state.backends.active;
+  if (!active) return false;
+  const activeBackend = state.backends.items.find((b) => b.id === active);
+  if (!activeBackend) return false;
+  const caps = activeBackend.capabilities ?? backendCapabilities(activeBackend);
+  if (!caps.quota) return false;
+  const channel = state.accounts.channels[active] ?? activeBackend.activeChannel;
+  if (caps.quota !== 'antigravity' && channel?.mode === 'provider') return false;
+  return true;
+}
+
 export function UsageBadge() {
   const t = useT();
   const active = useView((s) => s.backends.active);
   const quotaScope = useView(quotaScopeOf);
+  const supportsQuota = useView(supportsQuotaOf);
+  const connected = useView((s) => s.connection === 'connected');
+  const hasModels = useView((s) => s.models.options.length > 0);
+  const running = useView((s) => s.session.running);
   const result = useView((s) => s.quotaFetchResult);
   const [quota, setQuota] = useState<QuotaView | undefined>();
   const [unavailable, setUnavailable] = useState(false);
   const [open, setOpen] = useState(false);
+  const quotaRef = useRef<QuotaView | undefined>(undefined);
   const requestIdRef = useRef(0);
   const handledIdRef = useRef(0);
   const fetchedForScope = useRef<string | undefined>(undefined);
   const probeSent = useRef(false);
   const lastScope = useRef<string>(quotaScopeOf(getState()));
+  const prevConnectedRef = useRef(connected);
+  const prevHasModelsRef = useRef(hasModels);
+  const prevRunningRef = useRef(running);
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const requestQuota = () => {
-    const requestId = ++requestIdRef.current;
+    const requestId = ++nextQuotaRequestId;
+    requestIdRef.current = requestId;
     fetchedForScope.current = quotaScopeOf(getState());
     postToHost({ type: 'fetchQuota', payload: { requestId } });
   };
@@ -168,22 +323,41 @@ export function UsageBadge() {
   }, []);
 
   useEffect(() => {
+    const scopeChanged = lastScope.current !== quotaScope;
+    const becameConnected = !prevConnectedRef.current && connected;
+    const loadedModels = !prevHasModelsRef.current && hasModels;
+    const finishedTurn = prevRunningRef.current && !running;
+    prevConnectedRef.current = connected;
+    prevHasModelsRef.current = hasModels;
+    prevRunningRef.current = running;
+
     // 切换底层、切换官方账号/服务商渠道或登录态变化后先隐藏旧额度，再立即为新作用域重新探测。
-    if (lastScope.current !== quotaScope) {
+    if (scopeChanged) {
       lastScope.current = quotaScope;
+      quotaRef.current = undefined;
       setQuota(undefined);
       setUnavailable(false);
       requestQuota();
+      return;
     }
-  }, [quotaScope, active]);
+
+    // 切换账号或重启底层初期，旧 access_token 可能尚未被新进程刷新，首次探测会返回 unavailable；
+    // 待底层重新连上、拉回模型列表或完成一轮对话（CLI 自动续期落盘）后自动补查一次。
+    if (supportsQuota && !quotaRef.current && (becameConnected || loadedModels || finishedTurn)) {
+      setUnavailable(false);
+      requestQuota();
+    }
+  }, [quotaScope, active, connected, hasModels, running, supportsQuota]);
 
   useEffect(() => {
     if (!result || result.requestId !== requestIdRef.current || result.requestId <= handledIdRef.current) return;
     handledIdRef.current = result.requestId;
     if (result.quota && result.quota.windows.length > 0) {
+      quotaRef.current = result.quota;
       setQuota(result.quota);
       setUnavailable(false);
     } else {
+      quotaRef.current = undefined;
       setQuota(undefined);
       setUnavailable(true);
     }
@@ -192,17 +366,21 @@ export function UsageBadge() {
   // 宿主查不到额度、或查询期间用户切到了别的底层/账号：标识彻底消失。
   if (!quota || unavailable || (fetchedForScope.current !== undefined && fetchedForScope.current !== quotaScope)) return null;
 
-  // 徽标优先只展示 5 小时（session）窗口的剩余百分比（且排除 Antigravity 3p 池干扰）；无 5 小时窗口时（如按计费周期计量的后端）再回退到全部窗口最小值。
-  const sessionWindows = quota.windows.filter((w) => w.kind === 'session');
-  const primarySessionWindows = sessionWindows.filter((w) => w.label.trim().toLowerCase() !== '3p');
-  const badgeWindows =
-    primarySessionWindows.length > 0
-      ? primarySessionWindows
-      : sessionWindows.length > 0
-        ? sessionWindows
-        : quota.windows;
-  const lowestRemaining = badgeWindows.reduce((min, w) => Math.min(min, w.remainingPercent), 100);
-  const level = lowestRemaining <= 10 ? 'high' : lowestRemaining <= 30 ? 'medium' : 'low';
+  // 外环展示周用量（无周/5h 窗口时回退计费周期），内环展示 5 小时用量；数字优先展示 5 小时剩余百分比。
+  const { weeklyRemaining, sessionRemaining, fallbackRemaining } = resolveRingMetrics(quota.windows);
+  const outerPercent = weeklyRemaining ?? (sessionRemaining === undefined ? fallbackRemaining : undefined);
+  const innerPercent = sessionRemaining;
+  const primaryRemaining = sessionRemaining ?? weeklyRemaining ?? fallbackRemaining ?? 0;
+  const worstRemaining = Math.min(
+    outerPercent ?? 100,
+    innerPercent ?? 100,
+    primaryRemaining,
+  );
+  const level = worstRemaining <= 10 ? 'high' : worstRemaining <= 30 ? 'medium' : 'low';
+  const hasBothRings = weeklyRemaining !== undefined && sessionRemaining !== undefined;
+  const badgeAriaLabel = hasBothRings
+    ? t('usage.badgeLabelDual', Math.round(weeklyRemaining), Math.round(sessionRemaining))
+    : t('usage.badgeLabel', Math.round(primaryRemaining));
   const sections = buildSections(quota.windows);
   const clearTimers = () => {
     clearTimeout(openTimer.current);
@@ -222,21 +400,26 @@ export function UsageBadge() {
   return (
     <Popover open={open} onOpenChange={(next) => { clearTimers(); setOpen(next); }}>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
-          aria-label={t('usage.badgeLabel', Math.round(lowestRemaining))}
-          title={t('usage.title')}
+          variant="ghost"
+          size="xs"
+          aria-label={badgeAriaLabel}
+          title={badgeAriaLabel}
           className={cn(
-            'usage-badge inline-flex h-7 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium tabular-nums transition-colors duration-150 hover:bg-hover',
-            level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink-2',
+            'usage-badge gap-1.5 font-medium tabular-nums hover:bg-hover',
+            level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink-2 hover:text-ink',
           )}
           data-testid="usage-badge"
           onPointerEnter={enter}
           onPointerLeave={leave}
         >
-          <GaugeIcon className="size-3.5 shrink-0" aria-hidden="true" />
-          <span>{Math.round(lowestRemaining)}%</span>
-        </button>
+          <DualUsageRing
+            {...(outerPercent !== undefined ? { outerPercent } : {})}
+            {...(innerPercent !== undefined ? { innerPercent } : {})}
+          />
+          <span>{Math.round(primaryRemaining)}%</span>
+        </Button>
       </PopoverTrigger>
       <PopoverContent
         side="top"
@@ -250,7 +433,21 @@ export function UsageBadge() {
         onPointerLeave={leave}
       >
         <div className="flex flex-col gap-2 px-3 py-2.5">
-          <div className="text-[12px] font-semibold leading-4 text-ink">{t('usage.title')}</div>
+          <div className="flex flex-col gap-1">
+            <div className="text-[12px] font-semibold leading-4 text-ink">{t('usage.title')}</div>
+            {hasBothRings ? (
+              <div className="flex items-center gap-3 text-[10.5px] leading-3.5 text-ink-3" data-testid="usage-ring-legend">
+                <span className="inline-flex items-center gap-1">
+                  <span aria-hidden className="size-1.5 rounded-full bg-accent-ink" />
+                  <span>{t('usage.ringLegendOuter')}</span>
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span aria-hidden className="size-1.5 rounded-full bg-green" />
+                  <span>{t('usage.ringLegendInner')}</span>
+                </span>
+              </div>
+            ) : null}
+          </div>
           {sections.map((section, index) => {
             if (section.type === 'single') {
               return (

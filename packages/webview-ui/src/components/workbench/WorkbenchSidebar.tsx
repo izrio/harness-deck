@@ -1,12 +1,12 @@
 /**
  * 工作台左侧栏（WorkbenchSidebar）：
  *
- * 顶部纵向呈现工作台核心模块导航（总览 / 定时 / 智能体 / 任务 / 项目），
- * 在「项目」下方直接以树形结构展示各项目的会话列表，左下角固定放置「设置」入口。
+ * 顶部纵向呈现工作台核心模块导航（总览 / 任务 / 智能体 / 会话），
+ * 在「会话」下方直接以扁平双行列表展示所有会话（不再按项目折叠分组），左下角固定放置「设置」入口。
  * - 宽屏桌面（>=768px）：固定左侧栏，可由顶栏按钮折叠/展开
- * - 窄屏 / 移动端（<768px）：通过 shadcn/ui Sheet 左侧抽屉承接完整导航、项目列表与设置入口
+ * - 窄屏 / 移动端（<768px）：通过 shadcn/ui Sheet 左侧抽屉承接完整导航、会话列表与设置入口
  */
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import type { GroupedSessionItem, ProjectSessionGroup } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,8 +36,6 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuButton,
@@ -52,11 +50,12 @@ import { requestCreateTask, setActiveModule, toggleSettingsPage, useView } from 
 import { loadState, postToHost, saveState } from '../../vscode.ts';
 import { BackendLogo } from '../BackendLogo.tsx';
 import {
+  ChatIcon,
   CheckIcon,
   ChevronRightIcon,
   CloseIcon,
+  ErrorIcon,
   FolderIcon,
-  FolderTreeIcon,
   GitBranchIcon,
   LayoutDashboardIcon,
   ListTodoIcon,
@@ -64,6 +63,7 @@ import {
   SearchIcon,
   SettingsIcon,
   SlidersVerticalIcon,
+  SpinnerIcon,
   TrashIcon,
   UsersIcon,
 } from '../icons.tsx';
@@ -75,6 +75,14 @@ type SessionFilter = 'all' | 'running' | 'attention' | 'unread';
 
 interface FallbackGroup extends ProjectSessionGroup {
   readonly isFallback?: boolean;
+}
+
+interface FlatSessionEntry {
+  readonly session: GroupedSessionItem;
+  readonly projectName: string;
+  readonly isCurrentProject: boolean;
+  readonly isFallback: boolean;
+  readonly branch?: string;
 }
 
 export function WorkbenchSidebar({
@@ -104,11 +112,7 @@ export function WorkbenchSidebar({
   const overview = useView((s) => s.workbench.overview);
   const tasks = useView((s) => s.workbench.tasks.items);
   const sessionGroups = useView((s) => s.workbench.sessionGroups);
-  const currentModelLabel = useView((s) => {
-    const current = s.models.current;
-    if (!current) return undefined;
-    return s.models.options.find((o) => o.provider === current.provider && o.model === current.model)?.name ?? current.model;
-  });
+  const sourceControl = useView((s) => s.workbench.sourceControl);
 
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -117,9 +121,6 @@ export function WorkbenchSidebar({
   const [query, setQuery] = useState('');
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>('all');
   const [projectsExpanded, setProjectsExpanded] = useState<boolean>(() => loadState().projectsExpanded ?? false);
-  const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>(() => ({
-    ...(loadState().expandedProjectPaths ?? {}),
-  }));
   const [pendingDelete, setPendingDelete] = useState<GroupedSessionItem | undefined>(undefined);
 
   useEffect(() => {
@@ -158,14 +159,29 @@ export function WorkbenchSidebar({
     ];
   }, [sessionGroups, sessions, activeBackendId, activeBackendName, t]);
 
-  const totalSessions = useMemo(
-    () => effectiveGroups.reduce((sum, g) => sum + g.sessions.length, 0),
-    [effectiveGroups],
-  );
+  const flatSessions = useMemo<readonly FlatSessionEntry[]>(() => {
+    const activeBranch = sourceControl?.available ? sourceControl.branch : undefined;
+    const list: FlatSessionEntry[] = [];
+    for (const group of effectiveGroups) {
+      for (const item of group.sessions) {
+        const branch = item.branch ?? (group.isCurrent ? activeBranch : undefined);
+        list.push({
+          session: item,
+          projectName: group.projectName,
+          isCurrentProject: group.isCurrent,
+          isFallback: Boolean(group.isFallback),
+          ...(branch ? { branch } : {}),
+        });
+      }
+    }
+    list.sort((a, b) => b.session.updatedAt - a.session.updatedAt);
+    return list;
+  }, [effectiveGroups, sourceControl]);
 
+  const totalSessions = flatSessions.length;
   const q = query.trim().toLowerCase();
 
-  const visibleGroups = useMemo(() => {
+  const visibleSessions = useMemo(() => {
     const matchesFilter = (item: GroupedSessionItem) => {
       if (sessionFilter === 'running') return item.running;
       if (sessionFilter === 'attention') return Boolean(item.needsAttention);
@@ -173,43 +189,25 @@ export function WorkbenchSidebar({
       return true;
     };
 
-    return effectiveGroups
-      .map((group) => {
-        const groupNameMatches = !q || group.projectName.toLowerCase().includes(q);
-        const filteredSessions = group.sessions.filter((item) => {
-          if (!matchesFilter(item)) return false;
-          if (!q) return true;
-          return (
-            item.title.toLowerCase().includes(q) ||
-            group.projectName.toLowerCase().includes(q) ||
-            item.backendName.toLowerCase().includes(q) ||
-            (item.agentName?.toLowerCase().includes(q) ?? false) ||
-            (item.model?.toLowerCase().includes(q) ?? false)
-          );
-        });
-        const visible =
-          sessionFilter !== 'all'
-            ? filteredSessions.length > 0
-            : q
-              ? groupNameMatches || filteredSessions.length > 0
-              : true;
-        return { group, filteredSessions, visible };
-      })
-      .filter((entry) => entry.visible);
-  }, [effectiveGroups, q, sessionFilter]);
+    return flatSessions.filter((entry) => {
+      const { session: item, projectName, branch } = entry;
+      if (!matchesFilter(item)) return false;
+      if (!q) return true;
+      return (
+        item.title.toLowerCase().includes(q) ||
+        projectName.toLowerCase().includes(q) ||
+        (branch?.toLowerCase().includes(q) ?? false) ||
+        item.backendName.toLowerCase().includes(q) ||
+        (item.agentName?.toLowerCase().includes(q) ?? false) ||
+        (item.model?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [flatSessions, q, sessionFilter]);
 
   const toggleProjectsSection = () => {
     setProjectsExpanded((prev) => {
       const next = !prev;
       saveState({ projectsExpanded: next });
-      return next;
-    });
-  };
-
-  const toggleGroup = (path: string) => {
-    setExpandedPaths((prev) => {
-      const next = { ...prev, [path]: !prev[path] };
-      saveState({ expandedProjectPaths: next });
       return next;
     });
   };
@@ -238,7 +236,7 @@ export function WorkbenchSidebar({
       case 'tasks':
         return <ListTodoIcon className="size-4 shrink-0" />;
       case 'sessions':
-        return <FolderTreeIcon className="size-4 shrink-0" />;
+        return <ChatIcon className="size-4 shrink-0" />;
     }
   };
 
@@ -285,6 +283,15 @@ export function WorkbenchSidebar({
                 tabIndex={activeModule === mod ? 0 : -1}
                 className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left text-[13px] leading-5"
                 onClick={() => {
+                  if (mod === 'sessions') {
+                    if (active) {
+                      toggleProjectsSection();
+                    } else {
+                      setActiveModule('sessions');
+                      if (!projectsExpanded) toggleProjectsSection();
+                    }
+                    return;
+                  }
                   setActiveModule(mod);
                   onPicked?.();
                 }}
@@ -298,9 +305,12 @@ export function WorkbenchSidebar({
 
                 {mod === 'overview' && overviewBadge > 0 ? (
                   <span
+                    data-testid="overview-badge"
                     className={cn(
-                      'ml-auto inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-4 font-semibold text-brand-foreground tabular-nums',
-                      overview.waiting.length > 0 ? 'bg-orange' : 'bg-brand',
+                      'ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] leading-none font-semibold tabular-nums',
+                      overview.waiting.length > 0
+                        ? 'bg-orange-tint text-orange ring-1 ring-inset ring-orange/35'
+                        : 'bg-accent-tint text-accent-ink ring-1 ring-inset ring-accent/30',
                     )}
                   >
                     {overviewBadge}
@@ -512,36 +522,37 @@ export function WorkbenchSidebar({
         </div>
       ) : null}
 
-      {/* 项目会话树：直接承接在「项目」大菜单下方，受「项目」大菜单展开/收起控制 */}
+      {/* 扁平会话列表：直接承接在「会话」大菜单下方，受展开/收起控制，不再按项目折叠分组 */}
       <SidebarContent className="gap-1 px-2.5 pt-0.5 pb-3">
         {projectsExpanded || q.length > 0 || sessionFilter !== 'all' ? (
-          effectiveGroups.length === 0 ? (
+          flatSessions.length === 0 ? (
             <div className="px-2.5 py-4 text-[12px] text-ink-3">{t('wb.sessions.noSessions')}</div>
-          ) : visibleGroups.length === 0 ? (
+          ) : visibleSessions.length === 0 ? (
             <div className="px-2.5 py-6 text-center text-[12px] text-ink-3">{t('header.noMatch')}</div>
           ) : (
-            visibleGroups.map(({ group, filteredSessions }) => {
-              const groupKey = group.projectPath || '__no_project__';
-              const hasFilter = q.length > 0 || sessionFilter !== 'all';
-              const collapsed = hasFilter ? false : !expandedPaths[groupKey];
-              return (
-                <ProjectSessionGroupBlock
-                  key={groupKey}
-                  group={group}
-                  filteredSessions={filteredSessions}
-                  collapsed={collapsed}
-                  hasFilter={hasFilter}
-                  currentSessionId={currentSessionId}
-                  activeBackendId={activeBackendId}
-                  isSessionsModule={activeModule === 'sessions' && !settingsOpen}
-                  currentModelLabel={currentModelLabel}
-                  remoteReadOnly={remoteReadOnly}
-                  onToggle={() => toggleGroup(groupKey)}
-                  onRequestDelete={setPendingDelete}
-                  {...(onPicked ? { onPicked } : {})}
-                />
-              );
-            })
+            <SidebarMenu className="gap-1.5">
+              {visibleSessions.map((entry) => {
+                const { session: sess, projectName, isCurrentProject, isFallback, branch } = entry;
+                const isActiveRow =
+                  activeModule === 'sessions' &&
+                  !settingsOpen &&
+                  isCurrentProject &&
+                  sess.id === currentSessionId &&
+                  sess.backendId === activeBackendId;
+                return (
+                  <SessionListItemRow
+                    key={`${sess.backendId}:${sess.id}`}
+                    session={sess}
+                    projectName={projectName}
+                    {...(branch ? { branch } : {})}
+                    isFallback={isFallback}
+                    isActiveRow={isActiveRow}
+                    onRequestDelete={setPendingDelete}
+                    {...(onPicked ? { onPicked } : {})}
+                  />
+                );
+              })}
+            </SidebarMenu>
           )
         ) : null}
       </SidebarContent>
@@ -596,15 +607,20 @@ export function WorkbenchSidebar({
           aria-label={t('wb.sidebar.title')}
           data-testid="project-sessions-sidebar"
           data-state={panelPresence.shown ? 'expanded' : 'collapsed'}
+          style={
+            {
+              '--sidebar-width': panelPresence.shown ? '16rem' : '0px',
+            } as CSSProperties
+          }
           className={cn(
-            'h-full shrink-0 overflow-hidden transition-[width] duration-[260ms] ease-[var(--ease-drawer)]',
-            panelPresence.shown ? 'w-64 border-r border-sidebar-border' : 'w-0',
+            'h-full shrink-0 overflow-hidden border-r transition-[width,border-color] duration-[260ms] ease-[var(--ease-drawer)] will-change-[width]',
+            panelPresence.shown ? 'border-sidebar-border' : 'border-transparent',
           )}
         >
           <div
             className={cn(
-              'flex h-full min-h-0 w-64 flex-col transition-transform duration-[260ms] ease-[var(--ease-drawer)]',
-              panelPresence.shown ? 'translate-x-0' : '-translate-x-full',
+              'flex h-full min-h-0 w-64 flex-col transition-[transform,opacity] duration-[260ms] ease-[var(--ease-drawer)] will-change-transform',
+              panelPresence.shown ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0',
             )}
           >
             {renderSidebarInner()}
@@ -648,135 +664,42 @@ export function WorkbenchSidebar({
   );
 }
 
-function ProjectSessionGroupBlock({
-  group,
-  filteredSessions,
-  collapsed,
-  hasFilter,
-  currentSessionId,
-  activeBackendId,
-  isSessionsModule,
-  currentModelLabel,
-  remoteReadOnly,
-  onToggle,
-  onRequestDelete,
-  onPicked,
-}: {
-  readonly group: FallbackGroup;
-  readonly filteredSessions: readonly GroupedSessionItem[];
-  readonly collapsed: boolean;
-  readonly hasFilter: boolean;
-  readonly currentSessionId: string | undefined;
-  readonly activeBackendId: string;
-  readonly isSessionsModule: boolean;
-  readonly currentModelLabel: string | undefined;
-  readonly remoteReadOnly: boolean;
-  readonly onToggle: () => void;
-  readonly onRequestDelete: (session: GroupedSessionItem) => void;
-  readonly onPicked?: () => void;
-}) {
-  const t = useT();
-
-  return (
-    <SidebarGroup className="gap-0.5 p-0" data-testid={`project-group-${group.projectName}`}>
-      <div className="group/project flex items-center rounded-control transition-colors duration-100 hover:bg-hover">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left"
-          onClick={onToggle}
-          title={group.projectPath || group.projectName}
-          aria-expanded={!collapsed}
-        >
-          <FolderIcon className={cn('size-4 shrink-0', collapsed ? 'text-ink-3' : 'text-ink-2')} />
-          <span className="truncate text-[13px] font-normal text-ink-2">{group.projectName}</span>
-          <span className="shrink-0 text-[12px] text-ink-3 tabular-nums">{filteredSessions.length}</span>
-        </button>
-
-        {!group.isFallback && !remoteReadOnly ? (
-          <div className="flex shrink-0 items-center pr-1.5 opacity-0 transition-opacity duration-100 group-focus-within/project:opacity-100 group-hover/project:opacity-100">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              data-testid={`project-new-session-${group.projectName}`}
-              title={t('wb.sessions.newInProject')}
-              aria-label={`${group.projectName} · ${t('wb.sessions.newInProject')}`}
-              className="text-ink-2 hover:bg-hover-2 hover:text-ink"
-              onClick={() => {
-                setActiveModule('sessions');
-                postToHost({
-                  type: 'startProjectSession',
-                  payload: { projectPath: group.projectPath, backendId: activeBackendId },
-                });
-                onPicked?.();
-              }}
-            >
-              <PlusIcon className="size-3.5" />
-            </Button>
-          </div>
-        ) : null}
-      </div>
-
-      {!collapsed ? (
-        <SidebarGroupContent className="relative before:pointer-events-none before:absolute before:top-0 before:bottom-1 before:left-[18px] before:w-px before:bg-sidebar-border">
-          {filteredSessions.length === 0 ? (
-            <div className="py-1.5 pr-2.5 pl-[42px] text-[11.5px] text-ink-3">
-              {hasFilter && group.sessions.length > 0 ? t('header.noMatch') : t('wb.sessions.noSessions')}
-            </div>
-          ) : (
-            <SidebarMenu className="gap-0.5">
-              {filteredSessions.map((sess) => (
-                <SessionListItemRow
-                  key={`${sess.backendId}:${sess.id}`}
-                  session={sess}
-                  isFallback={Boolean(group.isFallback)}
-                  isCurrent={group.isCurrent && sess.id === currentSessionId && sess.backendId === activeBackendId}
-                  isActiveRow={
-                    isSessionsModule &&
-                    group.isCurrent &&
-                    sess.id === currentSessionId &&
-                    sess.backendId === activeBackendId
-                  }
-                  currentModelLabel={currentModelLabel}
-                  onRequestDelete={onRequestDelete}
-                  {...(onPicked ? { onPicked } : {})}
-                />
-              ))}
-            </SidebarMenu>
-          )}
-        </SidebarGroupContent>
-      ) : null}
-    </SidebarGroup>
-  );
-}
-
 function SessionListItemRow({
   session,
+  projectName,
+  branch,
   isFallback,
-  isCurrent,
   isActiveRow,
-  currentModelLabel,
   onRequestDelete,
   onPicked,
 }: {
   readonly session: GroupedSessionItem;
+  readonly projectName: string;
+  readonly branch?: string;
   readonly isFallback: boolean;
-  readonly isCurrent: boolean;
   readonly isActiveRow: boolean;
-  readonly currentModelLabel?: string | undefined;
   readonly onRequestDelete: (session: GroupedSessionItem) => void;
   readonly onPicked?: () => void;
 }) {
   const t = useT();
-  const modelLabel = session.model ?? (isCurrent ? currentModelLabel : undefined);
   const canDelete = !session.running && !isFallback;
   const deleteTitle = session.running ? t('wb.sessions.deleteRunning') : t('wb.sessions.deleteSession');
-
-  const statusText = session.running
-    ? t('wb.sessions.statusRunning')
-    : session.needsAttention
+  const projectBranchLabel = branch ? `${projectName}/${branch}` : projectName;
+  const statusKind = session.needsAttention
+    ? 'attention'
+    : session.running
+      ? 'running'
+      : session.unread
+        ? 'unread'
+        : undefined;
+  const statusLabel =
+    statusKind === 'attention'
       ? t('wb.sessions.statusWaiting')
-      : t('wb.sessions.statusIdle');
+      : statusKind === 'running'
+        ? t('wb.sessions.statusRunning')
+        : statusKind === 'unread'
+          ? t('wb.sessions.filterUnread')
+          : undefined;
 
   const openSession = () => {
     setActiveModule('sessions');
@@ -802,26 +725,33 @@ function SessionListItemRow({
       data-testid={`grouped-session-${session.id}`}
       title={session.title}
       className={cn(
-        'h-auto items-start gap-2.5 rounded-control px-2.5 py-1.5 transition-colors duration-100 group-has-data-[sidebar=menu-action]/menu-item:pr-2.5',
+        'h-auto items-start rounded-control px-2.5 py-2 transition-colors duration-100 group-has-data-[sidebar=menu-action]/menu-item:pr-2.5',
         isActiveRow
           ? 'bg-surface text-ink shadow-hairline hover:bg-surface data-[active=true]:bg-surface data-[active=true]:text-ink dark:bg-white/[0.07] dark:hover:bg-white/[0.08] dark:data-[active=true]:bg-white/[0.07]'
           : 'text-ink-2 hover:bg-hover hover:text-ink',
       )}
       onClick={openSession}
     >
-      {/* 图标与上方文件夹和菜单图标保持同一垂直基准线，覆盖在树形引导线上 */}
-      <span
-        className={cn(
-          'relative z-10 mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full',
-          isActiveRow ? 'bg-surface' : 'bg-sidebar group-hover/menu-item:bg-hover',
-        )}
-        title={session.agentName ? `${session.backendName} · ${session.agentName}` : session.backendName}
-      >
-        <BackendLogo backend={{ id: session.backendId, name: session.backendName }} size="sm" />
-      </span>
-
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {/* 第一行：状态标识 + 会话标题（左）+ 相对时间（右，悬停可删除时淡出让位给删除按钮） */}
         <div className="flex w-full min-w-0 items-center gap-1.5">
+          {statusKind ? (
+            <span
+              className="inline-flex shrink-0 items-center justify-center"
+              data-testid={`session-status-${session.id}`}
+              data-status={statusKind}
+              title={statusLabel}
+              aria-label={statusLabel}
+            >
+              {statusKind === 'attention' ? (
+                <ErrorIcon className="size-3.5 text-orange" aria-hidden="true" />
+              ) : statusKind === 'running' ? (
+                <SpinnerIcon className="size-3.5 text-accent-ink" aria-hidden="true" />
+              ) : (
+                <span className="size-1.5 rounded-full bg-accent-ink" aria-hidden="true" />
+              )}
+            </span>
+          ) : null}
           <span
             className={cn(
               'min-w-0 flex-1 truncate text-[13px] leading-snug',
@@ -843,21 +773,24 @@ function SessionListItemRow({
           ) : null}
         </div>
 
-        <div className="flex w-full min-w-0 items-center gap-1 text-[11.5px] leading-snug text-ink-3">
+        {/* 第二行：项目/分支（左）+ 模型/底层图标（右，不展示具体模型名） */}
+        <div className="flex w-full min-w-0 items-center justify-between gap-2 text-[11.5px] leading-snug text-ink-3">
           <span
-            className={cn(
-              'shrink-0',
-              session.running ? 'text-accent-ink' : session.needsAttention ? 'text-orange' : 'text-ink-3',
-            )}
+            className="min-w-0 flex-1 truncate"
+            title={projectBranchLabel}
+            data-testid={`session-project-branch-${session.id}`}
           >
-            {statusText}
+            {projectBranchLabel}
           </span>
-          {modelLabel ? (
-            <span className="min-w-0 truncate" title={modelLabel}>
-              · {modelLabel}
-            </span>
-          ) : null}
-          <span className="sr-only">{session.backendName}</span>
+
+          <span
+            className="inline-flex size-4 shrink-0 items-center justify-center"
+            data-testid={`session-model-icon-${session.id}`}
+            title={session.agentName ? `${session.backendName} · ${session.agentName}` : session.backendName}
+          >
+            <BackendLogo backend={{ id: session.backendId, name: session.backendName }} size="sm" />
+            <span className="sr-only">{session.backendName}</span>
+          </span>
         </div>
       </div>
     </SidebarMenuButton>
@@ -886,7 +819,7 @@ function SessionListItemRow({
           aria-label={deleteTitle}
           data-testid={`delete-session-${session.id}`}
           className={cn(
-            'top-1.5 right-1.5 text-ink-3 hover:bg-hover-2 hover:text-ink',
+            'top-2 right-1.5 text-ink-3 hover:bg-hover-2 hover:text-ink',
             canDelete
               ? 'opacity-0 focus-visible:opacity-100 group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100'
               : 'hidden',

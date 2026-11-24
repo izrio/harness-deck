@@ -194,7 +194,7 @@ data class StatusBarSnapshot(
                 null
             }
             return StatusBarSnapshot(
-                backendName = obj.get("backendName")?.asString ?: "Harness Deck",
+                backendName = obj.get("backendName")?.asString ?: "Halo",
                 statusKind = statusObj?.get("kind")?.asString ?: "idle",
                 modelLabel = obj.get("modelLabel")?.takeIf { !it.isJsonNull }?.asString,
                 remote = remoteInfo,

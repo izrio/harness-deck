@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HostSnapshot, HostToWebview, RuntimeStatus } from '@harness-deck/shared';
+import { accountSlotSecretKey, systemAccountId } from '../src/accounts/AccountStore.ts';
+import { antigravityPrimaryTokenPath } from '../src/accounts/AccountIsolation.ts';
+import { clearAntigravityQuotaCache } from '../src/quota/antigravity.ts';
 import type { BackendHost } from '../src/backend/host.ts';
 import type { BackendProfile, ChatBackendController, RunningBackend } from '../src/backend/types.ts';
 import { createHarnessHostRuntime, type HarnessHostRuntime } from '../src/host/HarnessHostRuntime.ts';
@@ -714,6 +717,103 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
       expect(reply.payload.error).toBeTruthy();
     }
     expect(fetchSpy).not.toHaveBeenCalled();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('非默认后端切换官方账号导致旧进程停止期间，fetchQuota 仍按 targetBackendId 查询目标账号额度', async () => {
+    clearAntigravityQuotaCache();
+    const home = await emptyTempHome();
+    vi.stubEnv('HOME', home);
+    const futureExpiry = new Date(Date.now() + 3600_000).toISOString();
+    const tokenA = JSON.stringify({
+      email: 'a@gmail.com',
+      token: { access_token: 'token-a', refresh_token: 'refresh-a', expiry: futureExpiry },
+    });
+    const tokenB = JSON.stringify({
+      email: 'b@gmail.com',
+      token: { access_token: 'token-b', refresh_token: 'refresh-b', expiry: futureExpiry },
+    });
+    await mkdir(join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    await writeFile(antigravityPrimaryTokenPath({ HOME: home }), tokenA, 'utf8');
+
+    const env = createFakePlatform({
+      initialSettings: {
+        defaultBackend: 'dsh',
+        accounts: [{ id: 'agy-b', backendId: 'antigravity', label: 'b@gmail.com', createdAt: 1 }],
+        backendChannels: { antigravity: { mode: 'official', accountId: systemAccountId('antigravity') } },
+      },
+    });
+    await env.platform.secrets.store(accountSlotSecretKey(systemAccountId('antigravity')), tokenA);
+    await env.platform.secrets.store(accountSlotSecretKey('agy-b'), tokenB);
+
+    let releaseStop: (() => void) | undefined;
+    let gatedFirstStop = false;
+    const baseFactory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, {
+      createBackend: (profile, host) => {
+        const running = baseFactory.createBackend(profile, host);
+        if (profile.id === 'antigravity' && !gatedFirstStop) {
+          gatedFirstStop = true;
+          const origStop = running.stop;
+          return {
+            ...running,
+            stop: async () => {
+              await new Promise<void>((resolve) => {
+                releaseStop = resolve;
+              });
+              await origStop();
+            },
+          };
+        }
+        return running;
+      },
+    });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    // 切到非默认后端 antigravity
+    runtime.handleWebviewMessage({ type: 'selectBackend', payload: { id: 'antigravity' } });
+    await flushAsync();
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const auth = (init?.headers as Record<string, string> | undefined)?.authorization;
+      const fraction = auth === 'Bearer token-b' ? 0.77 : 0.11;
+      return new Response(
+        JSON.stringify({
+          groups: [
+            {
+              displayName: 'Gemini Models',
+              buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: fraction }],
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    env.posted.length = 0;
+    // 切换到 agy-b：旧 antigravity 进程 stop() 尚未结束，active 暂时为 undefined
+    runtime.handleWebviewMessage({
+      type: 'setBackendChannel',
+      payload: { backendId: 'antigravity', mode: 'official', accountId: 'agy-b' },
+    });
+    await flushAsync();
+    expect(releaseStop).toBeDefined();
+
+    // 模拟 Webview 在收到 pushAccounts 后立即发出的 fetchQuota
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 99 } });
+    await flushAsync();
+
+    releaseStop?.();
+    await flushAsync();
+
+    const reply = env.posted.find((m) => m.type === 'quotaFetched' && m.payload.requestId === 99);
+    expect(reply).toBeTruthy();
+    if (reply?.type === 'quotaFetched') {
+      expect(reply.payload.quota?.windows[0]?.remainingPercent).toBe(77);
+    }
+    expect(fetchSpy).toHaveBeenCalled();
+    clearAntigravityQuotaCache();
     await rm(home, { recursive: true, force: true });
   });
 });

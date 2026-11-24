@@ -1,7 +1,7 @@
 /**
  * Pi Coding Agent（`pi --mode rpc`）会话投影层：
  * 将实时 `AgentSessionEvent`（`agent_start`、`message_update`、`message_end`、`tool_execution_*`、`agent_end`）
- * 以及 `get_messages` / 磁盘 `.jsonl` 历史消息列表统一投影为 Harness Deck 视图模型。
+ * 以及 `get_messages` / 磁盘 `.jsonl` 历史消息列表统一投影为 Halo 视图模型。
  */
 import { joinLabel, type ImageView, type Item, type LineStats, type SessionHeader } from '@harness-deck/shared';
 import { inputFilePath, type AcpDiff, type FileChange } from '../acp/projection.ts';

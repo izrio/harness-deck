@@ -344,7 +344,7 @@ export class UnattendedRunner {
         {
           protocolVersion: PROTOCOL_VERSION,
           clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-          clientInfo: { name: 'harness-deck-scheduler', title: 'Harness Deck Scheduler', version: this.host.extensionVersion },
+          clientInfo: { name: 'harness-deck-scheduler', title: 'Halo Scheduler', version: this.host.extensionVersion },
         },
         INITIALIZE_TIMEOUT_MS,
       );

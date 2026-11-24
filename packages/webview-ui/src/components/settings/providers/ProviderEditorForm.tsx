@@ -71,7 +71,6 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
               );
             })}
           </div>
-          <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.presetUnverifiedNote')}</p>
         </div>
 
         {/* 名称 */}
@@ -131,7 +130,6 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
             }
             onChange={(e) => setEditor({ ...editor, apiKey: e.target.value, clearApiKey: false })}
           />
-          <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.apiKeyHint')}</p>
         </div>
 
         {/* 折叠区：配置模型与连接地址 */}
@@ -189,7 +187,7 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
               </div>
 
               {editor.openaiChatUrl.trim() || editor.openaiResponsesUrl.trim() ? (
-                <div className="flex flex-col gap-1 rounded-control bg-field/60 px-2.5 py-2">
+                <div className="rounded-control bg-field/60 px-2.5 py-2">
                   <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] font-medium text-ink">
                     <Checkbox
                       data-testid="provider-convert-openai"
@@ -198,9 +196,6 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                     />
                     <span>{t('settings.providers.convertOpenaiLabel')}</span>
                   </label>
-                  <p className="m-0 pl-6 text-[11px] leading-relaxed text-ink-3">
-                    {t('settings.providers.convertOpenaiHint')}
-                  </p>
                 </div>
               ) : null}
 
@@ -263,7 +258,6 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.smallModelHint')}</p>
                 </div>
               </div>
             </div>
@@ -358,7 +352,6 @@ export function ProviderEditorForm({ locale, providers, protocolGatewayEnabled, 
                   );
                 })}
               </div>
-              <p className="m-0 text-[11px] text-ink-3">{t('settings.providers.bindWorkbenchAgentsHint')}</p>
             </div>
           ) : null}
         </div>

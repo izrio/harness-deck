@@ -11,6 +11,7 @@ import type {
   ExtensionsState,
   HostSnapshot,
   HostToWebview,
+  McpServerConfig,
   ModelState,
   PreferencesState,
   ProjectsState,
@@ -125,6 +126,8 @@ export interface ControllerHostOptions {
   readonly projects?: () => ProjectsState;
   /** 扩展模块状态（已安装 Agent Skills 与统一 MCP 服务器配置）。 */
   readonly extensions?: () => ExtensionsState;
+  /** 运行时实际注入给智能体的 MCP 服务器列表（含内置浏览器 MCP，不含于设置页静态列表）。 */
+  readonly runtimeMcpServers?: () => readonly McpServerConfig[];
   /** 写入外观与排版设置（harnessDeck.ui.*）；值为 null 时恢复默认。 */
   readonly setAppearance?: (
     patch: Extract<WebviewToHost, { type: 'setAppearance' }>['payload'],

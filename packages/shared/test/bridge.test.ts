@@ -237,6 +237,37 @@ describe('parseWebviewMessage', () => {
       type: 'deleteMcpServer',
       payload: { id: 'filesystem' },
     });
+    expect(parseWebviewMessage({ type: 'scanAgentSkills', payload: {} })).toEqual({
+      type: 'scanAgentSkills',
+      payload: {},
+    });
+    expect(parseWebviewMessage({ type: 'fetchSkillMarket', payload: { force: true } })).toEqual({
+      type: 'fetchSkillMarket',
+      payload: { force: true },
+    });
+    expect(parseWebviewMessage({ type: 'fetchMcpMarket', payload: { query: 'postgres', force: true } })).toEqual({
+      type: 'fetchMcpMarket',
+      payload: { query: 'postgres', force: true },
+    });
+    expect(parseWebviewMessage({ type: 'pickLocalSkillDir', payload: {} })).toEqual({
+      type: 'pickLocalSkillDir',
+      payload: {},
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'importLocalSkills',
+        payload: {
+          skills: [{ sourceDir: '/home/user/.claude/skills/review', importedFrom: 'Claude Code' }],
+          agents: ['claude'],
+        },
+      }),
+    ).toEqual({
+      type: 'importLocalSkills',
+      payload: {
+        skills: [{ sourceDir: '/home/user/.claude/skills/review', importedFrom: 'Claude Code' }],
+        agents: ['claude'],
+      },
+    });
     expect(parseWebviewMessage({ type: 'scanAgentMcpConfigs', payload: {} })).toEqual({
       type: 'scanAgentMcpConfigs',
       payload: {},
@@ -284,6 +315,7 @@ describe('parseWebviewMessage', () => {
     expect(parseWebviewMessage({ type: 'runCommand', payload: { command: 'rm -rf /' } })).toBeUndefined();
     expect(parseWebviewMessage({ type: 'setPreferences', payload: { chatCommands: [{ name: '', prompt: 'hi' }] } })).toBeUndefined();
     expect(parseWebviewMessage({ type: 'installGitSkills', payload: { repoUrl: '' } })).toBeUndefined();
+    expect(parseWebviewMessage({ type: 'importLocalSkills', payload: { skills: [] } })).toBeUndefined();
     expect(parseWebviewMessage({ type: 'importMcpServers', payload: { servers: [], agents: ['dsh'] } })).toBeUndefined();
     expect(parseWebviewMessage({ type: 'ready' })).toBeUndefined();
     expect(parseWebviewMessage('ready')).toBeUndefined();

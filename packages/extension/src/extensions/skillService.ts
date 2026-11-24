@@ -8,10 +8,10 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import type { DiscoveredGitSkill, InstalledSkillView } from '@harness-deck/shared';
+import type { DiscoveredGitSkill, InstalledSkillView, SkillImportCandidate } from '@harness-deck/shared';
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 120_000;
@@ -35,6 +35,8 @@ interface StoredSkillRecord {
   readonly name: string;
   readonly description: string;
   readonly repoUrl: string;
+  readonly sourceKind?: 'git' | 'local';
+  readonly importedFrom?: string;
   readonly ref?: string;
   readonly subpath?: string;
   readonly commit?: string;
@@ -281,6 +283,8 @@ function toInstalledView(storageRoot: string, rec: StoredSkillRecord): Installed
     name: rec.name,
     description: rec.description,
     repoUrl: rec.repoUrl,
+    ...(rec.sourceKind ? { sourceKind: rec.sourceKind } : {}),
+    ...(rec.importedFrom ? { importedFrom: rec.importedFrom } : {}),
     ...(rec.ref ? { ref: rec.ref } : {}),
     ...(rec.subpath ? { subpath: rec.subpath } : {}),
     ...(rec.commit ? { commit: rec.commit } : {}),
@@ -323,6 +327,8 @@ async function readRegistryRecords(storageRoot: string): Promise<StoredSkillReco
       name,
       description: typeof obj.description === 'string' ? obj.description : '',
       repoUrl,
+      ...(obj.sourceKind === 'local' || obj.sourceKind === 'git' ? { sourceKind: obj.sourceKind } : {}),
+      ...(typeof obj.importedFrom === 'string' && obj.importedFrom.trim() ? { importedFrom: obj.importedFrom.trim() } : {}),
       ...(typeof obj.ref === 'string' && obj.ref.trim() ? { ref: obj.ref.trim() } : {}),
       ...(typeof obj.subpath === 'string' && obj.subpath.trim() ? { subpath: obj.subpath.trim() } : {}),
       ...(typeof obj.commit === 'string' && obj.commit.trim() ? { commit: obj.commit.trim() } : {}),
@@ -508,7 +514,192 @@ export async function installSkillsFromGit(params: {
   }
 }
 
-/** 从记录的源 Git 仓库重新拉取并更新单个已安装 Skill。 */
+export interface ScanAgentSkillsOptions {
+  readonly homeDir?: string;
+  readonly workspacePath?: string;
+  readonly dshHome?: string;
+  readonly storageRoot?: string;
+  readonly existingIds?: ReadonlySet<string>;
+}
+
+interface SkillDirProbe {
+  readonly agentId: string;
+  readonly agentName: string;
+  readonly path: string;
+}
+
+/**
+ * 扫描本机及当前工作区中各 Agent 约定目录里的 SKILL.md 技能，返回可导入候选列表。
+ */
+export async function scanAgentSkills(options: ScanAgentSkillsOptions = {}): Promise<{
+  readonly items: SkillImportCandidate[];
+  readonly scannedSources: string[];
+}> {
+  const home = options.homeDir ?? homedir();
+  const ws = options.workspacePath;
+  const dshHome = options.dshHome || process.env.DSH_HOME || join(home, '.dsh');
+  const existingIds = options.existingIds ?? new Set<string>();
+  const resolvedStorage = options.storageRoot
+    ? await realpath(options.storageRoot).catch(() => resolve(options.storageRoot!))
+    : undefined;
+
+  const probes: SkillDirProbe[] = [
+    ...(ws
+      ? [
+          { agentId: 'workspace', agentName: 'Workspace (.agents)', path: join(ws, '.agents', 'skills') },
+          { agentId: 'claude', agentName: 'Claude Code', path: join(ws, '.claude', 'skills') },
+          { agentId: 'codex', agentName: 'Codex', path: join(ws, '.codex', 'skills') },
+          { agentId: 'dsh', agentName: 'DeepSeek', path: join(ws, '.dsh', 'skills') },
+          { agentId: 'codebuddy', agentName: 'CodeBuddy', path: join(ws, '.codebuddy', 'skills') },
+          { agentId: 'pi', agentName: 'Pi', path: join(ws, '.pi', 'skills') },
+          { agentId: 'pi', agentName: 'Pi', path: join(ws, '.omp', 'skills') },
+          { agentId: 'opencode', agentName: 'OpenCode', path: join(ws, '.opencode', 'skills') },
+          { agentId: 'cursor', agentName: 'Cursor', path: join(ws, '.cursor', 'skills') },
+        ]
+      : []),
+    { agentId: 'agents', agentName: 'Agents (~/.agents)', path: join(home, '.agents', 'skills') },
+    { agentId: 'claude', agentName: 'Claude Code', path: join(home, '.claude', 'skills') },
+    { agentId: 'codex', agentName: 'Codex', path: join(home, '.codex', 'skills') },
+    { agentId: 'dsh', agentName: 'DeepSeek', path: join(dshHome, 'skills') },
+    { agentId: 'codebuddy', agentName: 'CodeBuddy', path: join(home, '.codebuddy', 'skills') },
+    { agentId: 'pi', agentName: 'Pi', path: join(home, '.pi', 'agent', 'skills') },
+    { agentId: 'pi', agentName: 'Pi', path: join(home, '.omp', 'agent', 'skills') },
+    { agentId: 'antigravity', agentName: 'Antigravity', path: join(home, '.gemini', 'antigravity', 'skills') },
+    { agentId: 'antigravity', agentName: 'Antigravity', path: join(home, '.gemini', 'antigravity-cli', 'skills') },
+    { agentId: 'gemini', agentName: 'Gemini CLI', path: join(home, '.gemini', 'skills') },
+    { agentId: 'opencode', agentName: 'OpenCode', path: join(home, '.config', 'opencode', 'skills') },
+    { agentId: 'zcode', agentName: 'ZCode', path: join(home, '.zcode', 'skills') },
+    { agentId: 'cursor', agentName: 'Cursor', path: join(home, '.cursor', 'skills') },
+  ];
+
+  const items: SkillImportCandidate[] = [];
+  const scannedSources: string[] = [];
+  const seenRealDirs = new Set<string>();
+
+  for (const probe of probes) {
+    const dirInfo = await stat(probe.path).catch(() => undefined);
+    if (!dirInfo || !dirInfo.isDirectory()) continue;
+    const realProbe = await realpath(probe.path).catch(() => resolve(probe.path));
+    if (resolvedStorage && isSameOrInsideDir(resolvedStorage, realProbe)) continue;
+
+    const discovered = await discoverSkillsInDir(probe.path).catch(() => []);
+    if (discovered.length === 0) continue;
+    scannedSources.push(probe.path);
+
+    for (const skill of discovered) {
+      const realSkillDir = await realpath(skill.absDir).catch(() => resolve(skill.absDir));
+      if (resolvedStorage && isSameOrInsideDir(resolvedStorage, realSkillDir)) continue;
+      if (seenRealDirs.has(realSkillDir)) continue;
+      seenRealDirs.add(realSkillDir);
+      const id = normalizeSkillId(skill.name || basename(realSkillDir));
+      items.push({
+        key: `${probe.agentId}:${realSkillDir}`,
+        name: skill.name,
+        description: skill.description,
+        sourceDir: realSkillDir,
+        sourceAgentId: probe.agentId,
+        sourceAgentName: probe.agentName,
+        ...(existingIds.has(id) ? { conflict: true } : {}),
+      });
+    }
+  }
+
+  return { items, scannedSources };
+}
+
+/** 扫描用户手动选择的本地目录中的 SKILL.md 技能。 */
+export async function scanLocalSkillDirectory(
+  dirPath: string,
+  existingIds: ReadonlySet<string> = new Set<string>(),
+): Promise<SkillImportCandidate[]> {
+  const realRoot = await realpath(dirPath).catch(() => resolve(dirPath));
+  const discovered = await discoverSkillsInDir(realRoot);
+  const label = basename(realRoot) || realRoot;
+  return discovered.map((skill) => {
+    const absDir = resolve(skill.absDir);
+    const id = normalizeSkillId(skill.name || basename(absDir));
+    return {
+      key: `local:${absDir}`,
+      name: skill.name,
+      description: skill.description,
+      sourceDir: absDir,
+      sourceAgentId: 'local',
+      sourceAgentName: label,
+      ...(existingIds.has(id) ? { conflict: true } : {}),
+    };
+  });
+}
+
+/** 将一个或多个本地技能目录（含 SKILL.md）安全导入到扩展存储目录。 */
+export async function importLocalSkills(params: {
+  readonly storageRoot: string;
+  readonly skills: readonly { readonly sourceDir: string; readonly importedFrom?: string }[];
+  readonly agents?: readonly string[];
+  readonly now?: number;
+}): Promise<{ readonly installed: InstalledSkillView[]; readonly all: InstalledSkillView[] }> {
+  if (params.skills.length === 0) {
+    throw new Error('No local skills selected');
+  }
+
+  const installBase = skillsInstalledRoot(params.storageRoot);
+  await mkdir(installBase, { recursive: true });
+
+  const existing = await readRegistryRecords(params.storageRoot);
+  const byId = new Map(existing.map((r) => [r.id, r]));
+  const order = existing.map((r) => r.id);
+  const timestamp = params.now ?? Date.now();
+  const cleanedAgents = params.agents?.map((a) => a.trim()).filter(Boolean);
+  const installedRecords: StoredSkillRecord[] = [];
+
+  for (const item of params.skills) {
+    const realSourceDir = await realpath(item.sourceDir).catch(() => resolve(item.sourceDir));
+    const discovered = await discoverSkillsInDir(realSourceDir);
+    const direct = discovered.find((d) => resolve(d.absDir) === realSourceDir) ?? discovered[0];
+    if (!direct) {
+      throw new Error(`No SKILL.md found in ${item.sourceDir}`);
+    }
+
+    const realSkillDir = await realpath(direct.absDir).catch(() => resolve(direct.absDir));
+    const id = normalizeSkillId(direct.name || basename(realSkillDir));
+    const targetDir = join(installBase, id);
+    const stagingDir = `${targetDir}.tmp-${timestamp}`;
+    await rm(stagingDir, { recursive: true, force: true });
+    await copySkillDirectorySafely(realSkillDir, stagingDir, realSkillDir, direct.skillFileName);
+    await rm(targetDir, { recursive: true, force: true });
+    await rename(stagingDir, targetDir);
+
+    const prev = byId.get(id);
+    const importedFrom = item.importedFrom?.trim() || prev?.importedFrom;
+    const record: StoredSkillRecord = {
+      id,
+      name: direct.name,
+      description: direct.description,
+      repoUrl: realSkillDir,
+      sourceKind: 'local',
+      ...(importedFrom ? { importedFrom } : {}),
+      enabled: prev ? prev.enabled : true,
+      ...(cleanedAgents && cleanedAgents.length > 0
+        ? { agents: cleanedAgents }
+        : prev?.agents?.length
+          ? { agents: prev.agents }
+          : {}),
+      installedAt: prev?.installedAt ?? timestamp,
+      updatedAt: timestamp,
+    };
+    byId.set(id, record);
+    if (!order.includes(id)) order.push(id);
+    installedRecords.push(record);
+  }
+
+  const nextRecords = order.map((id) => byId.get(id)).filter((r): r is StoredSkillRecord => r !== undefined);
+  await writeRegistryRecords(params.storageRoot, nextRecords);
+  return {
+    installed: installedRecords.map((r) => toInstalledView(params.storageRoot, r)),
+    all: nextRecords.map((r) => toInstalledView(params.storageRoot, r)),
+  };
+}
+
+/** 从记录的源 Git 仓库或本地目录重新同步并更新单个已安装 Skill。 */
 export async function syncInstalledSkill(params: {
   readonly storageRoot: string;
   readonly id: string;
@@ -519,6 +710,36 @@ export async function syncInstalledSkill(params: {
   const records = await readRegistryRecords(params.storageRoot);
   const existing = records.find((r) => r.id === targetId);
   if (!existing) throw new Error(`Skill not found: ${params.id}`);
+
+  if (existing.sourceKind === 'local') {
+    const realSourceDir = await realpath(existing.repoUrl).catch(() => undefined);
+    if (!realSourceDir) throw new Error(`Local skill directory not found: ${existing.repoUrl}`);
+    const discovered = await discoverSkillsInDir(realSourceDir);
+    const matched = discovered.find((d) => resolve(d.absDir) === realSourceDir) ?? discovered[0];
+    if (!matched) throw new Error(`SKILL.md no longer found in ${existing.repoUrl}`);
+
+    const installBase = skillsInstalledRoot(params.storageRoot);
+    const targetDir = join(installBase, targetId);
+    const timestamp = params.now ?? Date.now();
+    const stagingDir = `${targetDir}.tmp-${timestamp}`;
+    await rm(stagingDir, { recursive: true, force: true });
+    await copySkillDirectorySafely(matched.absDir, stagingDir, realSourceDir, matched.skillFileName);
+    await rm(targetDir, { recursive: true, force: true });
+    await rename(stagingDir, targetDir);
+
+    const updated = records.map((rec) =>
+      rec.id === targetId
+        ? {
+            ...rec,
+            name: matched.name,
+            description: matched.description,
+            updatedAt: timestamp,
+          }
+        : rec,
+    );
+    await writeRegistryRecords(params.storageRoot, updated);
+    return updated.map((r) => toInstalledView(params.storageRoot, r));
+  }
 
   const source = parseGitSkillSource(existing.repoUrl, existing.ref, existing.subpath);
   const cloned = await cloneGitRepoToTemp(source, params.env);

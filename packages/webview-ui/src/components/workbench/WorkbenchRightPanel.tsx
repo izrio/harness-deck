@@ -7,7 +7,7 @@
  * - Git：复用 ChangesView 展示分支、未提交改动、内置 Diff 审阅、提交、推送与创建 PR
  * - 宽屏桌面（>=768px）：停靠在主内容区右侧；窄屏 / 移动端（<768px）：通过 shadcn/ui Sheet 右侧抽屉展开
  */
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { FileCandidate, SourceControlFileView } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +17,14 @@ import { useIsMobile } from '../../hooks/use-mobile.ts';
 import { usePanelPresence } from '../../hooks/usePanelPresence.ts';
 import { useT } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
-import { requestPanelFiles, setRightPanelOpen, setRightPanelTab, useView, type RightPanelTab } from '../../store.ts';
+import {
+  requestPanelFiles,
+  setRightPanelOpen,
+  setRightPanelTab,
+  setRightPanelWidth,
+  useView,
+  type RightPanelTab,
+} from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import {
   ChevronDownIcon,
@@ -26,6 +33,7 @@ import {
   FilesIcon,
   FileTypeIcon,
   GitBranchIcon,
+  GlobeIcon,
   RefreshIcon,
   SearchIcon,
   TerminalIcon,
@@ -35,6 +43,19 @@ import {
 import { ChangesView } from './ChangesView.tsx';
 
 const LazyTerminalView = lazy(() => import('./TerminalView.tsx'));
+const LazyBrowserView = lazy(() => import('./BrowserView.tsx'));
+
+const MIN_RIGHT_PANEL_WIDTH = 280;
+const DEFAULT_RIGHT_PANEL_WIDTH = 360;
+const DEFAULT_BROWSER_PANEL_WIDTH = 520;
+
+function clampRightPanelWidth(raw: number): number {
+  const viewportMax =
+    typeof window !== 'undefined' && window.innerWidth > 0
+      ? Math.max(480, Math.floor(window.innerWidth * 0.72))
+      : 1_200;
+  return Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(viewportMax, Math.round(raw)));
+}
 
 interface FileTreeNode {
   readonly name: string;
@@ -106,12 +127,52 @@ export function WorkbenchRightPanel() {
   const open = useView((s) => s.rightPanelOpen);
   const panelPresence = usePanelPresence(open);
   const tab = useView((s) => s.rightPanelTab);
+  const storedWidth = useView((s) => s.rightPanelWidth);
   const sourceControl = useView((s) => s.workbench.sourceControl);
   const dirtyFiles = useView((s) => s.workspace.dirtyFiles);
   const terminalSessions = useView((s) => s.terminal.sessions);
+  const browser = useView((s) => s.browser);
+
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const draggingRef = useRef(false);
+
+  const defaultWidth = tab === 'browser' ? DEFAULT_BROWSER_PANEL_WIDTH : DEFAULT_RIGHT_PANEL_WIDTH;
+  const effectiveWidth = clampRightPanelWidth(dragWidth ?? storedWidth ?? defaultWidth);
+  const isResizing = dragWidth !== null;
+
+  const startResize = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (isMobile || event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startW = effectiveWidth;
+    draggingRef.current = true;
+    setDragWidth(startW);
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+
+    const onMove = (moveEvent: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const nextW = clampRightPanelWidth(startW + (startX - moveEvent.clientX));
+      setDragWidth(nextW);
+    };
+    const onEnd = (endEvent: MouseEvent) => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.userSelect = prevUserSelect;
+      const finalW = clampRightPanelWidth(startW + (startX - endEvent.clientX));
+      setDragWidth(null);
+      setRightPanelWidth(finalW);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onEnd);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+  };
 
   const changesCount = sourceControl?.available ? sourceControl.files.length : dirtyFiles;
   const runningTerminals = terminalSessions.filter((s) => s.running).length;
+  const browserRunning = browser.status === 'running';
 
   const panelBody = (
     <Tabs
@@ -119,12 +180,15 @@ export function WorkbenchRightPanel() {
       onValueChange={(v) => setRightPanelTab(v as RightPanelTab)}
       className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden"
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-2.5">
-        <TabsList variant="line" className="h-9 gap-2 p-0">
+      <div className="flex shrink-0 items-center justify-between gap-1 border-b border-sidebar-border px-2">
+        <TabsList
+          variant="line"
+          className="tabs h-9 min-w-0 justify-start gap-1 overflow-x-auto overflow-y-hidden p-0"
+        >
           <TabsTrigger
             value="files"
             data-testid="right-panel-tab-files"
-            className="h-9 flex-none gap-1.5 rounded-none px-2 text-[12.5px] after:bottom-0 after:bg-brand"
+            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
             onClick={() => setRightPanelTab('files')}
           >
             <FilesIcon className="size-3.5 shrink-0" />
@@ -133,7 +197,7 @@ export function WorkbenchRightPanel() {
           <TabsTrigger
             value="git"
             data-testid="right-panel-tab-git"
-            className="h-9 flex-none gap-1.5 rounded-none px-2 text-[12.5px] after:bottom-0 after:bg-brand"
+            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
             onClick={() => setRightPanelTab('git')}
           >
             <GitBranchIcon className="size-3.5 shrink-0" />
@@ -147,7 +211,7 @@ export function WorkbenchRightPanel() {
           <TabsTrigger
             value="terminal"
             data-testid="right-panel-tab-terminal"
-            className="h-9 flex-none gap-1.5 rounded-none px-2 text-[12.5px] after:bottom-0 after:bg-brand"
+            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
             onClick={() => setRightPanelTab('terminal')}
           >
             <TerminalIcon className="size-3.5 shrink-0" />
@@ -156,6 +220,18 @@ export function WorkbenchRightPanel() {
               <span className="rounded-full bg-green-tint px-1.5 text-[10.5px] font-medium text-green tabular-nums">
                 {runningTerminals}
               </span>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger
+            value="browser"
+            data-testid="right-panel-tab-browser"
+            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
+            onClick={() => setRightPanelTab('browser')}
+          >
+            <GlobeIcon className="size-3.5 shrink-0" />
+            <span>{t('wb.rightPanel.browser')}</span>
+            {browserRunning ? (
+              <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-green" />
             ) : null}
           </TabsTrigger>
         </TabsList>
@@ -189,6 +265,13 @@ export function WorkbenchRightPanel() {
           </Suspense>
         ) : null}
       </TabsContent>
+      <TabsContent value="browser" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+        {tab === 'browser' ? (
+          <Suspense fallback={<div className="p-4 text-[12px] text-ink-3">{t('thread.opening')}</div>}>
+            <LazyBrowserView />
+          </Suspense>
+        ) : null}
+      </TabsContent>
     </Tabs>
   );
 
@@ -217,15 +300,45 @@ export function WorkbenchRightPanel() {
       aria-label={t('wb.rightPanel.title')}
       data-testid="workbench-right-panel"
       data-state={panelPresence.shown ? 'expanded' : 'collapsed'}
+      style={{ width: panelPresence.shown ? `${effectiveWidth}px` : '0px' }}
       className={cn(
-        'flex h-full shrink-0 flex-col overflow-hidden bg-sidebar transition-[width] duration-[260ms] ease-[var(--ease-drawer)]',
-        panelPresence.shown ? 'w-80 border-l border-sidebar-border min-[1180px]:w-[360px]' : 'w-0',
+        'relative flex h-full shrink-0 flex-col overflow-hidden border-l bg-sidebar will-change-[width]',
+        isResizing ? 'transition-none' : 'transition-[width,border-color] duration-[260ms] ease-[var(--ease-drawer)]',
+        panelPresence.shown ? 'border-sidebar-border' : 'border-transparent',
       )}
     >
+      {/* 左侧拖拽调宽把手 */}
+      {panelPresence.shown ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('wb.rightPanel.resize')}
+          title={t('wb.rightPanel.resize')}
+          data-testid="right-panel-resize-handle"
+          onMouseDown={startResize}
+          onDoubleClick={() => setRightPanelWidth(undefined)}
+          className={cn(
+            'group/resize absolute inset-y-0 left-0 z-20 w-2 cursor-col-resize touch-none',
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none absolute inset-y-0 left-0 w-[2px] transition-colors duration-150',
+              isResizing ? 'bg-accent' : 'bg-transparent group-hover/resize:bg-accent/60',
+            )}
+          />
+        </div>
+      ) : null}
+
+      {isResizing ? <div className="fixed inset-0 z-50 cursor-col-resize" aria-hidden="true" /> : null}
+
       <div
+        style={{ width: `${effectiveWidth}px` }}
         className={cn(
-          'flex h-full w-80 flex-col transition-transform duration-[260ms] ease-[var(--ease-drawer)] min-[1180px]:w-[360px]',
-          panelPresence.shown ? 'translate-x-0' : 'translate-x-full',
+          'flex h-full flex-col will-change-transform',
+          isResizing ? 'transition-none' : 'transition-[transform,opacity] duration-[260ms] ease-[var(--ease-drawer)]',
+          panelPresence.shown ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
         )}
       >
         {panelBody}

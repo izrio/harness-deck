@@ -72,7 +72,6 @@ export function BackendCard({
 }) {
   const t = useT();
   const capabilities = backend.capabilities ?? backendCapabilities(backend);
-  const description = DESCRIPTIONS[backend.id];
   const [prevInstalled, setPrevInstalled] = useState(backend.version);
   const [pickedVersion, setPickedVersion] = useState(backend.version ?? '');
   const [versionDialogOpen, setVersionDialogOpen] = useState(false);
@@ -120,7 +119,7 @@ export function BackendCard({
   return (
     <>
       <Card
-        className="flex-row items-start gap-3 border-line/75 bg-surface/80 px-3.5 py-3 shadow-xs transition-colors hover:border-line-strong/80 hover:bg-surface dark:bg-surface/75"
+        className="flex-row items-center gap-3 border-line/75 bg-surface/80 px-3.5 py-2.5 shadow-xs transition-colors hover:border-line-strong/80 hover:bg-surface dark:bg-surface/75"
         data-testid={`settings-backend-${backend.id}`}
       >
       <BackendLogo backend={backend} />
@@ -202,13 +201,7 @@ export function BackendCard({
           ) : null}
         </div>
 
-        <p className="mt-1 mb-0 text-[12px] leading-snug text-ink-2">
-          {description ? t(description) : t('backend.desc.acp', backend.command ?? backend.name)}
-        </p>
-
-        {backend.npmPackage && backend.available && backend.npmOwned === false ? (
-          <p className="mt-1 mb-0 text-[11.5px] text-ink-3">{t('settings.backend.externalInstall')}</p>
-        ) : !backend.npmPackage && backend.available === false && (backend.installHint || backend.command) ? (
+        {!backend.npmPackage && backend.available === false && (backend.installHint || backend.command) ? (
           <p className="mt-1 mb-0 font-mono text-[11.5px] text-ink-3">{backend.installHint ?? backend.command}</p>
         ) : null}
       </div>

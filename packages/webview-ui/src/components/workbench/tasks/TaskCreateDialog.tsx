@@ -476,11 +476,20 @@ export function TaskCreateDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={AGENT_NONE_VALUE}>{t('wb.tasks.agentNone')}</SelectItem>
-                      {agents.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.name}
-                        </SelectItem>
-                      ))}
+                      {agents.map((a) => {
+                        const agentBackend = runtimeItems.find((b) => b.id === a.backendId) ?? {
+                          id: a.backendId,
+                          name: a.backendId,
+                        };
+                        return (
+                          <SelectItem key={a.id} value={a.id} textValue={a.name}>
+                            <span className="inline-flex min-w-0 items-center gap-2">
+                              <BackendLogo backend={agentBackend} size="sm" />
+                              <span className="truncate">{a.name}</span>
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>

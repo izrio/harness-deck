@@ -619,11 +619,16 @@ export class ChatController implements ChatBackendController {
       case 'updateSkill':
       case 'syncSkill':
       case 'deleteSkill':
+      case 'scanAgentSkills':
+      case 'pickLocalSkillDir':
+      case 'fetchSkillMarket':
+      case 'importLocalSkills':
       case 'upsertMcpServer':
       case 'toggleMcpServer':
       case 'deleteMcpServer':
       case 'scanAgentMcpConfigs':
       case 'pickMcpConfigFile':
+      case 'fetchMcpMarket':
       case 'importMcpServers':
       case 'upsertProvider':
       case 'deleteProvider':

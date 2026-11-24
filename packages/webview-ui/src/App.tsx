@@ -47,7 +47,19 @@ import { SessionsView } from './components/workbench/SessionsView.tsx';
 import { TasksView } from './components/workbench/TasksView.tsx';
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel.tsx';
 import { WorkbenchSidebar } from './components/workbench/WorkbenchSidebar.tsx';
-import { BeakerIcon, BookIcon, BugIcon, CheckIcon, ChevronDownIcon, DiffIcon, FolderIcon, GlobeIcon, KeyIcon } from './components/icons.tsx';
+import {
+  ArrowRightIcon,
+  BeakerIcon,
+  BookIcon,
+  BugIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  DiffIcon,
+  FolderIcon,
+  GitBranchIcon,
+  GlobeIcon,
+  KeyIcon,
+} from './components/icons.tsx';
 import type { MessageKey } from './i18n.ts';
 import { useT } from './i18n.ts';
 
@@ -228,8 +240,6 @@ export function App() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={toggleSidebar}
         onOpenMobileDrawer={() => setMobileDrawerOpen(true)}
-        onNewWorktree={openNewWorktree}
-        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
       />
       {transport.mode === 'mobile-web' && transport.status !== 'connected' && transport.suggestedRoute ? (
         <a
@@ -307,7 +317,7 @@ export function App() {
               </div>
             ) : null}
             {opening ? <SessionLoading /> : empty ? <EmptyState /> : <Thread />}
-            <Composer />
+            <Composer onNewWorktree={openNewWorktree} />
           </SessionsView>
         </main>
         {!settingsOpen ? <WorkbenchRightPanel /> : null}
@@ -358,10 +368,8 @@ export function App() {
       </Dialog>
 
       <div
-        className={cn(
-          'pointer-events-none fixed inset-x-0 z-40 [&_.toast]:pointer-events-auto',
-          hideChat ? 'bottom-3' : 'bottom-32',
-        )}
+        data-testid="toast-viewport"
+        className="pointer-events-none fixed top-12 right-3 z-40 max-sm:left-3 [&_.toast]:pointer-events-auto"
       >
         <Toasts />
       </div>
@@ -399,111 +407,167 @@ function EmptyState() {
   return <Home />;
 }
 
-/** 首页（Beautiful UI Recommendation / Context 卡片网格 + 胶囊上下文芯片）。 */
+/** 首页（Halo 视觉风格：品牌徽章 + 实时工作区上下文条 + 快捷任务卡片）。 */
 function Home() {
   const t = useT();
   const backends = useView((s) => s.backends);
+  const sourceControl = useView((s) => s.workbench.sourceControl);
+  const dirtyFiles = useView((s) => s.workspace.dirtyFiles);
   const folder = backends.workspace;
   const current = backends.items.find((b) => b.id === backends.active);
   // 只允许切换到已安装的智能体
   const installed = backends.items.filter((b) => b.available !== false);
-  const chipClass =
-    'home__chip inline-flex max-w-full items-center gap-1.5 rounded-chip bg-surface px-2.5 py-1 text-[12px] font-medium text-ink shadow-card transition-colors duration-150';
+  const branch = sourceControl?.available ? sourceControl.branch : undefined;
+  const changesCount = sourceControl?.available ? sourceControl.files.length : dirtyFiles;
+
+  const kbdClass =
+    'inline-flex min-w-[1.5em] items-center justify-center rounded-[5px] border border-line/80 bg-surface/80 px-1.5 py-0.5 text-center font-mono text-[10.5px] leading-none text-ink-2 shadow-[0_1px_0_var(--line)]';
+
   return (
-    <div className="empty flex min-h-0 flex-1 flex-col justify-center overflow-y-auto px-5 py-6 text-center">
-      <div className="flex flex-col items-center">
-        <div className="mb-3" aria-hidden="true">
-          <HarnessDeckLogo />
+    <div className="empty relative flex min-h-0 flex-1 flex-col justify-center overflow-y-auto px-5 py-8 text-center">
+      <div className="home-backdrop pointer-events-none absolute inset-0" aria-hidden="true" />
+
+      <div className="relative z-10 mx-auto flex w-full max-w-[500px] flex-col items-center">
+        {/* 品牌徽标 + 柔和光晕 */}
+        <div className="relative mb-4 flex items-center justify-center" aria-hidden="true">
+          <div className="home-emblem-glow pointer-events-none absolute -inset-4 rounded-full blur-md" />
+          <div className="relative flex size-13 items-center justify-center rounded-2xl border border-line/70 bg-surface/85 p-1 shadow-raised backdrop-blur-sm dark:inset-shadow-[0_1px_rgb(255_255_255/8%)]">
+            <HarnessDeckLogo className="size-10 rounded-[11px]" />
+          </div>
         </div>
-        <p className="mt-0 mb-1.5 text-[17px] font-semibold tracking-tight text-ink">{t('empty.title')}</p>
-        <p className="mx-auto my-0 max-w-76 text-[13px] leading-relaxed text-ink-2">{t('empty.hint')}</p>
-        <div className="mt-3.5 flex flex-wrap justify-center gap-1.5">
-          {current && installed.length > 0 ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className={cn(chipClass, 'hover:bg-hover')} data-testid="home-backend" title={t('home.switchBackend')}>
-                  <BackendLogo backend={current} size="sm" />
-                  <span>{current.name}</span>
-                  {current.available === false ? <span className="size-1.5 rounded-full bg-orange" title={t('backend.missing')} /> : null}
-                  <ChevronDownIcon className="size-3 text-ink-3" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="min-w-44">
-                {installed.map((backend) => (
-                  <DropdownMenuItem
-                    key={backend.id}
-                    data-testid={`home-backend-${backend.id}`}
-                    className="gap-2 text-[12px]"
-                    onSelect={() => {
-                      if (backend.id !== backends.active) postToHost({ type: 'selectBackend', payload: { id: backend.id } });
-                    }}
+
+        <h1 className="m-0 text-[22px] leading-tight font-semibold tracking-[-0.025em] text-balance text-ink">
+          {t('empty.title')}
+        </h1>
+
+        {/* 统一实时上下文条：当前智能体 · 工作区目录 · Git 分支与改动 */}
+        {(current || folder || branch) ? (
+          <div className="surface-glass mt-3.5 inline-flex max-w-full flex-wrap items-center justify-center divide-x divide-line/60 overflow-hidden rounded-full border border-line/70 shadow-xs dark:inset-shadow-[0_1px_rgb(255_255_255/4%)]">
+            {current && installed.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="home__chip inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-hover"
+                    data-testid="home-backend"
+                    title={t('home.switchBackend')}
                   >
-                    <BackendLogo backend={backend} size="sm" />
-                    <span className="truncate">{backend.name}</span>
-                    {backend.id === backends.active ? <CheckIcon className="ml-auto size-3.5 text-accent-ink" /> : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : current ? (
-            <span className={chipClass} data-testid="home-backend">
-              <BackendLogo backend={current} size="sm" />
-              <span>{current.name}</span>
-              {current.available === false ? <span className="size-1.5 rounded-full bg-orange" title={t('backend.missing')} /> : null}
-            </span>
-          ) : null}
-          {folder ? (
-            <span className="home__chip inline-flex max-w-full items-center gap-1.5 rounded-chip bg-field px-2.5 py-1 text-[12px] text-ink-2 shadow-hairline" title={folder}>
-              <FolderIcon className="size-3.5 shrink-0 text-ink-3" />
-              <span className="truncate">{folder}</span>
-            </span>
-          ) : null}
+                    <BackendLogo backend={current} size="sm" />
+                    <span className="truncate">{current.name}</span>
+                    {current.available === false ? <span className="size-1.5 rounded-full bg-orange" title={t('backend.missing')} /> : null}
+                    <ChevronDownIcon className="size-3 text-ink-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="min-w-44">
+                  {installed.map((backend) => (
+                    <DropdownMenuItem
+                      key={backend.id}
+                      data-testid={`home-backend-${backend.id}`}
+                      className="gap-2 text-[12px]"
+                      onSelect={() => {
+                        if (backend.id !== backends.active) postToHost({ type: 'selectBackend', payload: { id: backend.id } });
+                      }}
+                    >
+                      <BackendLogo backend={backend} size="sm" />
+                      <span className="truncate">{backend.name}</span>
+                      {backend.id === backends.active ? <CheckIcon className="ml-auto size-3.5 text-accent-ink" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : current ? (
+              <span className="home__chip inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-ink" data-testid="home-backend">
+                <BackendLogo backend={current} size="sm" />
+                <span className="truncate">{current.name}</span>
+                {current.available === false ? <span className="size-1.5 rounded-full bg-orange" title={t('backend.missing')} /> : null}
+              </span>
+            ) : null}
+
+            {folder ? (
+              <span className="home__chip inline-flex max-w-44 items-center gap-1.5 px-3 py-1.5 font-mono text-[11.5px] text-ink-2" title={folder}>
+                <FolderIcon className="size-3.5 shrink-0 text-ink-3" />
+                <span className="truncate">{folder}</span>
+              </span>
+            ) : null}
+
+            {branch ? (
+              <button
+                type="button"
+                className="home__chip inline-flex max-w-44 items-center gap-1.5 px-3 py-1.5 font-mono text-[11.5px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
+                title={branch}
+                onClick={() => {
+                  setRightPanelTab('git');
+                  setRightPanelOpen(true);
+                }}
+              >
+                <GitBranchIcon className="size-3 shrink-0 text-ink-3" />
+                <span className="truncate">{branch}</span>
+                {changesCount > 0 ? (
+                  <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-orange-tint px-1.5 py-0.5 text-[10px] leading-none font-semibold text-orange tabular-nums">
+                    {changesCount}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* 快捷起步任务网格 */}
+        <div
+          className="suggestions mt-6 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2"
+          data-testid="suggestions"
+        >
+          {SUGGESTIONS.map(({ key, icon, tone }) => (
+            <button
+              key={key}
+              type="button"
+              className="suggestion group relative flex items-center gap-3 overflow-hidden rounded-xl border border-line/70 bg-surface/75 px-3.5 py-3 text-left text-ink shadow-xs backdrop-blur-sm transition-[transform,border-color,background-color,box-shadow] duration-150 hover:-translate-y-px hover:border-line-strong hover:bg-surface hover:shadow-raised active:translate-y-0 active:scale-[0.985] dark:inset-shadow-[0_1px_rgb(255_255_255/4%)]"
+              onClick={() => requestPrefill(t(`empty.suggest.${key}Prompt` as MessageKey))}
+            >
+              <span className={cn('inline-flex size-8 shrink-0 items-center justify-center rounded-lg transition-transform duration-150 group-hover:scale-105', tone)}>
+                {icon}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-[12.5px] leading-snug font-medium text-ink">
+                  {t(`empty.suggest.${key}` as MessageKey)}
+                </span>
+                <span className="truncate text-[11.5px] leading-snug text-ink-3">
+                  {t(`empty.suggest.${key}Desc` as MessageKey)}
+                </span>
+              </span>
+              <ArrowRightIcon className="size-3.5 shrink-0 -translate-x-1 text-ink-3 opacity-0 transition-[transform,opacity] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
+            </button>
+          ))}
         </div>
-      </div>
 
-      <div className="suggestions mx-auto mt-5 grid w-full max-w-[420px] grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2" data-testid="suggestions">
-        {SUGGESTIONS.map(({ key, icon }) => (
-          <button
-            key={key}
-            type="button"
-            className="suggestion flex items-start gap-2.5 rounded-xl border border-line/80 bg-surface p-3 text-left text-ink shadow-xs transition-[transform,border-color,background-color,box-shadow] duration-150 hover:-translate-y-px hover:border-line-strong hover:bg-inset hover:shadow-raised active:translate-y-0"
-            onClick={() => requestPrefill(t(`empty.suggest.${key}Prompt` as MessageKey))}
-          >
-            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-control bg-field text-ink-2">
-              {icon}
+        {/* 键帽快捷键提示 */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11.5px] text-ink-3" aria-hidden="true">
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className={kbdClass}>@</kbd>
+            <span>{t('home.tips.mention')}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className={kbdClass}>/</kbd>
+            <span>{t('home.tips.command')}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-0.5">
+              <kbd className={kbdClass}>⇧</kbd>
+              <kbd className={kbdClass}>↵</kbd>
             </span>
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-[12.5px] leading-snug font-medium text-ink">{t(`empty.suggest.${key}` as MessageKey)}</span>
-              <span className="text-[11.5px] leading-snug text-ink-3">{t(`empty.suggest.${key}Desc` as MessageKey)}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-5 flex flex-wrap justify-center gap-x-3.5 gap-y-1.5 text-[11.5px] text-ink-3" aria-hidden="true">
-        <span className="inline-flex items-center gap-1">
-          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">@</kbd>
-          {t('home.tips.mention')}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">/</kbd>
-          {t('home.tips.command')}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">⇧</kbd>
-          <kbd className="inline-block min-w-[1.5em] rounded-[5px] bg-surface px-1 py-0.5 text-center font-mono text-[11px] leading-none text-ink-2 shadow-hairline">↵</kbd>
-          {t('home.tips.newline')}
-        </span>
+            <span>{t('home.tips.newline')}</span>
+          </span>
+        </div>
       </div>
     </div>
   );
 }
 
 const SUGGESTIONS = [
-  { key: 'project', icon: <BookIcon className="size-3.5" /> },
-  { key: 'bugs', icon: <BugIcon className="size-3.5" /> },
-  { key: 'tests', icon: <BeakerIcon className="size-3.5" /> },
-  { key: 'commit', icon: <DiffIcon className="size-3.5" /> },
+  { key: 'project', icon: <BookIcon className="size-4" />, tone: 'bg-accent-tint text-accent-ink ring-1 ring-inset ring-accent/20' },
+  { key: 'bugs', icon: <BugIcon className="size-4" />, tone: 'bg-orange-tint text-orange ring-1 ring-inset ring-orange/25' },
+  { key: 'tests', icon: <BeakerIcon className="size-4" />, tone: 'bg-green-tint text-green ring-1 ring-inset ring-green/25' },
+  { key: 'commit', icon: <DiffIcon className="size-4" />, tone: 'bg-field text-ink-2 ring-1 ring-inset ring-line-strong/60' },
 ] as const;
 
 function SessionLoading() {

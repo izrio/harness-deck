@@ -1,5 +1,5 @@
 /**
- * 设置和命令的名称集中在这里（插件改名为 Harness Deck 后从 `dsh.*` 改成 `harnessDeck.*`）。
+ * 设置和命令的名称集中在这里（插件改名为 Halo 后从 `dsh.*` 改成 `harnessDeck.*`）。
  */
 import * as vscode from 'vscode';
 

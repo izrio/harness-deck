@@ -260,12 +260,8 @@ function IdeRemoteSettingsPanel() {
         }
       >
         <div className="primitive-card-pad flex flex-col gap-3">
-          <p className="m-0 text-[12px] text-ink-3">{t('remote.subtitle')}</p>
           <div className="flex items-center justify-between gap-3">
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
-              <span className="font-medium text-ink">{t('remote.enabled')}</span>
-              <span className="text-[11.5px] text-ink-3">{t('remote.enabledHint')}</span>
-            </span>
+            <span className="min-w-0 flex-1 text-[12.5px] font-medium text-ink">{t('remote.enabled')}</span>
             <Switch
               data-testid="remote-enabled-switch"
               aria-label={t('remote.enabled')}
@@ -298,7 +294,6 @@ function IdeRemoteSettingsPanel() {
                 <span>{t('remote.refreshNetwork')}</span>
               </Button>
             </div>
-            <span className="text-[11.5px] text-ink-3">{t('remote.lanHostHint')}</span>
             <Select
               value={remote?.selectedHost || ((remote?.interfaces ?? []).length === 0 ? '127.0.0.1' : undefined)}
               onValueChange={(value) => postToHost({ type: 'setRemoteConfig', payload: { selectedHost: value } })}
@@ -446,7 +441,6 @@ function IdeRemoteSettingsPanel() {
           {/* BYO Tunnel */}
           <div className="flex flex-col gap-1 border-t border-line pt-3">
             <span className="text-[12.5px] font-medium text-ink">{t('remote.tunnelUrl')}</span>
-            <span className="text-[11.5px] text-ink-3">{t('remote.tunnelUrlHint')}</span>
             <div className="flex items-center gap-1.5">
               <Input
                 size="sm"
@@ -535,7 +529,6 @@ function IdeRemoteSettingsPanel() {
                     <span>{t('remote.copyPairing')}</span>
                   </Button>
                 </div>
-                <p className="m-0 text-[11px] text-ink-3">{t('remote.pairingHint')}</p>
               </div>
             </div>
           ) : null}
@@ -621,12 +614,9 @@ function IdeRemoteSettingsPanel() {
           </Button>
         }
       >
-        <div className="primitive-card-pad flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
-              <span className="text-ink">{t('remote.webPushEnabled')}</span>
-              <span className="text-[11.5px] text-ink-3">{t('remote.webPushHint')}</span>
-            </span>
+        <div className="divide-y divide-line/60">
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('remote.webPushEnabled')}</span>
             <Switch
               data-testid="remote-webpush-switch"
               aria-label={t('remote.webPushEnabled')}
@@ -635,11 +625,8 @@ function IdeRemoteSettingsPanel() {
             />
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
-              <span className="text-ink">{t('remote.suppressFocused')}</span>
-              <span className="text-[11.5px] text-ink-3">{t('remote.suppressFocusedHint')}</span>
-            </span>
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('remote.suppressFocused')}</span>
             <Switch
               data-testid="remote-suppress-focused-switch"
               aria-label={t('remote.suppressFocused')}
@@ -650,8 +637,8 @@ function IdeRemoteSettingsPanel() {
             />
           </div>
 
-          <div className="flex flex-col gap-2 border-t border-line pt-3">
-            <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-2.5 px-4 py-3">
+            <div className="flex items-center justify-between gap-4">
               <span className="text-[12.5px] font-medium text-ink">{t('remote.webhookEnabled')}</span>
               <Switch
                 data-testid="remote-webhook-switch"

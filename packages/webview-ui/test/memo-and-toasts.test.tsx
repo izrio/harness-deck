@@ -31,22 +31,24 @@ describe('Toasts 挂载稳定性与 TurnDone memo', () => {
     });
 
     const initialToast = container.querySelector('.toast');
+    const viewport = screen.getByTestId('toast-viewport');
     expect(initialToast).not.toBeNull();
     expect(initialToast?.textContent).toContain('Persistent error');
-    expect(initialToast?.parentElement?.parentElement?.className).toContain('bottom-32');
+    expect(viewport.className).toContain('top-12');
+    expect(viewport.className).toContain('right-3');
 
     act(() => {
       openSettingsPage();
     });
     expect(screen.getByTestId('settings-page')).toBeTruthy();
     expect(container.querySelector('.toast')).toBe(initialToast);
-    expect(initialToast?.parentElement?.parentElement?.className).toContain('bottom-3');
+    expect(screen.getByTestId('toast-viewport').className).toContain('top-12');
 
     act(() => {
       closeSettingsPage();
     });
     expect(container.querySelector('.toast')).toBe(initialToast);
-    expect(initialToast?.parentElement?.parentElement?.className).toContain('bottom-32');
+    expect(screen.getByTestId('toast-viewport').className).toContain('top-12');
 
     act(() => {
       toggleRightPanel();

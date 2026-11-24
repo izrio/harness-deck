@@ -27,6 +27,7 @@ import {
   accountIsolationDir,
   antigravityFallbackTokenPath,
   antigravityPrimaryTokenPath,
+  antigravityTokensSameAccount,
   codebuddyInternetEnvForRegion,
   readAntigravityDiskTokenRaw,
   readCodebuddyDiskAuthSnapshot,
@@ -387,35 +388,6 @@ async function queryAntigravitySlotQuota(params: {
   } finally {
     await rm(tempHome, { recursive: true, force: true }).catch(() => undefined);
   }
-}
-
-function parseAntigravityIdentityFingerprint(raw: string): { readonly refreshToken?: string; readonly email?: string } {
-  try {
-    const json = rec(JSON.parse(raw));
-    const token = rec(json?.token);
-    const refreshToken =
-      (typeof token?.refresh_token === 'string' && token.refresh_token.trim()) ||
-      (typeof token?.refreshToken === 'string' && token.refreshToken.trim()) ||
-      (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
-      (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
-      undefined;
-    const idPayload = decodeJwtPayloadUnsafe(token?.id_token ?? json?.id_token);
-    const email =
-      (typeof json?.email === 'string' && json.email.trim().toLowerCase()) ||
-      (typeof idPayload?.email === 'string' && idPayload.email.trim().toLowerCase()) ||
-      undefined;
-    return { ...(refreshToken ? { refreshToken } : {}), ...(email ? { email } : {}) };
-  } catch {
-    return {};
-  }
-}
-
-function antigravityTokensSameAccount(a: string, b: string): boolean {
-  const fa = parseAntigravityIdentityFingerprint(a);
-  const fb = parseAntigravityIdentityFingerprint(b);
-  if (fa.refreshToken && fb.refreshToken && fa.refreshToken !== fb.refreshToken) return false;
-  if (fa.email && fb.email && fa.email !== fb.email) return false;
-  return true;
 }
 
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';

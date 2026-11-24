@@ -308,7 +308,6 @@ export function AccountSettings() {
               ) : null}
             </div>
           </div>
-          <p className="m-0 text-[12px] leading-relaxed text-ink-3">{t('settings.accounts.desc')}</p>
         </div>
 
         <div className="flex flex-col gap-2.5">
@@ -359,8 +358,11 @@ export function AccountSettings() {
                   </SelectTrigger>
                   <SelectContent>
                     {(editor.isNew ? multiAccountBackends : backends).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
+                      <SelectItem key={b.id} value={b.id} textValue={b.name}>
+                        <span className="inline-flex min-w-0 items-center gap-2">
+                          <BackendLogo backend={b} size="sm" />
+                          <span className="truncate">{b.name}</span>
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -451,15 +453,10 @@ export function AccountSettings() {
               ) : null}
 
               {editorAccountCap?.supportsSessionIsolation && !editor.isSystemDefault ? (
-                <div className="flex items-start justify-between gap-3 rounded-control border border-line bg-inset/45 px-2.5 py-2">
-                  <div className="min-w-0">
-                    <div className="text-[12px] font-medium text-ink">
-                      {t('settings.accounts.form.isolateSessions')}
-                    </div>
-                    <p className="mt-0.5 mb-0 text-[11px] leading-snug text-ink-3">
-                      {t('settings.accounts.form.isolateSessionsHint')}
-                    </p>
-                  </div>
+                <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-inset/45 px-2.5 py-2">
+                  <span className="text-[12px] font-medium text-ink">
+                    {t('settings.accounts.form.isolateSessions')}
+                  </span>
                   <Switch
                     checked={editor.isolateSessions}
                     onCheckedChange={(checked) => setEditor({ ...editor, isolateSessions: checked })}
@@ -834,15 +831,22 @@ function BackendAccountCard({
 
         <div className="flex flex-wrap items-center gap-1.5">
           <div
-            className="inline-flex items-center rounded-control border border-line bg-surface p-0.5"
+            className="inline-flex items-center gap-0.5 rounded-lg border border-line/80 bg-inset p-0.5 dark:bg-page/80"
             role="group"
             aria-label={t('model.channel.label')}
           >
             <Button
               type="button"
-              variant={activeMode === 'official' ? 'secondary' : 'ghost'}
+              variant={activeMode === 'official' ? 'default' : 'ghost'}
               size="xs"
+              aria-pressed={activeMode === 'official'}
               data-testid={`channel-official-${backend.id}`}
+              className={cn(
+                'px-2.5',
+                activeMode === 'official'
+                  ? 'font-medium shadow-xs'
+                  : 'text-ink-3 hover:bg-hover/70 hover:text-ink',
+              )}
               onClick={() => switchToOfficial()}
             >
               <UsersIcon className="size-3" />
@@ -850,10 +854,17 @@ function BackendAccountCard({
             </Button>
             <Button
               type="button"
-              variant={activeMode === 'provider' ? 'secondary' : 'ghost'}
+              variant={activeMode === 'provider' ? 'default' : 'ghost'}
               size="xs"
+              aria-pressed={activeMode === 'provider'}
               disabled={!supportsProvider || compatibleProviders.length === 0}
               data-testid={`channel-provider-${backend.id}`}
+              className={cn(
+                'px-2.5',
+                activeMode === 'provider'
+                  ? 'font-medium shadow-xs'
+                  : 'text-ink-3 hover:bg-hover/70 hover:text-ink',
+              )}
               onClick={() => {
                 const target = activeProviderId ?? compatibleProviders[0]?.id;
                 if (target) switchToProvider(target);
@@ -879,12 +890,8 @@ function BackendAccountCard({
         </div>
       </div>
 
-      {/* 第三方服务商选择栏（当支持服务商时展示） */}
-      {!supportsProvider ? (
-        <div className="px-3.5 pb-2.5">
-          <p className="m-0 text-[11.5px] text-ink-3">{t('settings.accounts.accountOnlyHint')}</p>
-        </div>
-      ) : activeMode === 'provider' ? (
+      {/* 第三方服务商选择栏（当支持服务商且处于第三方模式时展示） */}
+      {supportsProvider && activeMode === 'provider' ? (
         <div className="px-3.5 pb-2.5">
           <div className="flex flex-wrap items-center gap-2 rounded-control bg-inset/45 px-2.5 py-2">
             <KeyIcon className="size-3.5 shrink-0 text-accent-ink" />

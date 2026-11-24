@@ -30,6 +30,7 @@ import {
   PlusIcon,
   RefreshIcon,
   SparklesIcon,
+  SpinnerIcon,
   UndoIcon,
   UploadIcon,
   VscodeFolderIcon,
@@ -58,12 +59,18 @@ const STATUS_STYLE: Record<
   SourceControlFileView['status'],
   { readonly letter: string; readonly nameCls: string; readonly badgeCls: string }
 > = {
-  modified: { letter: 'M', nameCls: 'text-accent-ink', badgeCls: 'text-accent-ink' },
-  added: { letter: 'A', nameCls: 'text-green', badgeCls: 'text-green' },
-  deleted: { letter: 'D', nameCls: 'text-ink-3 line-through', badgeCls: 'text-red' },
-  renamed: { letter: 'R', nameCls: 'text-accent-ink', badgeCls: 'text-accent-ink' },
-  untracked: { letter: 'U', nameCls: 'text-orange', badgeCls: 'text-orange' },
-  conflicted: { letter: '!', nameCls: 'text-red', badgeCls: 'text-red' },
+  modified: { letter: 'M', nameCls: 'text-ink', badgeCls: 'bg-accent-tint text-accent-ink' },
+  added: { letter: 'A', nameCls: 'text-ink', badgeCls: 'bg-green-tint text-green' },
+  deleted: { letter: 'D', nameCls: 'text-ink-3 line-through', badgeCls: 'bg-red-tint text-red' },
+  renamed: { letter: 'R', nameCls: 'text-ink', badgeCls: 'bg-accent-tint text-accent-ink' },
+  untracked: { letter: 'U', nameCls: 'text-ink', badgeCls: 'bg-orange-tint text-orange' },
+  conflicted: { letter: '!', nameCls: 'text-red', badgeCls: 'bg-red-tint text-red' },
+};
+
+const GROUP_DOT_CLASS: Record<ChangeGroup['id'], string> = {
+  staged: 'bg-green',
+  changes: 'bg-accent-ink',
+  untracked: 'bg-orange',
 };
 
 function splitFilePath(rawPath: string): { readonly normalized: string; readonly name: string; readonly dir: string } {
@@ -327,24 +334,26 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
       className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', !compact && 'bg-canvas')}
       data-testid="workbench-changes"
     >
-      {/* 顶部单行 IDEA 风格工具栏：分支切换 + 统计 + 抓取/拉取/刷新/分组/筛选/PR */}
-      <div className="flex h-9 shrink-0 items-center justify-between gap-1.5 border-b border-sidebar-border px-2.5">
+      {/* 顶部单行工具栏：分支切换 + 增删统计 + 同步/视图/PR 操作 */}
+      <div className="flex h-10 shrink-0 items-center justify-between gap-1.5 border-b border-sidebar-border px-2.5">
         <div className="flex min-w-0 items-center gap-1.5" title={branchTooltip}>
           {state?.available && !remoteReadOnly ? (
             <Popover open={branchPopoverOpen} onOpenChange={setBranchPopoverOpen}>
               <PopoverTrigger asChild>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="xs"
                   data-testid="changes-branch-trigger"
-                  className="inline-flex min-w-0 items-center gap-1 rounded-control px-1 py-0.5 text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                  className="min-w-0 max-w-[168px] font-mono text-[11.5px] font-medium text-ink hover:bg-hover"
                 >
                   <GitBranchIcon className="size-3.5 shrink-0 text-accent-ink" />
-                  <span className="truncate">{state.branch ?? 'HEAD'}</span>
+                  <span className="min-w-0 truncate">{state.branch ?? 'HEAD'}</span>
                   <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
-                </button>
+                </Button>
               </PopoverTrigger>
-              <PopoverContent align="start" className="w-64 p-2">
-                <div className="mb-1.5 text-[11px] font-medium text-ink-3">{t('wb.changes.switchBranch')}</div>
+              <PopoverContent align="start" sideOffset={6} className="w-64 p-2">
+                <div className="mb-1.5 px-1 text-[11px] font-medium text-ink-3">{t('wb.changes.switchBranch')}</div>
                 <div className="max-h-44 overflow-y-auto">
                   {(state.branches ?? []).map((b) => {
                     const current = b === state.branch;
@@ -355,7 +364,7 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                         onClick={() => checkoutBranch(b)}
                         className={cn(
                           'flex w-full items-center justify-between gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors hover:bg-hover',
-                          current && 'bg-field font-medium text-ink',
+                          current ? 'bg-field font-medium text-ink' : 'text-ink-2',
                         )}
                       >
                         <span className="truncate font-mono text-[11.5px]">{b}</span>
@@ -376,7 +385,7 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                   />
                   <Button
                     type="button"
-                    size="xs"
+                    size="icon-xs"
                     aria-label={t('wb.changes.createBranch')}
                     title={t('wb.changes.createBranch')}
                     disabled={!newBranchName.trim() || busy}
@@ -406,15 +415,15 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
               </PopoverContent>
             </Popover>
           ) : (
-            <>
+            <div className="flex min-w-0 items-center gap-1.5 px-1">
               <GitBranchIcon className="size-3.5 shrink-0 text-accent-ink" />
-              <span className="truncate text-[12px] font-medium text-ink">
+              <span className="truncate font-mono text-[11.5px] font-medium text-ink">
                 {state?.available ? (state.branch ?? 'HEAD') : t('wb.changes.title')}
               </span>
-            </>
+            </div>
           )}
           {state?.available && (state.additions > 0 || state.deletions > 0) ? (
-            <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-field/85 px-1.5 py-0.5 font-mono text-[10.5px] leading-none tabular-nums">
               {state.additions > 0 ? <span className="text-green">+{state.additions}</span> : null}
               {state.deletions > 0 ? <span className="text-red">−{state.deletions}</span> : null}
             </span>
@@ -454,6 +463,7 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
           </Button>
           {state?.available ? (
             <>
+              <span aria-hidden="true" className="mx-0.5 h-3.5 w-px bg-line/70" />
               <Button
                 type="button"
                 variant="ghost"
@@ -579,28 +589,37 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
         </div>
       ) : (
         <>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 py-1.5">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2">
             {visibleFiles.length === 0 ? (
-              <div className="px-2 py-8 text-center text-[12px] text-ink-3">{t('wb.changes.empty')}</div>
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 px-3 py-10 text-center">
+                <span className="inline-flex size-8 items-center justify-center rounded-full bg-field text-ink-3">
+                  <CheckIcon className="size-4" />
+                </span>
+                <span className="text-[12px] text-ink-3">{t('wb.changes.empty')}</span>
+              </div>
             ) : (
-              <div className="flex flex-col gap-1" data-testid="changes-list">
+              <div className="flex flex-col gap-3" data-testid="changes-list">
                 {groups.map((group) => {
                   const collapsed = Boolean(collapsedGroups[group.id]);
                   return (
-                    <section key={group.id} className="flex flex-col" data-testid={`changes-group-${group.id}`}>
+                    <section key={group.id} className="flex flex-col gap-1" data-testid={`changes-group-${group.id}`}>
                       <button
                         type="button"
                         aria-expanded={!collapsed}
                         onClick={() => toggleGroup(group.id)}
-                        className="flex w-full items-center gap-1 rounded-control px-1.5 py-1 text-left text-[11.5px] font-medium text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
+                        className="flex w-full items-center gap-1.5 rounded-control px-1.5 py-1 text-left text-[11.5px] font-medium text-ink-2 transition-colors duration-100 hover:bg-hover/70 hover:text-ink"
                       >
                         {collapsed ? (
                           <ChevronRightIcon className="size-3 shrink-0 text-ink-3" />
                         ) : (
                           <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
                         )}
-                        <span className="truncate">{t(group.labelKey)}</span>
-                        <span className="font-mono text-[11px] font-normal text-ink-3 tabular-nums">
+                        <span
+                          aria-hidden="true"
+                          className={cn('size-1.5 shrink-0 rounded-full', GROUP_DOT_CLASS[group.id])}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{t(group.labelKey)}</span>
+                        <span className="shrink-0 rounded-full bg-field px-1.5 py-0.5 font-mono text-[10px] leading-none font-normal text-ink-3 tabular-nums">
                           {group.files.length}
                         </span>
                       </button>
@@ -620,7 +639,7 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                             onDiscard={setDiscardTarget}
                           />
                         ) : (
-                          <div className="flex flex-col gap-0.5 pl-2">
+                          <div className="flex flex-col gap-0.5">
                             {group.files.map((file) => (
                               <ChangeFileRow
                                 key={file.path}
@@ -651,75 +670,77 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
             ) : null}
           </div>
 
-          {/* 底部固定 IDEA 风格 Commit 区 */}
-          <div className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border bg-sidebar px-2.5 py-2">
-            <div className="relative">
-              <Textarea
-                rows={3}
-                className="min-h-16 resize-none bg-surface/90 pr-8 text-[12px] leading-snug"
-                value={commitMessage}
-                onChange={(event) => setCommitMessage(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                    event.preventDefault();
-                    commit();
-                  }
-                }}
-                placeholder={t('wb.changes.commitPlaceholder')}
-                aria-label={t('wb.changes.commitPlaceholder')}
-                disabled={busy || remoteReadOnly || state.files.length === 0}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                data-testid="changes-ai-commit-btn"
-                aria-label={t('wb.changes.aiCommit')}
-                title={generatingCommit ? t('wb.changes.generating') : t('wb.changes.aiCommit')}
-                disabled={generatingCommit || busy || remoteReadOnly || state.files.length === 0}
-                onClick={requestAiCommit}
-                className="absolute top-1.5 right-1.5 text-ink-3 hover:text-accent-ink"
-              >
-                <SparklesIcon className={cn('size-3.5', generatingCommit && 'spin')} />
-              </Button>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              {showStageToggle ? (
-                <label
-                  className="flex min-w-0 cursor-pointer items-center gap-1.5 text-[11px] text-ink-2"
-                  title={t('wb.changes.stageAll')}
+          {/* 底部固定 Commit 卡片（与对话 Composer 统一的悬浮卡片风格） */}
+          <div className="shrink-0 border-t border-sidebar-border/80 bg-sidebar px-2.5 py-2.5">
+            <div className="flex flex-col overflow-hidden rounded-xl border border-black/8 bg-surface/90 shadow-xs transition-[border-color,box-shadow] duration-150 focus-within:border-ring/45 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--accent)_24%,transparent)] dark:border-white/[0.08] dark:bg-surface/75">
+              <div className="relative">
+                <Textarea
+                  rows={2}
+                  className="min-h-[60px] resize-none border-0 bg-transparent px-2.5 pt-2 pr-8 pb-1.5 text-[12px] leading-relaxed shadow-none focus-visible:ring-0 dark:bg-transparent"
+                  value={commitMessage}
+                  onChange={(event) => setCommitMessage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      commit();
+                    }
+                  }}
+                  placeholder={t('wb.changes.commitPlaceholder')}
+                  aria-label={t('wb.changes.commitPlaceholder')}
+                  disabled={busy || remoteReadOnly || state.files.length === 0}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  data-testid="changes-ai-commit-btn"
+                  aria-label={t('wb.changes.aiCommit')}
+                  title={generatingCommit ? t('wb.changes.generating') : t('wb.changes.aiCommit')}
+                  disabled={generatingCommit || busy || remoteReadOnly || state.files.length === 0}
+                  onClick={requestAiCommit}
+                  className="absolute top-1.5 right-1.5 text-ink-3 hover:bg-hover hover:text-accent-ink"
                 >
-                  <Checkbox checked={stageAll} onCheckedChange={(checked) => setStageAll(checked === true)} />
-                  <span className="truncate">{t('wb.changes.stageAll')}</span>
-                </label>
-              ) : (
-                <span className="truncate text-[11px] text-ink-3 tabular-nums">
-                  {t('wb.changes.fileCount', visibleFiles.length)}
-                </span>
-              )}
+                  {generatingCommit ? <SpinnerIcon className="size-3.5" /> : <SparklesIcon className="size-3.5" />}
+                </Button>
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-line/60 bg-inset/35 px-2 py-1.5">
+                {showStageToggle ? (
+                  <label
+                    className="flex min-w-0 cursor-pointer items-center gap-1.5 text-[11px] text-ink-2 select-none hover:text-ink"
+                    title={t('wb.changes.stageAll')}
+                  >
+                    <Checkbox checked={stageAll} onCheckedChange={(checked) => setStageAll(checked === true)} />
+                    <span className="truncate">{t('wb.changes.stageAll')}</span>
+                  </label>
+                ) : (
+                  <span className="truncate pl-0.5 text-[11px] text-ink-3 tabular-nums">
+                    {t('wb.changes.fileCount', visibleFiles.length)}
+                  </span>
+                )}
 
-              <div className="flex shrink-0 items-center gap-1.5">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={commit}
-                  disabled={busy || remoteReadOnly || !commitMessage.trim() || state.files.length === 0}
-                >
-                  <GitCommitIcon className="size-3.5" />
-                  <span>{t('wb.changes.commit')}</span>
-                </Button>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="outline"
-                  data-testid="changes-push-btn"
-                  aria-label={t('wb.changes.push')}
-                  title={t('wb.changes.push')}
-                  onClick={() => setPushOpen(true)}
-                  disabled={busy || remoteReadOnly || !state.remote}
-                >
-                  <UploadIcon className="size-3.5" />
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    type="button"
+                    size="xs"
+                    onClick={commit}
+                    disabled={busy || remoteReadOnly || !commitMessage.trim() || state.files.length === 0}
+                  >
+                    <GitCommitIcon className="size-3.5" />
+                    <span>{t('wb.changes.commit')}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="outline"
+                    data-testid="changes-push-btn"
+                    aria-label={t('wb.changes.push')}
+                    title={t('wb.changes.push')}
+                    onClick={() => setPushOpen(true)}
+                    disabled={busy || remoteReadOnly || !state.remote}
+                  >
+                    <UploadIcon className="size-3.5" />
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -823,7 +844,7 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                 disabled={generatingPr || busy}
                 onClick={requestAiPr}
               >
-                <SparklesIcon className={cn('size-3.5', generatingPr && 'spin')} />
+                {generatingPr ? <SpinnerIcon className="size-3.5" /> : <SparklesIcon className="size-3.5" />}
                 <span>{generatingPr ? t('wb.changes.generating') : t('wb.changes.aiPr')}</span>
               </Button>
             </div>
@@ -874,66 +895,96 @@ function ChangeFileRow({
   const isSelected = activeDiffPath === normalized;
   const statusLabel = t(`wb.changes.status.${file.status}` as MessageKey);
 
+  const hasStats = (file.additions !== undefined && file.additions > 0) || (file.deletions !== undefined && file.deletions > 0);
+
   return (
     <div
       className={cn(
-        'group/file flex w-full items-center gap-1 rounded-control pr-1 transition-colors duration-100 hover:bg-hover',
-        isSelected && 'bg-hover',
+        'group/file relative flex w-full items-center gap-1 rounded-control pr-1.5 transition-colors duration-100',
+        isSelected
+          ? 'bg-surface shadow-hairline dark:bg-white/[0.07]'
+          : 'hover:bg-hover/80',
       )}
     >
       <button
         type="button"
         data-testid={`changes-file-${normalized}`}
-        className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left"
+        className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left"
         onClick={() => onOpenDiff(file)}
         title={`${normalized} (${statusLabel})`}
       >
         <FileTypeIcon path={file.path} className="size-4 shrink-0" />
-        <span className={cn('shrink-0 truncate text-[12px] font-medium', showDir ? 'max-w-[55%]' : 'min-w-0 flex-1', style.nameCls)}>
+        <span
+          className={cn(
+            'shrink-0 truncate text-[12px] leading-4 font-medium',
+            showDir ? 'max-w-[56%]' : 'min-w-0 flex-1',
+            style.nameCls,
+          )}
+        >
           {name}
         </span>
         {showDir && dir ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">{dir}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] leading-4 text-ink-3/85">{dir}</span>
         ) : (
           <span className="flex-1" />
         )}
-        {file.additions !== undefined && file.additions > 0 ? (
-          <span className="shrink-0 font-mono text-[10.5px] text-green tabular-nums">+{file.additions}</span>
-        ) : null}
-        {file.deletions !== undefined && file.deletions > 0 ? (
-          <span className="shrink-0 font-mono text-[10.5px] text-red tabular-nums">−{file.deletions}</span>
-        ) : null}
       </button>
 
-      {canMutate ? (
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/file:opacity-100 focus-within:opacity-100">
-          {!file.staged ? (
-            <button
-              type="button"
-              data-testid={`changes-discard-${normalized}`}
-              aria-label={t('wb.changes.discardFile')}
-              title={t('wb.changes.discardFile')}
-              className="inline-flex size-5 items-center justify-center rounded text-ink-3 hover:bg-hover-2 hover:text-red"
-              onClick={() => onDiscard(file)}
-            >
-              <UndoIcon className="size-3" />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            data-testid={`${file.staged ? 'changes-unstage' : 'changes-stage'}-${normalized}`}
-            aria-label={file.staged ? t('wb.changes.unstageFile') : t('wb.changes.stageFile')}
-            title={file.staged ? t('wb.changes.unstageFile') : t('wb.changes.stageFile')}
-            className="inline-flex size-5 items-center justify-center rounded text-ink-3 hover:bg-hover-2 hover:text-ink"
-            onClick={() => (file.staged ? onUnstage(file) : onStage(file))}
+      {/* 右侧统计与悬停操作：悬停或聚焦时切换为暂存/撤销按钮，避免遮挡目录路径 */}
+      <div className="flex shrink-0 items-center justify-end">
+        {hasStats ? (
+          <span
+            className={cn(
+              'inline-flex shrink-0 items-center gap-1 pr-1 font-mono text-[10.5px] leading-4 tabular-nums',
+              canMutate && 'group-focus-within/file:hidden group-hover/file:hidden',
+            )}
           >
-            {file.staged ? <MinusIcon className="size-3" /> : <PlusIcon className="size-3" />}
-          </button>
-        </div>
-      ) : null}
+            {file.additions !== undefined && file.additions > 0 ? (
+              <span className="text-green">+{file.additions}</span>
+            ) : null}
+            {file.deletions !== undefined && file.deletions > 0 ? (
+              <span className="text-red">−{file.deletions}</span>
+            ) : null}
+          </span>
+        ) : null}
+
+        {canMutate ? (
+          <div className="pointer-events-none flex w-0 shrink-0 items-center gap-0.5 overflow-hidden opacity-0 transition-opacity duration-100 group-focus-within/file:pointer-events-auto group-focus-within/file:w-auto group-focus-within/file:overflow-visible group-focus-within/file:opacity-100 group-hover/file:pointer-events-auto group-hover/file:w-auto group-hover/file:overflow-visible group-hover/file:opacity-100">
+            {!file.staged ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid={`changes-discard-${normalized}`}
+                aria-label={t('wb.changes.discardFile')}
+                title={t('wb.changes.discardFile')}
+                className="text-ink-3 hover:bg-hover-2 hover:text-red"
+                onClick={() => onDiscard(file)}
+              >
+                <UndoIcon className="size-3" />
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              data-testid={`${file.staged ? 'changes-unstage' : 'changes-stage'}-${normalized}`}
+              aria-label={file.staged ? t('wb.changes.unstageFile') : t('wb.changes.stageFile')}
+              title={file.staged ? t('wb.changes.unstageFile') : t('wb.changes.stageFile')}
+              className="text-ink-3 hover:bg-hover-2 hover:text-ink"
+              onClick={() => (file.staged ? onUnstage(file) : onStage(file))}
+            >
+              {file.staged ? <MinusIcon className="size-3" /> : <PlusIcon className="size-3" />}
+            </Button>
+          </div>
+        ) : null}
+      </div>
 
       <span
-        className={cn('w-3 shrink-0 text-center font-mono text-[11px] font-semibold', style.badgeCls)}
+        className={cn(
+          'inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] font-mono text-[10.5px] leading-none font-semibold',
+          style.badgeCls,
+        )}
         aria-label={statusLabel}
       >
         {style.letter}
@@ -1049,7 +1100,7 @@ function ChangeDirBranch({
         onClick={() => onToggleDir(key)}
         title={node.fullPath}
         style={{ paddingLeft: `${depth * 12 + 6}px` }}
-        className="flex w-full items-center gap-1.5 rounded-control py-1 pr-1.5 text-left text-[11.5px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
+        className="flex w-full items-center gap-1.5 rounded-control py-1.5 pr-2 text-left text-[11.5px] text-ink-2 transition-colors duration-100 hover:bg-hover/80 hover:text-ink"
       >
         {collapsed ? (
           <ChevronRightIcon className="size-3 shrink-0 text-ink-3" />
@@ -1062,7 +1113,9 @@ function ChangeDirBranch({
           <VscodeFolderOpenIcon className="size-4 shrink-0" />
         )}
         <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{node.name}</span>
-        <span className="shrink-0 font-mono text-[10.5px] text-ink-3 tabular-nums">{node.totalFiles}</span>
+        <span className="shrink-0 rounded-full bg-field px-1.5 py-0.5 font-mono text-[10px] leading-none text-ink-3 tabular-nums">
+          {node.totalFiles}
+        </span>
       </button>
       {!collapsed ? (
         <div className="flex flex-col gap-0.5">

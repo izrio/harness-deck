@@ -1,7 +1,7 @@
-# Harness Deck 改进路线图（对标 T3 Code）
+# Halo 改进路线图
 
 > 基线：`v0.6.1`（`ea905bb`）。
-> 目标：借鉴 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 在**适配层能力模型、回合级工作流、源码控制闭环、质量门禁、手机端远程互通**上的做法，补齐 Harness Deck 的短板；保持「IDE 插件 + 宿主运行时 + 多底层」核心形态，并通过内嵌桥接与 PWA 延伸至手机端。
+> 目标：持续完善 Halo 在**适配层能力模型、回合级工作流、源码控制闭环、质量门禁、手机端远程互通**上的能力；保持「IDE 插件 + 宿主运行时 + 多底层」核心形态，并通过内嵌桥接与 PWA 延伸至手机端。
 > 用法：每完成一项，把对应 `- [ ]` 改成 `- [x]`，并在「进度记录」写一行日期、版本和验证结果。每完成一个里程碑（M0–M5）对照本文件做一次评审，把新发现的遗漏补进来。
 
 状态图例：`待开始` / `进行中` / `已完成` / `搁置`
@@ -87,7 +87,7 @@
 - **现状**：
   - `packages/shared/src/providers.ts:293` 的 `backendProtocolCapability()` 用底层 id 字符串硬编码协议支持。
   - `profile.kind` 分支约 23 处，`BackendView`（`packages/shared/src/viewModel.ts:418`）只暴露 `kind`，没有能力集合。
-- **借鉴**：t3code 的 `ProviderAdapter` 边界 + `docs/user/permission-modes.md` 的「支持 / 降级 / 不支持」写法。
+- **设计原则**：明确底层适配器边界，用「支持 / 降级 / 不支持」显式声明能力矩阵。
 - **做法**：
   1. 在 `packages/shared/src/capabilities.ts` 定义 `BackendCapabilities`：
      - `protocols`、`quota`、`webUi`、`apiKeySetup`、`approvalHint`、`steer`、`turnChanges`、`subagents`、`questions`、`goal`、`images`、`rollback`、`worktree`
@@ -107,7 +107,7 @@
 
 ### HD-02 「每个面都改到」清单
 
-- **目标**：把 t3code 的 “Hit every surface” 改造成我们的清单，减少「VS Code 好了、JetBrains 漏了」这类缺陷。
+- **目标**：建立跨端自检清单，减少「VS Code 好了、JetBrains 漏了」这类缺陷。
 - **做法**：在 `AGENTS.md` 增加一节「改动自检清单」，至少覆盖：
   - 入口：对话、命令面板、设置页、右键菜单、状态栏
   - 客户端：VS Code Webview、JetBrains JCEF、宿主公共层
@@ -122,7 +122,7 @@
 
 ### HD-03 测试纪律 lint 规则
 
-- **目标**：把 t3code 的测试规则变成可执行的检查，而不是口头约定。
+- **目标**：把测试纪律变成可执行的自动化检查，而不是口头约定。
 - **做法**：在 `eslint.config.mjs` 增加 3 条自定义规则（只作用于测试文件）：
   1. `no-sleep-in-tests`：禁止 `setTimeout` / `sleep` / 空转等待；应等待具体事件或 promise。
   2. `no-wall-clock-in-tests`：禁止用 `Date.now()` / `performance.now()` 差值做断言；断言事件和次数。
@@ -147,7 +147,7 @@
 
 - **目标**：不再用 `npm install -g` 覆盖用户通过 Homebrew / mise / Volta 安装的底层。
 - **现状**：`packages/extension/src/backend/npmManager.ts:287` 直接执行 `npm install -g <pkg>`。
-- **借鉴**：t3code `docs/internals/providers.md` 的「Provider updates run only through the owning installer」。
+- **设计原则**：运行时更新仅通过其归属的安装器执行，避免越权覆写外部安装。
 - **做法**：
   1. 安装/切换版本前，解析当前可执行文件的真实路径（`which` + `realpath`）。
   2. 判断是否位于 `npm prefix -g` 的 `bin` 下；是才允许 npm 操作。
@@ -165,7 +165,7 @@
 
 - **目标**：为回滚、按回合查看 diff、按回合统计用量和生成 PR 打基础。
 - **现状**：视图模型里有 `turnDone` 条目和 `seq`，但没有统一的回合记录；各底层投影各写各的。
-- **借鉴**：t3code 的 `thread / turn / run / turn_item` 分层（只借概念，不借事件溯源）。
+- **设计原则**：建立 `thread / turn / run / turn_item` 分层模型（只做轻量投影，不做重型事件溯源）。
 - **做法**：
   1. 在 `packages/shared/src/viewModel.ts` 增加 `TurnView`：
      - `id`、`seq`、`startedAt`、`endedAt`、`status`（`running | completed | failed | interrupted`）
@@ -181,7 +181,7 @@
 
 - **目标**：能「回到这一轮之前」，而不只是看 diff。
 - **现状**：Diff 是从工具片段反推的（`packages/extension/src/vm/diffs.ts`），只能看不能恢复；没有回滚入口。
-- **借鉴**：t3code 每回合 checkpoint + provider 原生 rollback；不能回滚的 provider 在改文件前就拒绝。
+- **设计原则**：每回合记录 checkpoint，结合底层原生回滚；不支持回滚的底层在改文件前显式提示。
 - **做法**：
   1. 调研结论：dsh / Claude / Pi / ZCode / ACP 都没有会话级原生回滚；dsh 的投影记录了每个文件的工具片段，可以按片段反推本轮开始前的内容。
   2. 已实现（dsh）：最后一轮的 `turnDone` 旁显示「恢复本轮文件」；写盘前弹窗确认，任何文件无法可靠还原、或有未保存内容时整体放弃，不写一半。对话不回退，描述符标记为 `rollback: 'files'`。
@@ -195,7 +195,7 @@
 
 - **目标**：一个窗口里一次运行一个独立 worktree 会话，与主工作区隔离；其他工作区的会话保留在标签与历史里。
 - **现状**：已有 `createProjectWorktree()`（`packages/extension/src/projects/ProjectService.ts:294`），但只在项目设置里手动触发。
-- **借鉴**：t3code「每个 thread 可以有自己的 worktree」；本实现先做串行化版本。
+- **设计原则**：支持会话独立 worktree 隔离；首期先做串行化版本。
 - **做法**：
   1. 会话列表侧栏新增「在 worktree 中新建会话」按钮；输入分支名后复用 `createProjectWorktree`（复制文件、准备命令）。
   2. 创建成功后整窗切换到该 worktree，再开一个新会话；同一时间只有一个工作区活动（串行化），其他会话不会并行收事件。
@@ -220,14 +220,14 @@
 ### HD-10 commit / push / PR
 
 - **目标**：把「任务 → worktree → Agent → 审 diff → 提交」接上。
-- **借鉴**：t3code 的 source-control provider 结构与「一个按钮完成 commit / push / PR」。
+- **设计原则**：统一源码控制服务抽象，实现一键 commit / push / PR 闭环。
 - **做法**：
   1. 检测 `gh` / `glab` / `fj`（先支持 GitHub，再 GitLab / Gitea），显示是否可用与登录状态。
   2. 提交前展示将要提交的文件与 diff；commit message 可由当前回合摘要生成，用户可改。
   3. push 与 PR 必须二次确认；PR 标题/正文可编辑。
   4. **不保存 token**，依赖 CLI 自己的凭据。
   5. 失败时保留草稿，不丢用户输入。
-  6. 第二阶段：PR 合并后自动把关联的看板任务标为完成（t3code settlement 的轻量版——定时重查 PR 状态，不做归档以外的自动动作）。
+  6. 第二阶段：PR 合并后自动把关联的看板任务标为完成（轻量 PR 结单——定时重查 PR 状态，不做归档以外的自动动作）。
 - **验收**：在测试仓库完成一次 commit → push → 创建 PR；未登录时给出安装/登录提示；不会覆盖已有 remote 或强推。
 - **风险**：不同 forge 的 CLI 参数差异。先做 GitHub 一条链路，其余按能力描述符渐进。
 
@@ -238,7 +238,7 @@
 ### HD-11 模型行为 eval
 
 - **目标**：改 skill / MCP 工具描述 / 会话标题提示词时，能知道行为有没有变差。
-- **借鉴**：t3code `evals/` 的「一个 eval 一个入口 + cases 即数据 + 跑多次 + 与基线比较」。
+- **设计原则**：评测遵循「一个 eval 一个入口 + cases 即数据 + 跑多次 + 与基线比较」。
 - **做法**：
   1. 新建 `evals/`，先做 3 个 case：skill 选择、MCP 工具调用、会话标题生成。
   2. 直接 import 现有提示词与工具描述，不复制文本。
@@ -263,11 +263,11 @@
 ### HD-19 文档体系与术语表
 
 - **目标**：把「为什么这么设计」和「怎么用」分开，降低后续维护（包括 AI 协作）的阅读成本。
-- **借鉴**：t3code 的 `docs/internals`（跨组件约束与陷阱）、`docs/user`（任务导向）、`docs/operations`（维护流程）三分 + `AGENTS.md` 术语表。
+- **设计原则**：文档按跨组件约束、任务导向与维护流程分层，并在 `AGENTS.md` 统一术语表。
 - **做法**：
   1. 恢复/整理 `docs/`：从 DESIGN.md 拆出「内部约束与陷阱」（对应 internals）与「里程碑记录」（对应 operations）；使用说明保持用户视角。
   2. 在 `AGENTS.md` 增加术语表：底层（backend）、会话、回合（turn，HD-08 之后启用）、工作台、worktree 会话、宿主运行时等，8–12 条即可。
-  3. 写作规则借 t3code：代码能回答的不进文档；跨边界的理由才进 internals；文档索引只更新受影响的条目。
+  3. 写作规则：代码能回答的不进文档；跨边界的理由才进设计文档；文档索引只更新受影响的条目。
 - **验收**：三个入口边界清晰；术语表与代码用法一致；README 的文档索引指向新结构。
 - **备注**：`docs/` 当前在工作区处于删除状态（未提交），动手前先确认保留范围。
 
@@ -288,7 +288,7 @@
 ### HD-14 driver / instance 多账号
 
 - **目标**：同一底层可以配多个账号（例如工作 / 个人 Claude），互不共享会话与凭据。
-- **借鉴**：t3code 的 `driverKind` 与 `instanceId` 分离。
+- **设计原则**：`driverKind` 与 `instanceId` 分离。
 - **做法**：把 `BackendProfile.id` 拆成 `driver` + `instanceId`；配置迁移；会话记录带 instance。
 - **已实现**：`BackendProfile` 增加可选 `driver` / `instanceId`，旧数据分别回退到 `kind` / `id`；`harnessDeck.backends` 支持显式 `instanceId`；`profileView` 下发这两个字段。历史会话仍按 `id`（即实例 id）保存，不需要迁移。
 - **触发条件**：出现真实的多账号需求，否则不做。
@@ -296,7 +296,7 @@
 ### HD-15 侧车连接监督器
 
 - **目标**：JetBrains sidecar 或未来的远程客户端断线后能稳定重连。
-- **借鉴**：t3code `client-runtime/connection/supervisor.ts` 的「单一重试 owner + 抖动退避 + 健康探测」。
+- **设计原则**：连接监督器遵循「单一重试 owner + 抖动退避 + 健康探测」。
 - **做法**：只借规则，不引入整个 client-runtime；先做连接状态机与探测，不做离线缓存。
 - **已实现**：Sidecar 异常退出后清空 transport，1.5 秒后重启；5 分钟内最多 3 次，避免崩溃循环。健康探测留到远程多客户端场景。
 - **触发条件**：sidecar 支持远程连接或多客户端。
@@ -317,7 +317,7 @@
 
 ### HD-18 定时任务后台化（sidecar 常驻）
 
-- **目标**：IDE 关闭后定时任务仍然执行（t3code 的 background service 形态）。
+- **目标**：IDE 关闭后定时任务仍然执行（独立后台守护服务形态）。
 - **现状**（已核实）：`WorkbenchHub` 用 15 秒 `setInterval`（`TICK_INTERVAL_MS`）在扩展宿主里轮询，窗口关闭任务即停。
 - **做法**：复用 JetBrains 已有的 sidecar 进程做无头宿主，把 `UnattendedRunner` 的执行路径跑进去；结果写回共享存储，IDE 下次打开时补看板；需要单实例锁避免与 IDE 里的调度重复触发。
 - **已实现**：sidecar 初始化时若存在启用的定时规则，会以 detached 方式拉起 `sidecar.cjs --headless-scheduler <configRoot> <projectPath>`；后台进程用文件存储 + `UnattendedRunner` 执行规则，写回 `global-state.json`。`scheduler.lock` 保证单实例；IDE 侧的 `WorkbenchHub` 检测到锁被其他进程持有就跳过自动触发，手动「立即执行」仍可用。集成测试在无 IDE 宿主里跑通一条到期规则。
@@ -327,7 +327,7 @@
 
 ### HD-21 ACP 代理注册表导入
 
-- **目标**：像 t3code 的 ACP Registry 一样，从社区注册表一键发现并配置新的 ACP 底层。
+- **目标**：从社区 ACP Registry 一键发现并配置新的 ACP 底层。
 - **做法**：拉取注册表清单（离线内置或按需下载），选中后落到现有 `harnessDeck.backends` 配置；装完后的能力展示沿用 HD-01 的描述符。
 - **已实现**：设置 -> Agent -> ACP 注册表，填写 HTTPS 地址后读取；条目校验后展示安装命令，点「添加」落到 `harnessDeck.backends`。不内置任何假条目，也不自动安装。
 - **触发条件**：社区 ACP 代理数量明显增长、手动配置成为摩擦点时再做。
@@ -343,7 +343,7 @@
 - **现状**：
   - `HarnessHostRuntime` 通过单一 `platform.postToWebview(msg)` 广播；收到 `ready` 会把完整 `snapshot` 发给全部视图。
   - `packages/webview-ui/src/vscode.ts`（58 行）直接调用 `acquireVsCodeApi()`；`App.tsx` 通过 `window.addEventListener('message')` 收消息。
-- **借鉴**：t3code `packages/client-runtime` 的共享传输抽象与 `EnvironmentSupervisor`（单一重试 owner + 抖动退避 + 切回前台健康探测）。
+- **设计原则**：共享传输抽象与连接监督器（单一重试 owner + 抖动退避 + 切回前台健康探测）。
 - **做法**：
   1. 在 `packages/extension/src/host/` 新增 `ClientHub`：管理已连接客户端（`id`、`surface: 'ide' | 'mobile-web'`、`scope`、`send()`），支持 `broadcast(msg)` 与 `sendTo(clientId, msg)`。
   2. 改造 `HarnessHostRuntime.handleWebviewMessage(msg, clientId?)`：`ready` 的 `snapshot` 及请求级响应（`fileCandidates`、`markdownPreview`、`diffContent`、`quotaFetched`、`providerModelsFetched`、`restoreDraft`）按 `clientId` 单播；会话流、审批、工作台状态更新继续广播。
@@ -357,7 +357,7 @@
 ### HD-23 宿主 HTTP/WS 桥接与局域网 QR 配对
 
 - **目标**：在 VS Code 与 JetBrains 中一键开启局域网手机互通，扫码即连，且安全边界清晰、随时可吊销。
-- **借鉴**：t3code `docs/internals/environment-auth.md` 的「宿主自主颁证 + 一次性短效配对码 + 作用域最小化 + 已授权设备管理与吊销」。
+- **设计原则**：安全认证遵循「宿主自主颁证 + 一次性短效配对码 + 作用域最小化 + 已授权设备管理与吊销」。
 - **做法**：
   1. 新增 `packages/extension/src/remote/`：
      - `RemoteBridgeServer.ts`：默认关闭；启用后基于 Node `http` + 现有 `ws` 托管 `dist/webview` 静态资源、`/api/pair`、`/ws` 与 `/manifest.webmanifest`。
@@ -377,7 +377,7 @@
 - **做法**：
   1. 利用已有 `useIsMobile()`（`<768px`）与 `clientSurface === 'mobile-web'` 优化移动端布局：
      - 顶栏紧凑化、标签栏支持横向惯性滚动；会话列表侧栏在窄屏下改为 `shadcn-ui` `Sheet` 抽屉。
-     - 审批卡片、提问卡片与底部输入框适配 `env(safe-area-inset-bottom)` 与 `visualViewport` 软键盘高度，避免按钮被底部手势条或键盘遮挡（t3code 移动端高频痛点）。
+     - 审批卡片、提问卡片与底部输入框适配 `env(safe-area-inset-bottom)` 与 `visualViewport` 软键盘高度，避免按钮被底部手势条或键盘遮挡（移动端高频体验痛点）。
      - 主要可点控件（审批按钮、停止按钮、标签切换）触控热区 ≥ 44px；代码块与 Diff 表格支持横向滚动且不撑破整页。
      - 顶部增加连接状态胶囊（已连接 / 重连中 / 离线，点击手动重连）。
   2. 新增 PWA `manifest.webmanifest`、应用图标与最小 Service Worker（缓存静态壳，WS 与 API 走网络），在 Vite 构建（`packages/webview-ui/vite.config.ts`）时一并输出到 `dist/webview`。
@@ -404,7 +404,7 @@
 ### HD-26 公网穿透（Tailscale 优先 + BYO 隧道）
 
 - **目标**：在零自建云中继的前提下，让用户在离桌/外出使用 4G/5G 时安全连回开发机，并获得 HTTPS/WSS 环境（解锁完整 PWA 与 Web Push）。
-- **借鉴**：t3code 的多路由（LAN / Tailscale / 隧道）连接思路与 `tailscale serve` 模式。
+- **设计原则**：多路由（LAN / Tailscale / 隧道）连接与 `tailscale serve` 模式。
 - **做法**：
   1. **Tailscale 集成**（遵循 HD-01 探测无副作用红线）：只读执行 `tailscale status --json` 探测本机 Tailnet 状态与 MagicDNS 域名；提供一键配置/引导 `tailscale serve` 将本机桥接端口反代为 `https://<node>.<tailnet>.ts.net`，在设置页生成对应 HTTPS 二维码。
   2. **BYO 自带隧道**：设置页支持填写用户自定义外部 HTTPS 入口（如 `cloudflared tunnel` / `frp` / 自有反代域名），自动加入 `Origin`/`Host` 校验白名单并生成外部配对二维码。
@@ -417,7 +417,7 @@
 ### HD-27 移动端推送通知（Web Push + Webhook）
 
 - **目标**：离开电脑后，当 Agent 等待审批、完成回合、异常退出或定时任务完成时，手机锁屏也能及时收到提醒并点开直达会话。
-- **借鉴**：t3code 移动端的通知触发分类与「桌面活跃时静默抑制」策略。
+- **设计原则**：移动端通知触发分类与「桌面活跃时静默抑制」策略。
 - **做法**：
   1. 扩展 `packages/extension/src/notifications/NotificationService.ts` 支持多目标投递（IDE 原生通知 + 远端推送适配层）。
   2. **本地 VAPID Web Push（免自建中继）**：宿主首次开启时生成并本地持久化 VAPID 密钥对；手机端在 HTTPS PWA 下注册 Push Subscription 并上报宿主绑定到当前 `deviceId`；事件触发时宿主直接向浏览器的 Push Endpoint 发送加密推送（纯标准 RFC 8291/8292，零中间服务器）。
@@ -480,7 +480,7 @@
 - **2026-11-20**：HD-07 实施结论。dsh / Claude / Pi / ZCode / ACP 均无会话级原生回滚 API；最终在 dsh 上实现按工具片段恢复最后一轮文件（含删除新建文件与失败回滚保护、不回退对话，`rollback: 'files'`），其他底层标记 `rollback: 'none'`；git checkpoint（hidden ref）留作后续阶段评估。
 - **2026-11-20**：HD-06 实施结论。并行多工作区需改造每会话独立进程架构，本阶段落地串行化版本（会话侧栏创建 worktree 并整窗切换，设置页提供 `git worktree remove` 安全清理入口），其他工作区会话保留在标签与历史里。
 - **2026-11-20**：HD-20 现状修正。`packages/extension/test/sidecarE2e.test.ts` 已有 Node 侧完整冒烟（握手、快照、外观持久化、密钥隔离、选区注入、断流自毁）；缺口只剩 Kotlin/IntelliJ 运行时，优先级下调。
-- **2026-11-21**：修订 0.2 边界，正式立项 **M5 手机端互通（HD-22–HD-28）**。深度调研 T3 Code 手机端实现后，确定采用「宿主内嵌 HTTP/WS 桥 + 复用 `webview-ui` 的 PWA 移动 Web + 短效 QR 配对与设备吊销 + Tailscale/BYO 隧道 + 免中继 Web Push/Webhook」路线，不自建商业云中继与商店原生 App；完整技术剖析与安全红线写入 [docs/MOBILE-INTEROP.md](./docs/MOBILE-INTEROP.md)。
+- **2026-11-21**：修订 0.2 边界，正式立项 **M5 手机端互通（HD-22–HD-28）**。经过移动端互通架构评估后，确定采用「宿主内嵌 HTTP/WS 桥 + 复用 `webview-ui` 的 PWA 移动 Web + 短效 QR 配对与设备吊销 + Tailscale/BYO 隧道 + 免中继 Web Push/Webhook」路线，不自建商业云中继与商店原生 App；完整技术剖析与安全红线写入 [docs/MOBILE-INTEROP.md](./docs/MOBILE-INTEROP.md)。
 - **待定**：HD-07 后续是否引入 git checkpoint（hidden ref）；HD-06 后续是否演进为多进程并行 worktree 会话；HD-18 / HD-28 后台无头进程的凭据桥（读取 IDE PasswordSafe）；M5 完成后是否按需提供轻量 Capacitor/Expo 外壳以支持 iOS Live Activities。
 
 ---

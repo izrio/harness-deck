@@ -1,6 +1,7 @@
 import type { McpImportCandidate } from '@harness-deck/shared';
 import { postToHost } from '../../../vscode.ts';
 import { CheckIcon, DownloadIcon, FolderIcon, RefreshIcon, SpinnerIcon } from '../../icons.tsx';
+import { BackendLogo } from '../../BackendLogo.tsx';
 import { ValuePill } from '../../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -20,9 +21,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
               <DownloadIcon className="size-4 text-accent-ink" />
               <span>{t('settings.mcp.import.title')}</span>
             </DialogTitle>
-            <DialogDescription className="text-[12px] leading-relaxed text-ink-3">
-              {t('settings.mcp.import.desc')}
-            </DialogDescription>
+            <DialogDescription className="sr-only">{t('settings.mcp.import.desc')}</DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-col gap-3">
@@ -151,14 +150,15 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
                       type="button"
                       data-testid={`mcp-import-agent-${agent.id}`}
                       onClick={() => toggleImportAgent(agent.id)}
-                      className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
                         selected
                           ? 'border-brand bg-accent-tint font-medium text-accent-ink'
                           : 'border-line bg-field text-ink-2 hover:bg-hover'
                       }`}
                     >
-                      {selected ? <CheckIcon className="size-3" /> : null}
+                      <BackendLogo backend={agent} size="sm" />
                       <span>{agent.name}</span>
+                      {selected ? <CheckIcon className="size-3" /> : null}
                     </button>
                   );
                 })}

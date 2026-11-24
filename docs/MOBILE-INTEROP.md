@@ -1,4 +1,4 @@
-# 手机端互通调研与实践方案（对标 T3 Code）
+# 手机端互通方案
 
 > 状态：方案设计与实践计划 ｜ 日期：2026-11-21
 >
@@ -6,65 +6,20 @@
 
 ---
 
-## 1. T3 Code（`pingdotgg/t3code`）手机端实现深度剖析
+## 1. 架构原则与设计目标
 
-T3 Code 是目前开源社区中将「本机 AI 编程代理 + 手机端远程操控」落得最完整的参考实现。其核心设计分为五层：
+手机端互通的核心原则是「瘦客户端 + 宿主机唯一执行边界」：手机端永远不碰本地代理进程或项目文件，所有执行与安全边界严格留在开发机（Host）侧，多端共用同一套协议与连接状态机，避免状态分叉。
 
-### 1.1 总体架构：瘦客户端 + 宿主机唯一执行边界
-
-| 模块 | 技术栈 | 职责 |
-| --- | --- | --- |
-| `apps/server` | Node.js + HTTP/WS + Effect RPC + SQLite | **唯一执行边界**：托管 CLI 代理（Claude Code、Codex 等）、文件系统、Git、终端、事件日志与状态投影 |
-| `apps/mobile` | Expo / React Native（iOS & Android） | **纯远程控制面**，手机端不运行 Node 宿主，只通过 WebSocket 连接一台或多台主机环境 |
-| `packages/contracts` | TypeScript Schema / Effect RPC | Web / Desktop / Mobile 共享的强类型命令、快照与事件契约 |
-| `packages/client-runtime` | 跨端共享状态机 | 连接监督器（`EnvironmentSupervisor`）、会话水合、断线重连、多环境路由管理 |
-| `apps/web` | 响应式 Web（`app.t3.codes`） | 浏览器兜底入口，复用同一套 `client-runtime` 与契约 |
-
-**关键启发**：手机端永远不碰本地代理进程或项目文件，所有执行与安全边界严格留在开发机（Host）侧；多端共用同一套协议与连接状态机，避免状态分叉。
-
-### 1.2 网络连通方案（三层路由）
-
-T3 Code 根据用户网络环境提供三种接入方式，并支持客户端在多路由间切换/回退：
-
-1. **局域网直连（LAN）**：`t3 up --lan` / `t3 serve --lan`，宿主绑定局域网网卡，通过二维码直接配对，零外网依赖。
-2. **私有组网（Tailscale）**：通过 `tailscale serve` 将本机服务（默认 `3773`）以 HTTPS/WSS 暴露到用户私有 Tailnet，无需开放公网端口即可跨网加密访问。
-3. **托管隧道（T3 Connect，`docs/internals/t3-connect.md`）**：
-   - 基于 `cloudflared` 托管隧道 + Cloudflare Worker 中继（`relay.t3.codes`）+ Clerk 云端账号。
-   - **架构亮点**：云端 Relay 只做**身份鉴权、隧道分配与信令引导**，初始化完成后 HTTP/WebSocket 应用流量直接走环境专属隧道域名，**不经 Relay Worker 转发业务流**（仅自动化 Webhook 为保持稳定 URL 经中继转发）。
-   - 具备休眠唤醒自动重连与闲置隧道回收机制。
-
-### 1.3 安全与配对模型（`docs/internals/environment-auth.md`）
-
-T3 Code 在远程操控安全上非常克制且严谨，有四条核心原则：
-
-1. **宿主自主颁证**：每个环境（Host）是自己的权限中心，签发并校验本机作用域会话；云端中继令牌**不能**直接等同于宿主登录态。
-2. **一次性配对码 + PKCE + 密钥绑定（DPoP）**：
-   - 宿主通过 CLI（`t3 pair`）或设置页生成短效单次配对码/二维码。
-   - 手机扫码后走 PKCE 交换会话令牌，存入系统安全存储（`expo-secure-store` / Keychain / Keystore）。
-   - 使用 DPoP（Demonstrating Proof-of-Possession）将令牌与客户端私钥绑定，校验失败直接拒绝、绝不静默降级为普通 Bearer；支持 1 小时短令牌 + 30 天可滚动续期会话。
-3. **作用域最小化与设备审批**：
-   - 权限按能力细粒度切分（如 `terminal:operate`、`orchestration:operate`、`filesystem:read`、`access:write`），派生/交换凭据只能缩窄权限，不能放大。
-   - 开启 `requireConnectDeviceApproval` 后，即使经 T3 Connect 接入的新设备，也必须在宿主本地由 `access:write` 权限持有者确认其设备指纹后才解锁。
-4. **可审计与即时吊销**：宿主设置页（`Sharing & access → Authorized clients`）与 CLI（`t3 auth connect-device revoke`）可随时查看并吊销单个设备。
-
-### 1.4 实时同步与断线恢复
-
-- **事件溯源 + 快照水合**：客户端连接后拉取快照（hydration），随后订阅会话流（`subscribeThread`，带序列号/水位线）接收增量事件。
-- **连接监督器（`EnvironmentSupervisor`）**：单一重试所有权、带抖动的指数退避、在线/离线与唤醒健康探测、客户端本地持久化环境列表与元数据。
-- **多端并发共存**：桌面端、Web 端、手机端同时连接同一 `apps/server`，线程、审批、Diff、终端状态实时同步。
-
-### 1.5 移动端专属体验
-
-- **原生审批卡片与底部抽屉**：针对小屏与虚拟键盘高度精细处理安全区，防止批准/拒绝按钮被导航栏或键盘遮挡。
-- **应用内 Diff 审阅**：手机无 IDE Diff 编辑器，内置专用 Diff 视图与语法高亮（`nativeReviewDiffAdapter`）。
-- **消息输入与附件**：支持多行输入、斜杠命令、图片附件与一键中断。
-- **推送通知与实时活动**：通过 Expo Push（经中继）在 Agent 等待审批、完成或失败时推送；支持 iOS Live Activities 与 Android Ongoing Notification；**桌面活跃时抑制手机推送**，避免双端重复打扰。
+- **三层网络连通**：局域网直连（LAN）→ 私有组网（Tailscale HTTPS/WSS）→ 自带隧道（BYO Tunnel）。
+- **安全与配对模型**：宿主自主颁证、短效一次性配对码/二维码、作用域最小化（`read-only` / `operate`）、已授权设备管理与即时吊销。
+- **实时同步与断线恢复**：快照水合 + 增量事件同步 + 单一重试所有权的连接监督器（指数退避 + 切回前台健康探测）。
+- **移动端专属体验**：安全区与虚拟键盘适配、Webview 内置 Diff 审阅、多行输入与附件、Web Push / Webhook 通知与桌面活跃时静默抑制。
 
 ---
 
-## 2. Harness Deck 的现状评估：哪些已有、哪些要补
+## 2. Halo 的现状评估：哪些已有、哪些要补
 
-Harness Deck 当前已完成 M0–M4（`HD-01`–`HD-21`），架构上天然具备极高的移动端互通复用度：
+Halo 当前已完成 M0–M4（`HD-01`–`HD-21`），架构上天然具备极高的移动端互通复用度：
 
 ### 2.1 可直接复用的现有资产
 
@@ -85,20 +40,20 @@ Harness Deck 当前已完成 M0–M4（`HD-01`–`HD-21`），架构上天然具
 2. **依赖 IDE 弹窗与 Diff 编辑器的交互**：
    - `openDiff` / `openSourceControlDiff` / `previewApproval` 目前调用 `vscode.diff` 或 IDEA Diff 编辑器，手机端必须改由宿主下发 Diff 数据并在 Webview 内直接渲染。
    - `workbench.confirm()` / `workbench.input()` / `pickOpenDialog()`（用于 `danger-full-access`、回合回滚、`renameSession`、`createWorktree`、`removeWorktree`、`pickFiles` 等）若由手机触发却弹在电脑 IDE 上，会造成手机端静默卡死。必须区分 `clientSurface: 'ide' | 'mobile-web'`，手机端统一使用 Webview 内 `Dialog` 完成确认与输入，IDE 专属能力按端能力降级或隐藏。
-3. **无外网中继基础设施前提**：Harness Deck 是开源 IDE 插件，**不自建 Clerk / Cloudflare 商业账号中继，也不在首期背负 App Store / Google Play 原生客户端审核与维护成本**。
+3. **无外网中继基础设施前提**：Halo 是开源 IDE 插件，**不自建 Clerk / Cloudflare 商业账号中继，也不在首期背负 App Store / Google Play 原生客户端审核与维护成本**。
 
 ---
 
-## 3. 架构决策：借什么、改什么、不借什么
+## 3. 架构选型
 
-| 维度 | T3 Code 做法 | Harness Deck 实践选型 | 理由 |
-| --- | --- | --- | --- |
-| 手机客户端形态 | Expo / React Native 独立原生 App + Web 兜底 | **PWA 移动 Web 优先**（直接复用 `packages/webview-ui`）；保持协议开放，后续按需套壳 | 零商店审核、零双套 UI 维护；新底层/新能力（`capabilities.ts`）零成本同步到手机 |
-| 宿主运行形态 | 独立常驻 `apps/server` | **阶段一：IDE 内嵌桥接（VS Code & JetBrains 共享）**；**阶段二：扩展 HD-18 为脱离 IDE 的独立守护进程** | 阶段一立刻实现「IDE 面板 ↔ 手机」同会话实时无缝接力，零额外后台进程管理负担 |
-| 网络连通 | LAN + Tailscale + 自建 T3 Connect 云中继 | **LAN 局域网直连（MVP）→ Tailscale 一键 HTTPS 接入 → BYO 自带隧道（`cloudflared` / `frp` / 反代）** | 零云端运维成本、100% 隐私可控；Tailscale HTTPS 同时解锁 PWA 完整能力与免中继 Web Push |
-| 认证与配对 | QR 一次码 + PKCE + DPoP + 作用域 + 设备吊销 | **QR 短效一次配对码（5 分钟）+ `HttpOnly` Cookie/设备令牌 + 作用域（`read-only` / `operate`）+ 已授权设备管理与即时吊销** | 完整覆盖威胁模型，且无需在浏览器端引入过度复杂的外部身份提供商 |
-| 状态同步 | Effect + 事件溯源 + SQLite 投影 | **沿用现有 `HostSnapshot` + `ItemsPatch` + `commandId` 幂等回执 + `ConnectionSupervisor` 断线重连** | 改动面最小，不重写控制器与投影层 |
-| 推送通知 | Expo Push + iOS Live Activities | **宿主直连 Web Push（本地 VAPID，HTTPS PWA 生效）+ 通用 Webhook（Bark/ntfy/IM，LAN HTTP 兜底）+ 桌面活跃静默** | 无需自建推送服务器；覆盖 iOS 16.4+ PWA、Android Chrome 与局域网全部场景 |
+| 维度 | Halo 实践选型 | 理由 |
+| --- | --- | --- |
+| 手机客户端形态 | **PWA 移动 Web 优先**（直接复用 `packages/webview-ui`）；保持协议开放，后续按需套壳 | 零商店审核、零双套 UI 维护；新底层/新能力（`capabilities.ts`）零成本同步到手机 |
+| 宿主运行形态 | **阶段一：IDE 内嵌桥接（VS Code & JetBrains 共享）**；**阶段二：扩展 HD-18 为脱离 IDE 的独立守护进程** | 阶段一立刻实现「IDE 面板 ↔ 手机」同会话实时无缝接力，零额外后台进程管理负担 |
+| 网络连通 | **LAN 局域网直连（MVP）→ Tailscale 一键 HTTPS 接入 → BYO 自带隧道（`cloudflared` / `frp` / 反代）** | 零云端运维成本、100% 隐私可控；Tailscale HTTPS 同时解锁 PWA 完整能力与免中继 Web Push |
+| 认证与配对 | **QR 短效一次配对码（5 分钟）+ `HttpOnly` Cookie/设备令牌 + 作用域（`read-only` / `operate`）+ 已授权设备管理与即时吊销** | 完整覆盖威胁模型，且无需在浏览器端引入过度复杂的外部身份提供商 |
+| 状态同步 | **沿用现有 `HostSnapshot` + `ItemsPatch` + `commandId` 幂等回执 + `ConnectionSupervisor` 断线重连** | 改动面最小，不重写控制器与投影层 |
+| 推送通知 | **宿主直连 Web Push（本地 VAPID，HTTPS PWA 生效）+ 通用 Webhook（Bark/ntfy/IM，LAN HTTP 兜底）+ 桌面活跃静默** | 无需自建推送服务器；覆盖 iOS 16.4+ PWA、Android Chrome 与局域网全部场景 |
 
 ---
 

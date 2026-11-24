@@ -485,7 +485,7 @@ describe('HD-27 PushService', () => {
     const ua = createECDH('prime256v1');
     ua.generateKeys();
     const authSecret = Buffer.from('0123456789abcdef');
-    const plaintext = JSON.stringify({ title: 'Harness Deck', body: 'Approve bash' });
+    const plaintext = JSON.stringify({ title: 'Halo', body: 'Approve bash' });
     const encrypted = encryptWebPushPayload(
       {
         endpoint: 'https://push.example.test/sub/roundtrip',
@@ -531,9 +531,9 @@ describe('HD-27 PushService', () => {
 
     const bark = formatWebhookRequest(
       { enabled: true, preset: 'bark', url: 'https://api.day.app/key' },
-      { kind: 'test', title: 'Harness Deck', body: 'Hello' },
+      { kind: 'test', title: 'Halo', body: 'Hello' },
     );
-    expect(JSON.parse(bark!.body)).toMatchObject({ title: 'Harness Deck', body: 'Hello', group: 'Harness Deck' });
+    expect(JSON.parse(bark!.body)).toMatchObject({ title: 'Halo', body: 'Hello', group: 'Halo' });
   });
 });
 

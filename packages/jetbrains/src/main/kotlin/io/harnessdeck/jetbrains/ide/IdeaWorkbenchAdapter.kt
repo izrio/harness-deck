@@ -277,7 +277,7 @@ class IdeaWorkbenchAdapter(private val project: Project) {
                 val res = Messages.showYesNoDialog(
                     project,
                     fullMessage,
-                    "Harness Deck",
+                    "Halo",
                     action,
                     Messages.getCancelButton(),
                     Messages.getQuestionIcon(),
@@ -408,8 +408,8 @@ class IdeaWorkbenchAdapter(private val project: Project) {
                     else -> NotificationType.INFORMATION
                 }
                 val notification = NotificationGroupManager.getInstance()
-                    .getNotificationGroup("Harness Deck")
-                    .createNotification("Harness Deck", message, type)
+                    .getNotificationGroup("Halo")
+                    .createNotification("Halo", message, type)
 
                 if (actions.isEmpty()) {
                     notification.notify(project)

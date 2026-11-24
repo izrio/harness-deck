@@ -74,7 +74,10 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
     boundProvider: () => host.boundProvider?.(profile.id),
     ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
     mcpServers: () =>
-      mcpServersForBackend(common.extensions?.().mcp.servers ?? latestPrepared?.mcpServers ?? [], profile.id),
+      mcpServersForBackend(
+        common.runtimeMcpServers?.() ?? common.extensions?.().mcp.servers ?? latestPrepared?.mcpServers ?? [],
+        profile.id,
+      ),
     skillsContext: () => ({
       skills: skillsForBackend(common.extensions?.().skills.items ?? latestPrepared?.skills ?? [], profile.id),
       ...(latestPrepared?.skillBundleDir ? { bundleDir: latestPrepared.skillBundleDir } : {}),
@@ -242,7 +245,7 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
         protocolVersion: PROTOCOL_VERSION,
         // 文件和终端由代理自己处理（不通过编辑器）
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        clientInfo: { name: 'harness-deck', title: 'Harness Deck', version: host.extensionVersion },
+        clientInfo: { name: 'harness-deck', title: 'Halo', version: host.extensionVersion },
       }, INITIALIZE_TIMEOUT_MS);
       if (current !== generation) return;
       const agent = init.agentInfo;

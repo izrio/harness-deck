@@ -1,5 +1,5 @@
 /**
- * Harness Deck 独立桌面客户端主进程（P3-11，Electron 壳）：
+ * Halo 独立桌面客户端主进程（P3-11，Electron 壳）：
  * - 拉起内置 `sidecar.cjs --headless-server` 守护进程，复用全部多底层/多账号/工作台/终端能力；
  * - 提供系统托盘常驻、全局快捷键（默认 Cmd/Ctrl+Shift+H）唤出/隐藏窗口、原生系统通知与窗口尺寸记忆；
  * - 单实例锁保证同一时间只有一个桌面主进程在运行。
@@ -73,7 +73,7 @@ function startEmbeddedHeadlessServer(): Promise<string> {
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        rejectUrl(new Error('Timed out waiting for Harness Deck headless server to start'));
+        rejectUrl(new Error('Timed out waiting for Halo headless server to start'));
       }
     }, 20_000);
 
@@ -136,7 +136,7 @@ async function createMainWindow(url: string): Promise<void> {
     ...(bounds.y !== undefined ? { y: bounds.y } : {}),
     minWidth: 720,
     minHeight: 520,
-    title: 'Harness Deck',
+    title: 'Halo',
     icon: resolveAppIcon(),
     backgroundColor: '#1b1d24',
     webPreferences: {
@@ -169,10 +169,10 @@ async function createMainWindow(url: string): Promise<void> {
 function setupTray(): void {
   try {
     tray = new Tray(resolveAppIcon());
-    tray.setToolTip('Harness Deck');
+    tray.setToolTip('Halo');
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: 'Show / Hide Harness Deck', click: () => toggleMainWindow() },
+        { label: 'Show / Hide Halo', click: () => toggleMainWindow() },
         { type: 'separator' },
         {
           label: 'Quit',
@@ -203,7 +203,7 @@ if (!app.requestSingleInstanceLock()) {
   ipcMain.on('hd:notify', (_event, payload: unknown) => {
     if (!Notification.isSupported() || !payload || typeof payload !== 'object') return;
     const { title, body } = payload as { title?: string; body?: string };
-    new Notification({ title: title || 'Harness Deck', body: body || '' }).show();
+    new Notification({ title: title || 'Halo', body: body || '' }).show();
   });
 
   ipcMain.handle('hd:open-external', (_event, url: unknown) => {

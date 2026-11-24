@@ -122,9 +122,9 @@ export function AppearancePanel() {
   const activePreset = FONT_PRESETS.find((p) => p.value === (appearance.fontFamily ?? ''));
 
   return (
-    <div className="flex flex-col gap-3.5" data-testid="appearance-panel">
+    <div className="divide-y divide-line/60" data-testid="appearance-panel">
       {/* 字体选择：预设快捷胶囊 + 自定义输入 */}
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.proseFont')}</span>
           <div className="flex flex-wrap items-center gap-1">
@@ -164,7 +164,7 @@ export function AppearancePanel() {
       </div>
 
       {/* 字号 */}
-      <div className="flex items-center justify-between gap-2.5">
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
         <span className="text-[12.5px] font-medium text-ink">{t('appearance.size')}</span>
         <div className="flex items-center gap-2">
           {appearance.fontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
@@ -184,7 +184,7 @@ export function AppearancePanel() {
       </div>
 
       {/* 行高 */}
-      <div className="flex items-center justify-between gap-2.5">
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
         <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.lineHeight')}</span>
         <div className="flex items-center gap-2">
           {appearance.lineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
@@ -204,7 +204,7 @@ export function AppearancePanel() {
       </div>
 
       {/* 段距 */}
-      <div className="flex items-center justify-between gap-2.5">
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
         <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.paragraphSpacing')}</span>
         <div className="flex items-center gap-2">
           {appearance.paragraphSpacing === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
@@ -224,7 +224,7 @@ export function AppearancePanel() {
       </div>
 
       {/* 内容宽度 */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3">
         <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.contentWidth')}</span>
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="flex items-center gap-1">
@@ -264,15 +264,17 @@ export function AppearancePanel() {
       </div>
 
       {/* 实时阅读与聊天排版预览 */}
-      <div className="flex flex-col gap-1.5 rounded-card bg-inset/70 p-3 shadow-hairline" data-testid="reading-live-preview">
-        <span className="text-[11px] font-medium text-ink-3">{t('settings.appearance.readingPreview')}</span>
-        <Markdown text={t('settings.appearance.readingPreviewSample')} />
-      </div>
+      <div className="flex flex-col gap-2.5 px-4 py-3">
+        <div className="flex flex-col gap-1.5 rounded-card bg-inset/70 p-3 shadow-hairline" data-testid="reading-live-preview">
+          <span className="text-[11px] font-medium text-ink-3">{t('settings.appearance.readingPreview')}</span>
+          <Markdown text={t('settings.appearance.readingPreviewSample')} />
+        </div>
 
-      <div className="flex items-center justify-end">
-        <Button type="button" variant="ghost" size="sm" data-testid="prose-reset" onClick={resetProse}>
-          {t('appearance.reset')}
-        </Button>
+        <div className="flex items-center justify-end">
+          <Button type="button" variant="ghost" size="sm" data-testid="prose-reset" onClick={resetProse}>
+            {t('appearance.reset')}
+          </Button>
+        </div>
       </div>
     </div>
   );

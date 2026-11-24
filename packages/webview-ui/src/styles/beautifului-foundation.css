@@ -27,14 +27,14 @@
   /* Panel slide motion (drawer reveal curve) */
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
-  /* Glass & surface elevation (t3code-ui-style) */
+  /* Glass & surface elevation */
   --app-scrollbar-width: 6px;
   --glass-blur: 12px;
   --glass-opacity: 82%;
   --glass-saturation: 1.14;
   --shadow-composer: 0 1px 2px rgb(0 0 0 / 5%);
 
-  /* Light Theme — Quiet Zinc (t3code-ui-style) */
+  /* Light Theme — Quiet Zinc */
   --page: #fcfcfc;
   --canvas: #fcfcfc;
   --surface: #ffffff;
@@ -288,7 +288,7 @@
   --color-red: var(--red);
   --color-red-tint: var(--red-tint);
 
-  /* micro-typography (t3code-ui-style) */
+  /* micro-typography */
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: calc(1 / 0.6875);
   --text-3xs: 0.625rem;
@@ -453,6 +453,25 @@ select:focus-visible,
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     background: var(--surface) !important;
   }
+}
+
+@utility home-backdrop {
+  background-image:
+    radial-gradient(ellipse 62% 48% at 50% 24%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 72%),
+    radial-gradient(color-mix(in srgb, var(--ink) 12%, transparent) 1px, transparent 1px);
+  background-size: 100% 100%, 20px 20px;
+  mask-image: radial-gradient(ellipse 72% 64% at 50% 38%, black 18%, transparent 82%);
+  -webkit-mask-image: radial-gradient(ellipse 72% 64% at 50% 38%, black 18%, transparent 82%);
+
+  @variant dark {
+    background-image:
+      radial-gradient(ellipse 62% 48% at 50% 24%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%),
+      radial-gradient(color-mix(in srgb, var(--ink) 14%, transparent) 1px, transparent 1px);
+  }
+}
+
+@utility home-emblem-glow {
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 28%, transparent) 0%, transparent 68%);
 }
 
 @utility dialog-glass {

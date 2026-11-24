@@ -24,15 +24,26 @@ import {
 } from '../src/extensions/mcpService.ts';
 import {
   deleteInstalledSkill,
+  importLocalSkills,
   installSkillsFromGit,
   loadInstalledSkills,
   parseGitSkillSource,
   parseSkillMarkdown,
+  scanAgentSkills,
+  scanLocalSkillDirectory,
   scanSkillsFromGit,
   stageSkillsForBackend,
   syncInstalledSkill,
   updateSkillEntry,
 } from '../src/extensions/skillService.ts';
+import {
+  BUILTIN_MCP_MARKET,
+  BUILTIN_SKILL_MARKET,
+  clearMarketCacheForTests,
+  fetchOnlineMcpMarket,
+  fetchOnlineSkillMarket,
+  parseMcpRegistryPayload,
+} from '../src/extensions/marketService.ts';
 
 const tempDirs: string[] = [];
 
@@ -550,5 +561,207 @@ describe('统一 MCP 服务器管理、各 Agent 配置导入与启动注入', (
     // 快照的斜杠命令中包含已安装的 Skill
     expect(controller.snapshot().commands.some((c) => c.name === 'frontend-design')).toBe(true);
     controller.dispose();
+  });
+
+  it('支持扫描本机/工作区 Agent 技能目录、手动目录扫描、本地安全导入与本地同步更新', async () => {
+    const homeDir = await makeTempDir('hd-skill-home-');
+    const workspacePath = await makeTempDir('hd-skill-ws-');
+    const storageRoot = await makeTempDir('hd-skill-store-');
+    const customDir = await makeTempDir('hd-skill-custom-');
+
+    const claudeSkillDir = join(homeDir, '.claude', 'skills', 'code-review');
+    await mkdir(claudeSkillDir, { recursive: true });
+    await writeFile(
+      join(claudeSkillDir, 'SKILL.md'),
+      '---\nname: code-review\ndescription: Review TypeScript PRs\n---\nCheck types and tests.\n',
+      'utf8',
+    );
+
+    const wsSkillDir = join(workspacePath, '.agents', 'skills', 'ui-style');
+    await mkdir(wsSkillDir, { recursive: true });
+    await writeFile(
+      join(wsSkillDir, 'SKILL.md'),
+      '---\nname: ui-style\ndescription: Polish UI\n---\nKeep spacing tight.\n',
+      'utf8',
+    );
+
+    const customSkillDir = join(customDir, 'release-check');
+    await mkdir(customSkillDir, { recursive: true });
+    await writeFile(
+      join(customSkillDir, 'SKILL.md'),
+      '---\nname: release-check\ndescription: Pre-release checks\n---\nRun tests.\n',
+      'utf8',
+    );
+
+    const scanned = await scanAgentSkills({
+      homeDir,
+      workspacePath,
+      storageRoot,
+      existingIds: new Set(['ui-style']),
+    });
+    expect(scanned.items.map((i) => i.name).sort()).toEqual(['code-review', 'ui-style']);
+    expect(scanned.items.find((i) => i.name === 'code-review')?.sourceAgentName).toBe('Claude Code');
+    expect(scanned.items.find((i) => i.name === 'ui-style')?.conflict).toBe(true);
+
+    const picked = await scanLocalSkillDirectory(customDir);
+    expect(picked).toHaveLength(1);
+    expect(picked[0]?.name).toBe('release-check');
+
+    const imported = await importLocalSkills({
+      storageRoot,
+      skills: [
+        { sourceDir: claudeSkillDir, importedFrom: 'Claude Code' },
+        { sourceDir: picked[0]!.sourceDir, importedFrom: picked[0]!.sourceAgentName },
+      ],
+      agents: ['claude', 'codex'],
+    });
+    expect(imported.installed.map((s) => s.id)).toEqual(['code-review', 'release-check']);
+    expect(imported.installed[0]).toMatchObject({
+      sourceKind: 'local',
+      importedFrom: 'Claude Code',
+      agents: ['claude', 'codex'],
+    });
+    expect(existsSync(imported.installed[0]!.skillMdPath)).toBe(true);
+
+    // 修改源目录 SKILL.md 后同步更新
+    await writeFile(
+      join(claudeSkillDir, 'SKILL.md'),
+      '---\nname: code-review\ndescription: Updated review guide\n---\nUpdated content.\n',
+      'utf8',
+    );
+    const synced = await syncInstalledSkill({ storageRoot, id: 'code-review' });
+    expect(synced.find((s) => s.id === 'code-review')?.description).toBe('Updated review guide');
+  });
+
+  it('在线扩展市场：支持 MCP Registry 实时解析、GitHub 技能实时拉取、缓存与离线兜底', async () => {
+    clearMarketCacheForTests();
+
+    const parsed = parseMcpRegistryPayload({
+      servers: [
+        {
+          server: {
+            name: 'io.github.acme/super-db',
+            description: 'Query Postgres and SQLite databases live',
+            version: '1.2.0',
+            packages: [
+              {
+                registryType: 'npm',
+                identifier: '@acme/super-db-mcp',
+                environmentVariables: [{ name: 'DB_URL', isRequired: true }],
+              },
+            ],
+          },
+          _meta: { 'io.modelcontextprotocol.registry/official': { isLatest: true } },
+        },
+        {
+          server: {
+            name: 'com.figma/figma-mcp',
+            description: 'Inspect Figma frames',
+            version: '2.0.0',
+            remotes: [{ type: 'streamable-http', url: 'https://mcp.figma.com/mcp' }],
+          },
+        },
+      ],
+    });
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]).toMatchObject({
+      id: 'super-db',
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', '@acme/super-db-mcp'],
+      envKeys: ['DB_URL'],
+      needsConfig: true,
+      category: 'data',
+      version: '1.2.0',
+    });
+    expect(parsed[1]).toMatchObject({
+      id: 'figma-mcp',
+      transport: 'http',
+      url: 'https://mcp.figma.com/mcp',
+      category: 'collab',
+    });
+
+    // 在线拉取 MCP 市场并命中缓存，force 可跳过缓存
+    let mcpCalls = 0;
+    const mockMcpFetch: typeof fetch = async () => {
+      mcpCalls++;
+      return new Response(
+        JSON.stringify({
+          servers: [
+            {
+              server: {
+                name: 'io.example/live-tool',
+                description: 'Live registry server',
+                version: '0.9.1',
+                remotes: [{ type: 'streamable-http', url: 'https://live.example.com/mcp' }],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+    const firstMcp = await fetchOnlineMcpMarket({ query: 'live', fetchImpl: mockMcpFetch });
+    expect(firstMcp.source).toBe('online');
+    expect(firstMcp.items[0]?.id).toBe('live-tool');
+    await fetchOnlineMcpMarket({ query: 'live', fetchImpl: mockMcpFetch });
+    expect(mcpCalls).toBe(1);
+    await fetchOnlineMcpMarket({ query: 'live', force: true, fetchImpl: mockMcpFetch });
+    expect(mcpCalls).toBe(2);
+
+    // 断网时 MCP 市场回退到离线精选目录
+    const fallbackMcp = await fetchOnlineMcpMarket({
+      query: 'offline-test',
+      force: true,
+      fetchImpl: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    });
+    expect(fallbackMcp.source).toBe('fallback');
+    expect(fallbackMcp.items.length).toBe(BUILTIN_MCP_MARKET.length);
+    expect(fallbackMcp.error).toContain('ECONNREFUSED');
+
+    // 在线拉取 GitHub 技能仓库树 + SKILL.md Frontmatter
+    const mockSkillFetch: typeof fetch = async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('/repos/anthropics/skills/git/trees/')) {
+        return new Response(
+          JSON.stringify({
+            tree: [{ type: 'blob', path: 'skills/brand-new-skill/SKILL.md' }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/repos/vercel-labs/agent-skills/git/trees/')) {
+        return new Response(JSON.stringify({ tree: [] }), { status: 200 });
+      }
+      if (url.includes('brand-new-skill/SKILL.md')) {
+        return new Response('---\nname: brand-new-skill\ndescription: Live React UI toolkit\n---\nBody\n', {
+          status: 200,
+        });
+      }
+      return new Response('not found', { status: 404 });
+    };
+    const onlineSkills = await fetchOnlineSkillMarket({ force: true, fetchImpl: mockSkillFetch });
+    expect(onlineSkills.source).toBe('online');
+    expect(onlineSkills.items).toEqual([
+      expect.objectContaining({
+        id: 'anthropic:brand-new-skill',
+        name: 'brand-new-skill',
+        description: 'Live React UI toolkit',
+        category: 'frontend',
+      }),
+    ]);
+
+    // 断网时技能市场回退到离线精选目录
+    const fallbackSkills = await fetchOnlineSkillMarket({
+      force: true,
+      fetchImpl: async () => {
+        throw new Error('network down');
+      },
+    });
+    expect(fallbackSkills.source).toBe('fallback');
+    expect(fallbackSkills.items.length).toBe(BUILTIN_SKILL_MARKET.length);
+    expect(fallbackSkills.error).toContain('network down');
   });
 });

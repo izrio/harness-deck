@@ -186,11 +186,11 @@ jobs:
           if [ "${{ github.event.inputs.prerelease }}" = "true" ]; then FLAGS+=(--prerelease); fi
           if gh release view "$TAG" > /dev/null 2>&1; then
             # 重新运行时更新已有的 Release，替换安装包
-            gh release edit "$TAG" --title "Harness Deck ${TAG}" --notes-file release/notes.md "${FLAGS[@]}"
+            gh release edit "$TAG" --title "Halo ${TAG}" --notes-file release/notes.md "${FLAGS[@]}"
             gh release upload "$TAG" release/*.vsix release/*.zip release/*.sha256 --clobber
           else
             gh release create "$TAG" release/*.vsix release/*.zip release/*.sha256 \
-              --title "Harness Deck ${TAG}" \
+              --title "Halo ${TAG}" \
               --notes-file release/notes.md \
               --target "$GITHUB_SHA" \
               "${FLAGS[@]}"

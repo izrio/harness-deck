@@ -134,9 +134,9 @@ try {
   };
 
   // code-server 的显示语言是英文：插件界面、命令标题都应该是英文（package.nls.json）
-  await runCommand('Harness Deck: Open Chat');
+  await runCommand('Halo: Open Chat');
   const webview = await findWebview();
-  check('命令面板「Harness Deck: 打开对话」打开插件视图', true);
+  check('命令面板「Halo: 打开对话」打开插件视图', true);
   // 等到会话列表可用（空状态出现、没有状态提示）再开始对话
   await webview.locator('.empty').waitFor({ timeout: 120_000 });
   await webview.waitForFunction(() => !document.querySelector('.banner'), undefined, { timeout: 120_000 });
@@ -202,7 +202,7 @@ try {
     () => check('确认后权限切换为完全访问', false),
   );
 
-  // 编辑器右键菜单：选中代码 →「Harness Deck → 解释这段代码」
+  // 编辑器右键菜单：选中代码 →「Halo → 解释这段代码」
   await page.keyboard.press('Control+P');
   await page.locator('.quick-input-widget input').waitFor();
   await page.keyboard.type('index.ts');
@@ -214,10 +214,10 @@ try {
   await page.keyboard.press('Control+A');
   await page.waitForTimeout(400);
   await editorLines.click({ button: 'right' });
-  const dshMenu = page.locator('.monaco-menu .action-item', { hasText: 'Harness Deck' }).first();
+  const dshMenu = page.locator('.monaco-menu .action-item', { hasText: 'Halo' }).first();
   await dshMenu.waitFor({ timeout: 10_000 }).then(
-    () => check('编辑器右键菜单里有 Harness Deck 子菜单', true),
-    () => check('编辑器右键菜单里有 Harness Deck 子菜单', false),
+    () => check('编辑器右键菜单里有 Halo 子菜单', true),
+    () => check('编辑器右键菜单里有 Halo 子菜单', false),
   );
   await dshMenu.hover();
   const explain = page.locator('.monaco-menu .action-label', { hasText: 'Explain This Code' }).first();
@@ -235,9 +235,9 @@ try {
   );
   await page.screenshot({ path: join(outDir, 'explain.png') });
 
-  await runCommand('Harness Deck: Switch Model');
+  await runCommand('Halo: Switch Model');
   await page.waitForTimeout(800);
-  check('命令「Harness Deck: 切换模型」列出模型', (await page.locator('.quick-input-list .monaco-list-row').count()) > 0);
+  check('命令「Halo: 切换模型」列出模型', (await page.locator('.quick-input-list .monaco-list-row').count()) > 0);
   await page.screenshot({ path: join(outDir, 'select-model.png') });
   await page.keyboard.press('Escape');
 } catch (error) {

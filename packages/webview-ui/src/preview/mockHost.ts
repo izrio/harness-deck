@@ -1,6 +1,7 @@
 import type {
   AppearanceState,
   BackendsState,
+  BrowserState,
   ContextState,
   HostSnapshot,
   HostToWebview,
@@ -105,6 +106,21 @@ function installMockHost(): void {
   let locale: Locale = resolveLocale(preferences.language);
   let projects: ProjectsState = PREVIEW_PROJECTS;
   let workbench: WorkbenchState = createInitialWorkbench();
+  let browserState: BrowserState = {
+    status: 'stopped',
+    url: 'about:blank',
+    title: '',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    viewportWidth: 1024,
+    viewportHeight: 720,
+    viewportPreset: 'responsive',
+    aiEnabled: true,
+    mcpUrl: 'http://127.0.0.1:41234/mcp',
+    detectedExecutable: '/usr/bin/google-chrome (preview mock)',
+    consoleLogs: [],
+  };
   let context: ContextState = {
     includeActiveByDefault: true,
     active: { kind: 'file', path: 'packages/webview-ui/src/App.tsx', key: 'preview-active' },
@@ -191,6 +207,7 @@ function installMockHost(): void {
       projects,
       extensions: PREVIEW_EXTENSIONS,
       workbench,
+      browser: browserState,
     };
   };
 
@@ -571,6 +588,8 @@ function installMockHost(): void {
         appearance = {
           ...appearance,
           ...(p.theme !== undefined ? { theme: p.theme ?? undefined } : {}),
+          ...(p.preset !== undefined ? { preset: p.preset ?? undefined } : {}),
+          ...(p.highContrast !== undefined ? { highContrast: p.highContrast ?? undefined } : {}),
           ...(p.fontSize !== undefined ? { fontSize: p.fontSize ?? undefined } : {}),
           ...(p.fontFamily !== undefined ? { fontFamily: p.fontFamily ?? undefined } : {}),
           ...(p.lineHeight !== undefined ? { lineHeight: p.lineHeight ?? undefined } : {}),
@@ -613,12 +632,19 @@ function installMockHost(): void {
       }
 
       case 'fetchQuota': {
-        // 预览模式按当前后端返回不同额度形态，方便直接查看标识与悬浮明细；
-        // 其它后端（dsh / pi / …）返回 unavailable，标识随之隐藏。
+        // 预览模式按当前后端返回模拟额度形态，方便直接查看双圆环用量标识与悬浮明细。
         const { requestId } = message.payload;
         const now = Date.now();
         const quota: QuotaView | undefined =
-          backends.active === 'claude'
+          backends.active === 'dsh'
+            ? {
+                windows: [
+                  { kind: 'weekly', label: '', usedPercent: 24, remainingPercent: 76, resetsAt: now + 4 * 86_400_000, severity: 'normal' },
+                  { kind: 'session', label: '', usedPercent: 42, remainingPercent: 58, resetsAt: now + 3 * 60 * 60_000, severity: 'normal' },
+                ],
+                queriedAt: now,
+              }
+            : backends.active === 'claude'
             ? {
                 windows: [
                   { kind: 'session', label: '', usedPercent: 42, remainingPercent: 58, resetsAt: now + 2 * 60 * 60_000, severity: 'normal' },
@@ -980,6 +1006,57 @@ function installMockHost(): void {
           },
         };
         postToWebview({ type: 'projects', payload: projects });
+        return;
+
+      case 'browserLaunch':
+      case 'browserNavigate': {
+        const nextUrl = message.payload.url?.trim() || 'http://localhost:5173';
+        browserState = {
+          ...browserState,
+          status: 'running',
+          url: nextUrl,
+          title: nextUrl,
+          cdpUrl: 'http://127.0.0.1:9222',
+          consoleLogs: [
+            ...browserState.consoleLogs,
+            { id: Date.now(), level: 'info', text: `Navigated to ${nextUrl} (preview mode)`, timestamp: Date.now() },
+          ],
+        };
+        postToWebview({ type: 'browserState', payload: browserState });
+        return;
+      }
+
+      case 'browserStop':
+        browserState = { ...browserState, status: 'stopped', cdpUrl: undefined };
+        postToWebview({ type: 'browserState', payload: browserState });
+        return;
+
+      case 'browserSetAiEnabled':
+        browserState = { ...browserState, aiEnabled: message.payload.enabled };
+        postToWebview({ type: 'browserState', payload: browserState });
+        return;
+
+      case 'browserClearConsole':
+        browserState = { ...browserState, consoleLogs: [] };
+        postToWebview({ type: 'browserState', payload: browserState });
+        return;
+
+      case 'browserResize':
+        browserState = {
+          ...browserState,
+          viewportWidth: message.payload.width,
+          viewportHeight: message.payload.height,
+          ...(message.payload.preset ? { viewportPreset: message.payload.preset } : {}),
+        };
+        postToWebview({ type: 'browserState', payload: browserState });
+        return;
+
+      case 'browserRequestFrame':
+      case 'browserMouse':
+      case 'browserKey':
+      case 'browserBack':
+      case 'browserForward':
+      case 'browserReload':
         return;
 
       default:

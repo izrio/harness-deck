@@ -3,7 +3,7 @@
  * 将 `codex app-server` 推送的 v2 通知流（`turn/started`、`item/started`、`item/agentMessage/delta`、
  * `item/reasoning/*`、`item/commandExecution/outputDelta`、`item/fileChange/*`、`item/completed`、
  * `turn/plan/updated`、`thread/tokenUsage/updated`、`turn/completed`、`error` 等）
- * 以及历史快照（`thread/read` / `thread/resume` 返回的 `Thread`）统一投影为 Harness Deck 视图模型。
+ * 以及历史快照（`thread/read` / `thread/resume` 返回的 `Thread`）统一投影为 Halo 视图模型。
  */
 import { joinLabel, type ContextDetail, type Item, type LineStats, type TokenBreakdown } from '@harness-deck/shared';
 import type { AcpDiff, FileChange } from '../acp/projection.ts';

@@ -1,7 +1,7 @@
 /**
  * 工作台顶栏（精简工具条）：
  * 左侧：侧边栏展开/收起按钮（移动端为抽屉入口）+ 当前页面标题
- * 右侧：移动端连接状态 / Worktree 会话 / 新建会话 / 全宽工作台 / 右侧文件与Git面板展开按钮
+ * 右侧：移动端连接状态 / 新建会话 / 全宽工作台 / 右侧工作区面板展开按钮
  */
 import type { WorkbenchModule } from '@harness-deck/shared/limits';
 import { setActiveModule, toggleRightPanel, useView } from '../store.ts';
@@ -9,10 +9,9 @@ import { postToHost, reconnectMobileTransport, useTransportState } from '../vsco
 import { useIsMobile } from '../hooks/use-mobile.ts';
 import { cn } from '../lib/utils.ts';
 import {
+  ChatIcon,
   ClockIcon,
-  CommandIcon,
   ExpandPanelIcon,
-  FolderTreeIcon,
   GitBranchIcon,
   LayoutDashboardIcon,
   ListTodoIcon,
@@ -24,6 +23,7 @@ import {
   WifiIcon,
   WifiOffIcon,
 } from './icons.tsx';
+import { BackendLogo } from './BackendLogo.tsx';
 import { Button } from '@/components/ui/button';
 import { useT, type MessageKey } from '../i18n.ts';
 
@@ -40,7 +40,7 @@ function renderModuleIcon(mod: WorkbenchModule) {
     case 'tasks':
       return <ListTodoIcon className="size-3.5 shrink-0" />;
     case 'sessions':
-      return <FolderTreeIcon className="size-3.5 shrink-0" />;
+      return <ChatIcon className="size-3.5 shrink-0" />;
   }
 }
 
@@ -48,14 +48,10 @@ export function Header({
   sidebarOpen = true,
   onToggleSidebar,
   onOpenMobileDrawer,
-  onNewWorktree,
-  onOpenCommandPalette,
 }: {
   readonly sidebarOpen?: boolean;
   readonly onToggleSidebar?: () => void;
   readonly onOpenMobileDrawer?: () => void;
-  readonly onNewWorktree?: () => void;
-  readonly onOpenCommandPalette?: () => void;
 }) {
   const isMobile = useIsMobile();
   const clientSurface = useView((s) => s.clientSurface);
@@ -64,8 +60,36 @@ export function Header({
   const settingsOpen = useView((s) => s.settingsOpen);
   const activeModule = useView((s) => s.activeModule);
   const rightPanelOpen = useView((s) => s.rightPanelOpen);
+  const backends = useView((s) => s.backends);
+  const connection = useView((s) => s.connection);
+  const runtime = useView((s) => s.runtime);
+  const sessionRunning = useView((s) => s.session.running);
+  const interactionsCount = useView((s) => s.interactions.length);
+  const sessionGroups = useView((s) => s.workbench.sessionGroups);
+  const tabs = useView((s) => s.tabs.items);
   const transport = useTransportState();
   const t = useT();
+
+  const startedRuntimes = backends.items.filter((b) => {
+    if (b.alive || b.running) return true;
+    if (b.id === backends.active && (connection === 'connected' || runtime.kind === 'connected' || runtime.kind === 'starting')) {
+      return true;
+    }
+    return false;
+  });
+
+  const attentionBackendIds = new Set<string>();
+  if (interactionsCount > 0 && backends.active) {
+    attentionBackendIds.add(backends.active);
+  }
+  for (const tab of tabs) {
+    if (tab.needsAttention && tab.backendId) attentionBackendIds.add(tab.backendId);
+  }
+  for (const group of sessionGroups) {
+    for (const s of group.sessions) {
+      if (s.needsAttention) attentionBackendIds.add(s.backendId);
+    }
+  }
 
   const currentTitle = settingsOpen
     ? t('header.settings')
@@ -120,6 +144,68 @@ export function Header({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5" data-testid="header-actions">
+          {startedRuntimes.length > 0 ? (
+            <div
+              className="mr-1 flex items-center gap-1"
+              role="group"
+              aria-label={t('header.runtime.listLabel')}
+              data-testid="header-started-runtimes"
+            >
+              {startedRuntimes.map((backend) => {
+                const isActive = backend.id === backends.active;
+                const isAttention = attentionBackendIds.has(backend.id);
+                const isRunning = Boolean(backend.running || (isActive && sessionRunning));
+                const statusKind = isAttention ? 'attention' : isRunning ? 'running' : 'idle';
+                const statusTitle =
+                  statusKind === 'attention'
+                    ? t('header.runtime.attention', backend.name)
+                    : statusKind === 'running'
+                      ? t('header.runtime.running', backend.name)
+                      : t('header.runtime.idle', backend.name);
+                return (
+                  <Button
+                    key={backend.id}
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    disabled={remoteReadOnly}
+                    data-testid={`header-runtime-${backend.id}`}
+                    data-runtime-status={statusKind}
+                    aria-label={statusTitle}
+                    aria-pressed={isActive}
+                    title={statusTitle}
+                    onClick={() => {
+                      setActiveModule('sessions');
+                      if (backend.id !== backends.active) {
+                        postToHost({ type: 'selectBackend', payload: { id: backend.id } });
+                      }
+                    }}
+                    className={cn(
+                      'relative rounded-full transition-colors',
+                      isActive
+                        ? 'bg-surface shadow-hairline ring-1 ring-brand/45 hover:bg-surface'
+                        : 'bg-field/75 hover:bg-hover',
+                    )}
+                  >
+                    <BackendLogo backend={backend} size="sm" />
+                    <span
+                      aria-hidden="true"
+                      data-testid={`header-runtime-dot-${backend.id}`}
+                      className={cn(
+                        'pointer-events-none absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-[1.5px] ring-sidebar',
+                        statusKind === 'attention'
+                          ? 'bg-orange'
+                          : statusKind === 'running'
+                            ? 'bg-brand animate-pulse'
+                            : 'bg-green',
+                      )}
+                    />
+                  </Button>
+                );
+              })}
+              <span aria-hidden="true" className="ml-0.5 h-3.5 w-px bg-line/70" />
+            </div>
+          ) : null}
           {clientSurface === 'mobile-web' || transport.mode === 'mobile-web' ? (
             <button
               type="button"
@@ -161,37 +247,6 @@ export function Header({
               </span>
             </button>
           ) : null}
-          {onOpenCommandPalette ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              data-testid="open-command-palette-btn"
-              aria-label={t('cmdPalette.trigger')}
-              title={t('cmdPalette.trigger')}
-              onClick={onOpenCommandPalette}
-            >
-              <CommandIcon className="size-3.5" />
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            disabled={remoteReadOnly}
-            data-testid="new-worktree-session"
-            aria-label={t('wb.sessions.worktreeSession')}
-            title={t('wb.sessions.worktreeSession')}
-            onClick={() => {
-              if (onNewWorktree) {
-                onNewWorktree();
-              } else {
-                postToHost({ type: 'newWorktreeSession', payload: {} });
-              }
-            }}
-          >
-            <GitBranchIcon className="size-3.5" />
-          </Button>
           <Button
             type="button"
             variant="ghost"

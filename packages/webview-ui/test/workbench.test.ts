@@ -171,6 +171,7 @@ function sampleWorkbench(): WorkbenchState {
             updatedAt: Date.now() - 10_000,
             running: true,
             model: 'DeepSeek R1',
+            branch: 'main',
           },
         ],
       },
@@ -450,10 +451,55 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(posted).toContainEqual({ type: 'rollbackLastTurn', payload: {} });
   });
 
-  it('会话模块：worktree 按钮请求串行化的 worktree 会话', () => {
+  it('会话模块：顶部移除命令面板与 worktree 按钮，底部分支弹层支持新建 worktree 会话', () => {
+    const snap = workbenchSnapshot();
+    const withSc: HostSnapshot = {
+      ...snap,
+      workbench: {
+        ...snap.workbench!,
+        sourceControl: {
+          available: true,
+          root: '/repo/alpha',
+          branch: 'main',
+          branches: ['main', 'feat/worktree'],
+          files: [],
+          additions: 0,
+          deletions: 0,
+          updatedAt: 1_000,
+        },
+      },
+    };
     render(createElement(App));
-    host({ type: 'snapshot', payload: workbenchSnapshot() });
+    host({ type: 'snapshot', payload: withSc });
+    fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
 
+    // 顶部栏不再显示命令面板按钮和独立的 worktree 按钮
+    expect(screen.queryByTestId('open-command-palette-btn')).toBeNull();
+    expect(screen.queryByTestId('new-worktree-session')).toBeNull();
+
+    // 顶部栏展示所有已启动运行时（圆形图标 + 执行状态点），并支持点击切换
+    const snapWithRuntimes: HostSnapshot = {
+      ...withSc,
+      backends: {
+        active: 'dsh',
+        workspace: 'alpha',
+        items: [
+          { id: 'dsh', name: 'DeepSeek', kind: 'dsh', builtin: true, available: true, alive: true, running: true },
+          { id: 'claude', name: 'Claude Code', kind: 'claude', builtin: true, available: true, alive: true },
+          { id: 'pi', name: 'Pi', kind: 'pi', builtin: true, available: true },
+        ],
+      },
+    };
+    host({ type: 'snapshot', payload: snapWithRuntimes });
+    expect(screen.getByTestId('header-runtime-dsh').getAttribute('data-runtime-status')).toBe('running');
+    expect(screen.getByTestId('header-runtime-dot-dsh')).toBeTruthy();
+    expect(screen.getByTestId('header-runtime-claude').getAttribute('data-runtime-status')).toBe('idle');
+    expect(screen.queryByTestId('header-runtime-pi')).toBeNull();
+    fireEvent.click(screen.getByTestId('header-runtime-claude'));
+    expect(posted).toContainEqual({ type: 'selectBackend', payload: { id: 'claude' } });
+
+    // 在底部分支切换弹层中点击新建 worktree 会话
+    fireEvent.click(screen.getByTestId('composer-branch-trigger'));
     fireEvent.click(screen.getByTestId('new-worktree-session'));
     expect(posted).toContainEqual({ type: 'newWorktreeSession', payload: {} });
   });
@@ -535,11 +581,37 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(screen.queryByTestId('agent-form')).toBeNull();
 
     fireEvent.click(screen.getByTestId('agent-new-btn'));
+    expect(screen.getByTestId('agent-composer')).toBeTruthy();
     fireEvent.change(screen.getByTestId('agent-input-name'), { target: { value: '安全审计员' } });
     fireEvent.change(screen.getByTestId('agent-input-specialty'), { target: { value: 'CSP 与依赖安全审计' } });
     fireEvent.change(screen.getByTestId('agent-input-instructions'), { target: { value: '逐项核查权限边界' } });
-    chooseSelectOption('agent-select-backend', 'Claude Code');
-    chooseSelectOption('agent-select-model', /DeepSeek R1/);
+    fireEvent.click(screen.getByTestId('agent-runtime-picker'));
+    fireEvent.click(screen.getByTestId('agent-runtime-option-claude'));
+    const agentFetchReq = posted.find((m) => (m as { type?: string }).type === 'fetchBackendModels') as
+      | { type: 'fetchBackendModels'; payload: { requestId: number; backendId: string } }
+      | undefined;
+    expect(agentFetchReq?.payload.backendId).toBe('claude');
+    host({
+      type: 'backendModelsFetched',
+      payload: {
+        requestId: agentFetchReq!.payload.requestId,
+        backendId: 'claude',
+        models: {
+          current: { provider: 'anthropic', model: 'claude-sonnet-4-5' },
+          options: [
+            {
+              provider: 'anthropic',
+              model: 'claude-sonnet-4-5',
+              name: 'Claude Sonnet 4.5',
+              group: 'Anthropic',
+              efforts: [],
+            },
+          ],
+        },
+      },
+    });
+    fireEvent.click(screen.getByTestId('agent-model-picker'));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Claude Sonnet 4\.5/ }));
     fireEvent.click(screen.getByTestId('agent-submit-btn'));
     expect(screen.queryByTestId('agent-form')).toBeNull();
 
@@ -551,8 +623,8 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
           specialty: 'CSP 与依赖安全审计',
           instructions: '逐项核查权限边界',
           backendId: 'claude',
-          provider: 'deepseek',
-          model: 'deepseek-reasoner',
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-5',
         }),
       }),
     );
@@ -697,19 +769,19 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(posted).toContainEqual({ type: 'updateTaskStatus', payload: { id: 'task-r1', status: 'done' } });
   });
 
-  it('会话模块：项目大菜单带展开收起图标且默认首次全部收起，支持展开后按项目新建与切换跨项目会话', async () => {
+  it('会话模块：会话大菜单带展开收起图标且支持点击整行展开收起，双行展示项目/分支与右侧模型图标', async () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
-    fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
 
     expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
 
-    // 默认首次「项目」大菜单处于收起态，项目列表不展示
-    const projectsToggle = screen.getByTestId('sidebar-projects-toggle');
-    expect(projectsToggle.getAttribute('aria-expanded')).toBe('false');
+    // 默认首次「会话」大菜单处于收起态，会话列表不展示
+    const sessionsTab = screen.getByTestId('workbench-tab-sessions');
+    const sessionsToggle = screen.getByTestId('sidebar-projects-toggle');
+    expect(sessionsToggle.getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByTestId('sidebar-projects-chevron').getAttribute('class') ?? '').not.toContain('rotate-90');
-    expect(screen.queryByTestId('project-group-alpha')).toBeNull();
-    expect(screen.queryByTestId('project-group-beta')).toBeNull();
+    expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
+    expect(screen.queryByTestId('grouped-session-s2')).toBeNull();
 
     // 搜索时自动展开命中项；清除搜索后恢复原收起态
     const sidebar = screen.getByTestId('project-sessions-sidebar');
@@ -720,55 +792,45 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
     expect(screen.getByTestId('grouped-session-s2')).toBeTruthy();
     fireEvent.click(sidebar.querySelector('button[aria-label="关闭"]') as HTMLElement);
-    expect(screen.queryByTestId('project-group-alpha')).toBeNull();
     expect(screen.queryByTestId('grouped-session-s2')).toBeNull();
 
-    // 点击「项目」大菜单的展开图标，展开项目文件夹列表（各项目文件夹首次默认收起，且文件夹上不再放额外箭头图标）
-    fireEvent.click(projectsToggle);
-    expect(projectsToggle.getAttribute('aria-expanded')).toBe('true');
+    // 点击「会话」整行即可展开会话列表（无需精确点到右侧箭头按钮），不再按项目折叠分组
+    fireEvent.click(sessionsTab);
+    expect(sessionsToggle.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByTestId('sidebar-projects-chevron').getAttribute('class') ?? '').toContain('rotate-90');
-    expect(screen.getByTestId('project-group-alpha')).toBeTruthy();
-    expect(screen.getByTestId('project-group-beta')).toBeTruthy();
-    expect(screen.queryByTestId('project-chevron-alpha')).toBeNull();
+    expect(screen.queryByTestId('project-group-alpha')).toBeNull();
+    expect(screen.queryByTestId('project-group-beta')).toBeNull();
+    expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
+    expect(screen.getByTestId('grouped-session-s2')).toBeTruthy();
 
-    const projectToggle = (name: string) =>
-      screen.getByTestId(`project-group-${name}`).querySelector('button') as HTMLElement;
-    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('false');
-    expect(projectToggle('beta').getAttribute('aria-expanded')).toBe('false');
+    // 再次点击「会话」整行可收起，再点击右侧箭头按钮也能重新展开
+    fireEvent.click(sessionsTab);
+    expect(sessionsToggle.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
-    expect(screen.queryByTestId('grouped-session-s2')).toBeNull();
+    fireEvent.click(sessionsToggle);
+    expect(sessionsToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
 
-    // 在 beta 项目分组下直接新建分组会话（即使收起状态也可新建）
-    fireEvent.click(screen.getByTestId('project-new-session-beta'));
-    expect(posted).toContainEqual({
-      type: 'startProjectSession',
-      payload: { projectPath: '/repo/beta', backendId: 'dsh' },
-    });
-
-    // 点击项目文件夹展开 alpha 与 beta 会话列表
-    fireEvent.click(projectToggle('alpha'));
-    fireEvent.click(projectToggle('beta'));
-    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('true');
-    expect(projectToggle('beta').getAttribute('aria-expanded')).toBe('true');
-
-    // 点击打开 beta 分组里的会话
+    // 点击打开跨项目会话
     fireEvent.click(screen.getByTestId('grouped-session-s2'));
     expect(posted).toContainEqual({
       type: 'openProjectSession',
       payload: { projectPath: '/repo/beta', sessionId: 's2', backendId: 'claude' },
     });
 
-    // 双行条目展示底层标识与相对时间
+    // 第二行左侧展示项目/分支，右侧放模型图标，且不展示具体模型名称
+    const s1Button = screen.getByTestId('grouped-session-s1');
     const s2Button = screen.getByTestId('grouped-session-s2');
+    expect(screen.getByTestId('session-project-branch-s1').textContent).toBe('alpha/main');
+    expect(screen.getByTestId('session-project-branch-s2').textContent).toBe('beta');
+    expect(screen.getByTestId('session-model-icon-s1')).toBeTruthy();
+    expect(screen.getByTestId('session-model-icon-s2')).toBeTruthy();
+    expect(s1Button.textContent).not.toContain('DeepSeek R1');
+    expect(s2Button.textContent).not.toContain('Claude Sonnet 4.5');
     expect(s2Button.textContent).toContain('Beta 接口设计');
     expect(s2Button.textContent).toContain('Claude Code');
 
-    // 每条会话在底层图标后展示各自使用的模型
-    const s1Button = screen.getByTestId('grouped-session-s1');
-    expect(s1Button.textContent).toContain('DeepSeek R1');
-    expect(s2Button.textContent).toContain('Claude Sonnet 4.5');
-
-    // 左侧工作台导航与会话树在切换模块时持久保留，点击任务右侧 + 直接跳转任务并打开新增弹窗
+    // 左侧工作台导航与会话列表在切换模块时持久保留，点击任务右侧 + 直接跳转任务并打开新增弹窗
     fireEvent.click(screen.getByTestId('workbench-tab-overview'));
     expect(screen.getByTestId('workbench-overview')).toBeTruthy();
     expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
@@ -791,12 +853,12 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     });
     expect(screen.queryByTestId('delete-session-dialog')).toBeNull();
 
-    // 再次点击收起与重新展开项目分组
-    fireEvent.click(projectToggle('alpha'));
-    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('false');
+    // 收起与重新展开会话列表
+    fireEvent.click(sessionsToggle);
+    expect(sessionsToggle.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByTestId('grouped-session-s1')).toBeNull();
-    fireEvent.click(projectToggle('alpha'));
-    expect(projectToggle('alpha').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(sessionsToggle);
+    expect(sessionsToggle.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByTestId('grouped-session-s1')).toBeTruthy();
 
     // 收起与重新展开侧边栏
@@ -806,12 +868,12 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(screen.getByTestId('project-sessions-sidebar')).toBeTruthy();
   });
 
-  it('左侧栏「项目」菜单、左下角设置按钮，移除历史记录按钮/面板与会话状态点标识', () => {
+  it('左侧栏「会话」菜单、左下角设置按钮，移除历史记录按钮/面板与会话状态点标识', () => {
     render(createElement(App));
     host({ type: 'snapshot', payload: workbenchSnapshot() });
 
-    // 1. 左侧会话菜单已更名为「项目」，且不再包含「改动」菜单
-    expect(screen.getByTestId('workbench-tab-sessions').textContent).toContain('项目');
+    // 1. 左侧会话菜单名称为「会话」，且不再包含「改动」菜单
+    expect(screen.getByTestId('workbench-tab-sessions').textContent).toContain('会话');
     expect(screen.queryByTestId('workbench-tab-changes')).toBeNull();
 
     // 2. 移除历史记录按钮与面板，且顶部右侧不再有设置按钮
@@ -830,12 +892,28 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     expect(settingsBtn).toBeTruthy();
     expect(settingsBtn.getAttribute('data-variant')).toBe('ghost');
 
-    // 4. 项目会话条目不再展示右侧状态圆点（先展开「项目」大菜单再展开 beta 分组）
+    // 4. 会话标题前按优先级展示状态标识（待确认 > 运行中 > 未读），空闲不展示多余状态标识
     fireEvent.click(screen.getByTestId('sidebar-projects-toggle'));
-    fireEvent.click(screen.getByTestId('project-group-beta').querySelector('button') as HTMLElement);
-    const s2Button = screen.getByTestId('grouped-session-s2');
-    expect(s2Button.querySelector('.bg-orange')).toBeNull();
-    expect(s2Button.querySelector('.bg-brand')).toBeNull();
+    expect(screen.getByTestId('session-status-s1').getAttribute('data-status')).toBe('running');
+    expect(screen.getByTestId('session-status-s2').getAttribute('data-status')).toBe('unread');
+
+    const withAttention = workbenchSnapshot();
+    const alphaGroup = withAttention.workbench!.sessionGroups[0]!;
+    host({
+      type: 'workbench',
+      payload: {
+        ...withAttention.workbench!,
+        sessionGroups: [
+          {
+            ...alphaGroup,
+            sessions: [{ ...alphaGroup.sessions[0]!, needsAttention: true }],
+          },
+          withAttention.workbench!.sessionGroups[1]!,
+        ],
+      },
+    });
+    expect(screen.getByTestId('session-status-s1').getAttribute('data-status')).toBe('attention');
+    expect(screen.getByTestId('session-status-s1').getAttribute('aria-label')).toBe('等待确认');
 
     fireEvent.click(screen.getByTestId('workbench-tab-sessions'));
     const textarea = screen.getByRole('textbox', { name: '消息' }) as HTMLTextAreaElement;
@@ -930,5 +1008,40 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
     ]);
     expect(pkg.dirs[0]!.dirs.map((d) => d.name)).toEqual(['accounts', 'host']);
     expect(pkg.dirs[2]!.dirs.map((d) => d.name)).toEqual(['settings', 'ui']);
+  });
+
+  it('左面板与右面板展开/收起都经过 collapsed ↔ expanded 过渡态并带动画类', async () => {
+    render(createElement(App));
+    host({ type: 'snapshot', payload: workbenchSnapshot() });
+
+    // 1. 左面板：默认展开，收起先切到 collapsed（--sidebar-width: 0px）再卸载；重新展开双帧过渡到 expanded
+    const leftBefore = screen.getByTestId('project-sessions-sidebar');
+    expect(leftBefore.getAttribute('data-state')).toBe('expanded');
+    expect(leftBefore.style.getPropertyValue('--sidebar-width')).toBe('16rem');
+    expect(leftBefore.className).toContain('transition-[width,border-color]');
+
+    fireEvent.click(screen.getByTestId('toggle-project-groups'));
+    const leftClosing = screen.getByTestId('project-sessions-sidebar');
+    expect(leftClosing.getAttribute('data-state')).toBe('collapsed');
+    expect(leftClosing.style.getPropertyValue('--sidebar-width')).toBe('0px');
+    await waitFor(() => expect(screen.queryByTestId('project-sessions-sidebar')).toBeNull());
+
+    fireEvent.click(screen.getByTestId('toggle-project-groups'));
+    await waitFor(() => expect(screen.getByTestId('project-sessions-sidebar').getAttribute('data-state')).toBe('expanded'));
+    expect(screen.getByTestId('project-sessions-sidebar').style.getPropertyValue('--sidebar-width')).toBe('16rem');
+
+    // 2. 右面板：默认关闭，打开经过动画过渡到 expanded，关闭先切到 collapsed（w-0）再卸载
+    expect(screen.queryByTestId('workbench-right-panel')).toBeNull();
+    fireEvent.click(screen.getByTestId('toggle-right-panel'));
+    await waitFor(() => expect(screen.getByTestId('workbench-right-panel').getAttribute('data-state')).toBe('expanded'));
+    const rightOpen = screen.getByTestId('workbench-right-panel');
+    expect(rightOpen.className).toContain('transition-[width,border-color]');
+    expect(rightOpen.style.width).toBe('360px');
+
+    fireEvent.click(screen.getByTestId('toggle-right-panel'));
+    const rightClosing = screen.getByTestId('workbench-right-panel');
+    expect(rightClosing.getAttribute('data-state')).toBe('collapsed');
+    expect(rightClosing.style.width).toBe('0px');
+    await waitFor(() => expect(screen.queryByTestId('workbench-right-panel')).toBeNull());
   });
 });

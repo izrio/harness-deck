@@ -1,6 +1,6 @@
 <idea-plugin>
     <id>io.github.izrio.harnessdeck</id>
-    <name>Harness Deck</name>
+    <name>Halo</name>
     <vendor>izrio</vendor>
 
     <depends>com.intellij.modules.platform</depends>
@@ -9,7 +9,7 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow
-            id="Harness Deck"
+            id="Halo"
             anchor="right"
             icon="/icons/harness-deck.svg"
             factoryClass="io.harnessdeck.jetbrains.ui.HarnessDeckToolWindowFactory"/>
@@ -21,23 +21,23 @@
             implementation="io.harnessdeck.jetbrains.ui.HarnessDeckStatusBarWidgetFactory"/>
 
         <notificationGroup
-            id="Harness Deck"
+            id="Halo"
             displayType="BALLOON"/>
 
         <applicationConfigurable
             parentId="tools"
             instance="io.harnessdeck.jetbrains.settings.HarnessDeckConfigurable"
             id="io.harnessdeck.settings"
-            displayName="Harness Deck"/>
+            displayName="Halo"/>
     </extensions>
 
     <actions>
-        <group id="HarnessDeck.EditorPopup" text="Harness Deck" popup="true">
+        <group id="HarnessDeck.EditorPopup" text="Halo" popup="true">
             <add-to-group group-id="EditorPopupMenu" anchor="first"/>
             <action id="HarnessDeck.ExplainSelection"
                     class="io.harnessdeck.jetbrains.actions.ExplainSelectionAction"
                     text="Explain This Code"
-                    description="Explain the selected code or active file with Harness Deck"/>
+                    description="Explain the selected code or active file with Halo"/>
             <action id="HarnessDeck.FixSelection"
                     class="io.harnessdeck.jetbrains.actions.FixSelectionAction"
                     text="Fix This Code"
@@ -50,10 +50,10 @@
             <action id="HarnessDeck.AddToChat"
                     class="io.harnessdeck.jetbrains.actions.AddToChatAction"
                     text="Add to Chat"
-                    description="Pin the active file or selection to Harness Deck chat context"/>
+                    description="Pin the active file or selection to Halo chat context"/>
         </group>
 
-        <group id="HarnessDeck.ToolsMenu" text="Harness Deck" popup="true">
+        <group id="HarnessDeck.ToolsMenu" text="Halo" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="HarnessDeck.OpenWorkbench"
                     class="io.harnessdeck.jetbrains.actions.OpenWorkbenchAction"

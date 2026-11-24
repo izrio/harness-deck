@@ -35,7 +35,6 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
           )}
         </Button>
       </div>
-      <p className="m-0 text-[11.5px] text-ink-3">{t('settings.providers.modelsPreHint')}</p>
 
       {fetchError ? (
         <div className="text-[11.5px] text-destructive" role="alert" data-testid="provider-fetch-error">
@@ -189,10 +188,6 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
           </div>
         </div>
       ) : null}
-
-      <p className="m-0 text-[11.5px] leading-relaxed text-ink-3">
-        {t('settings.providers.modelsHelp')}
-      </p>
     </div>
 
   );

@@ -2,7 +2,7 @@
  * ZCode 会话投影层：
  * 将 `zcode app-server --stdio` 推送的 `session/event` 流式事件（`turn.started`、`model.streaming`、
  * `tool.updated`、`turn.completed`、`turn.failed`、`session.titleUpdated`、`session.updated` 等）
- * 以及历史快照（`session/read`、`session/messages`）统一投影为 Harness Deck 视图模型。
+ * 以及历史快照（`session/read`、`session/messages`）统一投影为 Halo 视图模型。
  */
 import { joinLabel, type Item, type LineStats, type SessionHeader } from '@harness-deck/shared';
 import { t } from '../i18n.ts';

@@ -180,7 +180,7 @@ function renderMobileHtml(hostKind: HostIdeKind, locale: 'zh' | 'en'): string {
 <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
 <link rel="apple-touch-icon" href="/icon-192.svg">
 <link rel="stylesheet" href="/index.css">
-<title>Harness Deck</title>
+<title>Halo</title>
 <script>
 window.__HARNESS_DECK_HOST__ = ${JSON.stringify(hostKind)};
 window.__HARNESS_DECK_CLIENT_SURFACE__ = 'mobile-web';
@@ -194,8 +194,8 @@ window.__HARNESS_DECK_CLIENT_SURFACE__ = 'mobile-web';
 }
 
 const FALLBACK_MANIFEST = JSON.stringify({
-  name: 'Harness Deck',
-  short_name: 'Harness Deck',
+  name: 'Halo',
+  short_name: 'Halo',
   start_url: '/',
   display: 'standalone',
   background_color: '#18181b',

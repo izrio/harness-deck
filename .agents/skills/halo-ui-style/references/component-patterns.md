@@ -1,8 +1,8 @@
-# Component Recipes (T3 Code Patterns Adapted for Harness Deck)
+# Halo Component Recipes
 
 ## 1. Floating Glass Composer & Attached Banner Seam
 
-T3 Code's signature element is a floating `rounded-2xl` glass composer card that lifts cleanly off the scrolled chat timeline, with optional status/queue/approval banners tucked seamlessly above it.
+Halo's signature element is a floating `rounded-2xl` glass composer card that lifts cleanly off the scrolled chat timeline, with optional status/queue/approval banners tucked seamlessly above it.
 
 ### Composer Card (`ComposerSurface`)
 - **Outer shape**: `rounded-2xl` (`16px`), centered in the chat lane (`max-w-[var(--content-width)]`), `relative isolate`.
@@ -39,7 +39,7 @@ When a banner (approval request, queued run, status notice, error) attaches abov
 ## 3. Work Log & Tool Activity Rows (`WorkLog`)
 
 - **Ultra-compact Row**: `min-h-6` (`24px`), `gap-1.5`, `text-sm leading-relaxed` (or `text-xs` in dense IDE sidebars), `select-none` on the toggle header and `select-text` inside expanded output.
-- **Fixed Icon Column**: `w-6 shrink-0` centered icon slot (`size-3.5` / `size-4` offline Iconify icon in Harness Deck), using `text-ink-2` (`--secondary-label`) for label text with single-line `truncate` when collapsed.
+- **Fixed Icon Column**: `w-6 shrink-0` centered icon slot (`size-3.5` / `size-4` offline Iconify icon in Halo), using `text-ink-2` (`--secondary-label`) for label text with single-line `truncate` when collapsed.
 - **Expanded Output Panel**: Indented `ms-7` (aligned under the label text past the `24px` icon + `4px` gap), `max-h-96 overflow-auto`, subtle hairline border or `bg-inset` code/command surface.
 - **In-Progress Shimmer**: Overlay the active label with a soft horizontal highlight sweep (see `motion-and-performance.md`) rather than spinning every tool icon simultaneously.
 

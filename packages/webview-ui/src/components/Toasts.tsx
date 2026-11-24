@@ -10,7 +10,7 @@ export function Toasts() {
   const t = useT();
   if (toasts.length === 0) return null;
   return (
-    <div className="content-column mb-2 flex flex-col gap-1.5">
+    <div className="flex flex-col items-end gap-1.5 max-sm:items-stretch">
       {toasts.map((toast) => {
         const isError = toast.level === 'error';
         return (
@@ -19,7 +19,7 @@ export function Toasts() {
             role={isError ? 'alert' : 'status'}
             style={{ animation: 'pop-in 200ms cubic-bezier(0.23,1,0.32,1) both' }}
             className={cn(
-              'toast surface-glass flex items-center gap-2.5 rounded-xl border border-line px-3 py-2 text-left text-[12.5px] text-ink shadow-overlay',
+              'toast surface-glass flex w-fit max-w-[min(380px,calc(100vw-24px))] items-center gap-2.5 rounded-xl border border-line px-3 py-2 text-left text-[12.5px] text-ink shadow-overlay max-sm:w-full',
               isError && 'toast--error border-red/30',
             )}
           >

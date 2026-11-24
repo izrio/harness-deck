@@ -141,7 +141,7 @@ export class CodexConnection implements CodexLink {
     const result = await this.request<Record<string, unknown>>(
       'initialize',
       {
-        clientInfo: { name: 'harness-deck', title: 'Harness Deck', version: clientVersion },
+        clientInfo: { name: 'harness-deck', title: 'Halo', version: clientVersion },
         capabilities: { experimentalApi: true },
       },
       timeoutMs,

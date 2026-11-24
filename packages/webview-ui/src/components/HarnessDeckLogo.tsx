@@ -1,5 +1,5 @@
 /**
- * Harness Deck 的标志（与 packages/extension/media/logo.svg 相同）：两张卡片组成 H（deck：可以换的底层），
+ * Halo 的标志（与 packages/extension/media/logo.svg 相同）：两张卡片组成 H（deck：可以换的底层），
  * 背后斜着的卡片表示「一叠」，中间的挽带和节点把它们连起来（harness）。
  * 渐变 id 用 useId，页面上同时有两个标志时不会互相引用错。
  */

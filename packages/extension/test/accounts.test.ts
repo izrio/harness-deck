@@ -27,6 +27,7 @@ import {
   removeIsolatedAccountData,
   switchAntigravityCredentialSlot,
   switchCodebuddyCredentialSlot,
+  syncActiveAntigravitySlotFromDisk,
 } from '../src/accounts/AccountIsolation.ts';
 import { decodeJwtPayloadUnsafe, inspectOfficialAccount } from '../src/accounts/AccountInspector.ts';
 import type { SecretStore } from '../src/host/HostPlatform.ts';
@@ -613,6 +614,77 @@ describe('AccountIsolation & AccountInspector', () => {
       assert.equal(userInfoInsp.identity, 'auto@gmail.com');
       assert.equal(fetchedUrls.length, 1);
       assert.ok(fetchedUrls[0]?.includes('googleapis.com/oauth2/v2/userinfo'));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves fresher CLI-refreshed disk token on same-slot re-activation and never leaks disk token into unlogged slots', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hd-accounts-agy-fresher-'));
+    try {
+      const fakeHome = join(root, 'home');
+      const secrets = memorySecrets();
+      const env = { HOME: fakeHome };
+      const nowMs = 1_800_000_000_000;
+      const tokenPath = antigravityPrimaryTokenPath(env);
+      await mkdir(join(fakeHome, '.gemini', 'antigravity-cli'), { recursive: true });
+
+      const staleSlot = JSON.stringify({
+        email: 'a@gmail.com',
+        token: {
+          access_token: 'expired-access-a',
+          refresh_token: 'refresh-a',
+          expiry: new Date(nowMs - 1800_000).toISOString(),
+        },
+      });
+      const freshDisk = JSON.stringify({
+        email: 'a@gmail.com',
+        token: {
+          access_token: 'fresh-access-a',
+          refresh_token: 'refresh-a',
+          expiry: new Date(nowMs + 3600_000).toISOString(),
+        },
+      });
+      await secrets.store(accountSlotSecretKey(systemAccountId('antigravity')), staleSlot);
+      await writeFile(tokenPath, freshDisk, 'utf8');
+
+      // 1. 同一槽位重新激活（如进程重启 prepareAccountLaunch）：不能用旧快照覆盖磁盘新 token，且需回写同步
+      const sameRes = await switchAntigravityCredentialSlot({
+        targetAccountId: systemAccountId('antigravity'),
+        previousAccountId: systemAccountId('antigravity'),
+        secrets,
+        env,
+      });
+      assert.equal(sameRes.activated, true);
+      assert.equal(await readFile(tokenPath, 'utf8'), freshDisk);
+      assert.equal(secrets.map.get(accountSlotSecretKey(systemAccountId('antigravity'))), freshDisk);
+
+      // 2. 从未登录的新槽位切回系统号时，不能把磁盘上原账号 token 错写进未登录槽位
+      const unloggedSwitch = await switchAntigravityCredentialSlot({
+        targetAccountId: systemAccountId('antigravity'),
+        previousAccountId: 'agy-unlogged',
+        secrets,
+        env,
+      });
+      assert.equal(unloggedSwitch.activated, true);
+      assert.equal(secrets.map.get(accountSlotSecretKey('agy-unlogged')), undefined);
+
+      // 3. syncActiveAntigravitySlotFromDisk 仅同步同账号且更新的磁盘 token
+      const newerDisk = JSON.stringify({
+        email: 'a@gmail.com',
+        token: {
+          access_token: 'newer-access-a',
+          refresh_token: 'refresh-a',
+          expiry: new Date(nowMs + 7200_000).toISOString(),
+        },
+      });
+      await writeFile(tokenPath, newerDisk, 'utf8');
+      await syncActiveAntigravitySlotFromDisk({
+        accountId: systemAccountId('antigravity'),
+        secrets,
+        env,
+      });
+      assert.equal(secrets.map.get(accountSlotSecretKey(systemAccountId('antigravity'))), newerDisk);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

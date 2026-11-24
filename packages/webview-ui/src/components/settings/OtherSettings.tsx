@@ -74,12 +74,9 @@ export function GeneralSettings() {
           ) : undefined
         }
       >
-      <div className="primitive-card-pad flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
-            <span className="text-ink">{t('settings.includeActiveEditor')}</span>
-            <span className="text-[11.5px] text-ink-3">{t('settings.includeActiveEditorHint')}</span>
-          </span>
+      <div className="divide-y divide-line/60">
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+          <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.includeActiveEditor')}</span>
           <Switch
             data-testid="pref-include-active"
             aria-label={t('settings.includeActiveEditor')}
@@ -88,11 +85,8 @@ export function GeneralSettings() {
           />
         </div>
 
-        <div className="flex items-center justify-between gap-3">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
-            <span className="text-ink">{t('settings.showTurnChanges')}</span>
-            <span className="text-[11.5px] text-ink-3">{t('settings.showTurnChangesHint')}</span>
-          </span>
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+          <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.showTurnChanges')}</span>
           <Switch
             data-testid="pref-show-turn-changes"
             aria-label={t('settings.showTurnChanges')}
@@ -100,7 +94,7 @@ export function GeneralSettings() {
             onCheckedChange={(checked) => updatePref({ showTurnChanges: checked })}
           />
         </div>
-        </div>
+      </div>
       </SettingsSection>
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent data-testid="mobile-rename-dialog">
@@ -183,10 +177,9 @@ export function AdvancedSettings() {
 
   return (
     <SettingsSection title={t('settings.advanced.title')} testId="settings-advanced">
-      <div className="primitive-card-pad flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
+      <div className="divide-y divide-line/60">
+        <div className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.schedules.title')}</span>
-          <span className="text-[11.5px] text-ink-3">{t('settings.schedules.hint')}</span>
           <Select
             value={preferences.schedulePermission ?? 'danger-full-access'}
             onValueChange={(value) =>
@@ -195,7 +188,7 @@ export function AdvancedSettings() {
           >
             <SelectTrigger
               size="sm"
-              className="mt-1 w-full"
+              className="w-full"
               data-testid="pref-schedule-permission"
               aria-label={t('settings.schedules.title')}
             >
@@ -209,7 +202,7 @@ export function AdvancedSettings() {
           </Select>
         </div>
 
-        <label className="flex flex-col gap-1 border-t border-line pt-3">
+        <label className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshPath')}</span>
           <Input
             size="sm"
@@ -224,7 +217,7 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshProfile')}</span>
           <Input
             size="sm"
@@ -239,7 +232,7 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1 border-t border-line pt-3">
+        <label className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.zcodePath')}</span>
           <Input
             size="sm"
@@ -254,7 +247,7 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.claudePath')}</span>
           <Input
             size="sm"
@@ -269,7 +262,7 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.piPath')}</span>
           <Input
             size="sm"
@@ -284,7 +277,7 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codexPath')}</span>
           <Input
             size="sm"
@@ -299,7 +292,7 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5 px-4 py-3">
           <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codebuddyPath')}</span>
           <Input
             size="sm"
@@ -314,11 +307,8 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <div className="flex items-center justify-between gap-3">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-[12.5px]">
-            <span className="text-ink">{t('settings.advanced.backendTrace')}</span>
-            <span className="text-[11.5px] text-ink-3">{t('settings.advanced.backendTraceHint')}</span>
-          </span>
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+          <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.advanced.backendTrace')}</span>
           <Switch
             data-testid="adv-backend-trace"
             aria-label={t('settings.advanced.backendTrace')}
@@ -329,7 +319,7 @@ export function AdvancedSettings() {
         </div>
 
         {!isMobileRemote ? (
-          <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
             <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
               <RefreshIcon className="size-3.5 text-ink-3" />
               <span>{t('header.restart')}</span>
@@ -350,7 +340,7 @@ export function AdvancedSettings() {
             </Button>
           </div>
         ) : (
-          <p className="m-0 border-t border-line pt-2 text-[11.5px] text-ink-3">{t('remote.mobileBlockedHint')}</p>
+          <p className="m-0 px-4 py-3 text-[11.5px] text-ink-3">{t('remote.mobileBlockedHint')}</p>
         )}
       </div>
     </SettingsSection>

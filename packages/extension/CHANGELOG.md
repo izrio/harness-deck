@@ -1,5 +1,20 @@
 # 更新记录 / Changelog
 
+## 0.15.0
+
+**品牌升级为 Halo、右侧栏内置浏览器与 AI 操控、在线实时 MCP / 技能市场、本地技能一键导入与全面设置系统打磨**：全系统产品名称统一更名为 **Halo**；右侧面板新增「浏览器」标签页（内置 CDP 实时画面交互与 MCP 工具联动，让智能体直接查看和操作页面）；扩展设置中的 **MCP 服务器** 与 **Agent 技能（SKILL.md）** 均重构为「已安装 / 市场」双标签与独立卡片布局，由宿主在线实时拉取官方 MCP Registry 与开源技能仓库并支持一键刷新与离线精选兜底，同时新增本地技能目录扫描与导入；全面精简设置页冗余说明文案、统一行间距与行间分割线，并在 MCP / 技能卡片及智能体下拉选择中全面接入运行时图标，进一步打磨首页空态、账号渠道切换对比度与移动端底部输入框间距。
+
+**Halo rebrand, built-in right-panel Browser with AI MCP control, live online MCP & Skills marketplaces, local SKILL.md import & comprehensive Settings polish**: Rebranded all user-facing surfaces to **Halo**; added a **Browser** tab to the right panel with live CDP viewport interaction and built-in MCP tooling so agents can inspect and drive web pages directly; rebuilt both **MCP Servers** and **Agent Skills (`SKILL.md`)** into two-tab (**Installed** / **Marketplace**) standalone-card views powered by live host-side fetching from the official MCP Registry API and open-source skill repositories (with one-click refresh and curated offline fallback), plus local `SKILL.md` scanning and import; decluttered Settings copy with clean divided row spacing, added runtime icons across MCP/Skill cards and agent dropdowns, and refined the home empty state, account channel contrast, and mobile composer spacing.
+
+- **全系统品牌升级为 Halo**：统一更新 VS Code、JetBrains、Electron 桌面端、Webview / PWA、文档与发版流程中的产品名称为 **Halo**（保留 JetBrains 旧凭据子系统兼容读取）。
+  **Halo product rebrand**: Unified all user-facing product names across VS Code, JetBrains, Electron desktop, Webview/PWA, docs, and release workflows to **Halo** (preserving legacy JetBrains credential lookup fallback).
+- **右侧栏内置浏览器与 AI MCP 联动**：新增 `BrowserView`、`EmbeddedBrowserManager` 与 `BrowserMcpServer`，在右侧面板支持实时画面预览、地址导航、点击/滚动/输入交互及终端日志，并自动注册内置浏览器 MCP 供智能体按需操作网页。
+  **Built-in right-panel Browser & AI MCP integration**: Added `BrowserView`, `EmbeddedBrowserManager`, and `BrowserMcpServer` for live CDP viewport rendering, navigation, pointer/keyboard interaction, console logs, and automatic MCP tool exposure to agents.
+- **在线实时 MCP 市场、技能市场与本地技能导入**：MCP 与技能设置统一拆分为「已安装 / 市场」双标签且每一项均为独立卡片；宿主新增 `marketService` 实时拉取官方 MCP Registry（支持关键词实时搜索、缓存与手动刷新）与官方开源技能仓库树及最新 `SKILL.md` Frontmatter，断网自动回退本地精选；支持从本机 Agent 目录或自定义本地文件夹扫描并一键导入 `SKILL.md`。
+  **Live online MCP & Skills marketplaces + local skill import**: Split MCP and Skills into two-tab (**Installed** / **Marketplace**) standalone-card views; added host-side `marketService` fetching live entries from the official MCP Registry API (with debounced online search, caching, and manual refresh) and official GitHub skill repos (`SKILL.md` frontmatter), with seamless offline curated fallback; added local `SKILL.md` scanning and one-click import.
+- **设置系统精简、行间分割线与运行时图标统一**：精简各设置页解释性文字，统一采用 `divide-y` 行间分割线与规范留白；MCP / 技能卡片、弹窗与智能体下拉选择器全面展示运行时图标（含 OpenAI Blossom 样式 Codex 图标），并修复官方/第三方渠道切换对比度、右侧栏标签溢出滚动条、AI 提交图标误旋转、总览角标对比度及移动端底部输入框安全间距。
+  **Settings declutter, divided rows & runtime icons**: Removed verbose explanatory prose across Settings and standardized `divide-y` row spacing; added runtime icons (`BackendLogo`, including the OpenAI Blossom Codex icon) to MCP/Skill cards, dialogs, and agent dropdowns; fixed official/third-party toggle contrast, right-panel tab scrollbar overflow, spinning AI commit icon, sidebar overview badge contrast, and mobile composer bottom safe-area spacing.
+
 ## 0.14.0
 
 **内置 CodeMirror 6 代码编辑与增强 Diff 审阅、右侧栏内置终端、跨底层 Git 检查点回滚与会话分叉、多 Worktree 并行标签、全局命令面板（`Ctrl/Cmd+K`）、OKLCH 配色预设、Electron 独立桌面外壳与 Oxlint 工程升级**：全面对齐并补齐独立 AI 编程客户端核心闭环——文件查看器升级为懒加载 CodeMirror 6（支持编辑保存/搜索/折叠），Diff 支持 Split 并排对比、Shiki 词法着色、词级差异、按 Hunk 暂存/撤销与行级批注回传智能体；右侧栏新增「终端」标签页（位于 Git 右侧，零原生编译跨平台 PTY + xterm.js）；Git 面板补齐单文件暂存/撤销、分支切换/新建、Pull/Fetch、AI 一键生成 Commit/PR 草稿与 PR 状态追踪/一键结单；宿主层新增跨所有底层的 Git 隐藏 ref 多回合检查点回滚、会话分叉与原地编辑重跑；并完成全项目 `shadcn-ui` Select 与尺寸统一、Antigravity 多账号隔离/5h 用量修复、Electron 桌面壳（`packages/desktop`）以及 ESLint → Oxlint（`--type-aware`）迁移。
@@ -36,9 +51,9 @@
 
 ## 0.12.0
 
-**界面视觉体系重构与官方登录授权码回填**：全面重做面板视觉语言，引入 t3code-ui-style 的 Quiet Zinc 浅色 / Cool Slate 深色配色、玻璃质感浮层与抽屉式滑入动效，统一品牌色、阴影与排版层级；「设置 → Agent」中的后端安装 / 切换版本改为弹窗式管理；官方账号登录支持在浏览器授权后回填授权码（如 Antigravity 的 `agy acp --login`）。
+**界面视觉体系重构与官方登录授权码回填**：全面重做面板视觉语言，引入 Quiet Zinc 浅色 / Cool Slate 深色配色、玻璃质感浮层与抽屉式滑入动效，统一品牌色、阴影与排版层级；「设置 → Agent」中的后端安装 / 切换版本改为弹窗式管理；官方账号登录支持在浏览器授权后回填授权码（如 Antigravity 的 `agy acp --login`）。
 
-**Visual system refresh & authorization-code paste for official sign-in**: The panel adopts a rebuilt visual language based on t3code-ui-style — Quiet Zinc light / Cool Slate dark palettes, glass-surface overlays and drawer-style slide-in motion, with a unified brand color, shadows and typographic hierarchy. Backend install / version switching in Settings → Agent now runs through dialogs, and official sign-in can accept a pasted authorization code after browser authorization (e.g. Antigravity `agy acp --login`).
+**Visual system refresh & authorization-code paste for official sign-in**: The panel adopts a rebuilt visual language — Quiet Zinc light / Cool Slate dark palettes, glass-surface overlays and drawer-style slide-in motion, with a unified brand color, shadows and typographic hierarchy. Backend install / version switching in Settings → Agent now runs through dialogs, and official sign-in can accept a pasted authorization code after browser authorization (e.g. Antigravity `agy acp --login`).
 
 - **设计令牌与玻璃质感**：浅色主题改为 Quiet Zinc 中性灰阶、深色主题改为 Cool Slate 冷色调并收紧描边；新增玻璃模糊 / 饱和度 / 滚动条与浮层阴影令牌，统一 shadcn 语义变量到主色，重做状态坞、模型选择器与各类下拉浮层的玻璃外观，并细化代码块的层级样式。
   **Design tokens & glass surfaces**: The light theme moves to a Quiet Zinc neutral scale and the dark theme to a Cool Slate palette with tighter hairlines; added glass blur/saturation, scrollbar and overlay-shadow tokens, bridged shadcn semantic variables to the brand color, restyled the status dock, model picker and dropdown overlays with glass surfaces, and refined code-block layering.
@@ -312,15 +327,15 @@
 - 内置底层 dsh 在界面上改叫 **DeepSeek**（命令、网页等指 dsh 程序本身的地方仍写 dsh）；原来的会话和设置不受影响。
   The built-in dsh backend is now shown as **DeepSeek** (places that mean the dsh program itself still say dsh); sessions and settings are unchanged.
 - 旧版扩展 DSH Copilot 还装着时（编辑器右键菜单里会多一个「DSH」），启动时提示并可以一键卸载。
-  If the old DSH Copilot extension is still installed (it adds the "DSH" editor context menu), Harness Deck offers to uninstall it.
+  If the old DSH Copilot extension is still installed (it adds the "DSH" editor context menu), Halo offers to uninstall it.
 - ACP 底层的新对话沿用上次选的模型和思考等级（按底层记住）。之前 Claude 等代理的模型是按会话设置的，新开的会话总是回到默认模型，和刚才选的不一样；已有的会话仍保持自己的模型。
   New chats on ACP backends use the model and thought level you picked last (remembered per backend). Before, agents such as Claude set the model per session, so a new chat went back to the default model; existing sessions keep their own.
 - 修复：回复后面开始调用工具时，前面那段文字末尾一直留着蓝色光标。
   Fixed: the blue cursor stayed after a reply's text once tool calls started.
 - 修复：模型网关每次回复都用同一个消息 id 时，工具调用之后的文字被拼到前面的段落里，看起来像中间没有文字；现在按时间顺序另起一段。
   Fixed: with model gateways that reuse one message id, text after tool calls was merged into an earlier paragraph and looked missing; it now starts a new paragraph in order.
-- 新设置 `harnessDeck.backendTrace`：把和 ACP 底层收发的消息原文写到「Harness Deck: Backend」输出面板，用来排查代理实际发了什么。
-  New setting `harnessDeck.backendTrace`: writes the raw ACP messages to the "Harness Deck: Backend" output channel for troubleshooting.
+- 新设置 `harnessDeck.backendTrace`：把和 ACP 底层收发的消息原文写到「Halo: Backend」输出面板，用来排查代理实际发了什么。
+  New setting `harnessDeck.backendTrace`: writes the raw ACP messages to the "Halo: Backend" output channel for troubleshooting.
 
 ## 0.3.1
 
@@ -332,25 +347,25 @@
   New built-in backend **Claude**, through Claude Code's official ACP adapter (`npm install -g @agentclientprotocol/claude-agent-acp`); sign-in and settings are shared with Claude Code. The chooser, home and menu show the Claude icon.
 - ACP 底层发消息时才发现需要登录（Claude 没登录或登录过期）：代理有登录方式时先登录再重发这一轮，没有时在对话里说明怎么登录，而不是只显示「Authentication required」。
   When an ACP backend reports that sign-in is needed while sending (Claude signed out or expired), the panel signs in and resends if the agent offers a sign-in method, or explains how to sign in instead of showing "Authentication required".
-- 工作区里的内部包改名为 `@harness-deck/shared`、`@harness-deck/webview-ui`；仓库 README 按 Harness Deck 重写（底层对照表、新截图、架构图、各底层的测试方法）。
-  Workspace packages renamed to `@harness-deck/shared` and `@harness-deck/webview-ui`; the repository README is rewritten for Harness Deck (backend table, new screenshots, architecture, tests for every backend).
+- 工作区里的内部包改名为 `@harness-deck/shared`、`@harness-deck/webview-ui`；仓库 README 按 Halo 重写（底层对照表、新截图、架构图、各底层的测试方法）。
+  Workspace packages renamed to `@harness-deck/shared` and `@harness-deck/webview-ui`; the repository README is rewritten for Halo (backend table, new screenshots, architecture, tests for every backend).
 
 ## 0.3.0
 
-**改名为 Harness Deck，支持多个底层：dsh、oh-my-pi、CodeBuddy，以及任何 ACP 代理。** 第一次打开面板时选底层；新首页和新标志；子代理显示。dsh 底层支持 `0.2.1-rc.5` 及以上。
+**改名为 Halo，支持多个底层：dsh、oh-my-pi、CodeBuddy，以及任何 ACP 代理。** 第一次打开面板时选底层；新首页和新标志；子代理显示。dsh 底层支持 `0.2.1-rc.5` 及以上。
 
-**Renamed to Harness Deck, with switchable backends: dsh, oh-my-pi, CodeBuddy and any ACP agent.** Pick a backend on first open; new home and logo; subagents shown. The dsh backend requires dsh `0.2.1-rc.5` or later.
+**Renamed to Halo, with switchable backends: dsh, oh-my-pi, CodeBuddy and any ACP agent.** Pick a backend on first open; new home and logo; subagents shown. The dsh backend requires dsh `0.2.1-rc.5` or later.
 
 - 底层可以切换：dsh，以及内置的 ACP（Agent Client Protocol）代理 oh-my-pi（`omp acp`）和 CodeBuddy（`codebuddy --acp`），也可以在设置 `harnessDeck.backends` 里加别的 ACP 代理。「…」→「底层」或命令「切换底层」里切换；每个底层的会话分开保存。
   Switchable backends: dsh, the built-in ACP (Agent Client Protocol) agents oh-my-pi (`omp acp`) and CodeBuddy (`codebuddy --acp`), and any ACP agent added in `harnessDeck.backends`. Switch from "…" → Backend or the Switch Backend command; sessions are kept per backend.
 - 第一次打开面板时显示底层选择卡片：每个底层的说明、本机是否已安装，没装的给出可以复制的安装命令；选好或「稍后再说」后不再出现。首页重新设计：渐变标识、当前底层和工作区标签（点击切换底层）、带说明的示例任务、输入提示。选择卡片、首页和菜单里的底层显示官方图标（DeepSeek、oh-my-pi、CodeBuddy）。插件有了自己的标志：两张卡片组成 H，中间的挽带和节点把它们连起来（插件图标、侧边栏图标、首页）。
-  On first open the panel asks which backend to use, with a description of each, whether it is installed on this machine and a copyable install command otherwise; it does not ask again once chosen or skipped. Redesigned home: gradient logo, current backend and workspace chips (click to switch backend), example tasks with descriptions, input tips. Backends show their official icons (DeepSeek, oh-my-pi, CodeBuddy) in the chooser, home and menu. New Harness Deck logo: two cards forming an H, joined by a strap and a node (extension icon, sidebar icon, home).
+  On first open the panel asks which backend to use, with a description of each, whether it is installed on this machine and a copyable install command otherwise; it does not ask again once chosen or skipped. Redesigned home: gradient logo, current backend and workspace chips (click to switch backend), example tasks with descriptions, input tips. Backends show their official icons (DeepSeek, oh-my-pi, CodeBuddy) in the chooser, home and menu. New Halo logo: two cards forming an H, joined by a strap and a node (extension icon, sidebar icon, home).
 - CodeBuddy：需要登录时选择登录方式（iOA、Google/GitHub、微信、企业域名），在浏览器里完成；也可以用 `CODEBUDDY_API_KEY`。待办（TaskCreate / TaskUpdate）进入输入框上方的状态条，命令输出去掉包装格式，Edit 的 Diff 显示整个文件。CodeBuddy 的一个进程只给一个会话推送回复，切回别的会话发消息时插件会重启 CodeBuddy 并重新加载那个会话（约 2 秒）。
   CodeBuddy: pick a sign-in method (iOA, Google/GitHub, WeChat, enterprise domain) and finish in the browser, or use `CODEBUDDY_API_KEY`. To-dos (TaskCreate / TaskUpdate) go to the status strip, command output is unwrapped, Edit diffs show the whole file. A CodeBuddy process streams to one session only, so sending in another session restarts CodeBuddy and reloads that session (about 2 s).
 - ACP 底层支持流式回复和推理、工具行（读文件和搜索合并、命令输出、修改的增删行数和 Diff）、审批、待办、用量、斜杠命令、模型和思考等级、模式（计划模式）、会话列表和重新打开、停止、图片；用真实的 oh-my-pi 和 CodeBuddy 做端到端测试，并每天在 CI 里对它们的固定版本和最新版本各跑一次。
   ACP backends cover streaming replies and reasoning, tool rows (grouped reads/searches, command output, edit line counts and diffs), approvals, to-dos, usage, slash commands, model and thought level, modes (plan), session list and reload, stop and images; tested end to end against real oh-my-pi and CodeBuddy, nightly in CI.
-- 插件改名为 Harness Deck：命令、视图和设置从 `dsh.*` 改为 `harnessDeck.*`（原来的设置第一次启动时自动迁移），安装包改名为 `harness-deck-<版本>.vsix`。这是新的扩展 id，升级后可以卸载 DSH Copilot。
-  Renamed to Harness Deck: commands, views and settings moved from `dsh.*` to `harnessDeck.*` (old settings are migrated on first start); the package is `harness-deck-<version>.vsix`. It is a new extension id, so DSH Copilot can be uninstalled afterwards.
+- 插件改名为 Halo：命令、视图和设置从 `dsh.*` 改为 `harnessDeck.*`（原来的设置第一次启动时自动迁移），安装包改名为 `harness-deck-<版本>.vsix`。这是新的扩展 id，升级后可以卸载 DSH Copilot。
+  Renamed to Halo: commands, views and settings moved from `dsh.*` to `harnessDeck.*` (old settings are migrated on first start); the package is `harness-deck-<version>.vsix`. It is a new extension id, so DSH Copilot can be uninstalled afterwards.
 - 子代理：dsh 派出的子代理显示成一张卡片（任务描述、状态、用时，点开看任务和回答），可以打开子代理自己的对话（只读）。
   Subagents show as a card (task, state, elapsed time; expand for the task and answer) and their conversation can be opened read-only.
 

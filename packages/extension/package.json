@@ -1,8 +1,8 @@
 {
   "name": "harness-deck",
-  "displayName": "Harness Deck",
+  "displayName": "Halo",
   "description": "%extension.description%",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -54,107 +54,107 @@
       {
         "command": "harnessDeck.openWorkbench",
         "title": "%command.openWorkbench%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.openChat",
         "title": "%command.openChat%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.newSession",
         "title": "%command.newSession%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.interrupt",
         "title": "%command.interrupt%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.selectModel",
         "title": "%command.selectModel%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.openWebUI",
         "title": "%command.openWebUI%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.restartRuntime",
         "title": "%command.restartRuntime%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.showLogs",
         "title": "%command.showLogs%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.explainSelection",
         "title": "%command.explainSelection%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.fixSelection",
         "title": "%command.fixSelection%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.testSelection",
         "title": "%command.testSelection%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.addToChat",
         "title": "%command.addToChat%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.configureApiKey",
         "title": "%command.configureApiKey%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.renameSession",
         "title": "%command.renameSession%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.selectFolder",
         "title": "%command.selectFolder%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.selectBackend",
         "title": "%command.selectBackend%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.selectChannel",
         "title": "%command.selectChannel%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.loginAccount",
         "title": "%command.loginAccount%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.toggleRemoteBridge",
         "title": "%command.toggleRemoteBridge%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.generateRemotePairing",
         "title": "%command.generateRemotePairing%",
-        "category": "Harness Deck"
+        "category": "Halo"
       },
       {
         "command": "harnessDeck.showRemoteDevices",
         "title": "%command.showRemoteDevices%",
-        "category": "Harness Deck"
+        "category": "Halo"
       }
     ],
     "configuration": {
@@ -363,12 +363,18 @@
             "iris"
           ],
           "default": "default",
-          "description": "OKLCH color theme preset for Harness Deck UI."
+          "description": "OKLCH color theme preset for Halo UI."
         },
         "harnessDeck.ui.highContrast": {
           "type": "boolean",
           "default": false,
-          "description": "Increase border and text contrast in Harness Deck UI."
+          "description": "Increase border and text contrast in Halo UI."
+        },
+        "harnessDeck.browser.executablePath": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "description": "Optional custom Chrome / Edge / Chromium executable path for the Halo built-in browser."
         },
         "harnessDeck.notifications.enabled": {
           "type": "boolean",

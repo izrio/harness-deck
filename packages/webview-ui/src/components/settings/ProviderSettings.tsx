@@ -376,25 +376,20 @@ export function ProviderSettings() {
         className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card"
         data-testid="provider-protocol-gateway-card"
       >
-        <div className="primitive-card-pad flex items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-start gap-2">
-            <ServerIcon className="mt-0.5 size-3.5 shrink-0 text-accent-ink" />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.providers.gatewayTitle')}</h3>
-                {protocolGatewayEnabled ? (
-                  <ValuePill tone="green" className="font-mono text-[10.5px]">
-                    {protocolGatewayOrigin
-                      ? t('settings.providers.gatewayRunningBadge', protocolGatewayOrigin)
-                      : t('settings.providers.gatewayEnabledBadge')}
-                  </ValuePill>
-                ) : (
-                  <ValuePill className="text-[10.5px]">{t('settings.providers.gatewayOffBadge')}</ValuePill>
-                )}
-              </div>
-              <p className="mt-1 mb-0 text-[11.5px] leading-relaxed text-ink-3">
-                {t('settings.providers.gatewayDesc')}
-              </p>
+        <div className="primitive-card-pad flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <ServerIcon className="size-3.5 shrink-0 text-accent-ink" />
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.providers.gatewayTitle')}</h3>
+              {protocolGatewayEnabled ? (
+                <ValuePill tone="green" className="font-mono text-[10.5px]">
+                  {protocolGatewayOrigin
+                    ? t('settings.providers.gatewayRunningBadge', protocolGatewayOrigin)
+                    : t('settings.providers.gatewayEnabledBadge')}
+                </ValuePill>
+              ) : (
+                <ValuePill className="text-[10.5px]">{t('settings.providers.gatewayOffBadge')}</ValuePill>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">

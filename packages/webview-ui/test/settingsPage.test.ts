@@ -895,6 +895,88 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     openActionsMenu('skill-actions-frontend-design');
     fireEvent.click(screen.getByTestId('delete-skill-frontend-design'));
     expect(posted).toContainEqual({ type: 'deleteSkill', payload: { id: 'frontend-design' } });
+
+    // 支持打开本地技能导入弹窗，扫描候选、选择目录并提交导入
+    fireEvent.click(screen.getByTestId('skill-import-btn'));
+    expect(screen.getByTestId('skill-import-dialog')).toBeTruthy();
+    expect(posted).toContainEqual({ type: 'scanAgentSkills', payload: {} });
+
+    fireEvent.click(screen.getByTestId('skill-import-pick-dir'));
+    expect(posted).toContainEqual({ type: 'pickLocalSkillDir', payload: {} });
+
+    host({
+      type: 'extensions',
+      payload: {
+        skills: {
+          items: [],
+          scannedSources: ['/home/user/.claude/skills'],
+          importCandidates: [
+            {
+              key: 'claude:/home/user/.claude/skills/code-review',
+              name: 'code-review',
+              description: 'Review PRs',
+              sourceDir: '/home/user/.claude/skills/code-review',
+              sourceAgentId: 'claude',
+              sourceAgentName: 'Claude Code',
+            },
+          ],
+        },
+        mcp: { servers: [] },
+      },
+    });
+    expect(screen.getByTestId('skill-candidate-code-review')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('skill-import-submit'));
+    expect(posted).toContainEqual({
+      type: 'importLocalSkills',
+      payload: {
+        skills: [{ sourceDir: '/home/user/.claude/skills/code-review', importedFrom: 'Claude Code' }],
+      },
+    });
+
+    // 支持切换到「技能市场」Tab：自动拉取在线市场、支持刷新、筛选分类并一键安装
+    fireEvent.click(screen.getByTestId('skills-tab-market'));
+    expect(screen.getByTestId('skills-panel-market')).toBeTruthy();
+    expect(posted).toContainEqual({ type: 'fetchSkillMarket', payload: {} });
+    fireEvent.click(screen.getByTestId('skill-market-refresh'));
+    expect(posted).toContainEqual({ type: 'fetchSkillMarket', payload: { force: true } });
+
+    host({
+      type: 'extensions',
+      payload: {
+        skills: {
+          ...store.getState().extensions.skills,
+          market: {
+            source: 'online',
+            updatedAt: Date.now(),
+            items: [
+              {
+                id: 'anthropic:mcp-builder',
+                name: 'mcp-builder',
+                repo: 'anthropics/skills',
+                ref: 'main',
+                subpath: 'skills/mcp-builder',
+                category: 'dev',
+                description: 'Build MCP servers cleanly',
+              },
+            ],
+          },
+        },
+        mcp: store.getState().extensions.mcp,
+      },
+    });
+    expect(screen.getByTestId('skill-market-source').textContent).toBe('在线');
+
+    fireEvent.click(screen.getByTestId('skill-market-cat-dev'));
+    expect(screen.getByTestId('skill-market-item-mcp-builder')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('skill-market-install-mcp-builder'));
+    expect(posted).toContainEqual({
+      type: 'installGitSkills',
+      payload: {
+        repoUrl: 'anthropics/skills',
+        ref: 'main',
+        subpath: 'skills/mcp-builder',
+      },
+    });
   });
 
   it('扩展 -> MCP：支持统一添加服务器、JSON 快捷填入、按 Agent 分配以及从各 Agent 配置导入', () => {
@@ -945,8 +1027,13 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     });
     expect(screen.getByTestId('mcp-server-filesystem')).toBeTruthy();
 
-    // 2. 在卡片上直接点击 Agent 芯片切换启动时交给哪些 Agent
-    fireEvent.click(screen.getByTestId('mcp-agent-filesystem-zcode'));
+    // 2. 在卡片上直接点击运行时图标切换启动时交给哪些 Agent
+    const dshChip = screen.getByTestId('mcp-agent-filesystem-dsh');
+    expect(dshChip.querySelector('[data-logo="dsh"]')).toBeTruthy();
+    expect(dshChip.getAttribute('aria-pressed')).toBe('true');
+    const zcodeChip = screen.getByTestId('mcp-agent-filesystem-zcode');
+    expect(zcodeChip.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(zcodeChip);
     expect(posted).toContainEqual({
       type: 'toggleMcpServer',
       payload: { id: 'filesystem', agents: ['dsh', 'claude', 'opencode', 'zcode'] },
@@ -1014,5 +1101,72 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     openActionsMenu('mcp-actions-filesystem');
     fireEvent.click(screen.getByTestId('delete-mcp-filesystem'));
     expect(posted).toContainEqual({ type: 'deleteMcpServer', payload: { id: 'filesystem' } });
+
+    // 4. 切换到 MCP 市场标签：自动请求在线市场、支持刷新、筛选分类、一键安装与预填配置
+    fireEvent.click(screen.getByTestId('mcp-tab-market'));
+    expect(screen.getByTestId('mcp-panel-market')).toBeTruthy();
+    expect(posted).toContainEqual({ type: 'fetchMcpMarket', payload: {} });
+
+    fireEvent.click(screen.getByTestId('mcp-market-refresh'));
+    expect(posted).toContainEqual({ type: 'fetchMcpMarket', payload: { force: true } });
+
+    host({
+      type: 'extensions',
+      payload: {
+        skills: store.getState().extensions.skills,
+        mcp: {
+          ...store.getState().extensions.mcp,
+          market: {
+            source: 'online',
+            updatedAt: Date.now(),
+            items: [
+              {
+                id: 'playwright',
+                name: 'playwright',
+                transport: 'stdio',
+                command: 'npx',
+                args: ['-y', '@playwright/mcp@latest'],
+                category: 'web',
+                description: 'Browser automation',
+                version: '1.0.0',
+              },
+              {
+                id: 'github',
+                name: 'github',
+                transport: 'stdio',
+                command: 'npx',
+                args: ['-y', '@modelcontextprotocol/server-github'],
+                envKeys: ['GITHUB_PERSONAL_ACCESS_TOKEN'],
+                needsConfig: true,
+                category: 'dev',
+                description: 'GitHub MCP',
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(screen.getByTestId('mcp-market-source').textContent).toBe('在线');
+
+    fireEvent.click(screen.getByTestId('mcp-market-cat-web'));
+    expect(screen.getByTestId('mcp-market-item-playwright')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('mcp-market-install-playwright'));
+    expect(posted).toContainEqual({
+      type: 'upsertMcpServer',
+      payload: {
+        name: 'playwright',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@playwright/mcp@latest'],
+        enabled: true,
+        agents: ['dsh', 'claude', 'opencode', 'zcode'],
+        importedFrom: 'Marketplace',
+      },
+    });
+
+    fireEvent.click(screen.getByTestId('mcp-market-cat-dev'));
+    fireEvent.click(screen.getByTestId('mcp-market-install-github'));
+    expect(screen.getByTestId('mcp-form-dialog')).toBeTruthy();
+    expect((screen.getByTestId('mcp-form-name') as HTMLInputElement).value).toBe('github');
   });
 });

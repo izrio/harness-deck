@@ -164,6 +164,19 @@ describe('Antigravity 订阅额度查询', () => {
     expect(quota?.windows).toHaveLength(4);
     expect(lastUa).toMatch(/^antigravity\/cli\/\d+\.\d+/u);
     expect(calls).toBe(1);
+
+    // 主 CLI 凭据存在且含 refresh_token（等待 CLI 续期）时，不回退 IDE 凭据以免多账号切换时串号
+    const mixedEnv = await writeToken(
+      { token: { access_token: 'expired-cli', refresh_token: 'refresh-cli', expiry: '2026-11-19T11:59:59.000Z' } },
+      'antigravity-cli/antigravity-oauth-token',
+    );
+    await writeFile(
+      join(mixedEnv.HOME!, '.gemini', 'jetski-standalone-oauth-token'),
+      JSON.stringify(agyToken(AGY_EXPIRY, 'other-ide-account-token')),
+      'utf8',
+    );
+    expect(await queryAntigravityQuota({ env: mixedEnv, fetchImpl, now: () => NOW })).toBeUndefined();
+    expect(calls).toBe(1);
   });
 
   it('主域返回 500 时改走备用域', async () => {

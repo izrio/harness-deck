@@ -4,21 +4,27 @@
  * 保存专长（specialty）、指令（instructions）、模型与底层配置、工具开关与权限预设；
  * 支持一键「开始会话」或直接「委派任务」至任务看板按序执行。
  */
-import { useState } from 'react';
-import type { AgentProfile, AgentToolConfig } from '@harness-deck/shared';
+import { useEffect, useMemo, useState } from 'react';
+import type { AgentProfile, AgentToolConfig, ModelOption } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
+import { cn } from '../../lib/utils.ts';
 import { useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import {
   AgentIcon,
   ChatIcon,
+  CheckIcon,
+  ChevronDownIcon,
   PencilIcon,
   PlusIcon,
   SendIcon,
   TrashIcon,
 } from '../icons.tsx';
-import { ValuePill } from '../beautifului/index.ts';
-import { getMergedModels, getProjectOptions } from '@/lib/workbenchOptions';
+import { BackendLogo } from '../BackendLogo.tsx';
+import { GlideMenu, ValuePill } from '../beautifului/index.ts';
+import { ModelPicker, type ModelPickerSelection } from '../ModelPicker.tsx';
+import { PermissionPicker } from '../PermissionPicker.tsx';
+import { getProjectOptions } from '@/lib/workbenchOptions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -30,10 +36,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
-const MODEL_DEFAULT_VALUE = '__default__';
+let nextAgentModelFetchId = 200_000;
+
+const AGENT_PERMISSION_OPTIONS = ['read-only', 'workspace-write', 'danger-full-access'] as const;
 
 const DEFAULT_TOOLS: AgentToolConfig = {
   permissionPreset: 'workspace-write',
@@ -50,6 +59,7 @@ export function AgentsView() {
   const backends = useView((s) => s.backends);
   const providers = useView((s) => s.providers.items);
   const models = useView((s) => s.models);
+  const backendModelsCache = useView((s) => s.backendModelsCache);
   const projects = useView((s) => s.projects);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -63,12 +73,74 @@ export function AgentsView() {
   const [specialty, setSpecialty] = useState('');
   const [instructions, setInstructions] = useState('');
   const [backendId, setBackendId] = useState(backends.active || 'dsh');
-  const [modelKey, setModelKey] = useState('');
+  const [selectedModel, setSelectedModel] = useState<ModelPickerSelection | undefined>(undefined);
   const [tools, setTools] = useState<AgentToolConfig>(DEFAULT_TOOLS);
+  const [runtimeMenuOpen, setRuntimeMenuOpen] = useState(false);
+  const [pendingFetch, setPendingFetch] = useState<{ readonly requestId: number; readonly backendId: string } | undefined>();
 
   const projectOptions = getProjectOptions(projects);
 
-  const mergedModels = getMergedModels(backendId, providers, models);
+  const runtimeItems = useMemo(
+    () => (backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]),
+    [backends.items],
+  );
+  const currentBackend = runtimeItems.find((b) => b.id === backendId) ?? { id: backendId || 'dsh', name: backendId || 'DeepSeek' };
+
+  const cachedForBackend = backendId === backends.active ? undefined : backendModelsCache[backendId];
+  const modelsLoading = Boolean(
+    pendingFetch &&
+      pendingFetch.backendId === backendId &&
+      (!cachedForBackend || cachedForBackend.requestId < pendingFetch.requestId),
+  );
+
+  const pickerModelOptions = useMemo<readonly ModelOption[]>(() => {
+    const seen = new Set<string>();
+    const list: ModelOption[] = [];
+    for (const p of providers.filter((item) => item.boundBackendIds.includes(backendId))) {
+      for (const m of p.models) {
+        const key = `${p.id}::${m.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push({
+          provider: p.id,
+          model: m.id,
+          name: m.name || m.id,
+          group: p.name,
+          efforts: (m.efforts ?? []).map((id) => ({ id, name: id })),
+        });
+      }
+    }
+    const runtimeOptions = backendId === backends.active ? models.options : (cachedForBackend?.models.options ?? []);
+    for (const m of runtimeOptions) {
+      const key = `${m.provider}::${m.model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      list.push(m);
+    }
+    return list;
+  }, [backendId, backends.active, providers, models.options, cachedForBackend]);
+
+  const requestBackendModels = (targetBackendId: string) => {
+    const requestId = ++nextAgentModelFetchId;
+    setPendingFetch({ requestId, backendId: targetBackendId });
+    postToHost({ type: 'fetchBackendModels', payload: { requestId, backendId: targetBackendId } });
+  };
+
+  useEffect(() => {
+    if (!formOpen || !pendingFetch || pendingFetch.backendId !== backendId) return;
+    if (!cachedForBackend || cachedForBackend.requestId < pendingFetch.requestId) return;
+    setPendingFetch(undefined);
+  }, [formOpen, pendingFetch, backendId, cachedForBackend]);
+
+  const handleSelectBackend = (nextBackendId: string) => {
+    setBackendId(nextBackendId);
+    setSelectedModel(undefined);
+    if (nextBackendId !== backends.active) {
+      requestBackendModels(nextBackendId);
+    } else {
+      setPendingFetch(undefined);
+    }
+  };
 
   const openCreate = () => {
     setEditingId(undefined);
@@ -76,8 +148,10 @@ export function AgentsView() {
     setSpecialty('');
     setInstructions('');
     setBackendId(backends.active || 'dsh');
-    setModelKey('');
+    setSelectedModel(undefined);
     setTools(DEFAULT_TOOLS);
+    setRuntimeMenuOpen(false);
+    setPendingFetch(undefined);
     setFormOpen(true);
   };
 
@@ -87,29 +161,34 @@ export function AgentsView() {
     setSpecialty(agent.specialty);
     setInstructions(agent.instructions);
     setBackendId(agent.backendId);
-    setModelKey(agent.model ? `${agent.provider ?? ''}::${agent.model}` : '');
+    setSelectedModel(
+      agent.model
+        ? {
+            ...(agent.provider ? { provider: agent.provider } : {}),
+            model: agent.model,
+            ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
+          }
+        : undefined,
+    );
     setTools(agent.tools);
+    setRuntimeMenuOpen(false);
+    if (agent.backendId !== backends.active) {
+      requestBackendModels(agent.backendId);
+    } else {
+      setPendingFetch(undefined);
+    }
     setFormOpen(true);
   };
 
   const closeForm = () => {
     setFormOpen(false);
     setEditingId(undefined);
+    setRuntimeMenuOpen(false);
+    setPendingFetch(undefined);
   };
 
   const handleSave = () => {
     if (!name.trim() || !specialty.trim()) return;
-    let provider: string | undefined;
-    let model: string | undefined;
-    if (modelKey) {
-      const sep = modelKey.indexOf('::');
-      if (sep >= 0) {
-        provider = modelKey.slice(0, sep) || undefined;
-        model = modelKey.slice(sep + 2) || undefined;
-      } else {
-        model = modelKey;
-      }
-    }
     postToHost({
       type: 'upsertAgent',
       payload: {
@@ -118,13 +197,16 @@ export function AgentsView() {
         specialty: specialty.trim(),
         instructions: instructions.trim(),
         backendId: backendId || 'dsh',
-        ...(provider ? { provider } : {}),
-        ...(model ? { model } : {}),
+        ...(selectedModel?.provider ? { provider: selectedModel.provider } : {}),
+        ...(selectedModel?.model ? { model: selectedModel.model } : {}),
+        ...(selectedModel?.reasoningEffort ? { reasoningEffort: selectedModel.reasoningEffort } : {}),
         tools,
       },
     });
     setFormOpen(false);
     setEditingId(undefined);
+    setRuntimeMenuOpen(false);
+    setPendingFetch(undefined);
   };
 
   const submitDelegate = (agentId: string) => {
@@ -191,89 +273,117 @@ export function AgentsView() {
                 </label>
               </div>
 
-              <label className="flex flex-col gap-1">
+              {/* 系统指令：复用会话输入框卡片，内置运行时、模型与默认权限选择器 */}
+              <div className="flex flex-col gap-1">
                 <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldInstructions')}</span>
-                <Textarea
-                  data-testid="agent-input-instructions"
-                  rows={3}
-                  value={instructions}
-                  placeholder={t('wb.agents.fieldInstructionsPlaceholder')}
-                  onChange={(e) => setInstructions(e.target.value)}
-                />
-              </label>
+                <div
+                  data-testid="agent-composer"
+                  className="composer surface-glass relative flex flex-col rounded-2xl border border-black/8 p-1.5 shadow-[var(--shadow-composer)] transition-[border-color,box-shadow] duration-150 focus-within:border-ring/45 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--accent)_30%,transparent),var(--shadow-composer)] dark:border-white/[0.07] dark:inset-shadow-[0_1px_rgb(255_255_255/3%)]"
+                >
+                  <textarea
+                    data-testid="agent-input-instructions"
+                    rows={5}
+                    value={instructions}
+                    placeholder={t('wb.agents.fieldInstructionsPlaceholder')}
+                    aria-label={t('wb.agents.fieldInstructions')}
+                    className="composer__input block max-h-64 min-h-28 w-full resize-none overflow-y-auto border-0 bg-transparent px-2 pt-1.5 pb-1 text-[13px] leading-[1.5] text-ink outline-none placeholder:text-ink-3"
+                    onChange={(e) => setInstructions(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSave();
+                      }
+                    }}
+                  />
 
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldBackend')}</span>
-                  <Select value={backendId} onValueChange={setBackendId}>
-                    <SelectTrigger
-                      size="sm"
-                      className="w-full"
-                      data-testid="agent-select-backend"
-                      aria-label={t('wb.agents.fieldBackend')}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(backends.items.length > 0 ? backends.items : [{ id: 'dsh', name: 'DeepSeek' }]).map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                  <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
+                    <div className="relative min-w-0">
+                      <Popover open={runtimeMenuOpen} onOpenChange={setRuntimeMenuOpen}>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            data-testid="agent-runtime-picker"
+                            aria-label={t('wb.agents.fieldBackend')}
+                            title={t('wb.agents.fieldBackend')}
+                            className="toolbar-button inline-flex h-7 max-w-full items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
+                          >
+                            <BackendLogo backend={currentBackend} size="sm" />
+                            <span className="toolbar-button__text min-w-0 truncate">{currentBackend.name}</span>
+                            <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="top"
+                          align="start"
+                          sideOffset={6}
+                          aria-label={t('wb.agents.fieldBackend')}
+                          className="model-menu flex max-h-72 w-auto min-w-[200px] max-w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-1 shadow-overlay"
+                        >
+                          <div role="menu" className="max-h-60 overflow-y-auto" data-testid="agent-runtime-list">
+                            <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
+                              {runtimeItems.map((b) => {
+                                const active = b.id === currentBackend.id;
+                                return (
+                                  <button
+                                    key={b.id}
+                                    type="button"
+                                    data-menu-row
+                                    role="menuitemradio"
+                                    aria-checked={active}
+                                    data-testid={`agent-runtime-option-${b.id}`}
+                                    onClick={() => {
+                                      setRuntimeMenuOpen(false);
+                                      if (b.id !== backendId) {
+                                        handleSelectBackend(b.id);
+                                      }
+                                    }}
+                                    className={cn(
+                                      'menu-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-[12.5px] transition-colors duration-100',
+                                      active
+                                        ? 'menu-item--active bg-field font-medium text-ink group-hover/glide-menu:bg-transparent'
+                                        : 'text-ink-2 hover:text-ink',
+                                    )}
+                                  >
+                                    <span className="inline-flex w-3.5 shrink-0 text-ink">
+                                      {active ? <CheckIcon className="size-3.5" strokeWidth={2.2} /> : null}
+                                    </span>
+                                    <BackendLogo backend={b} size="sm" />
+                                    <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                                  </button>
+                                );
+                              })}
+                            </GlideMenu>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
 
-                <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldModel')}</span>
-                  <Select
-                    value={modelKey || MODEL_DEFAULT_VALUE}
-                    onValueChange={(value) => setModelKey(value === MODEL_DEFAULT_VALUE ? '' : value)}
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      className="w-full"
-                      data-testid="agent-select-model"
-                      aria-label={t('wb.agents.fieldModel')}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={MODEL_DEFAULT_VALUE}>{t('wb.agents.modelDefault')}</SelectItem>
-                      {mergedModels.map((m) => (
-                        <SelectItem key={m.key} value={m.key}>
-                          {m.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                    <ModelPicker
+                      disabled={false}
+                      value={selectedModel}
+                      options={pickerModelOptions}
+                      onSelect={setSelectedModel}
+                      hideChannelSwitcher
+                      loading={modelsLoading}
+                      placeholder={t('wb.agents.modelDefault')}
+                      testId="agent-model-picker"
+                    />
 
-                <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-ink-2">{t('wb.agents.fieldPermission')}</span>
-                  <Select
-                    value={tools.permissionPreset}
-                    onValueChange={(value) =>
-                      setTools({
-                        ...tools,
-                        permissionPreset: value as AgentToolConfig['permissionPreset'],
-                      })
-                    }
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      className="w-full"
-                      data-testid="agent-select-permission"
-                      aria-label={t('wb.agents.fieldPermission')}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="read-only">{t('wb.schedules.permRead')}</SelectItem>
-                      <SelectItem value="workspace-write">{t('wb.schedules.permWorkspace')}</SelectItem>
-                      <SelectItem value="danger-full-access">{t('wb.schedules.permFull')}</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <span className="composer__spacer min-w-0 flex-1!" />
+
+                    <PermissionPicker
+                      disabled={false}
+                      value={tools.permissionPreset}
+                      options={AGENT_PERMISSION_OPTIONS}
+                      onSelect={(value) =>
+                        setTools({
+                          ...tools,
+                          permissionPreset: value as AgentToolConfig['permissionPreset'],
+                        })
+                      }
+                      testId="agent-permission-picker"
+                    />
+                  </div>
                 </div>
               </div>
 

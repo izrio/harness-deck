@@ -17,7 +17,7 @@ import { AgentIcon, ArrowUpIcon, CloseIcon, PaperclipIcon, PlanIcon, StopIcon } 
 import { ModelPicker } from './ModelPicker.tsx';
 import { PermissionPicker } from './PermissionPicker.tsx';
 import { StatusDock } from './StatusDock.tsx';
-import { UsageBadge } from './UsageBadge.tsx';
+import { ComposerFooter } from './ComposerFooter.tsx';
 import { useT } from '../i18n.ts';
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
@@ -70,7 +70,7 @@ function triggerAt(text: string, caret: number): Trigger | undefined {
 
 let nextRequestId = 0;
 
-export function Composer() {
+export function Composer({ onNewWorktree }: { readonly onNewWorktree?: () => void } = {}) {
   const session = useView((s) => s.session);
   const connected = useView((s) => s.connection === 'connected');
   const clientSurface = useView((s) => s.clientSurface);
@@ -391,8 +391,16 @@ export function Composer() {
   const showStop = session.running && !readOnly;
   const showSend = !showStop || text.trim().length > 0 || images.length > 0;
 
+  const isMobileRemote = useView((s) => s.clientSurface === 'mobile-web');
+
   return (
-    <div className="content-column relative shrink-0 pb-[env(safe-area-inset-bottom,0px)]">
+    <div
+      data-testid="composer-dock"
+      className={cn(
+        'content-column relative shrink-0 pb-[env(safe-area-inset-bottom,0px)] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)]',
+        isMobileRemote && 'pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)]',
+      )}
+    >
       <StatusDock />
       {session.subagentOf ? (
         <div className="mb-2 flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12px] text-ink-2 shadow-card" data-testid="subagent-strip">
@@ -420,7 +428,7 @@ export function Composer() {
       ) : null}
       <div
         ref={composerRef}
-        className="composer surface-glass relative mb-2.5 flex flex-col rounded-2xl border border-black/8 p-1.5 shadow-[var(--shadow-composer)] transition-[border-color,box-shadow] duration-150 focus-within:border-ring/45 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--accent)_30%,transparent),var(--shadow-composer)] dark:border-white/[0.07] dark:inset-shadow-[0_1px_rgb(255_255_255/3%)]"
+        className="composer surface-glass relative mb-1.5 flex flex-col rounded-2xl border border-black/8 p-1.5 shadow-[var(--shadow-composer)] transition-[border-color,box-shadow] duration-150 focus-within:border-ring/45 focus-within:shadow-[0_0_0_1px_color-mix(in_oklch,var(--accent)_30%,transparent),var(--shadow-composer)] dark:border-white/[0.07] dark:inset-shadow-[0_1px_rgb(255_255_255/3%)]"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes('Files')) event.preventDefault();
         }}
@@ -540,7 +548,6 @@ export function Composer() {
               {...(session.contextDetail ? { detail: session.contextDetail } : {})}
             />
           ) : null}
-          <UsageBadge />
           <span className="composer__spacer min-w-0 flex-1!" />
           <PermissionPicker disabled={!connected || readOnly} />
           {showStop ? (
@@ -576,6 +583,7 @@ export function Composer() {
           ) : null}
         </div>
       </div>
+      <ComposerFooter onNewWorktree={onNewWorktree} />
     </div>
   );
 }
