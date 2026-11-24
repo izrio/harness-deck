@@ -816,4 +816,32 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
     clearAntigravityQuotaCache();
     await rm(home, { recursive: true, force: true });
   });
+
+  it('侧边栏与工作台面板分别注册 IDE 客户端后，quotaFetched 仅单播给发起方不互相覆盖', async () => {
+    const env = createFakePlatform({ initialSettings: { defaultBackend: 'dsh' } });
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, { createBackend: factory.createBackend });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    const panelPosted: HostToWebview[] = [];
+    const unregisterPanel = runtime.registerIdeClient?.('ide-panel', (msg) => panelPosted.push(msg));
+    expect(unregisterPanel).toBeDefined();
+
+    env.posted.length = 0;
+    panelPosted.length = 0;
+
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 5 } }, 'ide');
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 2 } }, 'ide-panel');
+    await flushAsync();
+
+    const sidebarQuotas = env.posted.filter((m) => m.type === 'quotaFetched');
+    const panelQuotas = panelPosted.filter((m) => m.type === 'quotaFetched');
+    expect(sidebarQuotas).toHaveLength(1);
+    expect(sidebarQuotas[0]?.type === 'quotaFetched' ? sidebarQuotas[0].payload.requestId : -1).toBe(5);
+    expect(panelQuotas).toHaveLength(1);
+    expect(panelQuotas[0]?.type === 'quotaFetched' ? panelQuotas[0].payload.requestId : -1).toBe(2);
+
+    unregisterPanel?.();
+  });
 });

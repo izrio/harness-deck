@@ -3,28 +3,37 @@
  * 左侧：侧边栏展开/收起按钮（移动端为抽屉入口）+ 当前页面标题
  * 右侧：移动端连接状态 / 新建会话 / 全宽工作台 / 右侧工作区面板展开按钮
  */
+import { useEffect, useRef, useState } from 'react';
+import type { RemoteRouteKind } from '@harness-deck/shared';
 import type { WorkbenchModule } from '@harness-deck/shared/limits';
-import { setActiveModule, toggleRightPanel, useView } from '../store.ts';
+import { openSettingsPage, setActiveModule, setSettingsTab, toggleRightPanel, useView } from '../store.ts';
 import { postToHost, reconnectMobileTransport, useTransportState } from '../vscode.ts';
 import { useIsMobile } from '../hooks/use-mobile.ts';
 import { cn } from '../lib/utils.ts';
 import {
   ChatIcon,
+  CheckIcon,
   ClockIcon,
+  CopyIcon,
   ExpandPanelIcon,
   GitBranchIcon,
   LayoutDashboardIcon,
   ListTodoIcon,
   PanelRightIcon,
   PlusIcon,
+  QrCodeIcon,
   SettingsIcon,
   SidebarIcon,
+  SmartphoneIcon,
   UsersIcon,
   WifiIcon,
   WifiOffIcon,
 } from './icons.tsx';
 import { BackendLogo } from './BackendLogo.tsx';
+import { QrCodeSvg } from './QrCodeSvg.tsx';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Switch } from '@/components/ui/switch';
 import { useT, type MessageKey } from '../i18n.ts';
 
 function renderModuleIcon(mod: WorkbenchModule) {
@@ -245,8 +254,18 @@ export function Header({
                         : 'mobile.conn.offline',
                 )}
               </span>
+              {transport.pendingOutboxCount > 0 ? (
+                <span
+                  data-testid="mobile-outbox-badge"
+                  className="rounded-full bg-canvas/80 px-1 text-[10px] font-semibold tabular-nums"
+                  title={t('mobile.conn.pendingOutbox', transport.pendingOutboxCount)}
+                >
+                  {transport.pendingOutboxCount}
+                </span>
+              ) : null}
             </button>
           ) : null}
+          {clientSurface !== 'mobile-web' ? <IdeRemoteQuickPopover /> : null}
           <Button
             type="button"
             variant="ghost"
@@ -293,5 +312,157 @@ export function Header({
         </div>
       </div>
     </header>
+  );
+}
+
+function IdeRemoteQuickPopover() {
+  const t = useT();
+  const remote = useView((s) => s.remote);
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(copyTimerRef.current), []);
+
+  const enabled = remote?.enabled === true;
+  const running = remote?.running === true;
+  const connectedCount = remote?.connectedClients ?? 0;
+  const pairing = remote?.pairing;
+
+  const preferredRoute: RemoteRouteKind = remote?.quickTunnel?.url
+    ? 'quick-tunnel'
+    : remote?.tailscale?.serveEnabled && remote.tailscale.serveUrl
+      ? 'tailscale'
+      : remote?.tunnelUrl
+        ? 'tunnel'
+        : 'lan';
+
+  const copyPairing = () => {
+    if (!pairing?.url) return;
+    void navigator.clipboard?.writeText(pairing.url).catch(() => undefined);
+    setCopied(true);
+    clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 1_500);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size={connectedCount > 0 ? 'xs' : 'icon-xs'}
+          data-testid="ide-remote-btn"
+          aria-label={t('remote.header.title')}
+          title={
+            running
+              ? connectedCount > 0
+                ? t('remote.header.onlineCount', connectedCount)
+                : t('remote.header.title')
+              : `${t('remote.header.title')} (${t('remote.header.offline')})`
+          }
+          className={cn(
+            'relative text-ink-2 hover:text-ink',
+            connectedCount > 0 && 'gap-1 px-1.5 text-[11px] text-green hover:text-green',
+          )}
+        >
+          <SmartphoneIcon className="size-3.5" />
+          {running && connectedCount === 0 ? (
+            <span className="pointer-events-none absolute top-0.5 right-0.5 size-1.5 rounded-full bg-green" />
+          ) : null}
+          {connectedCount > 0 ? <span className="font-medium tabular-nums">{connectedCount}</span> : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-3.5" data-testid="ide-remote-popover">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className={cn('size-2 shrink-0 rounded-full', running ? 'bg-green' : 'bg-ink-4')} />
+              <span className="truncate text-[12.5px] font-semibold text-ink">{t('remote.header.title')}</span>
+            </div>
+            <Switch
+              data-testid="ide-remote-switch"
+              aria-label={t('remote.enabled')}
+              checked={enabled}
+              onCheckedChange={(checked) => postToHost({ type: 'setRemoteEnabled', payload: { enabled: checked } })}
+            />
+          </div>
+
+          {running ? (
+            <div className="flex flex-col gap-2.5">
+              {pairing ? (
+                <div className="flex flex-col items-center gap-2.5 rounded-xl bg-field/65 p-3 dark:bg-surface/80">
+                  <QrCodeSvg value={pairing.url} size={156} />
+                  <div className="flex w-full items-center justify-between gap-1.5">
+                    <span className="truncate text-[11px] text-ink-3">
+                      {t(`remote.route.${pairing.routeKind}` as MessageKey)}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      data-testid="ide-remote-copy-btn"
+                      onClick={copyPairing}
+                    >
+                      {copied ? <CheckIcon className="size-3 text-green" /> : <CopyIcon className="size-3" />}
+                      <span>{t('remote.copyPairing')}</span>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  data-testid="ide-remote-generate-qr"
+                  onClick={() =>
+                    postToHost({
+                      type: 'generateRemotePairing',
+                      payload: { scope: remote?.scope ?? 'operate', routeKind: preferredRoute },
+                    })
+                  }
+                >
+                  <QrCodeIcon className="size-3.5" />
+                  <span>{t('remote.generatePairing')}</span>
+                </Button>
+              )}
+
+              {connectedCount > 0 ? (
+                <div className="flex items-center justify-between text-[11.5px] text-ink-2">
+                  <span>{t('remote.header.onlineCount', connectedCount)}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="text-ink-3 hover:text-ink"
+                    onClick={() => postToHost({ type: 'disconnectAllRemote', payload: {} })}
+                  >
+                    {t('remote.disconnectAll')}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="text-ink-2 hover:text-ink"
+              data-testid="ide-remote-open-settings"
+              onClick={() => {
+                setOpen(false);
+                setSettingsTab('remote');
+                openSettingsPage();
+              }}
+            >
+              <SettingsIcon className="size-3" />
+              <span>{t('remote.header.openSettings')}</span>
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

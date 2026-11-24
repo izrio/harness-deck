@@ -40,7 +40,7 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
 
           <div className="flex flex-col gap-3">
             {showJsonPaste ? (
-              <div className="flex flex-col gap-2 rounded-control border border-line bg-field p-2.5">
+              <div className="flex flex-col gap-2 rounded-xl bg-field/65 p-3">
                 <Textarea
                   rows={3}
                   data-testid="mcp-paste-json-input"
@@ -196,10 +196,10 @@ export function McpFormDialog({ agents, form, setForm, formError, showJsonPaste,
                       type="button"
                       data-testid={`mcp-form-agent-${agent.id}`}
                       onClick={() => toggleFormAgent(agent.id)}
-                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] transition-colors ${
                         selected
-                          ? 'border-brand bg-accent-tint font-medium text-accent-ink'
-                          : 'border-line bg-field text-ink-2 hover:bg-hover'
+                          ? 'bg-accent-tint font-medium text-accent-ink'
+                          : 'bg-field/60 text-ink-2 hover:bg-hover hover:text-ink'
                       }`}
                     >
                       <BackendLogo backend={agent} size="sm" />

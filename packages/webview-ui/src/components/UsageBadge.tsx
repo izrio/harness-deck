@@ -15,6 +15,10 @@ import { useT } from '../i18n.ts';
 const QUOTA_CACHE_MS = 300_000;
 const OPEN_DELAY = 250;
 const CLOSE_DELAY = 250;
+/** 底层刚连上或切换账号初期遇到临时 unavailable 时，延迟补查一次以覆盖 CLI 后台续期落盘窗口。 */
+const TRANSIENT_RETRY_MS = 3_000;
+/** 切回窗口/面板可见时自动补查的最小间隔，避免高频切换焦点制造重复请求。 */
+const FOCUS_RETRY_COOLDOWN_MS = 15_000;
 
 type WindowSection =
   | { readonly type: 'single'; readonly key: string; readonly window: QuotaWindowView }
@@ -280,19 +284,32 @@ function supportsQuotaOf(state: ReturnType<typeof getState>): boolean {
   return true;
 }
 
+function activeAccountQuotaOf(state: ReturnType<typeof getState>): QuotaView | undefined {
+  if (!supportsQuotaOf(state)) return undefined;
+  const active = state.backends.active;
+  if (!active) return undefined;
+  const activeBackend = state.backends.items.find((b) => b.id === active);
+  const channel = state.accounts.channels[active] ?? activeBackend?.activeChannel;
+  if (channel?.mode === 'provider') return undefined;
+  const accountId = channel?.accountId ?? `system:${active}`;
+  const quota = state.accounts.items.find((a) => a.id === accountId)?.quota;
+  return quota && quota.windows.length > 0 ? quota : undefined;
+}
+
 export function UsageBadge() {
   const t = useT();
   const active = useView((s) => s.backends.active);
   const quotaScope = useView(quotaScopeOf);
   const supportsQuota = useView(supportsQuotaOf);
+  const activeAccountQuota = useView(activeAccountQuotaOf);
   const connected = useView((s) => s.connection === 'connected');
   const hasModels = useView((s) => s.models.options.length > 0);
   const running = useView((s) => s.session.running);
-  const result = useView((s) => s.quotaFetchResult);
-  const [quota, setQuota] = useState<QuotaView | undefined>();
+  const fetchResults = useView((s) => s.quotaFetchResults);
+  const [quota, setQuota] = useState<QuotaView | undefined>(() => activeAccountQuotaOf(getState()));
   const [unavailable, setUnavailable] = useState(false);
   const [open, setOpen] = useState(false);
-  const quotaRef = useRef<QuotaView | undefined>(undefined);
+  const quotaRef = useRef<QuotaView | undefined>(quota);
   const requestIdRef = useRef(0);
   const handledIdRef = useRef(0);
   const fetchedForScope = useRef<string | undefined>(undefined);
@@ -301,13 +318,20 @@ export function UsageBadge() {
   const prevConnectedRef = useRef(connected);
   const prevHasModelsRef = useRef(hasModels);
   const prevRunningRef = useRef(running);
+  const unavailableAtRef = useRef(0);
+  const lastProbeAtRef = useRef(0);
+  const retriedForScopeRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const requestQuota = () => {
+    clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = undefined;
     const requestId = ++nextQuotaRequestId;
     requestIdRef.current = requestId;
     fetchedForScope.current = quotaScopeOf(getState());
+    lastProbeAtRef.current = Date.now();
     postToHost({ type: 'fetchQuota', payload: { requestId } });
   };
 
@@ -316,9 +340,36 @@ export function UsageBadge() {
       probeSent.current = true;
       requestQuota();
     }
+    const maybeRefreshOnFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const state = getState();
+      if (!supportsQuotaOf(state) || state.connection !== 'connected') return;
+      const now = Date.now();
+      if (now - lastProbeAtRef.current < FOCUS_RETRY_COOLDOWN_MS) return;
+      if (!quotaRef.current || now - quotaRef.current.queriedAt >= QUOTA_CACHE_MS) {
+        setUnavailable(false);
+        requestQuota();
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') maybeRefreshOnFocus();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', maybeRefreshOnFocus);
+    }
     return () => {
       clearTimeout(openTimer.current);
       clearTimeout(closeTimer.current);
+      clearTimeout(retryTimerRef.current);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', maybeRefreshOnFocus);
+      }
     };
   }, []);
 
@@ -334,8 +385,11 @@ export function UsageBadge() {
     // 切换底层、切换官方账号/服务商渠道或登录态变化后先隐藏旧额度，再立即为新作用域重新探测。
     if (scopeChanged) {
       lastScope.current = quotaScope;
-      quotaRef.current = undefined;
-      setQuota(undefined);
+      retriedForScopeRef.current = false;
+      unavailableAtRef.current = 0;
+      const scopedQuota = activeAccountQuotaOf(getState());
+      quotaRef.current = scopedQuota;
+      setQuota(scopedQuota);
       setUnavailable(false);
       requestQuota();
       return;
@@ -349,19 +403,49 @@ export function UsageBadge() {
     }
   }, [quotaScope, active, connected, hasModels, running, supportsQuota]);
 
+  // 若宿主已通过账号巡检 / 登录完成 / 其他视图刷新并广播了当前激活账号的额度，直接同步展示。
   useEffect(() => {
-    if (!result || result.requestId !== requestIdRef.current || result.requestId <= handledIdRef.current) return;
-    handledIdRef.current = result.requestId;
-    if (result.quota && result.quota.windows.length > 0) {
-      quotaRef.current = result.quota;
-      setQuota(result.quota);
+    if (!supportsQuota || !activeAccountQuota) return;
+    const current = quotaRef.current;
+    const shouldAdopt = current
+      ? activeAccountQuota.queriedAt > current.queriedAt
+      : !unavailable || activeAccountQuota.queriedAt > unavailableAtRef.current;
+    if (!shouldAdopt) return;
+    clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = undefined;
+    quotaRef.current = activeAccountQuota;
+    fetchedForScope.current = quotaScope;
+    setQuota(activeAccountQuota);
+    setUnavailable(false);
+  }, [activeAccountQuota, quotaScope, supportsQuota, unavailable]);
+
+  useEffect(() => {
+    const matched = fetchResults[requestIdRef.current];
+    if (!matched || matched.requestId <= handledIdRef.current) return;
+    handledIdRef.current = matched.requestId;
+    if (matched.quota && matched.quota.windows.length > 0) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = undefined;
+      quotaRef.current = matched.quota;
+      setQuota(matched.quota);
       setUnavailable(false);
     } else {
       quotaRef.current = undefined;
+      unavailableAtRef.current = Date.now();
       setQuota(undefined);
       setUnavailable(true);
+      if (supportsQuota && connected && !retriedForScopeRef.current) {
+        retriedForScopeRef.current = true;
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = undefined;
+          if (!quotaRef.current && supportsQuotaOf(getState()) && getState().connection === 'connected') {
+            setUnavailable(false);
+            requestQuota();
+          }
+        }, TRANSIENT_RETRY_MS);
+      }
     }
-  }, [result]);
+  }, [fetchResults, supportsQuota, connected]);
 
   // 宿主查不到额度、或查询期间用户切到了别的底层/账号：标识彻底消失。
   if (!quota || unavailable || (fetchedForScope.current !== undefined && fetchedForScope.current !== quotaScope)) return null;

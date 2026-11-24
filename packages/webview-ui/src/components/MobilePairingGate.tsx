@@ -1,10 +1,10 @@
 /**
  * 手机浏览器未配对拦截页（HD-23）：
- * 自动读取 URL `#code=` 一次码（已在 transport 启动时从地址栏擦除），并支持手动输入配对码与设备名称。
+ * - 扫码携带 `#code=` 一次码时自动完成配对连接，无需再次手动点击
+ * - 若自动配对失败（过期/无效）或直接打开页面，平滑回退为手动输入表单
  */
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useT } from '../i18n.ts';
@@ -19,12 +19,7 @@ export function MobilePairingGate() {
   const [deviceName, setDeviceName] = useState(() => detectDefaultDeviceName());
   const [submitting, setSubmitting] = useState(false);
   const [errorText, setErrorText] = useState<string | undefined>();
-
-  useEffect(() => {
-    if (transport.pendingPairCode && !code) {
-      setCode(transport.pendingPairCode);
-    }
-  }, [transport.pendingPairCode, code]);
+  const autoPairedCodeRef = useRef<string | undefined>(undefined);
 
   const formatError = (reason: string, remainingAttempts?: number): string => {
     switch (reason) {
@@ -40,6 +35,21 @@ export function MobilePairingGate() {
         return reason;
     }
   };
+
+  useEffect(() => {
+    const incoming = transport.pendingPairCode;
+    if (!incoming || autoPairedCodeRef.current === incoming) return;
+    autoPairedCodeRef.current = incoming;
+    setCode(incoming);
+    setSubmitting(true);
+    setErrorText(undefined);
+    void pairWithHost(incoming, detectDefaultDeviceName()).then((res) => {
+      setSubmitting(false);
+      if (!res.ok) {
+        setErrorText(formatError(res.reason, res.remainingAttempts));
+      }
+    });
+  }, [transport.pendingPairCode]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -58,59 +68,62 @@ export function MobilePairingGate() {
       className="flex min-h-dvh flex-1 items-center justify-center bg-canvas px-4 py-6"
       data-testid="mobile-pairing-gate"
     >
-      <Card className="w-full max-w-sm shadow-raised">
-        <CardHeader className="items-center text-center">
+      <div className="flex w-full max-w-sm flex-col gap-6 rounded-2xl bg-field/55 p-6 dark:bg-surface/70">
+        <div className="flex flex-col items-center gap-2 text-center">
           <div className="mb-1">
             <HarnessDeckLogo />
           </div>
-          <CardTitle className="flex items-center gap-1.5 text-[15px]">
+          <h1 className="m-0 flex items-center gap-1.5 text-[15px] font-semibold text-ink">
             <QrCodeIcon className="size-4 text-accent-ink" />
             <span>{t('mobile.pair.title')}</span>
-          </CardTitle>
-          <CardDescription className="text-[12px] leading-relaxed">{t('mobile.pair.subtitle')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="flex flex-col gap-3" onSubmit={(e) => void onSubmit(e)}>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="pair-code-input" className="text-[12px]">
-                {t('mobile.pair.codeLabel')}
-              </Label>
-              <Input
-                id="pair-code-input"
-                size="sm"
-                data-testid="mobile-pair-code-input"
-                className="font-mono"
-                value={code}
-                placeholder={t('mobile.pair.codePlaceholder')}
-                onChange={(e) => setCode(e.target.value)}
-                autoComplete="one-time-code"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="pair-device-input" className="text-[12px]">
-                {t('mobile.pair.deviceLabel')}
-              </Label>
-              <Input
-                id="pair-device-input"
-                size="sm"
-                data-testid="mobile-pair-device-input"
-                value={deviceName}
-                placeholder={t('mobile.pair.devicePlaceholder')}
-                onChange={(e) => setDeviceName(e.target.value)}
-              />
-            </div>
-            {errorText ? (
-              <p className="m-0 rounded-control bg-red-tint px-2.5 py-2 text-[12px] text-red" role="alert" data-testid="mobile-pair-error">
-                {errorText}
-              </p>
-            ) : null}
-            <Button type="submit" size="sm" data-testid="mobile-pair-submit" disabled={!code.trim() || submitting}>
-              {submitting ? <SpinnerIcon className="size-3.5" /> : null}
-              <span>{submitting ? t('mobile.pair.connecting') : t('mobile.pair.submit')}</span>
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+          </h1>
+          <p className="m-0 text-[12px] leading-relaxed text-ink-3">{t('mobile.pair.subtitle')}</p>
+        </div>
+
+        <form className="flex flex-col gap-3.5" onSubmit={(e) => void onSubmit(e)}>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pair-code-input" className="text-[12px] text-ink-2">
+              {t('mobile.pair.codeLabel')}
+            </Label>
+            <Input
+              id="pair-code-input"
+              size="sm"
+              data-testid="mobile-pair-code-input"
+              className="font-mono"
+              value={code}
+              placeholder={t('mobile.pair.codePlaceholder')}
+              onChange={(e) => setCode(e.target.value)}
+              autoComplete="one-time-code"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pair-device-input" className="text-[12px] text-ink-2">
+              {t('mobile.pair.deviceLabel')}
+            </Label>
+            <Input
+              id="pair-device-input"
+              size="sm"
+              data-testid="mobile-pair-device-input"
+              value={deviceName}
+              placeholder={t('mobile.pair.devicePlaceholder')}
+              onChange={(e) => setDeviceName(e.target.value)}
+            />
+          </div>
+          {errorText ? (
+            <p
+              className="m-0 rounded-xl bg-red-tint px-3 py-2 text-[12px] text-red"
+              role="alert"
+              data-testid="mobile-pair-error"
+            >
+              {errorText}
+            </p>
+          ) : null}
+          <Button type="submit" size="sm" data-testid="mobile-pair-submit" disabled={!code.trim() || submitting}>
+            {submitting ? <SpinnerIcon className="size-3.5" /> : null}
+            <span>{submitting ? t('mobile.pair.connecting') : t('mobile.pair.submit')}</span>
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }

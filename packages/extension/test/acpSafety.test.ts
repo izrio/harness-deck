@@ -182,6 +182,61 @@ describe('ACP 模式切换', () => {
     expect(link.log).toContain('session/set_config_option plan');
     c.dispose();
   });
+
+  it('新建会话草稿在 session/new 返回 default 且套用偏好模型期间不会把权限闪回 default，最终保持 auto', async () => {
+    const publishedModes: (string | undefined)[] = [];
+    const { c } = setup();
+    let seq = 0;
+    const link: AcpLink & { log: string[] } = {
+      log: [],
+      request: async <T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> => {
+        link.log.push(`${method}:${JSON.stringify(params ?? {})}`);
+        if (method === 'session/new') {
+          return {
+            sessionId: `s${++seq}`,
+            configOptions: [
+              {
+                id: 'model',
+                category: 'model',
+                currentValue: 'm1',
+                options: [
+                  { value: 'm1', name: 'M1' },
+                  { value: 'm2', name: 'M2' },
+                ],
+              },
+              {
+                id: 'mode',
+                category: 'mode',
+                currentValue: 'default',
+                options: [
+                  { value: 'default', name: 'Default' },
+                  { value: 'auto', name: 'Auto' },
+                ],
+              },
+            ],
+          } as T;
+        }
+        return null as T;
+      },
+      notify: () => undefined,
+    };
+
+    c.setLink(link, { authMethods: [] });
+    await flush();
+    expect(c.snapshot().permissions.current).toBe('auto');
+
+    // 先发送一条消息占掉首个草稿，再新建标签触发第二次 session/new（模拟用户新建会话并开始输入）
+    await c.handle({ type: 'sendMessage', payload: { text: '第一句', includeActive: false } });
+    await flush();
+    await c.handle({ type: 'newSession', payload: {} });
+    publishedModes.push(c.snapshot().permissions.current);
+    await flush();
+    publishedModes.push(c.snapshot().permissions.current);
+
+    expect(publishedModes).toEqual(['auto', 'auto']);
+    expect(c.snapshot().permissions.current).toBe('auto');
+    c.dispose();
+  });
 });
 
 describe('ACP 发送', () => {

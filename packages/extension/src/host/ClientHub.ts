@@ -6,7 +6,7 @@ import type { ClientSurface, HostIdeKind, HostToWebview, RemoteScope } from '@ha
 export interface ConnectedClient {
   readonly id: string;
   readonly surface: ClientSurface;
-  readonly scope: RemoteScope;
+  scope: RemoteScope;
   readonly deviceId?: string;
   visible: boolean;
   readonly send: (message: HostToWebview) => void;
@@ -75,6 +75,18 @@ export class ClientHub {
     if (client) client.visible = visible;
   }
 
+  /** 实时更新某已授权设备所有活跃远程连接的权限作用域，返回受影响的 clientId 列表。 */
+  updateDeviceScope(deviceId: string, scope: RemoteScope): string[] {
+    const updated: string[] = [];
+    for (const client of this.clients.values()) {
+      if (client.surface === 'mobile-web' && client.deviceId === deviceId) {
+        client.scope = scope;
+        updated.push(client.id);
+      }
+    }
+    return updated;
+  }
+
   remoteClientCount(): number {
     let count = 0;
     for (const client of this.clients.values()) {
@@ -116,6 +128,17 @@ export class ClientHub {
 
   broadcast(message: HostToWebview): void {
     for (const client of this.clients.values()) {
+      try {
+        client.send(this.stampForClient(client, message));
+      } catch {
+        // 忽略失效客户端发送异常
+      }
+    }
+  }
+
+  broadcastIde(message: HostToWebview): void {
+    for (const client of this.clients.values()) {
+      if (client.surface !== 'ide') continue;
       try {
         client.send(this.stampForClient(client, message));
       } catch {

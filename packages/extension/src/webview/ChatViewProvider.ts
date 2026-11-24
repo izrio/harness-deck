@@ -7,10 +7,12 @@ import * as vscode from 'vscode';
 import { parseWebviewMessage, type HostToWebview, type WebviewToHost } from '@harness-deck/shared';
 
 export interface ChatViewHost {
-  /** 已校验的 Webview 消息。 */
-  readonly onMessage: (message: WebviewToHost) => void;
+  /** 已校验的 Webview 消息；第二个参数在工作台面板时传入独立客户端标识，避免与侧边栏单播响应串台。 */
+  readonly onMessage: (message: WebviewToHost, clientId?: string) => void;
   /** 视图打开、或隐藏后重新显示时调用（用于按需启动底层）。 */
   readonly onViewVisible: () => void;
+  /** 编辑器工作台标签页打开时向宿主注册独立客户端，返回注销函数。 */
+  readonly onPanelOpen?: (clientId: string, send: (message: HostToWebview) => void) => () => void;
   /** 界面语言（写进 `<html lang>`，读屏据此选择发音）。 */
   readonly locale?: () => 'zh' | 'en';
   readonly log: (line: string) => void;
@@ -19,8 +21,10 @@ export interface ChatViewHost {
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'harnessDeck.chatView';
   static readonly panelId = 'harnessDeck.workbenchPanel';
+  static readonly panelClientId = 'ide-panel';
   private view: vscode.WebviewView | undefined;
   private panel: vscode.WebviewPanel | undefined;
+  private disposePanelClient: (() => void) | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -29,7 +33,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
-    this.mountWebview(view.webview);
+    this.mountWebview(view.webview, 'ide');
     view.onDidDispose(() => {
       if (this.view === view) this.view = undefined;
     });
@@ -56,9 +60,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [webviewRoot] },
     );
     this.panel = panel;
-    this.mountWebview(panel.webview);
+    this.disposePanelClient?.();
+    this.disposePanelClient = this.host.onPanelOpen?.(ChatViewProvider.panelClientId, (message) => {
+      void panel.webview.postMessage(message);
+    });
+    this.mountWebview(panel.webview, ChatViewProvider.panelClientId);
     panel.onDidDispose(() => {
-      if (this.panel === panel) this.panel = undefined;
+      if (this.panel === panel) {
+        this.panel = undefined;
+        this.disposePanelClient?.();
+        this.disposePanelClient = undefined;
+      }
     });
     panel.onDidChangeViewState(() => {
       if (panel.visible) this.host.onViewVisible();
@@ -66,14 +78,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.host.onViewVisible();
   }
 
-  private mountWebview(webview: vscode.Webview): void {
+  private mountWebview(webview: vscode.Webview, clientId: string): void {
     const webviewRoot = vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview');
     webview.options = { enableScripts: true, localResourceRoots: [webviewRoot] };
     webview.html = renderHtml(webview, webviewRoot, this.host.locale?.() ?? 'zh');
     webview.onDidReceiveMessage((raw: unknown) => {
       const message = parseWebviewMessage(raw);
-      if (message) this.host.onMessage(message);
-      else this.host.log('Webview：丢弃格式不对的消息');
+      if (!message) {
+        this.host.log('Webview：丢弃格式不对的消息');
+        return;
+      }
+      if (clientId === 'ide') this.host.onMessage(message);
+      else this.host.onMessage(message, clientId);
     });
   }
 
@@ -84,7 +100,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /** 视图还没打开时丢弃消息：Webview 加载后会发 ready 取完整快照。 */
   post(message: HostToWebview): void {
     void this.view?.webview.postMessage(message);
-    void this.panel?.webview.postMessage(message);
+    // 若宿主已通过 onPanelOpen 将工作台面板注册为独立 ClientHub 客户端，广播由 ClientHub 直接投递，不再重复转发
+    if (!this.host.onPanelOpen) {
+      void this.panel?.webview.postMessage(message);
+    }
   }
 }
 

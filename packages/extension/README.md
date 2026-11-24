@@ -155,12 +155,12 @@ OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号
 - **Claude 提示需要登录**：在终端运行 `claude` 并输入 `/login`，或给内置的 `claude` 配置 `ANTHROPIC_API_KEY`（见上面的「用 Claude」）。
 - **CodeBuddy 登录**：取消了登录方式选择或进度，下次发消息时会再问。浏览器登录不方便时用 `CODEBUDDY_API_KEY`（见上面的「用 CodeBuddy」）。
 
-## 手机端远程互通（PWA + 局域网 / Tailscale / 隧道）
+## 手机端远程互通（PWA + 局域网 / 快速公网 / Tailscale / 隧道）
 
-- **开启与配对**：在「设置 → 远程互通」（或命令面板「Halo: 开启/关闭手机端远程互通」）启用宿主内嵌 HTTP/WS 桥接（默认关闭）；点击「生成配对二维码」后用手机扫码打开，一次性短效配对码通过 URL `#fragment` 传递（不落访问日志）并在换取 `HttpOnly` 设备 Cookie 后立即作废。
-- **跨网与 HTTPS**：局域网下可在设置页切换物理网卡 IP；离桌 4G/5G 场景支持只读探测本机 `tailscale status --json` 并启用 `tailscale serve` 获取 MagicDNS HTTPS 入口，或填写自带 HTTPS 隧道（`cloudflared` / `frp` / 反向代理）。
-- **权限与安全边界**：支持 `read-only`（只读查看会话与 Diff）和 `operate`（对话、审批、Git 提交/推送/PR）两种作用域；安装底层、修改服务商/MCP/技能/高级宿主机配置等高危操作默认在远程屏蔽。支持在设置页查看并一键吊销单个设备或全部断开。
-- **移动端体验与推送**：内置响应式布局、PWA 主屏安装、内嵌 Diff 审阅、面板内确认/输入弹窗（不阻塞桌面 IDE），以及免自建中继的本地 VAPID Web Push 和 Bark/ntfy/自定义 Webhook 兜底推送（默认在桌面 IDE 聚焦时静默）。
+- **开启与扫码自动配对**：在「设置 → 远程互通」、顶部标题栏远程快捷入口或命令面板（「Halo: 开启/关闭手机端远程互通」）启用宿主内嵌 HTTP/WS 桥接（默认关闭）；扫码打开后自动完成配对，一次性短效配对码通过 URL `#fragment` 传递并在换取 `HttpOnly` 设备 Cookie 后立即作废。
+- **跨网、公网与无缝切换**：支持局域网多网卡选择、一键启动本机 `cloudflared` 临时公网 HTTPS 隧道（`*.trycloudflare.com`，零账号开箱即用）、`tailscale serve` MagicDNS HTTPS 或自带 HTTPS 隧道；手机端在不同入口间切换时通过 90 秒一次性 `#handoff=` 票据自动续签登录态，无需重新扫码。
+- **权限、设备管理与安全边界**：支持 `read-only`（只读查看会话与 Diff）和 `operate`（对话、审批、Git 提交/推送/PR）两种作用域，已配对设备支持随时重命名、实时切换权限（立即对活跃 WebSocket 生效）及单独吊销或全部断开；安装底层、修改服务商/MCP/技能/远程管理等高危操作在远程默认屏蔽。
+- **离线容错与主流 IM 推送**：内置断网/切后台幂等消息暂存队列（重连后按序自动补发）、响应式布局、PWA 主屏安装、内嵌 Diff 审阅、本地 VAPID Web Push，以及飞书、企业微信、钉钉、Telegram、Slack、Discord、Bark、ntfy 与自定义 Webhook 推送（携带可直达对应会话的完整链接，桌面 IDE 聚焦时默认静默）。
 - **独立守护进程**：需要脱离 IDE 常驻时，可运行 `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`（配合 `--headless-status` / `--headless-stop` 查看或停止）。
 
 ## 隐私
@@ -189,6 +189,6 @@ A VS Code chat panel for coding agents: streaming replies, compact tool rows, ap
 
 **Official Accounts & Channel Switching**: manage multiple official accounts per agent under Settings → Agent → Accounts (isolated config directories / credential slots / official API keys with optional isolated sessions and per-account subscription quota) and switch any agent between official accounts and third-party providers from Settings, the Model Picker header, or the Command Palette (`Switch Model Channel / Official Account`). For sign-ins that require pasting an authorization code (e.g. Antigravity), the sign-in dialog asks for the code (or the callback page URL) after browser authorization and only reports success once it is submitted.
 
-**Mobile Remote Access (PWA + LAN / Tailscale / BYO Tunnel)**: disabled by default. Enable in Settings → Mobile Remote (or command `Halo: Toggle Mobile Remote Access`), generate a 5-minute single-use QR pairing link (`#code=` fragment), and connect from your phone browser or installed PWA. Supports `read-only` and `operate` device scopes, per-device revocation, in-app Diff review, local VAPID Web Push & Webhook fallback (suppressed while IDE is focused), Tailscale `serve` / custom HTTPS tunnel routing, and standalone headless mode via `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`.
+**Mobile Remote Access (PWA + LAN / Quick Tunnel / Tailscale / BYO Tunnel)**: disabled by default. Enable from Settings → Mobile Remote, the IDE header remote popover, or `Halo: Toggle Mobile Remote Access`; scanning the 5-minute single-use QR link (`#code=` fragment) auto-pairs your phone browser or installed PWA. Supports one-click `cloudflared` Quick Tunnel (`*.trycloudflare.com`), Tailscale `serve`, custom HTTPS tunnels, seamless cross-route session handoff (`#handoff=` single-use ticket), offline idempotent outbox queuing during reconnects, live `read-only` / `operate` scope switching and device renaming, per-device revocation, in-app Diff review, local VAPID Web Push, and IM Webhooks (Feishu, WeCom, DingTalk, Telegram, Slack, Discord, Bark, ntfy, custom) with deep links directly to the active session. Standalone headless mode is also available via `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`.
 
 **Privacy**: the extension itself makes no network requests; the backend makes all model requests. Only the context chips you see above the input box are attached to a message.

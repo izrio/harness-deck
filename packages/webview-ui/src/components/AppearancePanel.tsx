@@ -1,6 +1,6 @@
 /**
  * 阅读与聊天排版控件：
- * 聊天回复、计划和 Markdown 文件预览共用字体、字号、行高、段距与内容宽度，切换主题不会改变这些设置。
+ * 去线留白：移除行间分割线、冗余「默认」胶囊与预览标题，让排版控件与实时预览直接自解释。
  */
 import { useEffect, useState } from 'react';
 import type { AppearanceState } from '@harness-deck/shared';
@@ -9,7 +9,6 @@ import { cn } from '../lib/utils.ts';
 import { setAppearanceLocal, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { Markdown } from './Markdown.tsx';
-import { ValuePill } from './beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import { NumberStepper } from './NumberStepper.tsx';
 import { Input } from '@/components/ui/input';
@@ -122,9 +121,9 @@ export function AppearancePanel() {
   const activePreset = FONT_PRESETS.find((p) => p.value === (appearance.fontFamily ?? ''));
 
   return (
-    <div className="divide-y divide-line/60" data-testid="appearance-panel">
+    <div className="flex flex-col gap-5 p-4" data-testid="appearance-panel">
       {/* 字体选择：预设快捷胶囊 + 自定义输入 */}
-      <div className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.proseFont')}</span>
           <div className="flex flex-wrap items-center gap-1">
@@ -134,7 +133,7 @@ export function AppearancePanel() {
                 <Button
                   key={preset.id}
                   type="button"
-                  variant={selected ? 'secondary' : 'ghost'}
+                  variant="ghost"
                   size="xs"
                   data-testid={`font-preset-${preset.id}`}
                   onClick={() => selectFontPreset(preset.value)}
@@ -142,7 +141,7 @@ export function AppearancePanel() {
                     'rounded-full px-2.5 text-[11.5px]',
                     selected
                       ? 'bg-accent-tint font-medium text-accent-ink hover:bg-accent-tint'
-                      : 'text-ink-2 hover:text-ink',
+                      : 'text-ink-2 hover:bg-canvas/70 hover:text-ink dark:hover:bg-page/45',
                   )}
                 >
                   {t(preset.id === 'vscode' && hostKind === 'jetbrains' ? 'settings.appearance.fontPreset.ide' : preset.labelKey)}
@@ -163,11 +162,10 @@ export function AppearancePanel() {
         />
       </div>
 
-      {/* 字号 */}
-      <div className="flex items-center justify-between gap-4 px-4 py-3">
-        <span className="text-[12.5px] font-medium text-ink">{t('appearance.size')}</span>
-        <div className="flex items-center gap-2">
-          {appearance.fontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
+      {/* 排版数值参数 */}
+      <div className="flex flex-col gap-3.5">
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[12.5px] font-medium text-ink">{t('appearance.size')}</span>
           <NumberStepper
             size="sm"
             decLabel={t('appearance.smaller')}
@@ -181,13 +179,9 @@ export function AppearancePanel() {
             {size}px
           </NumberStepper>
         </div>
-      </div>
 
-      {/* 行高 */}
-      <div className="flex items-center justify-between gap-4 px-4 py-3">
-        <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.lineHeight')}</span>
-        <div className="flex items-center gap-2">
-          {appearance.lineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.lineHeight')}</span>
           <NumberStepper
             size="sm"
             decLabel={t('settings.appearance.lineHeightSmaller')}
@@ -201,13 +195,9 @@ export function AppearancePanel() {
             {lineHeight.toFixed(1)}
           </NumberStepper>
         </div>
-      </div>
 
-      {/* 段距 */}
-      <div className="flex items-center justify-between gap-4 px-4 py-3">
-        <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.paragraphSpacing')}</span>
-        <div className="flex items-center gap-2">
-          {appearance.paragraphSpacing === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.paragraphSpacing')}</span>
           <NumberStepper
             size="sm"
             decLabel={t('settings.appearance.paragraphSpacingSmaller')}
@@ -221,57 +211,66 @@ export function AppearancePanel() {
             {paragraphSpacing}px
           </NumberStepper>
         </div>
-      </div>
 
-      {/* 内容宽度 */}
-      <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3">
-        <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.contentWidth')}</span>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex items-center gap-1">
-            {WIDTH_PRESETS.map((preset) => {
-              const selected = contentWidth === preset.width;
-              return (
-                <Button
-                  key={preset.width}
-                  type="button"
-                  variant={selected ? 'secondary' : 'ghost'}
-                  size="xs"
-                  data-testid={`width-preset-${preset.width}`}
-                  onClick={() => setContentWidth(preset.width)}
-                  className={cn(
-                    'rounded-full px-2 text-[11px]',
-                    selected && 'bg-accent-tint text-accent-ink hover:bg-accent-tint',
-                  )}
-                >
-                  {t(preset.labelKey)}
-                </Button>
-              );
-            })}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.contentWidth')}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1">
+              {WIDTH_PRESETS.map((preset) => {
+                const selected = contentWidth === preset.width;
+                return (
+                  <Button
+                    key={preset.width}
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    data-testid={`width-preset-${preset.width}`}
+                    onClick={() => setContentWidth(preset.width)}
+                    className={cn(
+                      'rounded-full px-2 text-[11px]',
+                      selected
+                        ? 'bg-accent-tint font-medium text-accent-ink hover:bg-accent-tint'
+                        : 'text-ink-2 hover:bg-canvas/70 hover:text-ink dark:hover:bg-page/45',
+                    )}
+                  >
+                    {t(preset.labelKey)}
+                  </Button>
+                );
+              })}
+            </div>
+            <NumberStepper
+              size="sm"
+              decLabel={t('settings.appearance.contentWidthSmaller')}
+              incLabel={t('settings.appearance.contentWidthLarger')}
+              decDisabled={contentWidth <= MIN_WIDTH}
+              incDisabled={contentWidth >= MAX_WIDTH}
+              onDec={() => setContentWidth(contentWidth - 40)}
+              onInc={() => setContentWidth(contentWidth + 40)}
+              valueTestId="prose-content-width"
+            >
+              {contentWidth}px
+            </NumberStepper>
           </div>
-          <NumberStepper
-            size="sm"
-            decLabel={t('settings.appearance.contentWidthSmaller')}
-            incLabel={t('settings.appearance.contentWidthLarger')}
-            decDisabled={contentWidth <= MIN_WIDTH}
-            incDisabled={contentWidth >= MAX_WIDTH}
-            onDec={() => setContentWidth(contentWidth - 40)}
-            onInc={() => setContentWidth(contentWidth + 40)}
-            valueTestId="prose-content-width"
-          >
-            {contentWidth}px
-          </NumberStepper>
         </div>
       </div>
 
-      {/* 实时阅读与聊天排版预览 */}
-      <div className="flex flex-col gap-2.5 px-4 py-3">
-        <div className="flex flex-col gap-1.5 rounded-card bg-inset/70 p-3 shadow-hairline" data-testid="reading-live-preview">
-          <span className="text-[11px] font-medium text-ink-3">{t('settings.appearance.readingPreview')}</span>
+      {/* 实时预览 + 重置 */}
+      <div className="flex flex-col gap-2.5">
+        <div
+          className="rounded-xl bg-canvas/85 p-4 dark:bg-page/55"
+          data-testid="reading-live-preview"
+        >
           <Markdown text={t('settings.appearance.readingPreviewSample')} />
         </div>
-
-        <div className="flex items-center justify-end">
-          <Button type="button" variant="ghost" size="sm" data-testid="prose-reset" onClick={resetProse}>
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="text-ink-3 hover:text-ink"
+            data-testid="prose-reset"
+            onClick={resetProse}
+          >
             {t('appearance.reset')}
           </Button>
         </div>

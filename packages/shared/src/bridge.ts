@@ -655,7 +655,10 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pickLocalSkillDir'), payload: empty }),
   z.object({
     type: z.literal('fetchSkillMarket'),
-    payload: z.object({ force: z.boolean().optional() }),
+    payload: z.object({
+      query: z.string().max(200).optional(),
+      force: z.boolean().optional(),
+    }),
   }),
   z.object({
     type: z.literal('importLocalSkills'),
@@ -843,15 +846,25 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('generateRemotePairing'),
     payload: z.object({
       scope: z.enum(['read-only', 'operate']).optional(),
-      routeKind: z.enum(['lan', 'tailscale', 'tunnel']).optional(),
+      routeKind: z.enum(['lan', 'tailscale', 'quick-tunnel', 'tunnel']).optional(),
     }),
   }),
   z.object({ type: z.literal('clearRemotePairing'), payload: empty }),
+  z.object({
+    type: z.literal('updateRemoteDevice'),
+    payload: z.object({
+      deviceId: z.string().min(1).max(120),
+      name: z.string().min(1).max(80).optional(),
+      scope: z.enum(['read-only', 'operate']).optional(),
+    }),
+  }),
   z.object({ type: z.literal('revokeRemoteDevice'), payload: z.object({ deviceId: z.string().min(1).max(120) }) }),
   z.object({ type: z.literal('disconnectAllRemote'), payload: empty }),
   z.object({ type: z.literal('refreshRemoteNetwork'), payload: empty }),
   z.object({ type: z.literal('probeTailscale'), payload: empty }),
   z.object({ type: z.literal('configureTailscaleServe'), payload: z.object({ enabled: z.boolean() }) }),
+  z.object({ type: z.literal('probeQuickTunnel'), payload: empty }),
+  z.object({ type: z.literal('setQuickTunnelEnabled'), payload: z.object({ enabled: z.boolean() }) }),
   z.object({
     type: z.literal('setRemotePushConfig'),
     payload: z.object({
@@ -860,8 +873,11 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       webhook: z
         .object({
           enabled: z.boolean().optional(),
-          preset: z.enum(['bark', 'ntfy', 'custom']).optional(),
+          preset: z
+            .enum(['bark', 'ntfy', 'feishu', 'wecom', 'dingtalk', 'telegram', 'slack', 'discord', 'custom'])
+            .optional(),
           url: z.string().max(2_000).optional(),
+          secret: z.string().max(512).optional(),
         })
         .optional(),
     }),

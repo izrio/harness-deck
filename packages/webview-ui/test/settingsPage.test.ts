@@ -589,25 +589,44 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     render(createElement(SettingsPage));
     fireEvent.click(screen.getByTestId('settings-tab-providers'));
 
-    // 默认状态下本地协议转换网关关闭；仅填 OpenAI Chat 地址时不可绑定 Claude Code，开启网关后方可绑定
+    // 默认状态下本地协议转换网关关闭，点击「添加服务商」通过弹窗打开编辑器
     const gwSwitch = screen.getByTestId('provider-protocol-gateway-switch');
     expect(gwSwitch.getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('provider-protocol-gateway-card').textContent).toContain('已关闭');
+    expect(screen.queryByTestId('provider-editor')).toBeNull();
+
+    // 仅填 OpenAI Chat 地址且网关关闭时不可绑定 Claude Code
+    fireEvent.click(screen.getByTestId('provider-add-btn'));
+    expect(screen.getByTestId('provider-editor')).toBeTruthy();
+    // 弹窗内各厂商预设展示对应品牌图标
+    expect(screen.getByTestId('provider-preset-volcengine-coding').querySelector('[data-provider-icon="doubao"]')).toBeTruthy();
+    expect(screen.getByTestId('provider-preset-zhipu-coding').querySelector('[data-provider-icon="zhipu"]')).toBeTruthy();
+    expect(screen.getByTestId('provider-preset-bailian-coding').querySelector('[data-provider-icon="qwen"]')).toBeTruthy();
+    expect(screen.getByTestId('provider-preset-kimi-coding').querySelector('[data-provider-icon="kimi"]')).toBeTruthy();
+    expect(screen.getByTestId('provider-preset-minimax-coding').querySelector('[data-provider-icon="minimax"]')).toBeTruthy();
 
     fireEvent.change(screen.getByTestId('provider-url-openai-chat'), {
       target: { value: 'https://api.example.com/v1' },
     });
     expect((screen.getByTestId('provider-bind-backend-claude') as HTMLButtonElement).disabled).toBe(true);
 
+    // 关闭弹窗开启网关后再打开弹窗，填 OpenAI Chat 地址即可绑定 Claude Code
+    fireEvent.click(screen.getByTestId('provider-cancel-btn'));
     fireEvent.click(gwSwitch);
     expect(posted).toContainEqual({ type: 'setProtocolGateway', payload: { enabled: true } });
     expect(gwSwitch.getAttribute('aria-checked')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('provider-add-btn'));
+    fireEvent.change(screen.getByTestId('provider-url-openai-chat'), {
+      target: { value: 'https://api.example.com/v1' },
+    });
     expect((screen.getByTestId('provider-bind-backend-claude') as HTMLButtonElement).disabled).toBe(false);
 
-    // 清空回初始状态以便继续校验自定义预设缺地址提示
+    // 恢复网关关闭并重新打开弹窗校验自定义预设缺地址提示
+    fireEvent.click(screen.getByTestId('provider-cancel-btn'));
     fireEvent.click(gwSwitch);
     expect(posted).toContainEqual({ type: 'setProtocolGateway', payload: { enabled: false } });
-    fireEvent.change(screen.getByTestId('provider-url-openai-chat'), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('provider-add-btn'));
 
     // 默认「自定义」下未填地址时展示缺地址提示与自有账号智能体提示
     const hintText = screen.getByTestId('provider-compatibility-hint').textContent ?? '';

@@ -180,6 +180,8 @@ export class AcpController implements ChatBackendController {
   /** 新对话：已经建好但还没发过消息的会话。 */
   private draftId: string | undefined;
   private creatingDraft: Promise<string | undefined> | undefined;
+  /** 新建会话草稿尚未就绪前用户手动选择的权限模式，避免被默认 auto 逻辑覆盖。 */
+  private pendingDraftMode: string | undefined;
   private readonly projections = new Map<string, AcpSessionProjection>();
   private readonly loading = new Set<string>();
   private listed: { id: string; cwd?: string; updatedAt: number; title?: string }[] = [];
@@ -720,6 +722,7 @@ export class AcpController implements ChatBackendController {
     this.tabs.setCurrentSession(sessionId);
     if (sessionId === this.activeId && (sessionId !== undefined || this.draftId !== undefined)) return;
     this.activeId = sessionId;
+    if (sessionId) this.pendingDraftMode = undefined;
     this.options.saveActiveSessionId(sessionId);
     if (sessionId) void this.load(sessionId);
     else void this.ensureDraft();
@@ -804,13 +807,17 @@ export class AcpController implements ChatBackendController {
     if (this.creatingDraft) return this.creatingDraft;
     const link = this.link;
     if (!link) return Promise.resolve(undefined);
-    this.creatingDraft = this.newSession(link)
+    this.creatingDraft = this.newSession(link, { cacheDefaults: false })
       .then(
         async (id) => {
           if (this.link !== link) return id;
-          await this.applyPreferredModel(id);
-          await this.applyDefaultMode(id);
-          if (this.link === link) this.draftId = id;
+          await this.applyPreferredModel(id, true);
+          await this.applyDefaultMode(id, true);
+          if (this.link === link) {
+            this.draftId = id;
+            const projection = this.projections.get(id);
+            if (projection) this.cacheProjectionDefaults(projection);
+          }
           return id;
         },
         (error: unknown) => {
@@ -830,7 +837,7 @@ export class AcpController implements ChatBackendController {
    * `session/new`；代理要求认证（-32000）时登录后再试一次。
    * 只有一种方式时直接用（omp：用已有的本地凭据）；有多种时由宿主让用户选（CodeBuddy：浏览器登录，可能要几分钟）。
    */
-  private async newSession(link: AcpLink): Promise<string> {
+  private async newSession(link: AcpLink, opts?: { readonly cacheDefaults?: boolean }): Promise<string> {
     const { params, hasRemoteMcp } = this.sessionLaunchParams();
     const requestNew = async (): Promise<{ sessionId: string } & AcpSessionMeta> => {
       try {
@@ -853,7 +860,9 @@ export class AcpController implements ChatBackendController {
     }
     const projection = this.projectionFor(result.sessionId);
     projection.setSessionMeta(result);
-    this.cacheProjectionDefaults(projection);
+    if (opts?.cacheDefaults !== false) {
+      this.cacheProjectionDefaults(projection);
+    }
     if (this.options.singleSession && this.link === link) this.bound = result.sessionId;
     return result.sessionId;
   }
@@ -1255,52 +1264,60 @@ export class AcpController implements ChatBackendController {
   }
 
   /** 新对话（草稿会话）套用上次选的模型和思考等级；代理没有这个选项时不动。 */
-  private async applyPreferredModel(sessionId: string): Promise<void> {
+  private async applyPreferredModel(sessionId: string, silent = false): Promise<void> {
     const preferred = this.options.loadPreferredModel?.();
     const projection = this.projections.get(sessionId);
     if (!preferred || !projection || projection.snapshotItems().length > 0) return;
     try {
       const model = this.modelOption(projection);
       if (model && model.currentValue !== preferred.model && model.options?.some((o) => o.value === preferred.model)) {
-        await this.setOption(sessionId, model.id, preferred.model);
+        await this.setOption(sessionId, model.id, preferred.model, silent);
       }
       // 思考等级的选项随模型变化：换完模型再看
       const effort = this.effortOption(this.projections.get(sessionId));
       if (preferred.effort && effort && effort.currentValue !== preferred.effort && effort.options?.some((o) => o.value === preferred.effort)) {
-        await this.setOption(sessionId, effort.id, preferred.effort);
+        await this.setOption(sessionId, effort.id, preferred.effort, silent);
       }
     } catch (error) {
       this.options.log(`新对话套用上次的模型失败：${describe(error)}`);
     }
   }
 
-  /** 新对话（草稿会话）若代理提供安全的 `auto` 权限模式，则默认切到 `auto`；不自动启用无确认的全放行模式。 */
-  private async applyDefaultMode(sessionId: string): Promise<void> {
+  /** 新对话（草稿会话）若代理提供安全的 `auto` 权限模式，则默认切到 `auto`；若用户已显式挑选模式则优先应用。 */
+  private async applyDefaultMode(sessionId: string, silent = false): Promise<void> {
     const projection = this.projections.get(sessionId);
     if (!projection || projection.snapshotItems().length > 0) return;
     const modeOpt = this.modeOption(projection);
     if (!modeOpt?.options?.length) return;
-    const autoOpt = modeOpt.options.find(
-      (o) => o.value.toLowerCase() === 'auto' && !isUnrestrictedMode(o.value, o.name),
-    );
-    if (!autoOpt || modeOpt.currentValue === autoOpt.value) return;
+    const explicitMode = this.pendingDraftMode;
+    this.pendingDraftMode = undefined;
+    const targetOpt = explicitMode
+      ? modeOpt.options.find((o) => o.value === explicitMode)
+      : modeOpt.options.find(
+          (o) => o.value.toLowerCase() === 'auto' && !isUnrestrictedMode(o.value, o.name),
+        );
+    if (!targetOpt || modeOpt.currentValue === targetOpt.value) return;
     try {
-      await this.setOption(sessionId, modeOpt.id, autoOpt.value);
+      await this.setOption(sessionId, modeOpt.id, targetOpt.value, silent);
     } catch (error) {
-      this.options.log(`新对话套用默认 auto 权限失败：${describe(error)}`);
+      this.options.log(`新对话套用默认 ${targetOpt.value} 权限失败：${describe(error)}`);
     }
   }
 
   private async setMode(mode: string, preConfirmed?: boolean): Promise<void> {
-    const sessionId = this.currentId() ?? (await this.ensureDraft());
-    const option = this.modeOption();
-    if (!sessionId || !option || option.currentValue === mode) return;
-    // 不再逐项询问的模式（Claude 的 bypassPermissions、各家的 yolo / full access）：和 dsh 的完全访问一样先确认
-    const target = option.options?.find((o) => o.value === mode);
+    const initialOption = this.modeOption();
+    const target = initialOption?.options?.find((o) => o.value === mode);
     if (preConfirmed !== true && isUnrestrictedMode(mode, target?.name)) {
       const name = target?.name ?? mode;
       if (!(await this.workbench.confirm(t('acp.dangerTitle', name), t('acp.dangerDetail', this.agentName(), name), t('acp.dangerAllow', name)))) return;
     }
+    if (!this.currentId()) {
+      this.pendingDraftMode = mode;
+      this.scheduleRender();
+    }
+    const sessionId = this.currentId() ?? (await this.ensureDraft());
+    const option = this.modeOption();
+    if (!sessionId || !option || option.currentValue === mode) return;
     try {
       await this.setOption(sessionId, option.id, mode);
     } catch (error) {
@@ -1308,7 +1325,7 @@ export class AcpController implements ChatBackendController {
     }
   }
 
-  private async setOption(sessionId: string, configId: string, value: string): Promise<void> {
+  private async setOption(sessionId: string, configId: string, value: string, silent = false): Promise<void> {
     const projection = this.projectionFor(sessionId);
     const currentOpt = this.effectiveOptions(projection).find((o) => o.id === configId || o.category === configId);
     if (currentOpt?.legacyMethod === 'session/set_model') {
@@ -1324,8 +1341,10 @@ export class AcpController implements ChatBackendController {
       projection.updateOptionValue(configId, value);
       projection.setSessionMeta(result);
     }
-    this.cacheProjectionDefaults(projection);
-    this.scheduleRender();
+    if (!silent) {
+      this.cacheProjectionDefaults(projection);
+      this.scheduleRender();
+    }
   }
 
   // ---------------------------------------------------------------- 审批
@@ -1573,9 +1592,20 @@ export class AcpController implements ChatBackendController {
       .filter((s) => s.id !== this.draftId && !isHidden?.(s.id))
       .sort((a, b) => b.updatedAt - a.updatedAt);
     const interactions = [...this.permissions.values()].filter((p) => p.sessionId === sessionId).map((p) => this.interactionOf(p));
+    const usingFallbackMode = !projection?.configOptions.length && !this.activeId;
+    const fallbackAutoMode = usingFallbackMode
+      ? mode?.options?.find((o) => o.value.toLowerCase() === 'auto' && !isUnrestrictedMode(o.value, o.name))?.value
+      : undefined;
+    const displayedMode = usingFallbackMode
+      ? ((this.pendingDraftMode && mode?.options?.some((o) => o.value === this.pendingDraftMode)
+          ? this.pendingDraftMode
+          : undefined) ??
+        fallbackAutoMode ??
+        mode?.currentValue)
+      : mode?.currentValue;
     const permissions: PermissionState = {
       options: (mode?.options ?? []).map((o) => o.value),
-      ...(mode?.currentValue ? { current: mode.currentValue } : {}),
+      ...(displayedMode ? { current: displayedMode } : {}),
       labels: Object.fromEntries((mode?.options ?? []).map((o) => [o.value, { name: o.name ?? o.value, ...(o.description ? { description: o.description } : {}) }])),
     };
     const agentCommands = projection?.commands.length ? projection.commands : this.cachedCommands;

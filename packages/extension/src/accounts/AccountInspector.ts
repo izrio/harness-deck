@@ -501,6 +501,7 @@ async function inspectAntigravity(params: {
   const idPayload = decodeJwtPayloadUnsafe(token?.id_token ?? json?.id_token);
   let email =
     (typeof json?.email === 'string' && json.email.trim()) ||
+    (typeof json?.id_token_email === 'string' && json.id_token_email.trim()) ||
     (typeof idPayload?.email === 'string' && idPayload.email.trim()) ||
     undefined;
 

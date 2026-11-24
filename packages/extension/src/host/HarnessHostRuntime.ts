@@ -272,6 +272,7 @@ const WORKBENCH_MESSAGE_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
 
 export interface HarnessHostRuntime {
   handleWebviewMessage(message: WebviewToHost, clientId?: string): void;
+  registerIdeClient?(clientId: string, send: (message: HostToWebview) => void): () => void;
   onViewVisible(): void;
   onWorkspaceChanged(): void;
   executeCommand(cmd: HostCommandId): Promise<void>;
@@ -322,7 +323,7 @@ export function createHarnessHostRuntime(
         startIfNeededRef();
       }
       if (remoteBridgeBox.current) {
-        clientHub.sendTo('ide', { type: 'remote', payload: remoteBridgeBox.current.getState() });
+        clientHub.broadcastIde({ type: 'remote', payload: remoteBridgeBox.current.getState() });
       }
     },
   });
@@ -988,6 +989,7 @@ export function createHarnessHostRuntime(
         getPreferences: readNotificationPreferences,
         actionLabel: () => t('notify.openSession'),
         onRemoteNotify: async (event, options) => {
+          const externalUrl = remoteBridgeBox.current?.buildSessionUrl(event.sessionId);
           await pushService.dispatch(
             {
               kind: event.kind,
@@ -996,6 +998,7 @@ export function createHarnessHostRuntime(
               ...(event.sessionId
                 ? { sessionId: event.sessionId, url: `/?session=${encodeURIComponent(event.sessionId)}` }
                 : { url: '/' }),
+              ...(externalUrl ? { externalUrl } : {}),
             },
             options,
           );
@@ -1469,6 +1472,7 @@ export function createHarnessHostRuntime(
   let mcpImportCandidates: readonly McpImportCandidate[] | undefined;
   let mcpScannedSources: readonly string[] | undefined;
   let skillMarket: SkillMarketState | undefined;
+  let skillMarketSeq = 0;
   let mcpMarket: McpMarketState | undefined;
   let mcpMarketSeq = 0;
 
@@ -2842,7 +2846,7 @@ export function createHarnessHostRuntime(
 
   const pushRemote = (): void => {
     if (!remoteBridgeBox.current) return;
-    clientHub.sendTo('ide', { type: 'remote', payload: remoteBridgeBox.current.getState() });
+    clientHub.broadcastIde({ type: 'remote', payload: remoteBridgeBox.current.getState() });
     updateStatusBar();
   };
 
@@ -3465,6 +3469,12 @@ export function createHarnessHostRuntime(
             getHttpProxy: () => platform.settings.getHttpProxy(),
             ...(clientVersion ? { clientVersion } : {}),
           });
+          // 先回传单播结果给请求方，再广播 accounts：避免 pushAccounts 变更账号 status 导致前端提前作废当前 requestId。
+          post(
+            quota
+              ? { type: 'quotaFetched', payload: { requestId, quota } }
+              : { type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } },
+          );
           if (quota) {
             if (providerId === 'antigravity') {
               await syncActiveAntigravitySlotFromDisk({
@@ -3487,13 +3497,13 @@ export function createHarnessHostRuntime(
             if (prev?.quota?.queriedAt !== quota.queriedAt) {
               pushAccounts();
             }
+          } else if (platform.settings.get<boolean>('backendTrace', false)) {
+            log(`订阅额度暂不可用（backend=${backendId}，provider=${providerId}，account=${activeAccId}）`);
           }
-          post(
-            quota
-              ? { type: 'quotaFetched', payload: { requestId, quota } }
-              : { type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } },
-          );
-        } catch {
+        } catch (error) {
+          if (platform.settings.get<boolean>('backendTrace', false)) {
+            log(`订阅额度查询异常（backend=${backendId}）：${error instanceof Error ? error.message : String(error)}`);
+          }
           // 额度查询失败不应该打扰用户，前端收到 unavailable 会隐藏标识。
           post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
         }
@@ -4067,15 +4077,22 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'fetchSkillMarket') {
       void (async () => {
-        if (skillMarket?.loading && !message.payload.force) return;
+        const seq = ++skillMarketSeq;
         skillMarket = {
           items: skillMarket?.items ?? [],
           source: skillMarket?.source ?? 'fallback',
           loading: true,
+          ...(message.payload.query ? { query: message.payload.query } : {}),
           ...(skillMarket?.updatedAt ? { updatedAt: skillMarket.updatedAt } : {}),
         };
         pushExtensions();
-        skillMarket = await fetchOnlineSkillMarket({ force: message.payload.force });
+        const next = await fetchOnlineSkillMarket({
+          query: message.payload.query,
+          force: message.payload.force,
+          getHttpProxy: () => platform.settings.getHttpProxy(),
+        });
+        if (seq !== skillMarketSeq) return;
+        skillMarket = next;
         pushExtensions();
       })();
       return;
@@ -4094,6 +4111,7 @@ export function createHarnessHostRuntime(
         const next = await fetchOnlineMcpMarket({
           query: message.payload.query,
           force: message.payload.force,
+          getHttpProxy: () => platform.settings.getHttpProxy(),
         });
         if (seq !== mcpMarketSeq) return;
         mcpMarket = next;
@@ -4677,6 +4695,27 @@ export function createHarnessHostRuntime(
       remoteBridge.clearPairing();
       return;
     }
+    if (message.type === 'updateRemoteDevice') {
+      void remoteBridge.updateDevice(message.payload.deviceId, message.payload).then(({ affectedClientIds }) => {
+        if (affectedClientIds.length > 0) {
+          const base = active
+            ? withUnifiedTabs(active.backend.controller.peekSnapshot?.() ?? active.backend.controller.snapshot())
+            : idleSnapshot();
+          const snap: HostSnapshot = {
+            ...base,
+            ...(base.hostKind === undefined ? { hostKind: platform.hostKind } : {}),
+            ...(remoteBridgeBox.current && base.remote === undefined
+              ? { remote: remoteBridgeBox.current.getState() }
+              : {}),
+          };
+          for (const cid of affectedClientIds) {
+            clientHub.sendTo(cid, { type: 'snapshot', payload: snap });
+          }
+        }
+        post({ type: 'toast', payload: { level: 'info', text: t('remote.deviceUpdated') } });
+      });
+      return;
+    }
     if (message.type === 'revokeRemoteDevice') {
       void remoteBridge.revokeDevice(message.payload.deviceId).then(() => {
         post({ type: 'toast', payload: { level: 'info', text: t('remote.deviceRevoked') } });
@@ -4713,17 +4752,44 @@ export function createHarnessHostRuntime(
       });
       return;
     }
+    if (message.type === 'probeQuickTunnel') {
+      void remoteBridge.probeQuickTunnel();
+      return;
+    }
+    if (message.type === 'setQuickTunnelEnabled') {
+      void remoteBridge.setQuickTunnelEnabled(message.payload.enabled).then((view) => {
+        if (message.payload.enabled && view.status === 'error') {
+          post({
+            type: 'toast',
+            payload: { level: 'error', text: t('remote.quickTunnelFailed', view.error ?? 'unknown') },
+          });
+        } else if (message.payload.enabled && view.url) {
+          post({
+            type: 'toast',
+            payload: { level: 'info', text: t('remote.quickTunnelStarted', view.url) },
+          });
+        } else if (!message.payload.enabled) {
+          post({
+            type: 'toast',
+            payload: { level: 'info', text: t('remote.quickTunnelStopped') },
+          });
+        }
+      });
+      return;
+    }
     if (message.type === 'setRemotePushConfig') {
       void pushService.updateConfig(message.payload).then(() => pushRemote());
       return;
     }
     if (message.type === 'testRemotePush') {
+      const externalUrl = remoteBridge.buildSessionUrl();
       void pushService
         .dispatch(
           {
             kind: 'test',
             title: 'Halo',
             body: t('remote.pushTestBody'),
+            ...(externalUrl ? { externalUrl } : {}),
           },
           { ignoreFocusCheck: true },
         )
@@ -4737,7 +4803,7 @@ export function createHarnessHostRuntime(
       return;
     }
     if (message.type === 'ready') {
-      const isIdeClient = (clientRequestContext.getStore()?.clientId ?? 'ide') === 'ide';
+      const isIdeClient = (clientRequestContext.getStore()?.surface ?? 'ide') === 'ide';
       const dshPath = platform.settings.get<string>('dsh.path', '');
       const zcodePath = platform.settings.get<string>('zcode.path', '');
       const claudePath = platform.settings.get<string>('claude.path', '');
@@ -5006,6 +5072,14 @@ export function createHarnessHostRuntime(
 
   return {
     handleWebviewMessage,
+    registerIdeClient: (clientId, send) =>
+      clientHub.registerClient({
+        id: clientId,
+        surface: 'ide',
+        scope: 'operate',
+        visible: true,
+        send,
+      }),
     onViewVisible: startIfNeeded,
     onWorkspaceChanged: () => active?.backend.controller.workspaceChanged(),
     executeCommand,

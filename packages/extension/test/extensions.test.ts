@@ -721,9 +721,30 @@ describe('统一 MCP 服务器管理、各 Agent 配置导入与启动注入', (
     expect(fallbackMcp.items.length).toBe(BUILTIN_MCP_MARKET.length);
     expect(fallbackMcp.error).toContain('ECONNREFUSED');
 
-    // 在线拉取 GitHub 技能仓库树 + SKILL.md Frontmatter
+    // 在线拉取 GitHub 技能仓库树 + SKILL.md Frontmatter，并支持 skills.sh 在线搜索
     const mockSkillFetch: typeof fetch = async (input) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes('skills.sh/api/search')) {
+        const parsedUrl = new URL(url);
+        const q = parsedUrl.searchParams.get('q') ?? '';
+        if (q === 'tailwind') {
+          return new Response(
+            JSON.stringify({
+              skills: [
+                {
+                  id: 'community/skills/tailwind-pro',
+                  source: 'community/skills',
+                  skillId: 'tailwind-pro',
+                  name: 'tailwind-pro',
+                  installs: 12400,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ skills: [] }), { status: 200 });
+      }
       if (url.includes('/repos/anthropics/skills/git/trees/')) {
         return new Response(
           JSON.stringify({
@@ -750,6 +771,19 @@ describe('统一 MCP 服务器管理、各 Agent 配置导入与启动注入', (
         name: 'brand-new-skill',
         description: 'Live React UI toolkit',
         category: 'frontend',
+      }),
+    ]);
+
+    const searchedSkills = await fetchOnlineSkillMarket({ query: 'tailwind', force: true, fetchImpl: mockSkillFetch });
+    expect(searchedSkills.source).toBe('online');
+    expect(searchedSkills.query).toBe('tailwind');
+    expect(searchedSkills.items).toEqual([
+      expect.objectContaining({
+        id: 'community/skills/tailwind-pro',
+        name: 'tailwind-pro',
+        repo: 'community/skills',
+        subpath: 'skills/tailwind-pro',
+        installs: 12400,
       }),
     ]);
 

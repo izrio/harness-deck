@@ -639,7 +639,7 @@ export class ZcodeController implements ChatBackendController {
         projection.applyMetadata(created);
         this.applySessionModelCatalog(created);
       }
-      if (this.draftMode !== 'auto') {
+      if (this.draftMode && projection.mode !== this.draftMode) {
         projection.mode = this.draftMode;
         await this.applyMode(sessionId, this.draftMode, true);
       }

@@ -1,4 +1,4 @@
-import { PROVIDER_PRESETS, type BackendView, type ProviderView } from '@harness-deck/shared';
+import type { BackendView, ProviderView } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -9,8 +9,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useT } from '../../../i18n.ts';
 import { cn } from '../../../lib/utils.ts';
-import { ValuePill } from '../../beautifului/index.ts';
 import { MoreIcon, PencilIcon, TrashIcon } from '../../icons.tsx';
+import { ProviderVendorIcon } from './ProviderVendorIcon.tsx';
 
 export function SavedProviderCard({
   provider,
@@ -30,8 +30,6 @@ export function SavedProviderCard({
   readonly onDelete: () => void;
 }) {
   const t = useT();
-  const preset = PROVIDER_PRESETS.find((p) => p.id === provider.presetId);
-  const badge = preset?.badge ?? provider.name.slice(0, 1).toUpperCase();
   const usesGatewayConversion =
     protocolGatewayEnabled &&
     Boolean(provider.openaiChatUrl?.trim() || provider.openaiResponsesUrl?.trim()) &&
@@ -49,52 +47,57 @@ export function SavedProviderCard({
     <div
       data-testid={`provider-card-${provider.id}`}
       className={cn(
-        'flex items-start justify-between gap-3 px-3.5 py-3 transition-colors duration-150',
-        editing ? 'bg-accent-tint/45 shadow-[inset_2px_0_0_0_var(--accent)]' : 'hover:bg-hover/35',
+        'flex items-start justify-between gap-3 rounded-xl px-3 py-3 transition-colors duration-150',
+        editing ? 'bg-accent-tint/50' : 'hover:bg-canvas/70 dark:hover:bg-hover/35',
       )}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="inline-flex size-6 shrink-0 items-center justify-center rounded bg-inset text-[12px] font-semibold text-ink shadow-hairline">
-            {badge}
-          </span>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <ProviderVendorIcon
+            presetId={provider.presetId}
+            name={provider.name}
+            defaultModel={provider.defaultModel}
+          />
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="text-[13px] font-semibold text-ink">{provider.name}</span>
               {provider.hasApiKey ? (
-                <ValuePill tone="green" className="text-[10.5px]">
+                <span className="text-[11.5px] text-green">
                   {t('settings.providers.apiKeySavedBadge')}
-                </ValuePill>
+                </span>
               ) : (
-                <ValuePill tone="orange" className="text-[10.5px]">
+                <span className="text-[11.5px] text-orange">
                   {t('settings.providers.apiKeyMissingBadge')}
-                </ValuePill>
+                </span>
               )}
               {provider.defaultModel ? (
-                <ValuePill className="font-mono text-[10.5px]">
+                <span className="font-mono text-[11.5px] text-ink-3">
                   {t('settings.providers.defaultTag', provider.defaultModel)}
-                </ValuePill>
+                </span>
               ) : null}
               {provider.smallModel && provider.smallModel !== provider.defaultModel ? (
-                <ValuePill className="font-mono text-[10.5px]">
+                <span className="font-mono text-[11.5px] text-ink-3">
                   {t('settings.providers.smallTag', provider.smallModel)}
-                </ValuePill>
+                </span>
               ) : null}
               {usesGatewayConversion ? (
-                <ValuePill tone="accent" className="text-[10.5px]">
+                <span className="rounded-md bg-accent-tint/70 px-1.5 py-0.5 text-[10.5px] font-medium text-accent-ink">
                   {t('settings.providers.convertedBadge')}
-                </ValuePill>
+                </span>
               ) : null}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 pl-8 text-[11.5px]">
+        <div className="flex flex-wrap items-center gap-1.5 pl-9.5 text-[11.5px]">
           {allBoundNames.length > 0 ? (
             allBoundNames.map((name) => (
-              <ValuePill key={name} tone="accent" className="text-[11px]">
+              <span
+                key={name}
+                className="rounded-md bg-accent-tint/65 px-1.5 py-0.5 text-[11px] font-medium text-accent-ink"
+              >
                 {name}
-              </ValuePill>
+              </span>
             ))
           ) : (
             <span className="text-ink-3">{t('settings.providers.unbound')}</span>

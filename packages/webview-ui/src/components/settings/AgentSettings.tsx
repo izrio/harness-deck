@@ -1,13 +1,13 @@
 /**
- * 设置 -> Agent -> 智能体配置：
- * Node.js/npm 运行环境、内置智能体安装/版本切换/密钥配置、以及外部 ACP 智能体管理（新增/编辑/删除）。
+ * 设置 -> Agent -> 运行时配置：
+ * 去线留白：Node 运行环境退居顶部轻量状态条，智能体列表使用无边框柔和色块。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { BackendView } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
 import { useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { AgentIcon, GlobeIcon, PlusIcon, RefreshIcon } from '../icons.tsx';
+import { AgentIcon, GlobeIcon, PlusIcon } from '../icons.tsx';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -168,35 +168,22 @@ export function AgentSettings() {
   };
 
   return (
-    <>
-      <SettingsSection
-        title={t('settings.runtimeEnv')}
-        testId="settings-runtime-env"
-        actions={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            data-testid="settings-refresh-env"
-            title={t('settings.refresh')}
-            aria-label={t('settings.refresh')}
-            onClick={refreshAll}
-          >
-            <RefreshIcon className="size-3.5 text-ink-2" />
-          </Button>
-        }
-      >
-        <NodeEnvBanner nodeEnv={nodeEnv} />
-      </SettingsSection>
+    <div className="flex flex-col gap-6">
+      <div data-testid="settings-runtime-env">
+        <NodeEnvBanner nodeEnv={nodeEnv} onRefresh={refreshAll} />
+      </div>
 
-      <div className="flex flex-col gap-2" data-testid="settings-backends">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-0.5">
-          <h3 className="m-0 truncate text-[13px] font-semibold tracking-tight text-ink">{t('settings.backends')}</h3>
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <SettingsSection
+        title={t('settings.backends')}
+        testId="settings-backends"
+        surface="plain"
+        actions={
+          <>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
+              className="text-ink-2 hover:text-ink"
               data-testid="agent-registry-btn"
               onClick={() => {
                 setRegistryUrl(backends.registryUrl ?? '');
@@ -206,14 +193,14 @@ export function AgentSettings() {
               <GlobeIcon className="size-3.5" />
               <span>{t('settings.agents.registry')}</span>
             </Button>
-            <Button type="button" variant="outline" size="sm" data-testid="agent-add-btn" onClick={openAdd}>
+            <Button type="button" variant="secondary" size="sm" data-testid="agent-add-btn" onClick={openAdd}>
               <PlusIcon className="size-3.5" />
               <span>{t('settings.agents.add')}</span>
             </Button>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2.5">
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2">
           {backends.items.map((backend) => {
             const channel = accounts.channels[backend.id] ?? backend.activeChannel;
             const boundProvider =
@@ -248,7 +235,7 @@ export function AgentSettings() {
             );
           })}
         </div>
-      </div>
+      </SettingsSection>
 
       <Dialog open={Boolean(form)} onOpenChange={(open) => !open && closeForm()}>
         {form ? (
@@ -342,7 +329,7 @@ export function AgentSettings() {
                 />
               </label>
 
-              <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-field/60 px-3 py-2">
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-field/60 px-3 py-2.5">
                 <span className="text-[12px] font-medium text-ink">{t('settings.agents.form.singleSession')}</span>
                 <Switch
                   data-testid="agent-form-single-session"
@@ -409,7 +396,7 @@ export function AgentSettings() {
             {(registry?.entries ?? []).map((entry) => {
               const exists = backends.items.some((backend) => backend.id === entry.id);
               return (
-                <div key={entry.id} className="min-w-0 rounded-control border border-line bg-field/60 px-2.5 py-2">
+                <div key={entry.id} className="min-w-0 rounded-xl bg-field/60 px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-[12.5px] font-medium text-ink">{entry.name}</div>
@@ -420,7 +407,7 @@ export function AgentSettings() {
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       disabled={exists}
                       onClick={() =>
                         postToHost({
@@ -460,6 +447,6 @@ export function AgentSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }

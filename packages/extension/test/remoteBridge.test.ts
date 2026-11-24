@@ -17,7 +17,15 @@ import {
   parseWindowsIpconfigOutput,
   parseWindowsPortProxyV4,
 } from '../src/remote/NetworkInterfaces.ts';
-import { PairingManager } from '../src/remote/PairingManager.ts';
+import { EventEmitter } from 'node:events';
+import type { ChildProcess } from 'node:child_process';
+import { PairingManager, HandoffManager } from '../src/remote/PairingManager.ts';
+import {
+  extractQuickTunnelUrl,
+  parseCloudflaredVersion,
+  probeCloudflared,
+  QuickTunnelManager,
+} from '../src/remote/QuickTunnelService.ts';
 import {
   buildVapidAuthorizationHeader,
   encryptWebPushPayload,
@@ -534,6 +542,207 @@ describe('HD-27 PushService', () => {
       { kind: 'test', title: 'Halo', body: 'Hello' },
     );
     expect(JSON.parse(bark!.body)).toMatchObject({ title: 'Halo', body: 'Hello', group: 'Halo' });
+  });
+
+  it('主流 IM Webhook 预设（飞书 / 企业微信 / 钉钉 / Telegram / Slack / Discord）正确生成请求体、加签与可点击会话链接', () => {
+    const payload = {
+      kind: 'attention' as const,
+      title: 'Halo',
+      body: 'Approve bash',
+      sessionId: 's-42',
+      url: '/?session=s-42',
+      externalUrl: 'https://demo.trycloudflare.com/?session=s-42',
+    };
+
+    const feishu = formatWebhookRequest(
+      { enabled: true, preset: 'feishu', url: 'https://open.feishu.cn/open-apis/bot/v2/hook/tok', secret: 'sec-1' },
+      payload,
+      1_700_000_000_000,
+    );
+    const feishuBody = JSON.parse(feishu!.body) as Record<string, unknown>;
+    expect(feishuBody.msg_type).toBe('post');
+    expect(typeof feishuBody.sign).toBe('string');
+    expect(feishu!.body).toContain('https://demo.trycloudflare.com/?session=s-42');
+
+    const wecom = formatWebhookRequest(
+      { enabled: true, preset: 'wecom', url: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc' },
+      payload,
+    );
+    expect(JSON.parse(wecom!.body)).toMatchObject({ msgtype: 'markdown' });
+    expect(wecom!.body).toContain('[打开会话](https://demo.trycloudflare.com/?session=s-42)');
+
+    const dingtalk = formatWebhookRequest(
+      { enabled: true, preset: 'dingtalk', url: 'https://oapi.dingtalk.com/robot/send?access_token=abc', secret: 'SEC123' },
+      payload,
+      1_700_000_000_000,
+    );
+    expect(dingtalk!.url).toContain('timestamp=1700000000000');
+    expect(dingtalk!.url).toContain('sign=');
+    expect(JSON.parse(dingtalk!.body)).toMatchObject({ msgtype: 'markdown' });
+
+    const telegram = formatWebhookRequest(
+      { enabled: true, preset: 'telegram', url: 'https://api.telegram.org/bot123:abc/sendMessage?chat_id=9988' },
+      payload,
+    );
+    expect(telegram!.url).toBe('https://api.telegram.org/bot123:abc/sendMessage');
+    expect(JSON.parse(telegram!.body)).toMatchObject({ chat_id: '9988', parse_mode: 'HTML' });
+    expect(telegram!.body).toContain('https://demo.trycloudflare.com/?session=s-42');
+
+    const slack = formatWebhookRequest(
+      { enabled: true, preset: 'slack', url: 'https://hooks.slack.com/services/T1/B1/X1' },
+      payload,
+    );
+    expect(slack!.body).toContain('<https://demo.trycloudflare.com/?session=s-42|Open Session>');
+
+    const discord = formatWebhookRequest(
+      { enabled: true, preset: 'discord', url: 'https://discord.com/api/webhooks/1/tok' },
+      payload,
+    );
+    expect(JSON.parse(discord!.body)).toMatchObject({
+      embeds: [{ title: 'Halo', description: 'Approve bash', url: 'https://demo.trycloudflare.com/?session=s-42' }],
+    });
+  });
+});
+
+describe('远程增强：QuickTunnelService / HandoffManager / 实时权限切换', () => {
+  it('QuickTunnelService 探测 cloudflared 版本并解析 trycloudflare 隧道地址', async () => {
+    expect(parseCloudflaredVersion('cloudflared version 2025.4.0 (built 2025-04-01)')).toBe('2025.4.0');
+    expect(extractQuickTunnelUrl('INF |  https://bright-fox-123.trycloudflare.com  |')).toBe(
+      'https://bright-fox-123.trycloudflare.com',
+    );
+
+    const probed = await probeCloudflared(async () => ({
+      stdout: 'cloudflared version 2025.4.0',
+      stderr: '',
+    }));
+    expect(probed).toEqual({ installed: true, version: '2025.4.0' });
+
+    const missing = await probeCloudflared(async () => {
+      const err = new Error('ENOENT') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      throw err;
+    });
+    expect(missing).toEqual({ installed: false });
+
+    let killed = false;
+    const manager = new QuickTunnelManager({
+      exec: async () => ({ stdout: 'cloudflared version 2025.4.0', stderr: '' }),
+      spawn: () => {
+        const proc = new EventEmitter() as unknown as ChildProcess & {
+          stdout: EventEmitter;
+          stderr: EventEmitter;
+        };
+        (proc as unknown as { stdout: EventEmitter }).stdout = new EventEmitter();
+        (proc as unknown as { stderr: EventEmitter }).stderr = new EventEmitter();
+        proc.kill = (() => {
+          killed = true;
+          return true;
+        }) as ChildProcess['kill'];
+        queueMicrotask(() => {
+          proc.stderr.emit('data', Buffer.from('INF | https://halo-demo.trycloudflare.com |\n'));
+        });
+        return proc;
+      },
+      onStateChange: () => undefined,
+    });
+
+    const started = await manager.start(37890);
+    expect(started.status).toBe('running');
+    expect(started.url).toBe('https://halo-demo.trycloudflare.com');
+    expect(manager.getUrl()).toBe('https://halo-demo.trycloudflare.com');
+
+    await manager.stop();
+    expect(killed).toBe(true);
+    expect(manager.getUrl()).toBeUndefined();
+  });
+
+  it('HandoffManager 签发一次性跨入口票据，ScopeGuard 拦截远程管理写操作，设备重命名与权限切换实时生效', async () => {
+    let now = 1_000;
+    const hm = new HandoffManager(() => now);
+    const { token } = hm.issue('dev-1', 5_000);
+    expect(hm.redeem(token)).toEqual({ ok: true, deviceId: 'dev-1' });
+    expect(hm.redeem(token)).toEqual({ ok: false });
+
+    const { token: expToken } = hm.issue('dev-2', 100);
+    now += 200;
+    expect(hm.redeem(expToken)).toEqual({ ok: false });
+
+    expect(authorizeRemoteMessage('operate', { type: 'updateRemoteDevice', payload: { deviceId: 'd1', name: 'x' } }).ok).toBe(false);
+    expect(authorizeRemoteMessage('operate', { type: 'setQuickTunnelEnabled', payload: { enabled: true } }).ok).toBe(false);
+    expect(authorizeRemoteMessage('operate', { type: 'probeQuickTunnel', payload: {} }).ok).toBe(false);
+
+    const kv = new MemoryKVStore();
+    const deviceAuth = new DeviceAuthStore(kv);
+    const pushService = new PushService(kv, deviceAuth, { isWindowFocused: () => false });
+    const hub = new ClientHub({
+      hostKind: 'vscode',
+      postToIde: () => undefined,
+      isIdeVisible: () => true,
+    });
+    const received: WebviewToHost[] = [];
+    const bridge = new RemoteBridgeServer({
+      hostKind: 'vscode',
+      globalState: kv,
+      clientHub: hub,
+      deviceAuth,
+      pushService,
+      bindHost: '127.0.0.1',
+      port: 0,
+      locale: () => 'zh',
+      onWebviewMessage: (msg) => received.push(msg),
+      onStateChange: () => undefined,
+      log: () => undefined,
+    });
+
+    try {
+      const state = await bridge.generatePairing({ scope: 'operate', routeKind: 'lan' });
+      const baseUrl = `http://127.0.0.1:${state.port!}`;
+      const pairRes = await fetch(`${baseUrl}/api/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: state.pairing!.code, deviceName: 'My Phone' }),
+      });
+      const cookie1 = (pairRes.headers.get('set-cookie') ?? '').split(';')[0]!;
+      const pairJson = (await pairRes.json()) as { device: { id: string } };
+
+      // 跨入口 Handoff：签发票据并兑换第二枚同设备 Cookie（不新增重复设备）
+      const handoffRes = await fetch(`${baseUrl}/api/auth/handoff`, {
+        method: 'POST',
+        headers: { Cookie: cookie1 },
+      });
+      const handoffJson = (await handoffRes.json()) as { ok: boolean; token: string };
+      expect(handoffJson.ok).toBe(true);
+
+      const redeemRes = await fetch(`${baseUrl}/api/auth/handoff/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: handoffJson.token }),
+      });
+      expect(redeemRes.status).toBe(200);
+      const cookie2 = (redeemRes.headers.get('set-cookie') ?? '').split(';')[0]!;
+      expect(cookie2).not.toBe(cookie1);
+      expect(bridge.getState().devices).toHaveLength(1);
+
+      // 重命名 + 实时切换为 read-only，活跃 WS 立即生效
+      const ws = new WebSocket(`ws://127.0.0.1:${state.port!}/ws`, { headers: { Cookie: cookie2 } });
+      await waitForOpen(ws);
+      try {
+        const updated = await bridge.updateDevice(pairJson.device.id, { name: 'Work iPhone', scope: 'read-only' });
+        expect(updated.affectedClientIds).toHaveLength(1);
+        expect(updated.state.devices[0]?.name).toBe('Work iPhone');
+        expect(updated.state.devices[0]?.scope).toBe('read-only');
+
+        const blockedToastPromise = nextJsonMessage<HostToWebview>(ws);
+        ws.send(JSON.stringify({ type: 'sendMessage', payload: { text: 'blocked after downgrade' } }));
+        const toast = await blockedToastPromise;
+        expect(toast.type).toBe('toast');
+        expect(received).toHaveLength(0);
+      } finally {
+        ws.terminate();
+      }
+    } finally {
+      await bridge.stop();
+    }
   });
 });
 

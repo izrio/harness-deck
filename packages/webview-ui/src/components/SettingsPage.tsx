@@ -1,16 +1,6 @@
 /**
  * 设置页面（shadcn/ui Sidebar 架构）：
- * 左侧为分组侧边栏导航（Sidebar），右侧为对应设置内容区：
- * - 界面 -> 外观（appearance）：主题、阅读与聊天排版、终端、界面语言
- * - 界面 -> 通知（notifications）：系统通知开关、触发时机与测试通知
- * - Agent -> 外部智能体（agents）：Node.js/npm 环境检测、内置与外部 ACP 智能体管理
- * - Agent -> 服务商（providers）：第三方编程套餐与自定义模型接口及智能体绑定
- * - 扩展 -> 技能（skills）：从 Git 仓库安装 Agent Skills（SKILL.md），Agent 启动时自动带上
- * - 扩展 -> MCP（mcp）：统一管理 MCP 服务器，启动时交给选中的 Agent，支持从各 Agent 配置导入
- * - 会话 -> 会话（session）：编辑器上下文与每轮改动卡片开关、重命名会话
- * - 会话 -> 聊天命令（commands）：存好的提示词，在输入框输入 / 选用，填入后可改再发；所有 Agent 通用
- * - 项目 -> 项目（projects）：最近项目切换、Worktree 复制文件、准备与验收命令
- * - 其他 -> 运行时与诊断（other）：定时任务默认权限、dsh 路径与 Profile、ACP 日志与 VS Code 原生设置
+ * 去线留白：左侧柔和底色导航栏与右侧画布自然过渡，不设边框分割线与冗余面包屑。
  */
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
@@ -20,6 +10,7 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -133,8 +124,6 @@ export function SettingsPage() {
   ];
 
   const flatItems = groups.flatMap((group) => group.items);
-  const activeGroup = groups.find((g) => g.items.some((item) => item.id === activeTab));
-  const activeItem = activeGroup?.items.find((item) => item.id === activeTab);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const idx = flatItems.findIndex((item) => item.id === activeTab);
@@ -156,38 +145,28 @@ export function SettingsPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-canvas" data-testid="settings-page">
-      {/* 顶部标题栏 + 面包屑 */}
-      <div className="surface-glass flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-1.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <Button type="button" variant="ghost" size="xs" data-testid="settings-back" onClick={closeSettingsPage}>
-            <ArrowLeftIcon className="size-3.5" />
-            <span>{t('settings.back')}</span>
-          </Button>
-          <h2 className="m-0 text-[13.5px] font-semibold text-ink">{t('settings.title')}</h2>
-          {activeGroup && activeItem ? (
-            <span
-              className="hidden items-center gap-1.5 truncate text-[12px] text-ink-3 sm:inline-flex"
-              data-testid="settings-breadcrumb"
-            >
-              <span>/</span>
-              <span>{activeGroup.label}</span>
-              <span>/</span>
-              <span className="font-medium text-ink-2">{activeItem.label}</span>
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      {/* 主体：桌面端左侧 shadcn/ui Sidebar；窄屏移动端顶部横向标签条 + 内容区 */}
       {isMobile ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex shrink-0 items-center gap-2 px-3 pt-3 pb-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="-ml-1 text-ink-2 hover:text-ink"
+              data-testid="settings-back"
+              onClick={closeSettingsPage}
+            >
+              <ArrowLeftIcon className="size-3.5" />
+              <span>{t('settings.back')}</span>
+            </Button>
+          </div>
           <div
             role="tablist"
             aria-orientation="horizontal"
             aria-label={t('settings.title')}
             data-testid="settings-tabs"
             onKeyDown={onKeyDown}
-            className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line bg-sidebar px-2.5 py-1.5"
+            className="flex shrink-0 items-center gap-1 overflow-x-auto px-3 py-2"
           >
             {flatItems.map((item, index) => {
               const selected = activeTab === item.id;
@@ -207,8 +186,8 @@ export function SettingsPage() {
                   onClick={() => setSettingsTab(item.id)}
                   className={
                     selected
-                      ? 'inline-flex shrink-0 items-center gap-1.5 rounded-[7px] bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink shadow-card'
-                      : 'inline-flex shrink-0 items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-[12px] text-ink-2 hover:bg-hover hover:text-ink'
+                      ? 'inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-field px-3 py-1.5 text-[12px] font-medium text-ink dark:bg-surface'
+                      : 'inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] text-ink-2 transition-colors hover:bg-hover/70 hover:text-ink'
                   }
                 >
                   {item.icon}
@@ -222,9 +201,9 @@ export function SettingsPage() {
             id={`settings-panel-${activeTab}`}
             aria-labelledby={`settings-tab-${activeTab}`}
             data-testid="settings-content"
-            className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-3"
+            className="topbar-scroll-fade min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-3 pb-10"
           >
-            <div className="mx-auto flex w-full max-w-[var(--content-width)] flex-col gap-3">
+            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-8">
               {renderActiveTab(activeTab)}
             </div>
           </div>
@@ -234,23 +213,37 @@ export function SettingsPage() {
           <Sidebar
             collapsible="none"
             aria-label={t('settings.title')}
-            className="w-36 shrink-0 overflow-y-auto border-r border-sidebar-border sm:w-48"
+            className="w-44 shrink-0 overflow-y-auto bg-inset/85 sm:w-52 dark:bg-page/75"
           >
+            <SidebarHeader className="px-3 pt-4 pb-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-fit justify-start px-2 text-ink-2 hover:bg-hover/70 hover:text-ink"
+                data-testid="settings-back"
+                onClick={closeSettingsPage}
+              >
+                <ArrowLeftIcon className="size-3.5" />
+                <span>{t('settings.back')}</span>
+              </Button>
+            </SidebarHeader>
+
             <SidebarContent
               role="tablist"
               aria-orientation="vertical"
               aria-label={t('settings.title')}
               data-testid="settings-tabs"
               onKeyDown={onKeyDown}
-              className="gap-2 p-1.5"
+              className="gap-4 px-2.5 pt-1 pb-8"
             >
               {groups.map((group) => (
-                <SidebarGroup key={group.id} className="p-1" data-testid={`sidebar-group-${group.id}`}>
-                  <SidebarGroupLabel className="h-6 px-2 text-[10.5px] font-semibold tracking-wider text-ink-3 uppercase">
+                <SidebarGroup key={group.id} className="p-0" data-testid={`sidebar-group-${group.id}`}>
+                  <SidebarGroupLabel className="h-6 px-2.5 text-[11px] font-medium text-ink-3/85">
                     {group.label}
                   </SidebarGroupLabel>
                   <SidebarGroupContent>
-                    <SidebarMenu>
+                    <SidebarMenu className="gap-0.5">
                       {group.items.map((item) => {
                         const index = itemCursor++;
                         const selected = activeTab === item.id;
@@ -270,7 +263,7 @@ export function SettingsPage() {
                               tabIndex={selected ? 0 : -1}
                               data-testid={`settings-tab-${item.id}`}
                               onClick={() => setSettingsTab(item.id)}
-                              className="text-[12.5px] data-[active=true]:bg-surface data-[active=true]:shadow-card"
+                              className="rounded-lg px-2.5 text-[12.5px] text-ink-2 hover:bg-hover/70 hover:text-ink data-[active=true]:bg-field/95 data-[active=true]:font-medium data-[active=true]:text-ink dark:data-[active=true]:bg-surface/90"
                             >
                               {item.icon}
                               <span>{item.label}</span>
@@ -290,9 +283,9 @@ export function SettingsPage() {
             id={`settings-panel-${activeTab}`}
             aria-labelledby={`settings-tab-${activeTab}`}
             data-testid="settings-content"
-            className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3.5 py-3"
+            className="topbar-scroll-fade min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-7 sm:px-10 sm:py-9"
           >
-            <div className="mx-auto flex w-full max-w-[var(--content-width)] flex-col gap-3">
+            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-9 pb-8">
               {renderActiveTab(activeTab)}
             </div>
           </div>

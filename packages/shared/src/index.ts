@@ -89,6 +89,7 @@ export type {
   RemoteInterfaceCandidate,
   RemotePairingView,
   RemotePushConfig,
+  RemoteQuickTunnelView,
   RemoteRouteKind,
   RemoteScope,
   RemoteState,

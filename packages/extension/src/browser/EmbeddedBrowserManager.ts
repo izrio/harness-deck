@@ -6,6 +6,8 @@
  *   让用户与 AI 共享同一个实时可见、可交互的浏览器会话。
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -17,7 +19,7 @@ import type {
   BrowserStatus,
   BrowserViewportPreset,
 } from '@harness-deck/shared';
-import { CdpClient } from './CdpClient.ts';
+import { CdpClient, type CdpSocketLike } from './CdpClient.ts';
 
 const MAX_CONSOLE_LOGS = 80;
 const FRAME_MIN_INTERVAL_MS = 50;
@@ -249,7 +251,11 @@ export function discoverBrowserExecutable(options?: {
 
 function toWslWindowsPath(linuxPath: string): string | undefined {
   try {
-    const res = spawnSync('wslpath', ['-w', linuxPath], { encoding: 'utf8', timeout: 1_500 });
+    const res = spawnSync('wslpath', ['-w', linuxPath], {
+      encoding: 'utf8',
+      timeout: 1_500,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     if (res.status === 0 && res.stdout.trim()) {
       return res.stdout.trim();
     }
@@ -257,6 +263,347 @@ function toWslWindowsPath(linuxPath: string): string | undefined {
     // ignore
   }
   return undefined;
+}
+
+function toWslLinuxPath(winPath: string): string | undefined {
+  const driveMatch = /^([A-Za-z]):[\\/](.*)$/u.exec(winPath.trim());
+  if (driveMatch) {
+    const drive = driveMatch[1]!.toLowerCase();
+    const rest = driveMatch[2]!.replace(/\\/gu, '/');
+    return `/mnt/${drive}/${rest}`;
+  }
+  try {
+    const res = spawnSync('wslpath', ['-u', winPath], {
+      encoding: 'utf8',
+      timeout: 1_500,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (res.status === 0 && res.stdout.trim()) {
+      return res.stdout.trim();
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+const WIN_DRIVE_PATH_RE = /^[A-Za-z]:\\/u;
+
+function probeWindowsEnvVar(varName: string): string | undefined {
+  const cmdPaths = ['/mnt/c/Windows/System32/cmd.exe', 'cmd.exe'];
+  const cwd = existsSync('/mnt/c') ? '/mnt/c' : undefined;
+  for (const cmd of cmdPaths) {
+    if (cmd.startsWith('/') && !existsSync(cmd)) continue;
+    try {
+      const res = spawnSync(cmd, ['/d', '/c', `echo %${varName}%`], {
+        ...(cwd ? { cwd } : {}),
+        encoding: 'utf8',
+        timeout: 2_500,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      if (res.status === 0 && res.stdout) {
+        const line = res.stdout
+          .split(/\r?\n/u)
+          .map((s) => s.trim())
+          .find((s) => WIN_DRIVE_PATH_RE.test(s) && !s.includes(`%${varName}%`));
+        if (line) return line;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
+
+function scanMntCWindowsTemp(): string | undefined {
+  const usersDir = '/mnt/c/Users';
+  if (existsSync(usersDir)) {
+    try {
+      const ignored = new Set(['public', 'default', 'default user', 'all users', 'desktop.ini']);
+      for (const entry of readdirSync(usersDir)) {
+        if (ignored.has(entry.toLowerCase())) continue;
+        const localDir = join(usersDir, entry, 'AppData', 'Local');
+        if (existsSync(localDir)) {
+          return `C:\\Users\\${entry}\\AppData\\Local`;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  if (existsSync('/mnt/c/Windows/Temp')) return 'C:\\Windows\\Temp';
+  return undefined;
+}
+
+/**
+ * 解析传给 Chromium `--user-data-dir` 的路径：
+ * - 普通 Linux / macOS / Windows 直接使用 `<storageRoot>/browser-profile`；
+ * - WSL2 启动 Windows `.exe`（如 `chrome.exe` / `msedge.exe`）时，禁止使用 `\\wsl.localhost\...` 9P 路径
+ *   （Windows 9P 不支持 `LockFileEx`，会导致 Crashpad / Profile 立即以 code=21 崩溃），
+ *   必须落到真实 Windows NTFS 盘符目录（如 `%LOCALAPPDATA%\Halo\browser-profile-<hash>`）。
+ */
+export function resolveChromiumUserDataDir(
+  storageRoot: string,
+  execPath: string,
+  deps?: {
+    readonly platform?: NodeJS.Platform;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly toWinPath?: (linuxPath: string) => string | undefined;
+    readonly probeWinEnv?: (varName: string) => string | undefined;
+    readonly scanWinBase?: () => string | undefined;
+  },
+): { readonly linuxDir?: string; readonly arg?: string; readonly isWslWinExe: boolean } {
+  const platform = deps?.platform ?? process.platform;
+  const profileDir = join(storageRoot, 'browser-profile');
+  const isWslWinExe = platform === 'linux' && /\.exe$/iu.test(execPath);
+  if (!isWslWinExe) {
+    return { linuxDir: profileDir, arg: profileDir, isWslWinExe: false };
+  }
+
+  const toWin = deps?.toWinPath ?? toWslWindowsPath;
+  const converted = toWin(profileDir);
+  if (converted && WIN_DRIVE_PATH_RE.test(converted)) {
+    return { linuxDir: profileDir, arg: converted, isWslWinExe: true };
+  }
+
+  const env = deps?.env ?? process.env;
+  const probeEnv = deps?.probeWinEnv ?? probeWindowsEnvVar;
+  const scanBase = deps?.scanWinBase ?? scanMntCWindowsTemp;
+
+  const winBase =
+    (env.LOCALAPPDATA && WIN_DRIVE_PATH_RE.test(env.LOCALAPPDATA) ? env.LOCALAPPDATA : undefined) ??
+    (env.TEMP && WIN_DRIVE_PATH_RE.test(env.TEMP) ? env.TEMP : undefined) ??
+    probeEnv('LOCALAPPDATA') ??
+    probeEnv('TEMP') ??
+    scanBase();
+
+  if (!winBase) {
+    return { isWslWinExe: true };
+  }
+
+  const hash = createHash('sha256').update(storageRoot).digest('hex').slice(0, 12);
+  const cleanBase = winBase.replace(/[\\/]+$/u, '');
+  const winProfileDir = `${cleanBase}\\Halo\\browser-profile-${hash}`;
+  const linuxMount = toWslLinuxPath(winProfileDir);
+  return {
+    ...(linuxMount ? { linuxDir: linuxMount } : {}),
+    arg: winProfileDir,
+    isWslWinExe: true,
+  };
+}
+
+const WSL_CDP_BRIDGE_CSHARP = [
+  'using System;',
+  'using System.IO;',
+  'using System.Net;',
+  'using System.Net.WebSockets;',
+  'using System.Text;',
+  'using System.Threading;',
+  'using System.Threading.Tasks;',
+  'public static class HaloCdpBridge {',
+  '  public static void Run(string origin) { RunAsync(origin).GetAwaiter().GetResult(); }',
+  '  private static string ResolveWsUrl(string origin) {',
+  '    if (origin.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) || origin.StartsWith("wss://", StringComparison.OrdinalIgnoreCase)) return origin;',
+  '    using (var wc = new WebClient()) {',
+  '      wc.Encoding = Encoding.UTF8;',
+  '      string listJson = wc.DownloadString(origin + "/json/list");',
+  '      string url = ExtractPageWs(listJson);',
+  '      if (!string.IsNullOrEmpty(url)) return url;',
+  '      string created = wc.UploadString(origin + "/json/new?about:blank", "PUT", "");',
+  '      url = ExtractWs(created);',
+  '      if (!string.IsNullOrEmpty(url)) return url;',
+  '    }',
+  '    throw new Exception("No debuggable browser page target available");',
+  '  }',
+  '  private static string ExtractPageWs(string json) {',
+  '    int idx = 0;',
+  '    while (true) {',
+  '      int t = json.IndexOf("\\"type\\"", idx, StringComparison.Ordinal);',
+  '      if (t < 0) break;',
+  '      int next = json.IndexOf("\\"type\\"", t + 6, StringComparison.Ordinal);',
+  '      int end = next > 0 ? next : json.Length;',
+  '      string slice = json.Substring(t, end - t);',
+  '      if (slice.IndexOf("\\"page\\"", StringComparison.Ordinal) >= 0) {',
+  '        string ws = ExtractWs(slice);',
+  '        if (!string.IsNullOrEmpty(ws)) return ws;',
+  '      }',
+  '      idx = t + 6;',
+  '    }',
+  '    return ExtractWs(json);',
+  '  }',
+  '  private static string ExtractWs(string s) {',
+  '    int k = s.IndexOf("\\"webSocketDebuggerUrl\\"", StringComparison.Ordinal);',
+  '    if (k < 0) return null;',
+  '    int c = s.IndexOf(":", k + 22, StringComparison.Ordinal);',
+  '    if (c < 0) return null;',
+  '    int q1 = s.IndexOf("\\"", c + 1, StringComparison.Ordinal);',
+  '    if (q1 < 0) return null;',
+  '    int q2 = s.IndexOf("\\"", q1 + 1, StringComparison.Ordinal);',
+  '    if (q2 < 0) return null;',
+  '    return s.Substring(q1 + 1, q2 - q1 - 1);',
+  '  }',
+  '  private static async Task RunAsync(string origin) {',
+  '    string wsUrl = ResolveWsUrl(origin);',
+  '    var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\\n" };',
+  '    var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));',
+  '    var ws = new ClientWebSocket();',
+  '    await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);',
+  '    stdout.WriteLine("{\\"__halo_ready\\":true,\\"wsUrl\\":\\"" + wsUrl.Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"") + "\\"}");',
+  '    var cts = new CancellationTokenSource();',
+  '    var readWs = Task.Run(async () => {',
+  '      var buf = new byte[65536];',
+  '      var ms = new MemoryStream();',
+  '      try {',
+  '        while (ws.State == WebSocketState.Open && !cts.IsCancellationRequested) {',
+  '          ms.SetLength(0);',
+  '          WebSocketReceiveResult r;',
+  '          do {',
+  '            r = await ws.ReceiveAsync(new ArraySegment<byte>(buf), cts.Token);',
+  '            if (r.MessageType == WebSocketMessageType.Close) return;',
+  '            ms.Write(buf, 0, r.Count);',
+  '          } while (!r.EndOfMessage);',
+  '          string msg = Encoding.UTF8.GetString(ms.ToArray()).Replace("\\r", "").Replace("\\n", "");',
+  '          stdout.WriteLine(msg);',
+  '        }',
+  '      } catch {}',
+  '      finally { cts.Cancel(); }',
+  '    });',
+  '    var readIn = Task.Run(async () => {',
+  '      try {',
+  '        string line;',
+  '        while ((line = await stdin.ReadLineAsync()) != null && !cts.IsCancellationRequested) {',
+  '          if (line.Length == 0) continue;',
+  '          byte[] bytes = Encoding.UTF8.GetBytes(line);',
+  '          await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);',
+  '        }',
+  '      } catch {}',
+  '      finally { cts.Cancel(); }',
+  '    });',
+  '    await Task.WhenAny(readWs, readIn);',
+  '    try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch {}',
+  '  }',
+  '}',
+].join('\n');
+
+function findWslPowerShell(): string | undefined {
+  const candidates = [
+    '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+    '/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe',
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return findInPath(['powershell.exe', 'pwsh.exe'], 'linux');
+}
+
+/**
+ * WSL2 NAT 模式下 Linux 无法直连 Windows `127.0.0.1:<cdpPort>`：
+ * 通过 Windows 内置 PowerShell + .NET `ClientWebSocket` 走标准输入输出管道转发 CDP JSON-RPC，
+ * 免防火墙配置、免管理员权限、免额外依赖。
+ */
+export class WslCdpBridgeSocket extends EventEmitter implements CdpSocketLike {
+  readyState = 0; // CONNECTING
+  private readonly proc: ChildProcess;
+  private stdoutBuf = '';
+  private stderrBuf = '';
+  private closed = false;
+
+  constructor(cdpOrigin: string, powerShellPath: string) {
+    super();
+    const safeOrigin = cdpOrigin.replace(/'/gu, "''");
+    const script = `$ProgressPreference = 'SilentlyContinue'\nAdd-Type -TypeDefinition @'\n${WSL_CDP_BRIDGE_CSHARP}\n'@\n[HaloCdpBridge]::Run('${safeOrigin}')`;
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const cwd = existsSync('/mnt/c') ? '/mnt/c' : undefined;
+    this.proc = spawn(
+      powerShellPath,
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      {
+        ...(cwd ? { cwd } : {}),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    );
+
+    this.proc.stdout?.on('data', (chunk: Buffer) => {
+      this.stdoutBuf += chunk.toString('utf8');
+      const lines = this.stdoutBuf.split('\n');
+      this.stdoutBuf = lines.pop() ?? '';
+      for (const rawLine of lines) {
+        const line = rawLine.replace(/\r$/u, '');
+        if (!line) continue;
+        if (this.readyState === 0) {
+          try {
+            const parsed = JSON.parse(line) as { __halo_ready?: boolean };
+            if (parsed.__halo_ready) {
+              this.readyState = 1; // OPEN
+              this.emit('open');
+              continue;
+            }
+          } catch {
+            // ignore non-JSON preamble
+          }
+          continue;
+        }
+        this.emit('message', line);
+      }
+    });
+
+    this.proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      // 忽略 PowerShell -EncodedCommand 默认输出的 CLIXML 进度流
+      if (text.trimStart().startsWith('#< CLIXML')) return;
+      this.stderrBuf += text;
+      if (this.stderrBuf.length > 2_048) this.stderrBuf = this.stderrBuf.slice(-2_048);
+    });
+
+    this.proc.once('error', (error) => {
+      this.finishClose(error);
+    });
+
+    this.proc.once('exit', (code) => {
+      if (this.readyState === 0 && !this.closed) {
+        const detail = this.stderrBuf.trim().slice(-300) || `exit code ${String(code)}`;
+        this.finishClose(new Error(`WSL CDP bridge exited before ready: ${detail}`));
+      } else {
+        this.finishClose();
+      }
+    });
+  }
+
+  send(data: string): void {
+    if (this.readyState !== 1 || this.closed || !this.proc.stdin?.writable) {
+      throw new Error('WSL CDP bridge is not open');
+    }
+    const clean = data.replace(/[\r\n]+/gu, '');
+    this.proc.stdin.write(`${clean}\n`);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.readyState = 3; // CLOSED
+    try {
+      this.proc.stdin?.end();
+    } catch {
+      // ignore
+    }
+    try {
+      this.proc.kill('SIGKILL');
+    } catch {
+      // ignore
+    }
+    this.emit('close');
+  }
+
+  private finishClose(error?: Error): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.readyState = 3; // CLOSED
+    if (error) {
+      this.emit('error', error);
+    }
+    this.emit('close');
+  }
 }
 
 const SNAPSHOT_SCRIPT = `(() => {
@@ -488,6 +835,7 @@ export class EmbeddedBrowserManager {
 
     try {
       let cdpHttpOrigin: string;
+      let launchedWslWinExe = false;
       const requestedCdp = params?.cdpUrl?.trim();
 
       if (requestedCdp) {
@@ -504,11 +852,11 @@ export class EmbeddedBrowserManager {
           );
         }
         this.executablePath = execPath;
+        launchedWslWinExe = process.platform === 'linux' && /\.exe$/iu.test(execPath);
         cdpHttpOrigin = await this.spawnChromium(execPath);
       }
 
-      const pageWsUrl = await this.resolvePageTargetWsUrl(cdpHttpOrigin);
-      const client = await CdpClient.connect(pageWsUrl);
+      const client = await this.connectCdpClient(cdpHttpOrigin, launchedWslWinExe);
       this.client = client;
       this.cdpUrl = cdpHttpOrigin;
 
@@ -575,17 +923,21 @@ export class EmbeddedBrowserManager {
 
     const client = this.client;
     this.client = undefined;
+    const child = this.child;
+    this.child = undefined;
     if (client) {
       try {
         await client.send('Page.stopScreencast', undefined, 1_000).catch(() => undefined);
+        // 由我们拉起的浏览器进程（尤其是 WSL2 下的 Windows Chrome）先通过 CDP 优雅关闭，确保立即释放 NTFS profile 锁
+        if (child) {
+          await client.send('Browser.close', undefined, 1_000).catch(() => undefined);
+        }
       } catch {
         // ignore
       }
       client.close();
     }
 
-    const child = this.child;
-    this.child = undefined;
     if (child) {
       try {
         child.kill('SIGTERM');
@@ -1071,11 +1423,10 @@ export class EmbeddedBrowserManager {
   }
 
   private async spawnChromium(execPath: string): Promise<string> {
-    const profileDir = join(this.options.storageRoot, 'browser-profile');
-    await mkdir(profileDir, { recursive: true });
-
-    const isWslWinExe = process.platform === 'linux' && /\.exe$/iu.test(execPath);
-    const userDataDirArg = isWslWinExe ? toWslWindowsPath(profileDir) : profileDir;
+    const resolved = resolveChromiumUserDataDir(this.options.storageRoot, execPath);
+    if (resolved.linuxDir) {
+      await mkdir(resolved.linuxDir, { recursive: true }).catch(() => undefined);
+    }
 
     const args = [
       '--headless=new',
@@ -1083,13 +1434,14 @@ export class EmbeddedBrowserManager {
       '--remote-debugging-address=127.0.0.1',
       '--no-first-run',
       '--no-default-browser-check',
+      '--disable-crash-reporter',
       '--disable-background-networking',
       '--disable-component-update',
       '--disable-sync',
       '--disable-extensions',
       '--disable-popup-blocking',
       `--window-size=${this.viewportWidth},${this.viewportHeight}`,
-      ...(userDataDirArg ? [`--user-data-dir=${userDataDirArg}`] : []),
+      ...(resolved.arg ? [`--user-data-dir=${resolved.arg}`] : []),
       'about:blank',
     ];
 
@@ -1145,9 +1497,29 @@ export class EmbeddedBrowserManager {
     return cdpOrigin;
   }
 
-  private async resolvePageTargetWsUrl(cdpHttpOrigin: string): Promise<string> {
+  private async connectCdpClient(cdpHttpOrigin: string, preferWslBridgeFallback: boolean): Promise<CdpClient> {
+    try {
+      const pageWsUrl = await this.resolvePageTargetWsUrl(cdpHttpOrigin, preferWslBridgeFallback ? 1_500 : undefined);
+      return await CdpClient.connect(pageWsUrl);
+    } catch (directError) {
+      if (!preferWslBridgeFallback) throw directError;
+      const psPath = findWslPowerShell();
+      if (!psPath) throw directError;
+      this.options.log?.(
+        `WSL2 direct CDP fetch to ${cdpHttpOrigin} failed (${directError instanceof Error ? directError.message : String(directError)}); falling back to Windows stdio CDP bridge`,
+      );
+      return await CdpClient.connect(cdpHttpOrigin, {
+        timeoutMs: 15_000,
+        socketFactory: (origin) => new WslCdpBridgeSocket(origin, psPath),
+      });
+    }
+  }
+
+  private async resolvePageTargetWsUrl(cdpHttpOrigin: string, timeoutMs?: number): Promise<string> {
+    if (/^wss?:\/\//iu.test(cdpHttpOrigin)) return cdpHttpOrigin;
     const listUrl = `${cdpHttpOrigin}/json/list`;
-    const res = await fetch(listUrl);
+    const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+    const res = await fetch(listUrl, signal ? { signal } : undefined);
     if (!res.ok) {
       throw new Error(`CDP /json/list failed (${res.status})`);
     }
@@ -1156,7 +1528,10 @@ export class EmbeddedBrowserManager {
     if (page?.webSocketDebuggerUrl) {
       return page.webSocketDebuggerUrl;
     }
-    const createRes = await fetch(`${cdpHttpOrigin}/json/new?about:blank`, { method: 'PUT' });
+    const createRes = await fetch(`${cdpHttpOrigin}/json/new?about:blank`, {
+      method: 'PUT',
+      ...(signal ? { signal } : {}),
+    });
     if (createRes.ok) {
       const created = (await createRes.json()) as { webSocketDebuggerUrl?: string };
       if (created.webSocketDebuggerUrl) return created.webSocketDebuggerUrl;

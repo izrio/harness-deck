@@ -9,7 +9,15 @@ import {
 } from './store.ts';
 import { cn } from './lib/utils.ts';
 import { applyHighContrast, applyThemeMode, applyThemePreset } from './theme.ts';
-import { loadState, postToHost, saveState, startHostBridge, useTransportState } from './vscode.ts';
+import {
+  consumePendingDeepLinkSession,
+  loadState,
+  navigateToRemoteRoute,
+  postToHost,
+  saveState,
+  startHostBridge,
+  useTransportState,
+} from './vscode.ts';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -37,6 +45,7 @@ import { Header } from './components/Header.tsx';
 import { MarkdownPreviewModal } from './components/MarkdownPreviewModal.tsx';
 import { MobilePairingGate } from './components/MobilePairingGate.tsx';
 import { RuntimeBanner } from './components/RuntimeBanner.tsx';
+import { RuntimeSetupView } from './components/RuntimeSetupView.tsx';
 import { SettingsPage } from './components/SettingsPage.tsx';
 import { TabBar } from './components/TabBar.tsx';
 import { Thread } from './components/Thread.tsx';
@@ -70,6 +79,7 @@ export function App() {
   const ready = useView((s) => s.ready);
   const runtime = useView((s) => s.runtime);
   const connection = useView((s) => s.connection);
+  const backends = useView((s) => s.backends);
   const clientSurface = useView((s) => s.clientSurface);
   const clientScope = useView((s) => s.clientScope);
   const settingsOpen = useView((s) => s.settingsOpen);
@@ -144,7 +154,8 @@ export function App() {
   useEffect(() => {
     if (!ready || deepLinkedRef.current || typeof window === 'undefined') return;
     deepLinkedRef.current = true;
-    const targetSession = new URLSearchParams(window.location.search).get('session');
+    const targetSession =
+      consumePendingDeepLinkSession() ?? new URLSearchParams(window.location.search).get('session');
     if (targetSession) {
       setActiveModule('sessions');
       let matched: { projectPath: string; backendId: string } | undefined;
@@ -233,6 +244,25 @@ export function App() {
 
   const viewerOpen = !settingsOpen && (hasPreview || hasDiff);
   const hideChat = settingsOpen || viewerOpen || activeModule !== 'sessions';
+  const currentBackend = backends.items.find((b) => b.id === backends.active);
+  const runtimeHealthyOrStarting =
+    runtime.kind === 'connected' ||
+    runtime.kind === 'starting' ||
+    runtime.kind === 'locating' ||
+    connection === 'connected' ||
+    connection === 'connecting';
+  const allBackendsMissing =
+    backends.items.length > 0 && backends.items.every((b) => b.available === false);
+  const activeBackendMissing =
+    runtime.kind === 'notInstalled' || (currentBackend !== undefined && currentBackend.available === false);
+  const noBackendConfigured =
+    backends.items.length === 0 || (!backends.active && runtime.kind === 'idle');
+  const needsRuntimeSetup =
+    ready &&
+    empty &&
+    !opening &&
+    !runtimeHealthyOrStarting &&
+    (allBackendsMissing || activeBackendMissing || noBackendConfigured);
 
   return (
     <div className="app" style={{ paddingBottom: 'var(--hd-keyboard-inset, 0px)' }}>
@@ -242,13 +272,14 @@ export function App() {
         onOpenMobileDrawer={() => setMobileDrawerOpen(true)}
       />
       {transport.mode === 'mobile-web' && transport.status !== 'connected' && transport.suggestedRoute ? (
-        <a
-          href={transport.suggestedRoute.url}
+        <button
+          type="button"
           data-testid="mobile-route-fallback-banner"
-          className="block shrink-0 border-b border-line bg-accent-tint px-3 py-1.5 text-center text-[12px] font-medium text-accent-ink hover:underline"
+          onClick={() => void navigateToRemoteRoute(transport.suggestedRoute!.url)}
+          className="block w-full shrink-0 border-b border-line bg-accent-tint px-3 py-1.5 text-center text-[12px] font-medium text-accent-ink hover:underline"
         >
           {t('mobile.conn.switchRoute', t(`remote.route.${transport.suggestedRoute.kind}` as MessageKey))}
-        </a>
+        </button>
       ) : null}
       {clientSurface === 'mobile-web' && clientScope === 'read-only' ? (
         <div
@@ -306,9 +337,9 @@ export function App() {
             </div>
           ) : null}
           <SessionsView hidden={hideChat}>
-            <TabBar />
-            {ready ? <RuntimeBanner status={runtime} connection={connection} /> : null}
-            {failure ? (
+            {!needsRuntimeSetup ? <TabBar /> : null}
+            {ready && !needsRuntimeSetup ? <RuntimeBanner status={runtime} connection={connection} /> : null}
+            {failure && !needsRuntimeSetup ? (
               <div className="content-column mt-2">
                 <div className="banner flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[12.5px] text-ink-2 shadow-card">
                   <span className="size-2 shrink-0 rounded-full bg-orange" />
@@ -316,8 +347,16 @@ export function App() {
                 </div>
               </div>
             ) : null}
-            {opening ? <SessionLoading /> : empty ? <EmptyState /> : <Thread />}
-            <Composer onNewWorktree={openNewWorktree} />
+            {needsRuntimeSetup ? (
+              <RuntimeSetupView />
+            ) : opening ? (
+              <SessionLoading />
+            ) : empty ? (
+              <EmptyState />
+            ) : (
+              <Thread />
+            )}
+            {!needsRuntimeSetup ? <Composer onNewWorktree={openNewWorktree} /> : null}
           </SessionsView>
         </main>
         {!settingsOpen ? <WorkbenchRightPanel /> : null}

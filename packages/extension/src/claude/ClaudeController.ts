@@ -773,7 +773,24 @@ export class ClaudeController implements ChatBackendController {
 
         const proj = this.projectionFor(currentKey);
         const wasRunning = proj.running;
+        const desiredModeBeforeInit = proj.mode;
         proj.applyEvent(event);
+        if (
+          event.type === 'system' &&
+          event.subtype === 'init' &&
+          desiredModeBeforeInit &&
+          desiredModeBeforeInit !== 'bypassPermissions' &&
+          typeof event.permissionMode === 'string' &&
+          event.permissionMode &&
+          event.permissionMode !== desiredModeBeforeInit
+        ) {
+          const activeLink = this.links.get(currentKey);
+          if (activeLink?.running) {
+            void activeLink
+              .sendControlRequest({ subtype: 'set_permission_mode', mode: desiredModeBeforeInit }, 8_000)
+              .catch(() => undefined);
+          }
+        }
         if (proj.slashCommands.length > 0) {
           this.discoveredSlashCommands = [...new Set([...this.discoveredSlashCommands, ...proj.slashCommands])];
         }
@@ -862,7 +879,7 @@ export class ClaudeController implements ChatBackendController {
       this.tabs.setCurrentSession(sessionKey);
       const proj = this.projectionFor(sessionKey);
       proj.title = (prompt || t('acp.image')).replace(/\s+/gu, ' ').trim().slice(0, MAX_TITLE);
-      if (this.draftMode !== 'default') proj.mode = this.draftMode;
+      proj.mode = this.draftMode;
     }
 
     this.editorContext.clearPinned();

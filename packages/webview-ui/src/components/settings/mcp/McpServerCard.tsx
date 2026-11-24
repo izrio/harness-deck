@@ -1,7 +1,6 @@
 import type { BackendView, McpServerConfig } from '@harness-deck/shared';
 import { GlobeIcon, MoreIcon, PencilIcon, TerminalIcon, TrashIcon } from '../../icons.tsx';
 import { BackendLogo } from '../../BackendLogo.tsx';
-import { ValuePill } from '../../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -37,11 +36,16 @@ export function McpServerCard({
   const summary = serverSummary(server);
   const isRemote = server.transport !== 'stdio';
 
+  const metaParts: string[] = [server.transport.toUpperCase()];
+  if (server.importedFrom) metaParts.push(t('settings.mcp.importedFrom', server.importedFrom));
+  if (envCount > 0) metaParts.push(t('settings.mcp.envCount', envCount));
+  if (headerCount > 0) metaParts.push(t('settings.mcp.headerCount', headerCount));
+
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 rounded-xl border border-line/75 bg-surface/80 px-4 py-3.5 shadow-xs transition-colors hover:border-line-strong dark:bg-surface/75',
-        server.enabled ? '' : 'opacity-65',
+        'flex flex-col gap-2.5 rounded-2xl bg-field/55 px-4 py-3.5 transition-colors hover:bg-field/80 dark:bg-surface/65 dark:hover:bg-surface/85',
+        server.enabled ? '' : 'opacity-60',
       )}
       data-testid={`mcp-server-${server.id}`}
     >
@@ -49,10 +53,10 @@ export function McpServerCard({
         <div className="flex min-w-0 flex-1 items-start gap-2.5">
           <div
             className={cn(
-              'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border',
+              'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl',
               isRemote
-                ? 'border-brand/25 bg-accent-tint/70 text-accent-ink'
-                : 'border-line/70 bg-field text-ink-2',
+                ? 'bg-accent-tint/70 text-accent-ink'
+                : 'bg-canvas/85 text-ink-2 dark:bg-page/55',
             )}
             aria-hidden="true"
           >
@@ -60,29 +64,13 @@ export function McpServerCard({
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="truncate font-mono text-[13px] font-semibold text-ink">
                 {server.name}
               </span>
-              <ValuePill
-                tone={isRemote ? 'accent' : 'neutral'}
-                className="font-mono text-[10px] uppercase"
-              >
-                {server.transport}
-              </ValuePill>
-              {server.importedFrom ? (
-                <ValuePill className="text-[10.5px]">
-                  {t('settings.mcp.importedFrom', server.importedFrom)}
-                </ValuePill>
-              ) : null}
-              {envCount > 0 ? (
-                <ValuePill className="text-[10.5px]">{t('settings.mcp.envCount', envCount)}</ValuePill>
-              ) : null}
-              {headerCount > 0 ? (
-                <ValuePill className="text-[10.5px]">
-                  {t('settings.mcp.headerCount', headerCount)}
-                </ValuePill>
-              ) : null}
+              <span className="truncate font-mono text-[11px] text-ink-3">
+                {metaParts.join(' · ')}
+              </span>
             </div>
 
             {summary ? (
@@ -143,8 +131,11 @@ export function McpServerCard({
       </div>
 
       <TooltipProvider delayDuration={150}>
-        <div className="flex flex-wrap items-center gap-1.5 sm:pl-10.5">
-          <span className="mr-0.5 text-[11px] text-ink-3">{t('settings.mcp.agentsLabel')}</span>
+        <div
+          className="flex flex-wrap items-center gap-1 sm:pl-10.5"
+          role="group"
+          aria-label={t('settings.mcp.agentsLabel')}
+        >
           {agents.map((agent) => {
             const selected = server.agents.includes(agent.id);
             return (
@@ -158,16 +149,16 @@ export function McpServerCard({
                     title={agent.name}
                     onClick={() => toggleServerAgent(server, agent.id)}
                     className={cn(
-                      'relative inline-flex size-7 cursor-pointer items-center justify-center rounded-md border transition-all',
+                      'relative inline-flex size-7 cursor-pointer items-center justify-center rounded-lg transition-all',
                       selected
-                        ? 'border-brand/70 bg-accent-tint/90 ring-1 ring-inset ring-brand/20'
-                        : 'border-line/60 bg-field/45 opacity-45 grayscale hover:border-line-strong hover:bg-hover hover:opacity-90 hover:grayscale-0',
+                        ? 'bg-accent-tint/90'
+                        : 'opacity-40 grayscale hover:bg-canvas/75 hover:opacity-90 hover:grayscale-0 dark:hover:bg-page/50',
                     )}
                   >
                     <BackendLogo backend={agent} size="sm" />
                     {selected ? (
                       <span
-                        className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-brand ring-1 ring-surface"
+                        className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-brand ring-2 ring-field dark:ring-surface"
                         aria-hidden="true"
                       />
                     ) : null}

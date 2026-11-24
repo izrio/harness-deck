@@ -1,10 +1,6 @@
 /**
  * 设置 -> 界面 -> 外观模块：
- * 分为四个独立子块：
- * 1. 主题：浅色 / 深色 / 跟随系统
- * 2. 阅读与聊天：字体、字号、行高、段距与内容宽度（聊天回复、计划和 Markdown 文件预览共用，切换主题不改变）
- * 3. 终端：终端与代码字体、字号、行高
- * 4. 语言：界面显示语言（跟随 VS Code / 简体中文 / English）
+ * 去线留白：四个独立区块通过间距自然分层，移除冗余「默认」胶囊与行间分割线。
  */
 import { useEffect, useState } from 'react';
 import type { AppearanceState, PreferencesState, ThemePreset } from '@harness-deck/shared';
@@ -15,14 +11,6 @@ import type { ThemeMode } from '../../theme.ts';
 import { postToHost } from '../../vscode.ts';
 import { AppearancePanel } from '../AppearancePanel.tsx';
 import { SettingsSection } from './SettingsSection.tsx';
-import {
-  CheckIcon,
-  ContrastIcon,
-  MonitorIcon,
-  MoonIcon,
-  SunIcon,
-} from '../icons.tsx';
-import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import { NumberStepper } from '../NumberStepper.tsx';
 import { Input } from '@/components/ui/input';
@@ -139,52 +127,45 @@ export function AppearanceSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-5" data-testid="settings-appearance">
+    <div className="flex flex-col gap-8" data-testid="settings-appearance">
       {/* 1. 主题 */}
       <SettingsSection id="appearance-sec-theme" title={t('settings.appearance.theme')}>
-        <div className="divide-y divide-line/60">
-          <div className="px-4 py-3.5">
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3" role="radiogroup" aria-label={t('settings.appearance.theme')}>
-              {THEME_CARDS.map(({ mode, titleKey }) => {
-                const active = currentTheme === mode;
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    data-testid={`theme-card-${mode}`}
-                    onClick={() => selectTheme(mode)}
+        <div className="flex flex-col gap-5 p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" role="radiogroup" aria-label={t('settings.appearance.theme')}>
+            {THEME_CARDS.map(({ mode, titleKey }) => {
+              const active = currentTheme === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  data-testid={`theme-card-${mode}`}
+                  onClick={() => selectTheme(mode)}
+                  className={cn(
+                    'group flex flex-col gap-2 rounded-xl p-2 text-center transition-all duration-150',
+                    active
+                      ? 'bg-canvas ring-2 ring-brand dark:bg-page/70'
+                      : 'bg-canvas/55 hover:bg-canvas/90 dark:bg-page/35 dark:hover:bg-page/60',
+                  )}
+                >
+                  <ThemePreview mode={mode} />
+                  <span
                     className={cn(
-                      'group flex flex-col gap-2 rounded-card p-2.5 text-left transition-all duration-150',
-                      active
-                        ? 'bg-inset shadow-[inset_0_0_0_1.5px_var(--accent)]'
-                        : 'bg-field shadow-hairline hover:bg-hover',
+                      'truncate text-[12px]',
+                      active ? 'font-semibold text-ink' : 'font-medium text-ink-2 group-hover:text-ink',
                     )}
                   >
-                    <ThemePreview mode={mode} />
-                    <div className="flex items-center justify-between gap-1.5">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <span className={cn('inline-flex shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}>
-                          {mode === 'light' ? <SunIcon className="size-3.5" /> : mode === 'dark' ? <MoonIcon className="size-3.5" /> : <MonitorIcon className="size-3.5" />}
-                        </span>
-                        <span className="truncate text-[12.5px] font-medium text-ink">{t(titleKey)}</span>
-                      </div>
-                      {active ? (
-                        <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-brand text-brand-foreground">
-                          <CheckIcon className="size-2.5" />
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    {t(titleKey)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="flex flex-col gap-2 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.preset')}</span>
-            <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('settings.appearance.preset')}>
+            <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={t('settings.appearance.preset')}>
               {THEME_PRESETS.map(({ id, swatch, labelKey }) => {
                 const active = currentPreset === id;
                 return (
@@ -192,11 +173,16 @@ export function AppearanceSettings() {
                     key={id}
                     type="button"
                     size="xs"
-                    variant={active ? 'secondary' : 'outline'}
+                    variant="ghost"
                     role="radio"
                     aria-checked={active}
                     data-testid={`theme-preset-${id}`}
-                    className={cn(active && 'border-brand ring-1 ring-brand/40')}
+                    className={cn(
+                      'rounded-full px-2.5',
+                      active
+                        ? 'bg-canvas font-medium text-ink ring-1 ring-brand/60 hover:bg-canvas dark:bg-page/75'
+                        : 'text-ink-2 hover:bg-canvas/70 hover:text-ink dark:hover:bg-page/45',
+                    )}
                     onClick={() => selectPreset(id)}
                   >
                     <span
@@ -211,11 +197,8 @@ export function AppearanceSettings() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <ContrastIcon className="size-3.5 shrink-0 text-ink-3" />
-              <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.highContrast')}</span>
-            </div>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.highContrast')}</span>
             <Switch
               checked={highContrast}
               data-testid="theme-high-contrast-switch"
@@ -240,9 +223,21 @@ export function AppearanceSettings() {
         id="appearance-sec-terminal"
         testId="appearance-terminal"
         title={t('settings.appearance.terminal')}
+        actions={
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="text-ink-3 hover:text-ink"
+            data-testid="terminal-reset"
+            onClick={resetTerminal}
+          >
+            {t('settings.appearance.resetTerminal')}
+          </Button>
+        }
       >
-        <div className="divide-y divide-line/60">
-          <label className="flex flex-col gap-1.5 px-4 py-3">
+        <div className="flex flex-col gap-4 p-4">
+          <label className="flex flex-col gap-1.5">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalFont')}</span>
             <Input
               size="sm"
@@ -256,58 +251,44 @@ export function AppearanceSettings() {
             />
           </label>
 
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center justify-between gap-4">
             <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalSize')}</span>
-            <div className="flex items-center gap-2">
-              {appearance.terminalFontSize === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-              <NumberStepper
-                size="sm"
-                decLabel={t('settings.appearance.terminalSizeSmaller')}
-                incLabel={t('settings.appearance.terminalSizeLarger')}
-                decDisabled={termSize <= MIN_TERM_SIZE}
-                incDisabled={termSize >= MAX_TERM_SIZE}
-                onDec={() => updateTerminal({ terminalFontSize: Math.max(MIN_TERM_SIZE, termSize - 1) })}
-                onInc={() => updateTerminal({ terminalFontSize: Math.min(MAX_TERM_SIZE, termSize + 1) })}
-                valueTestId="terminal-font-size"
-              >
-                {termSize}px
-              </NumberStepper>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalLineHeight')}</span>
-            <div className="flex items-center gap-2">
-              {appearance.terminalLineHeight === undefined ? <ValuePill className="text-[11px]">{t('appearance.default')}</ValuePill> : null}
-              <NumberStepper
-                size="sm"
-                decLabel={t('settings.appearance.terminalLineHeightSmaller')}
-                incLabel={t('settings.appearance.terminalLineHeightLarger')}
-                decDisabled={termLineHeight <= MIN_TERM_LH + 0.01}
-                incDisabled={termLineHeight >= MAX_TERM_LH - 0.01}
-                onDec={() => updateTerminal({ terminalLineHeight: Number((termLineHeight - 0.1).toFixed(1)) })}
-                onInc={() => updateTerminal({ terminalLineHeight: Number((termLineHeight + 0.1).toFixed(1)) })}
-                valueTestId="terminal-line-height"
-              >
-                {termLineHeight.toFixed(1)}
-              </NumberStepper>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2.5 px-4 py-3">
-            <pre
-              data-testid="terminal-live-preview"
-              className="terminal-surface m-0 overflow-auto rounded-control bg-field px-3 py-2 whitespace-pre-wrap text-ink-2 shadow-hairline [overflow-wrap:anywhere]"
+            <NumberStepper
+              size="sm"
+              decLabel={t('settings.appearance.terminalSizeSmaller')}
+              incLabel={t('settings.appearance.terminalSizeLarger')}
+              decDisabled={termSize <= MIN_TERM_SIZE}
+              incDisabled={termSize >= MAX_TERM_SIZE}
+              onDec={() => updateTerminal({ terminalFontSize: Math.max(MIN_TERM_SIZE, termSize - 1) })}
+              onInc={() => updateTerminal({ terminalFontSize: Math.min(MAX_TERM_SIZE, termSize + 1) })}
+              valueTestId="terminal-font-size"
             >
-              {'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
-            </pre>
-
-            <div className="flex items-center justify-end">
-              <Button type="button" variant="ghost" size="sm" data-testid="terminal-reset" onClick={resetTerminal}>
-                {t('settings.appearance.resetTerminal')}
-              </Button>
-            </div>
+              {termSize}px
+            </NumberStepper>
           </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalLineHeight')}</span>
+            <NumberStepper
+              size="sm"
+              decLabel={t('settings.appearance.terminalLineHeightSmaller')}
+              incLabel={t('settings.appearance.terminalLineHeightLarger')}
+              decDisabled={termLineHeight <= MIN_TERM_LH + 0.01}
+              incDisabled={termLineHeight >= MAX_TERM_LH - 0.01}
+              onDec={() => updateTerminal({ terminalLineHeight: Number((termLineHeight - 0.1).toFixed(1)) })}
+              onInc={() => updateTerminal({ terminalLineHeight: Number((termLineHeight + 0.1).toFixed(1)) })}
+              valueTestId="terminal-line-height"
+            >
+              {termLineHeight.toFixed(1)}
+            </NumberStepper>
+          </div>
+
+          <pre
+            data-testid="terminal-live-preview"
+            className="terminal-surface m-0 overflow-auto rounded-xl bg-canvas/85 px-3.5 py-2.5 whitespace-pre-wrap text-ink-2 [overflow-wrap:anywhere] dark:bg-page/55"
+          >
+            {'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
+          </pre>
         </div>
       </SettingsSection>
 
@@ -317,7 +298,7 @@ export function AppearanceSettings() {
         testId="appearance-language"
         title={t('settings.appearance.language')}
       >
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div className="flex items-center justify-between gap-4 px-4 py-3.5">
           <span className="text-[12.5px] font-medium text-ink">{t('settings.language')}</span>
           <div className="w-44">
             <Select
@@ -351,23 +332,17 @@ export function AppearanceSettings() {
 function ThemePreview({ mode }: { readonly mode: ThemeMode }) {
   if (mode === 'system') {
     return (
-      <div className="relative flex h-15 w-full overflow-hidden rounded-[7px] border border-line/80" aria-hidden="true">
+      <div className="relative flex h-15 w-full overflow-hidden rounded-lg" aria-hidden="true">
         <div className="flex w-1/2 flex-col gap-1.5 p-2" style={{ backgroundColor: LIGHT_PREVIEW.canvas }}>
           <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: LIGHT_PREVIEW.ink }} />
-          <div
-            className="flex-1 rounded-[4px] p-1.5"
-            style={{ backgroundColor: LIGHT_PREVIEW.surface, boxShadow: `0 0 0 1px ${LIGHT_PREVIEW.line}` }}
-          >
+          <div className="flex-1 rounded-[5px] p-1.5" style={{ backgroundColor: LIGHT_PREVIEW.surface }}>
             <div className="h-1 w-full rounded-full" style={{ backgroundColor: LIGHT_PREVIEW.inkMuted }} />
             <div className="mt-1 h-1 w-2/3 rounded-full" style={{ backgroundColor: LIGHT_PREVIEW.accent }} />
           </div>
         </div>
         <div className="flex w-1/2 flex-col gap-1.5 p-2" style={{ backgroundColor: DARK_PREVIEW.canvas }}>
           <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: DARK_PREVIEW.ink }} />
-          <div
-            className="flex-1 rounded-[4px] p-1.5"
-            style={{ backgroundColor: DARK_PREVIEW.surface, boxShadow: `0 0 0 1px ${DARK_PREVIEW.line}` }}
-          >
+          <div className="flex-1 rounded-[5px] p-1.5" style={{ backgroundColor: DARK_PREVIEW.surface }}>
             <div className="h-1 w-full rounded-full" style={{ backgroundColor: DARK_PREVIEW.inkMuted }} />
             <div className="mt-1 h-1 w-2/3 rounded-full" style={{ backgroundColor: DARK_PREVIEW.accent }} />
           </div>
@@ -379,7 +354,7 @@ function ThemePreview({ mode }: { readonly mode: ThemeMode }) {
   const preview = mode === 'dark' ? DARK_PREVIEW : LIGHT_PREVIEW;
   return (
     <div
-      className="flex h-15 w-full flex-col gap-1.5 rounded-[7px] border border-line/80 p-2"
+      className="flex h-15 w-full flex-col gap-1.5 rounded-lg p-2"
       style={{ backgroundColor: preview.canvas }}
       aria-hidden="true"
     >
@@ -387,10 +362,7 @@ function ThemePreview({ mode }: { readonly mode: ThemeMode }) {
         <div className="h-1.5 w-10 rounded-full" style={{ backgroundColor: preview.ink }} />
         <div className="h-1.5 w-3 rounded-full" style={{ backgroundColor: preview.accent }} />
       </div>
-      <div
-        className="flex flex-1 flex-col justify-center gap-1 rounded-[5px] p-1.5"
-        style={{ backgroundColor: preview.surface, boxShadow: `0 0 0 1px ${preview.line}` }}
-      >
+      <div className="flex flex-1 flex-col justify-center gap-1 rounded-[5px] p-1.5" style={{ backgroundColor: preview.surface }}>
         <div className="h-1.5 w-4/5 rounded-full" style={{ backgroundColor: preview.inkMuted }} />
         <div className="h-1.5 w-3/5 rounded-full" style={{ backgroundColor: preview.accent }} />
       </div>

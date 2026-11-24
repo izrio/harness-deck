@@ -761,12 +761,15 @@ export interface SkillMarketItem {
   readonly description: string;
   readonly descZh?: string;
   readonly descEn?: string;
+  /** 来自在线市场（如 skills.sh）的安装热度统计。 */
+  readonly installs?: number;
 }
 
 export interface SkillMarketState {
   readonly items: readonly SkillMarketItem[];
   readonly loading?: boolean;
   readonly source: 'online' | 'fallback';
+  readonly query?: string;
   readonly updatedAt?: number;
   readonly error?: string;
 }
@@ -1353,8 +1356,25 @@ export interface AccountsState {
 
 export type ClientSurface = 'ide' | 'mobile-web';
 export type RemoteScope = 'read-only' | 'operate';
-export type RemoteRouteKind = 'lan' | 'tailscale' | 'tunnel';
-export type RemoteWebhookPreset = 'bark' | 'ntfy' | 'custom';
+export type RemoteRouteKind = 'lan' | 'tailscale' | 'quick-tunnel' | 'tunnel';
+export type RemoteWebhookPreset =
+  | 'bark'
+  | 'ntfy'
+  | 'feishu'
+  | 'wecom'
+  | 'dingtalk'
+  | 'telegram'
+  | 'slack'
+  | 'discord'
+  | 'custom';
+
+export interface RemoteQuickTunnelView {
+  readonly installed: boolean;
+  readonly status: 'stopped' | 'starting' | 'running' | 'error';
+  readonly version?: string;
+  readonly url?: string;
+  readonly error?: string;
+}
 
 export interface RemoteInterfaceCandidate {
   readonly name: string;
@@ -1392,6 +1412,8 @@ export interface RemoteWebhookConfig {
   readonly enabled: boolean;
   readonly preset: RemoteWebhookPreset;
   readonly url: string;
+  /** 可选签名密钥（飞书/钉钉加签）或 Telegram Chat ID。 */
+  readonly secret?: string;
 }
 
 export interface RemotePushConfig {
@@ -1426,6 +1448,7 @@ export interface RemoteState {
   readonly devices: readonly RemoteDeviceView[];
   readonly pairing?: RemotePairingView;
   readonly tailscale?: RemoteTailscaleView;
+  readonly quickTunnel?: RemoteQuickTunnelView;
   readonly tunnelUrl?: string;
   readonly push?: RemotePushConfig;
   readonly wslNat?: RemoteWslNatInfo;

@@ -3,7 +3,7 @@
  * 统一管理 Model Context Protocol 服务器（stdio / http / sse），
  * 选择启动时交给哪些 Agent，并支持从本机与工作区各 Agent 配置文件一键导入。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { McpImportCandidate, McpServerConfig } from '@harness-deck/shared';
 import { useT, type MessageKey } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
@@ -20,7 +20,6 @@ import {
   SparklesIcon,
   SpinnerIcon,
 } from '../icons.tsx';
-import { ValuePill } from '../beautifului/index.ts';
 import { FALLBACK_BACKENDS } from '@/lib/workbenchOptions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -272,11 +271,23 @@ export function McpSettings() {
     setImportOpen(false);
   };
 
+  const marketRetriedRef = useRef(false);
+
   useEffect(() => {
-    if (activeTab === 'market' && !mcp.market) {
-      postToHost({ type: 'fetchMcpMarket', payload: {} });
+    if (activeTab !== 'market') {
+      marketRetriedRef.current = false;
+      return;
     }
-  }, [activeTab, mcp.market]);
+    if (!mcp.market) {
+      postToHost({ type: 'fetchMcpMarket', payload: {} });
+      return;
+    }
+    if (mcp.market.source === 'fallback' && !mcp.market.loading && !marketRetriedRef.current) {
+      marketRetriedRef.current = true;
+      const q = marketQuery.trim();
+      postToHost({ type: 'fetchMcpMarket', payload: { ...(q ? { query: q } : {}), force: true } });
+    }
+  }, [activeTab, mcp.market, marketQuery]);
 
   useEffect(() => {
     if (activeTab !== 'market' || !mcp.market) return;
@@ -288,10 +299,14 @@ export function McpSettings() {
     return () => window.clearTimeout(timer);
   }, [activeTab, marketQuery, mcp.market]);
 
-  const marketItems = useMemo(
-    () => (mcp.market && mcp.market.items.length > 0 ? mcp.market.items : MCP_MARKET_CATALOG),
-    [mcp.market],
-  );
+  const marketItems = useMemo(() => {
+    if (mcp.market) {
+      if (mcp.market.items.length > 0 || (mcp.market.source === 'online' && mcp.market.query)) {
+        return mcp.market.items;
+      }
+    }
+    return MCP_MARKET_CATALOG;
+  }, [mcp.market]);
   const marketLoading = Boolean(mcp.market?.loading);
   const marketSource = mcp.market?.source;
 
@@ -306,9 +321,13 @@ export function McpSettings() {
 
   const filteredMarket = useMemo(() => {
     const q = marketQuery.trim().toLowerCase();
+    const serverMatched =
+      mcp.market?.source === 'online' &&
+      Boolean(q) &&
+      (mcp.market.query?.trim().toLowerCase() ?? '') === q;
     return marketItems.filter((entry) => {
       if (marketCategory !== 'all' && entry.category !== marketCategory) return false;
-      if (!q) return true;
+      if (!q || serverMatched) return true;
       return (
         entry.name.toLowerCase().includes(q) ||
         entry.description.toLowerCase().includes(q) ||
@@ -318,7 +337,7 @@ export function McpSettings() {
         (entry.url?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [marketCategory, marketItems, marketQuery]);
+  }, [marketCategory, marketItems, marketQuery, mcp.market?.query, mcp.market?.source]);
 
   const installFromMarket = (entry: McpMarketEntry) => {
     const defaultAgentIds = agents.map((a) => a.id);
@@ -393,16 +412,17 @@ export function McpSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-2.5" data-testid="settings-mcp">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-0.5">
+    <div className="flex flex-col gap-5" data-testid="settings-mcp">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-1">
         <h3 className="m-0 truncate text-[13px] font-semibold tracking-tight text-ink">
           {t('settings.mcp.title')}
         </h3>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
+            className="text-ink-2 hover:text-ink"
             data-testid="mcp-import-btn"
             onClick={openImportDialog}
           >
@@ -411,7 +431,7 @@ export function McpSettings() {
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             data-testid="mcp-add-btn"
             onClick={openAdd}
@@ -425,47 +445,45 @@ export function McpSettings() {
       <Tabs
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as 'installed' | 'market')}
-        className="gap-0"
+        className="gap-4"
       >
-        <div className="border-b border-line/70">
-          <TabsList variant="line" className="h-9 gap-2 overflow-y-hidden p-0">
-            <TabsTrigger
-              value="installed"
-              data-testid="mcp-tab-installed"
-              onClick={() => setActiveTab('installed')}
-              className="h-9 flex-none gap-1.5 rounded-none px-1.5 text-[12.5px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
-            >
-              <ServerIcon className="size-3.5 shrink-0" />
-              <span>{t('settings.mcp.tabInstalled')}</span>
-              <span className="rounded-full bg-field px-1.5 text-[10.5px] font-medium text-ink-2 tabular-nums">
-                {mcp.servers.length}
-              </span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="market"
-              data-testid="mcp-tab-market"
-              onClick={() => setActiveTab('market')}
-              className="h-9 flex-none gap-1.5 rounded-none px-1.5 text-[12.5px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
-            >
-              <SparklesIcon className="size-3.5 shrink-0" />
-              <span>{t('settings.mcp.tabMarket')}</span>
-              <span className="rounded-full bg-field px-1.5 text-[10.5px] font-medium text-ink-2 tabular-nums">
-                {marketItems.length}
-              </span>
-            </TabsTrigger>
-          </TabsList>
-        </div>
+        <TabsList className="h-auto w-fit gap-1 rounded-xl bg-field/65 p-1 dark:bg-surface/65">
+          <TabsTrigger
+            value="installed"
+            data-testid="mcp-tab-installed"
+            onClick={() => setActiveTab('installed')}
+            className="flex-none gap-1.5 rounded-lg border-0 px-3 py-1.5 text-[12.5px] shadow-none data-[state=active]:bg-canvas data-[state=active]:shadow-none dark:data-[state=active]:bg-page/75"
+          >
+            <ServerIcon className="size-3.5 shrink-0" />
+            <span>{t('settings.mcp.tabInstalled')}</span>
+            <span className="text-[11px] font-normal text-ink-3 tabular-nums">
+              {mcp.servers.length}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="market"
+            data-testid="mcp-tab-market"
+            onClick={() => setActiveTab('market')}
+            className="flex-none gap-1.5 rounded-lg border-0 px-3 py-1.5 text-[12.5px] shadow-none data-[state=active]:bg-canvas data-[state=active]:shadow-none dark:data-[state=active]:bg-page/75"
+          >
+            <SparklesIcon className="size-3.5 shrink-0" />
+            <span>{t('settings.mcp.tabMarket')}</span>
+            <span className="text-[11px] font-normal text-ink-3 tabular-nums">
+              {marketItems.length}
+            </span>
+          </TabsTrigger>
+        </TabsList>
 
-        <TabsContent value="installed" className="mt-0 pt-3" data-testid="mcp-panel-installed">
+        <TabsContent value="installed" className="mt-0" data-testid="mcp-panel-installed">
           {mcp.servers.length === 0 ? (
             <div
-              className="flex flex-col items-center gap-2.5 rounded-xl border border-line/75 bg-surface/80 px-4 py-7 text-center text-[12px] text-ink-3 shadow-xs dark:bg-surface/75"
+              className="flex flex-col items-center gap-3 rounded-2xl bg-field/55 px-4 py-10 text-center text-[12px] text-ink-3 dark:bg-surface/65"
               data-testid="mcp-empty"
             >
               <span>{t('settings.mcp.empty')}</span>
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="xs"
                 onClick={() => setActiveTab('market')}
               >
@@ -482,8 +500,8 @@ export function McpSettings() {
           )}
         </TabsContent>
 
-        <TabsContent value="market" className="mt-0 pt-3" data-testid="mcp-panel-market">
-          <div className="flex flex-col gap-3">
+        <TabsContent value="market" className="mt-0" data-testid="mcp-panel-market">
+          <div className="flex flex-col gap-3.5">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-44 flex-1">
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-ink-3" />
@@ -504,22 +522,25 @@ export function McpSettings() {
                 />
               </div>
               <div className="flex items-center gap-1.5">
-                {marketSource ? (
-                  <span data-testid="mcp-market-source" title={mcp.market?.error}>
-                    <ValuePill
-                      tone={marketSource === 'online' ? 'green' : 'neutral'}
-                      className="text-[10.5px]"
-                    >
-                      {marketSource === 'online'
-                        ? t('settings.market.sourceOnline')
-                        : t('settings.market.sourceFallback')}
-                    </ValuePill>
+                {marketSource && !marketLoading ? (
+                  <span
+                    data-testid="mcp-market-source"
+                    title={mcp.market?.error}
+                    className={cn(
+                      'px-1.5 text-[11px]',
+                      marketSource === 'online' ? 'text-green' : 'text-ink-3',
+                    )}
+                  >
+                    {marketSource === 'online'
+                      ? t('settings.market.sourceOnline')
+                      : t('settings.market.sourceFallback')}
                   </span>
                 ) : null}
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
+                  className="text-ink-2 hover:text-ink"
                   disabled={marketLoading}
                   data-testid="mcp-market-refresh"
                   onClick={() => {
@@ -532,6 +553,11 @@ export function McpSettings() {
                 </Button>
               </div>
             </div>
+            {marketSource === 'fallback' && !marketLoading && mcp.market?.error ? (
+              <div className="truncate px-1 text-[11px] text-ink-3" data-testid="mcp-market-error">
+                {mcp.market.error}
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-center gap-1">
               {MCP_MARKET_CATEGORIES.map((cat) => {
                 const active = marketCategory === cat.id;
@@ -539,11 +565,11 @@ export function McpSettings() {
                   <Button
                     key={cat.id}
                     type="button"
-                    variant={active ? 'default' : 'ghost'}
+                    variant={active ? 'secondary' : 'ghost'}
                     size="xs"
                     data-testid={`mcp-market-cat-${cat.id}`}
                     onClick={() => setMarketCategory(cat.id)}
-                    className={cn(!active && 'text-ink-3 hover:text-ink')}
+                    className={cn('rounded-full px-2.5', active ? 'font-medium text-ink' : 'text-ink-3 hover:text-ink')}
                   >
                     {t(cat.labelKey)}
                   </Button>
@@ -552,7 +578,7 @@ export function McpSettings() {
             </div>
 
             {filteredMarket.length === 0 ? (
-              <div className="rounded-xl border border-line/75 bg-surface/80 px-4 py-7 text-center text-[12px] text-ink-3 shadow-xs dark:bg-surface/75">
+              <div className="rounded-2xl bg-field/55 px-4 py-10 text-center text-[12px] text-ink-3 dark:bg-surface/65">
                 {t('settings.mcp.market.empty')}
               </div>
             ) : (
@@ -565,45 +591,37 @@ export function McpSettings() {
                     <div
                       key={entry.id}
                       data-testid={`mcp-market-item-${entry.id}`}
-                      className="flex flex-col justify-between gap-2.5 rounded-xl border border-line/75 bg-surface/80 p-3.5 shadow-xs transition-colors hover:border-line-strong dark:bg-surface/75"
+                      className="flex flex-col justify-between gap-3 rounded-2xl bg-field/55 p-4 transition-colors hover:bg-field/85 dark:bg-surface/65 dark:hover:bg-surface/90"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <span className="truncate font-mono text-[12.5px] font-semibold text-ink">
                             {entry.name}
                           </span>
-                          <div className="flex shrink-0 items-center gap-1">
-                            {entry.version ? (
-                              <span className="font-mono text-[10px] text-ink-3">v{entry.version}</span>
-                            ) : null}
-                            <ValuePill
-                              tone={entry.transport === 'stdio' ? 'neutral' : 'accent'}
-                              className="font-mono text-[10px] uppercase"
-                            >
+                          <div className="flex shrink-0 items-center gap-1.5 font-mono text-[10.5px] text-ink-3">
+                            {entry.version ? <span>v{entry.version}</span> : null}
+                            <span className={cn('uppercase', entry.transport !== 'stdio' && 'text-accent-ink')}>
                               {entry.transport}
-                            </ValuePill>
+                            </span>
                           </div>
                         </div>
-                        <p className="mt-1 mb-0 line-clamp-2 text-[11.5px] leading-snug text-ink-2">
+                        <p className="mt-1 mb-0 line-clamp-2 text-[11.5px] leading-relaxed text-ink-2">
                           {locale === 'en'
                             ? (entry.descEn ?? entry.description)
                             : (entry.descZh ?? entry.description)}
                         </p>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <ValuePill className="text-[10px]">
-                          {t(`settings.mcp.market.cat${entry.category[0]!.toUpperCase()}${entry.category.slice(1)}` as MessageKey)}
-                        </ValuePill>
+                      <div className="flex items-center justify-end gap-2">
                         {installed ? (
-                          <ValuePill tone="green" className="text-[10.5px]">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green">
                             <CheckIcon className="size-3" />
                             <span>{t('settings.mcp.market.installed')}</span>
-                          </ValuePill>
+                          </span>
                         ) : (
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="secondary"
                             size="xs"
                             data-testid={`mcp-market-install-${entry.id}`}
                             onClick={() => installFromMarket(entry)}

@@ -28,7 +28,7 @@ export function GatewayLogsDialog({
         <div className="flex max-h-[55vh] min-w-0 flex-col gap-2 overflow-y-auto pr-1">
           {logs.length === 0 ? (
             <div
-              className="rounded-control bg-field px-3 py-6 text-center text-[12px] text-ink-3 shadow-hairline"
+              className="rounded-xl bg-field/60 px-3 py-8 text-center text-[12px] text-ink-3"
               data-testid="provider-gateway-logs-empty"
             >
               {t('settings.providers.gatewayLogsEmpty')}
@@ -51,7 +51,7 @@ export function GatewayLogsDialog({
                 <div
                   key={entry.id}
                   data-testid={`provider-gateway-log-${entry.id}`}
-                  className="flex min-w-0 flex-col gap-1 rounded-control bg-field/70 px-3 py-2 text-[11.5px] shadow-hairline"
+                  className="flex min-w-0 flex-col gap-1 rounded-xl bg-field/60 px-3.5 py-2.5 text-[11.5px]"
                 >
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-mono text-[10.5px] text-ink-3">

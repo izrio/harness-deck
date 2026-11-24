@@ -3,7 +3,7 @@
  * 从 Git 仓库扫描并安装包含 SKILL.md 的技能目录，配置启用状态与目标 Agent，
  * Agent 启动时自动带上并支持在输入框通过 / 调用。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InstalledSkillView, SkillImportCandidate } from '@harness-deck/shared';
 import { SKILL_MARKET_CATALOG, type SkillMarketCategory, type SkillMarketEntry } from './skillCatalog.ts';
 import { useT, type MessageKey } from '../../i18n.ts';
@@ -49,6 +49,12 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
+function formatInstalls(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1).replace(/\.0$/u, '')}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1).replace(/\.0$/u, '')}k`;
+  return String(count);
+}
 
 const MARKET_CATEGORIES: readonly { readonly id: 'all' | SkillMarketCategory; readonly labelKey: MessageKey }[] = [
   { id: 'all', labelKey: 'settings.skills.market.catAll' },
@@ -241,16 +247,43 @@ export function SkillSettings() {
     }
   }, [skills.installing]);
 
-  useEffect(() => {
-    if (activeTab === 'market' && !skills.market) {
-      postToHost({ type: 'fetchSkillMarket', payload: {} });
-    }
-  }, [activeTab, skills.market]);
+  const marketRetriedRef = useRef(false);
 
-  const marketItems = useMemo(
-    () => (skills.market && skills.market.items.length > 0 ? skills.market.items : SKILL_MARKET_CATALOG),
-    [skills.market],
-  );
+  useEffect(() => {
+    if (activeTab !== 'market') {
+      marketRetriedRef.current = false;
+      return;
+    }
+    if (!skills.market) {
+      postToHost({ type: 'fetchSkillMarket', payload: {} });
+      return;
+    }
+    if (skills.market.source === 'fallback' && !skills.market.loading && !marketRetriedRef.current) {
+      marketRetriedRef.current = true;
+      const q = marketQuery.trim();
+      postToHost({ type: 'fetchSkillMarket', payload: { ...(q ? { query: q } : {}), force: true } });
+    }
+  }, [activeTab, skills.market, marketQuery]);
+
+  useEffect(() => {
+    if (activeTab !== 'market' || !skills.market) return;
+    const trimmed = marketQuery.trim();
+    if (trimmed.length === 1) return;
+    if (trimmed === (skills.market.query ?? '')) return;
+    const timer = window.setTimeout(() => {
+      postToHost({ type: 'fetchSkillMarket', payload: trimmed ? { query: trimmed } : {} });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, marketQuery, skills.market]);
+
+  const marketItems = useMemo(() => {
+    if (skills.market) {
+      if (skills.market.items.length > 0 || (skills.market.source === 'online' && skills.market.query)) {
+        return skills.market.items;
+      }
+    }
+    return SKILL_MARKET_CATALOG;
+  }, [skills.market]);
   const marketLoading = Boolean(skills.market?.loading);
   const marketSource = skills.market?.source;
 
@@ -260,9 +293,13 @@ export function SkillSettings() {
 
   const filteredMarket = useMemo(() => {
     const q = marketQuery.trim().toLowerCase();
+    const serverMatched =
+      skills.market?.source === 'online' &&
+      Boolean(q) &&
+      (skills.market.query?.trim().toLowerCase() ?? '') === q;
     return marketItems.filter((entry) => {
       if (marketCategory !== 'all' && entry.category !== marketCategory) return false;
-      if (!q) return true;
+      if (!q || serverMatched) return true;
       return (
         entry.name.toLowerCase().includes(q) ||
         entry.repo.toLowerCase().includes(q) ||
@@ -271,7 +308,7 @@ export function SkillSettings() {
         (entry.descEn?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [marketCategory, marketItems, marketQuery]);
+  }, [marketCategory, marketItems, marketQuery, skills.market?.query, skills.market?.source]);
 
   const installFromMarket = (entry: SkillMarketEntry) => {
     if (skills.installing) return;
@@ -329,16 +366,17 @@ export function SkillSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-2.5" data-testid="settings-skills">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-0.5">
+    <div className="flex flex-col gap-5" data-testid="settings-skills">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-1">
         <h3 className="m-0 truncate text-[13px] font-semibold tracking-tight text-ink">
           {t('settings.skills.title')}
         </h3>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="sm"
+            className="text-ink-2 hover:text-ink"
             data-testid="skill-import-btn"
             onClick={openImportDialog}
           >
@@ -347,7 +385,7 @@ export function SkillSettings() {
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             data-testid="skill-install-btn"
             onClick={openInstallDialog}
@@ -361,47 +399,45 @@ export function SkillSettings() {
       <Tabs
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as 'installed' | 'market')}
-        className="gap-0"
+        className="gap-4"
       >
-        <div className="border-b border-line/70">
-          <TabsList variant="line" className="h-9 gap-2 overflow-y-hidden p-0">
-            <TabsTrigger
-              value="installed"
-              data-testid="skills-tab-installed"
-              onClick={() => setActiveTab('installed')}
-              className="h-9 flex-none gap-1.5 rounded-none px-1.5 text-[12.5px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
-            >
-              <PuzzleIcon className="size-3.5 shrink-0" />
-              <span>{t('settings.skills.tabInstalled')}</span>
-              <span className="rounded-full bg-field px-1.5 text-[10.5px] font-medium text-ink-2 tabular-nums">
-                {skills.items.length}
-              </span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="market"
-              data-testid="skills-tab-market"
-              onClick={() => setActiveTab('market')}
-              className="h-9 flex-none gap-1.5 rounded-none px-1.5 text-[12.5px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
-            >
-              <SparklesIcon className="size-3.5 shrink-0" />
-              <span>{t('settings.skills.tabMarket')}</span>
-              <span className="rounded-full bg-field px-1.5 text-[10.5px] font-medium text-ink-2 tabular-nums">
-                {marketItems.length}
-              </span>
-            </TabsTrigger>
-          </TabsList>
-        </div>
+        <TabsList className="h-auto w-fit gap-1 rounded-xl bg-field/65 p-1 dark:bg-surface/65">
+          <TabsTrigger
+            value="installed"
+            data-testid="skills-tab-installed"
+            onClick={() => setActiveTab('installed')}
+            className="flex-none gap-1.5 rounded-lg border-0 px-3 py-1.5 text-[12.5px] shadow-none data-[state=active]:bg-canvas data-[state=active]:shadow-none dark:data-[state=active]:bg-page/75"
+          >
+            <PuzzleIcon className="size-3.5 shrink-0" />
+            <span>{t('settings.skills.tabInstalled')}</span>
+            <span className="text-[11px] font-normal text-ink-3 tabular-nums">
+              {skills.items.length}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="market"
+            data-testid="skills-tab-market"
+            onClick={() => setActiveTab('market')}
+            className="flex-none gap-1.5 rounded-lg border-0 px-3 py-1.5 text-[12.5px] shadow-none data-[state=active]:bg-canvas data-[state=active]:shadow-none dark:data-[state=active]:bg-page/75"
+          >
+            <SparklesIcon className="size-3.5 shrink-0" />
+            <span>{t('settings.skills.tabMarket')}</span>
+            <span className="text-[11px] font-normal text-ink-3 tabular-nums">
+              {marketItems.length}
+            </span>
+          </TabsTrigger>
+        </TabsList>
 
-        <TabsContent value="installed" className="mt-0 pt-3" data-testid="skills-panel-installed">
+        <TabsContent value="installed" className="mt-0" data-testid="skills-panel-installed">
           {skills.items.length === 0 ? (
             <div
-              className="flex flex-col items-center gap-2.5 rounded-xl border border-line/75 bg-surface/80 px-4 py-7 text-center text-[12px] text-ink-3 shadow-xs dark:bg-surface/75"
+              className="flex flex-col items-center gap-3 rounded-2xl bg-field/55 px-4 py-10 text-center text-[12px] text-ink-3 dark:bg-surface/65"
               data-testid="skills-empty"
             >
               <span>{t('settings.skills.empty')}</span>
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="xs"
                 onClick={() => setActiveTab('market')}
               >
@@ -418,298 +454,318 @@ export function SkillSettings() {
                   <div
                     key={skill.id}
                     className={cn(
-                      'flex flex-col gap-2 rounded-xl border border-line/75 bg-surface/80 px-4 py-3.5 shadow-xs transition-colors hover:border-line-strong dark:bg-surface/75',
-                      skill.enabled ? '' : 'opacity-65',
+                      'flex flex-col gap-2.5 rounded-2xl bg-field/55 px-4 py-3.5 transition-colors hover:bg-field/80 dark:bg-surface/65 dark:hover:bg-surface/85',
+                      skill.enabled ? '' : 'opacity-60',
                     )}
                     data-testid={`skill-item-${skill.id}`}
                   >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono text-[13px] font-semibold text-ink">
-                          /{skill.name}
-                        </span>
-                        <ValuePill tone="accent" className="text-[10.5px]">
-                          {t('settings.skills.badge')}
-                        </ValuePill>
-                        <span
-                          className="inline-flex items-center gap-1 truncate font-mono text-[11px] text-ink-3"
-                          title={skill.repoUrl}
-                        >
-                          {skill.sourceKind === 'local' ? (
-                            <>
-                              <FolderIcon className="size-3 shrink-0" />
-                              <span>{skill.importedFrom || skill.repoUrl}</span>
-                            </>
-                          ) : (
-                            <>
-                              <GitBranchIcon className="size-3 shrink-0" />
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className="font-mono text-[13px] font-semibold text-ink">
+                            /{skill.name}
+                          </span>
+                          <span
+                            className="inline-flex items-center gap-1 truncate font-mono text-[11px] text-ink-3"
+                            title={skill.repoUrl}
+                          >
+                            {skill.sourceKind === 'local' ? (
+                              <>
+                                <FolderIcon className="size-3 shrink-0" />
+                                <span>{skill.importedFrom || skill.repoUrl}</span>
+                              </>
+                            ) : (
+                              <>
+                                <GitBranchIcon className="size-3 shrink-0" />
+                                <span>
+                                  {shortRepoLabel(skill.repoUrl)}
+                                  {skill.subpath ? `/${skill.subpath}` : ''}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                          {skill.ref || skill.commit ? (
+                            <span className="font-mono text-[11px] text-ink-3">
+                              {skill.ref ? `${skill.ref}${skill.commit ? `@${skill.commit}` : ''}` : skill.commit}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <Switch
+                          size="default"
+                          checked={skill.enabled}
+                          disabled={busy}
+                          aria-label={skill.name}
+                          data-testid={`toggle-skill-${skill.id}`}
+                          onCheckedChange={(checked) => updateSkillLocalAndHost(skill, { enabled: checked })}
+                        />
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="shrink-0 text-ink-2 hover:text-ink"
+                              data-testid={`skill-actions-${skill.id}`}
+                              aria-label={t('common.moreActions')}
+                              title={t('common.moreActions')}
+                            >
+                              <MoreIcon className="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-40">
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              data-testid={`preview-skill-${skill.id}`}
+                              onSelect={() => requestMarkdownPreview(skill.skillMdPath)}
+                            >
+                              <EyeIcon className="size-3.5 text-ink-2" />
+                              <span>{t('settings.skills.preview')}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              disabled={busy}
+                              data-testid={`sync-skill-${skill.id}`}
+                              onSelect={() => postToHost({ type: 'syncSkill', payload: { id: skill.id } })}
+                            >
+                              {skill.busy === 'updating' ? (
+                                <SpinnerIcon className="size-3.5 text-ink-2" />
+                              ) : (
+                                <RefreshIcon className="size-3.5 text-ink-2" />
+                              )}
                               <span>
-                                {shortRepoLabel(skill.repoUrl)}
-                                {skill.subpath ? `/${skill.subpath}` : ''}
+                                {skill.busy === 'updating' ? t('settings.skills.syncing') : t('settings.skills.sync')}
                               </span>
-                            </>
-                          )}
-                        </span>
-                        {skill.ref || skill.commit ? (
-                          <ValuePill className="font-mono text-[10px]">
-                            {skill.ref ? `${skill.ref}${skill.commit ? `@${skill.commit}` : ''}` : skill.commit}
-                          </ValuePill>
-                        ) : null}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              className="gap-2 text-[12.5px]"
+                              disabled={busy}
+                              data-testid={`delete-skill-${skill.id}`}
+                              onSelect={() => postToHost({ type: 'deleteSkill', payload: { id: skill.id } })}
+                            >
+                              <TrashIcon className="size-3.5" />
+                              <span>{t('settings.skills.delete')}</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <Switch
-                        size="default"
-                        checked={skill.enabled}
-                        disabled={busy}
-                        aria-label={skill.name}
-                        data-testid={`toggle-skill-${skill.id}`}
-                        onCheckedChange={(checked) => updateSkillLocalAndHost(skill, { enabled: checked })}
-                      />
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                    {skill.description ? (
+                      <p className="m-0 text-[12px] leading-relaxed text-ink-2">{skill.description}</p>
+                    ) : null}
+
+                    <TooltipProvider delayDuration={150}>
+                      <div
+                        className="flex flex-wrap items-center gap-1"
+                        role="group"
+                        aria-label={t('settings.skills.agentsLabel')}
+                      >
+                        <button
+                          type="button"
+                          data-testid={`skill-agent-all-${skill.id}`}
+                          aria-pressed={isUniversal}
+                          onClick={() => updateSkillLocalAndHost(skill, { agents: null })}
+                          className={cn(
+                            'inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg px-2 text-[11px] transition-colors',
+                            isUniversal
+                              ? 'bg-accent-tint/90 font-medium text-accent-ink'
+                              : 'bg-transparent text-ink-3 hover:bg-canvas/75 hover:text-ink dark:hover:bg-page/50',
+                          )}
+                        >
+                          {isUniversal ? <CheckIcon className="size-2.5" /> : null}
+                          <span>{t('settings.skills.allAgents')}</span>
+                        </button>
+                        {agents.map((agent) => {
+                          const selected = !isUniversal && Boolean(skill.agents?.includes(agent.id));
+                          return (
+                            <Tooltip key={agent.id}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  data-testid={`skill-agent-${skill.id}-${agent.id}`}
+                                  aria-label={agent.name}
+                                  aria-pressed={selected}
+                                  title={agent.name}
+                                  onClick={() => toggleSkillAgent(skill, agent.id)}
+                                  className={cn(
+                                    'relative inline-flex size-7 cursor-pointer items-center justify-center rounded-lg transition-all',
+                                    selected
+                                      ? 'bg-accent-tint/90'
+                                      : 'opacity-40 grayscale hover:bg-canvas/75 hover:opacity-90 hover:grayscale-0 dark:hover:bg-page/50',
+                                  )}
+                                >
+                                  <BackendLogo backend={agent} size="sm" />
+                                  {selected ? (
+                                    <span
+                                      className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-brand ring-2 ring-field dark:ring-surface"
+                                      aria-hidden="true"
+                                    />
+                                  ) : null}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="px-2 py-1 text-[11px]">
+                                {agent.name}
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    </TooltipProvider>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="market" className="mt-0" data-testid="skills-panel-market">
+          <div className="flex flex-col gap-3.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-44 flex-1">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-ink-3" />
+                <Input
+                  size="sm"
+                  data-testid="skill-market-search"
+                  value={marketQuery}
+                  onChange={(e) => setMarketQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const q = marketQuery.trim();
+                      postToHost({ type: 'fetchSkillMarket', payload: { ...(q ? { query: q } : {}), force: true } });
+                    }
+                  }}
+                  placeholder={t('settings.skills.market.searchPlaceholder')}
+                  aria-label={t('settings.skills.market.searchPlaceholder')}
+                  className="pl-8 text-[12px]"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                {marketSource && !marketLoading ? (
+                  <span
+                    data-testid="skill-market-source"
+                    title={skills.market?.error}
+                    className={cn(
+                      'px-1.5 text-[11px]',
+                      marketSource === 'online' ? 'text-green' : 'text-ink-3',
+                    )}
+                  >
+                    {marketSource === 'online'
+                      ? t('settings.market.sourceOnline')
+                      : t('settings.market.sourceFallback')}
+                  </span>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-ink-2 hover:text-ink"
+                  disabled={marketLoading}
+                  data-testid="skill-market-refresh"
+                  onClick={() => {
+                    const q = marketQuery.trim();
+                    postToHost({ type: 'fetchSkillMarket', payload: { ...(q ? { query: q } : {}), force: true } });
+                  }}
+                >
+                  {marketLoading ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
+                  <span>{t('settings.market.refresh')}</span>
+                </Button>
+              </div>
+            </div>
+            {marketSource === 'fallback' && !marketLoading && skills.market?.error ? (
+              <div className="truncate px-1 text-[11px] text-ink-3" data-testid="skill-market-error">
+                {skills.market.error}
+              </div>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-1">
+              {MARKET_CATEGORIES.map((cat) => {
+                const active = marketCategory === cat.id;
+                return (
+                  <Button
+                    key={cat.id}
+                    type="button"
+                    variant={active ? 'secondary' : 'ghost'}
+                    size="xs"
+                    data-testid={`skill-market-cat-${cat.id}`}
+                    onClick={() => setMarketCategory(cat.id)}
+                    className={cn('rounded-full px-2.5', active ? 'font-medium text-ink' : 'text-ink-3 hover:text-ink')}
+                  >
+                    {t(cat.labelKey)}
+                  </Button>
+                );
+              })}
+            </div>
+
+            {filteredMarket.length === 0 ? (
+              <div className="rounded-2xl bg-field/55 px-4 py-10 text-center text-[12px] text-ink-3 dark:bg-surface/65">
+                {t('settings.skills.market.empty')}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                {filteredMarket.map((entry) => {
+                  const installed = installedNames.has(entry.name.toLowerCase());
+                  const installingThis = Boolean(skills.installing && installingMarketId === entry.id);
+                  return (
+                    <div
+                      key={entry.id}
+                      data-testid={`skill-market-item-${entry.name}`}
+                      className="flex flex-col justify-between gap-3 rounded-2xl bg-field/55 p-4 transition-colors hover:bg-field/85 dark:bg-surface/65 dark:hover:bg-surface/90"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-mono text-[12.5px] font-semibold text-ink">
+                            /{entry.name}
+                          </span>
+                          {entry.installs !== undefined && entry.installs > 0 ? (
+                            <span className="shrink-0 font-mono text-[10.5px] text-ink-3 tabular-nums">
+                              {formatInstalls(entry.installs)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 mb-0 line-clamp-2 text-[11.5px] leading-relaxed text-ink-2">
+                          {locale === 'en'
+                            ? (entry.descEn ?? entry.description)
+                            : (entry.descZh ?? entry.description)}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex min-w-0 items-center gap-1 truncate font-mono text-[10.5px] text-ink-3">
+                          <GitBranchIcon className="size-3 shrink-0" />
+                          <span className="truncate">{entry.repo}</span>
+                        </span>
+                        {installed ? (
+                          <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-green">
+                            <CheckIcon className="size-3" />
+                            <span>{t('settings.skills.market.installed')}</span>
+                          </span>
+                        ) : (
                           <Button
                             type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            className="shrink-0 text-ink-2 hover:text-ink"
-                            data-testid={`skill-actions-${skill.id}`}
-                            aria-label={t('common.moreActions')}
-                            title={t('common.moreActions')}
+                            variant="secondary"
+                            size="xs"
+                            className="shrink-0"
+                            disabled={Boolean(skills.installing)}
+                            data-testid={`skill-market-install-${entry.name}`}
+                            onClick={() => installFromMarket(entry)}
                           >
-                            <MoreIcon className="size-4" />
+                            {installingThis ? <SpinnerIcon className="size-3" /> : <DownloadIcon className="size-3" />}
+                            <span>{installingThis ? t('settings.skills.dialog.installing') : t('settings.skills.market.install')}</span>
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-40">
-                          <DropdownMenuItem
-                            className="gap-2 text-[12.5px]"
-                            data-testid={`preview-skill-${skill.id}`}
-                            onSelect={() => requestMarkdownPreview(skill.skillMdPath)}
-                          >
-                            <EyeIcon className="size-3.5 text-ink-2" />
-                            <span>{t('settings.skills.preview')}</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="gap-2 text-[12.5px]"
-                            disabled={busy}
-                            data-testid={`sync-skill-${skill.id}`}
-                            onSelect={() => postToHost({ type: 'syncSkill', payload: { id: skill.id } })}
-                          >
-                            {skill.busy === 'updating' ? (
-                              <SpinnerIcon className="size-3.5 text-ink-2" />
-                            ) : (
-                              <RefreshIcon className="size-3.5 text-ink-2" />
-                            )}
-                            <span>
-                              {skill.busy === 'updating' ? t('settings.skills.syncing') : t('settings.skills.sync')}
-                            </span>
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            className="gap-2 text-[12.5px]"
-                            disabled={busy}
-                            data-testid={`delete-skill-${skill.id}`}
-                            onSelect={() => postToHost({ type: 'deleteSkill', payload: { id: skill.id } })}
-                          >
-                            <TrashIcon className="size-3.5" />
-                            <span>{t('settings.skills.delete')}</span>
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-
-                  {skill.description ? (
-                    <p className="m-0 text-[12px] leading-relaxed text-ink-2">{skill.description}</p>
-                  ) : null}
-
-                  <TooltipProvider delayDuration={150}>
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                      <span className="mr-0.5 text-[11px] text-ink-3">{t('settings.skills.agentsLabel')}</span>
-                      <button
-                        type="button"
-                        data-testid={`skill-agent-all-${skill.id}`}
-                        aria-pressed={isUniversal}
-                        onClick={() => updateSkillLocalAndHost(skill, { agents: null })}
-                        className={cn(
-                          'inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px] transition-colors',
-                          isUniversal
-                            ? 'border-brand/70 bg-accent-tint/90 font-medium text-accent-ink ring-1 ring-inset ring-brand/20'
-                            : 'border-line/60 bg-field/45 text-ink-3 hover:border-line-strong hover:bg-hover hover:text-ink',
                         )}
-                      >
-                        {isUniversal ? <CheckIcon className="size-2.5" /> : null}
-                        <span>{t('settings.skills.allAgents')}</span>
-                      </button>
-                      {agents.map((agent) => {
-                        const selected = !isUniversal && Boolean(skill.agents?.includes(agent.id));
-                        return (
-                          <Tooltip key={agent.id}>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                data-testid={`skill-agent-${skill.id}-${agent.id}`}
-                                aria-label={agent.name}
-                                aria-pressed={selected}
-                                title={agent.name}
-                                onClick={() => toggleSkillAgent(skill, agent.id)}
-                                className={cn(
-                                  'relative inline-flex size-7 cursor-pointer items-center justify-center rounded-md border transition-all',
-                                  selected
-                                    ? 'border-brand/70 bg-accent-tint/90 ring-1 ring-inset ring-brand/20'
-                                    : 'border-line/60 bg-field/45 opacity-45 grayscale hover:border-line-strong hover:bg-hover hover:opacity-90 hover:grayscale-0',
-                                )}
-                              >
-                                <BackendLogo backend={agent} size="sm" />
-                                {selected ? (
-                                  <span
-                                    className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-brand ring-1 ring-surface"
-                                    aria-hidden="true"
-                                  />
-                                ) : null}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="px-2 py-1 text-[11px]">
-                              {agent.name}
-                            </TooltipContent>
-                          </Tooltip>
-                        );
-                      })}
+                      </div>
                     </div>
-                  </TooltipProvider>
-                </div>
-              );
-            })}
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="market" className="mt-0 pt-3" data-testid="skills-panel-market">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative min-w-44 flex-1">
-                  <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-ink-3" />
-                  <Input
-                    size="sm"
-                    data-testid="skill-market-search"
-                    value={marketQuery}
-                    onChange={(e) => setMarketQuery(e.target.value)}
-                    placeholder={t('settings.skills.market.searchPlaceholder')}
-                    aria-label={t('settings.skills.market.searchPlaceholder')}
-                    className="pl-8 text-[12px]"
-                  />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {marketSource ? (
-                    <span data-testid="skill-market-source" title={skills.market?.error}>
-                      <ValuePill
-                        tone={marketSource === 'online' ? 'green' : 'neutral'}
-                        className="text-[10.5px]"
-                      >
-                        {marketSource === 'online'
-                          ? t('settings.market.sourceOnline')
-                          : t('settings.market.sourceFallback')}
-                      </ValuePill>
-                    </span>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={marketLoading}
-                    data-testid="skill-market-refresh"
-                    onClick={() => postToHost({ type: 'fetchSkillMarket', payload: { force: true } })}
-                  >
-                    {marketLoading ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
-                    <span>{t('settings.market.refresh')}</span>
-                  </Button>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-1">
-                {MARKET_CATEGORIES.map((cat) => {
-                  const active = marketCategory === cat.id;
-                  return (
-                    <Button
-                      key={cat.id}
-                      type="button"
-                      variant={active ? 'default' : 'ghost'}
-                      size="xs"
-                      data-testid={`skill-market-cat-${cat.id}`}
-                      onClick={() => setMarketCategory(cat.id)}
-                      className={cn(!active && 'text-ink-3 hover:text-ink')}
-                    >
-                      {t(cat.labelKey)}
-                    </Button>
                   );
                 })}
               </div>
-
-              {filteredMarket.length === 0 ? (
-                <div className="rounded-xl border border-line/75 bg-surface/80 px-4 py-7 text-center text-[12px] text-ink-3 shadow-xs dark:bg-surface/75">
-                  {t('settings.skills.market.empty')}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  {filteredMarket.map((entry) => {
-                    const installed = installedNames.has(entry.name.toLowerCase());
-                    const installingThis = Boolean(skills.installing && installingMarketId === entry.id);
-                    return (
-                      <div
-                        key={entry.id}
-                        data-testid={`skill-market-item-${entry.name}`}
-                        className="flex flex-col justify-between gap-2.5 rounded-xl border border-line/75 bg-surface/80 p-3.5 shadow-xs transition-colors hover:border-line-strong dark:bg-surface/75"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate font-mono text-[12.5px] font-semibold text-ink">
-                              /{entry.name}
-                            </span>
-                            <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[10.5px] text-ink-3">
-                              <GitBranchIcon className="size-3" />
-                              <span>{entry.repo}</span>
-                            </span>
-                          </div>
-                          <p className="mt-1 mb-0 line-clamp-2 text-[11.5px] leading-snug text-ink-2">
-                            {locale === 'en'
-                              ? (entry.descEn ?? entry.description)
-                              : (entry.descZh ?? entry.description)}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2">
-                          <ValuePill className="text-[10px]">
-                            {t(`settings.skills.market.cat${entry.category[0]!.toUpperCase()}${entry.category.slice(1)}` as MessageKey)}
-                          </ValuePill>
-                          {installed ? (
-                            <ValuePill tone="green" className="text-[10.5px]">
-                              <CheckIcon className="size-3" />
-                              <span>{t('settings.skills.market.installed')}</span>
-                            </ValuePill>
-                          ) : (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="xs"
-                              disabled={Boolean(skills.installing)}
-                              data-testid={`skill-market-install-${entry.name}`}
-                              onClick={() => installFromMarket(entry)}
-                            >
-                              {installingThis ? <SpinnerIcon className="size-3" /> : <DownloadIcon className="size-3" />}
-                              <span>{installingThis ? t('settings.skills.dialog.installing') : t('settings.skills.market.install')}</span>
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => !open && closeInstallDialog()}>
         {dialogOpen ? (
@@ -804,14 +860,14 @@ export function SkillSettings() {
                     </div>
                   </div>
 
-                  <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-control border border-line bg-field p-2">
+                  <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-xl bg-field/55 p-2">
                     {discovered.map((item) => {
                       const checked = selectedSubpaths.includes(item.subpath);
                       const already = installedNames.has(item.name.toLowerCase());
                       return (
                         <label
                           key={item.subpath || item.name}
-                          className="flex cursor-pointer items-start gap-2 rounded-control bg-surface px-2.5 py-2 shadow-hairline"
+                          className="flex cursor-pointer items-start gap-2 rounded-lg bg-canvas/85 px-2.5 py-2 transition-colors hover:bg-canvas dark:bg-page/55"
                           data-testid={`discovered-skill-${item.name}`}
                         >
                           <Checkbox
@@ -853,10 +909,10 @@ export function SkillSettings() {
                     type="button"
                     data-testid="skill-install-agent-all"
                     onClick={() => setAllAgentsMode(true)}
-                    className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                    className={`inline-flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] transition-colors ${
                       allAgentsMode
-                        ? 'border-brand bg-accent-tint font-medium text-accent-ink'
-                        : 'border-line bg-field text-ink-2 hover:bg-hover'
+                        ? 'bg-accent-tint font-medium text-accent-ink'
+                        : 'bg-field/60 text-ink-2 hover:bg-hover hover:text-ink'
                     }`}
                   >
                     {allAgentsMode ? <CheckIcon className="size-3" /> : null}
@@ -870,10 +926,10 @@ export function SkillSettings() {
                         type="button"
                         data-testid={`skill-install-agent-${agent.id}`}
                         onClick={() => toggleDialogAgent(agent.id)}
-                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] transition-colors ${
                           active
-                            ? 'border-brand bg-accent-tint font-medium text-accent-ink'
-                            : 'border-line bg-field text-ink-2 hover:bg-hover'
+                            ? 'bg-accent-tint font-medium text-accent-ink'
+                            : 'bg-field/60 text-ink-2 hover:bg-hover hover:text-ink'
                         }`}
                       >
                         <BackendLogo backend={agent} size="sm" />
@@ -972,7 +1028,7 @@ export function SkillSettings() {
                 </div>
               ) : importCandidates.length === 0 ? (
                 <div
-                  className="rounded-control bg-field px-3 py-5 text-center text-[12px] text-ink-3 shadow-hairline"
+                  className="rounded-xl bg-field/60 px-3 py-6 text-center text-[12px] text-ink-3"
                   data-testid="skill-import-empty"
                 >
                   {t('settings.skills.import.empty')}
@@ -1002,7 +1058,7 @@ export function SkillSettings() {
                   </div>
 
                   <div
-                    className="flex max-h-56 flex-col gap-1.5 overflow-y-auto rounded-control border border-line bg-field p-2"
+                    className="flex max-h-56 flex-col gap-1.5 overflow-y-auto rounded-xl bg-field/55 p-2"
                     data-testid="skill-import-candidates"
                   >
                     {importCandidates.map((item) => {
@@ -1010,7 +1066,7 @@ export function SkillSettings() {
                       return (
                         <label
                           key={item.key}
-                          className="flex cursor-pointer items-start gap-2 rounded-control bg-surface px-2.5 py-2 shadow-hairline"
+                          className="flex cursor-pointer items-start gap-2 rounded-lg bg-canvas/85 px-2.5 py-2 transition-colors hover:bg-canvas dark:bg-page/55"
                           data-testid={`skill-candidate-${item.name}`}
                         >
                           <Checkbox
@@ -1054,10 +1110,10 @@ export function SkillSettings() {
                     type="button"
                     data-testid="skill-import-agent-all"
                     onClick={() => setImportAllAgents(true)}
-                    className={`inline-flex cursor-pointer items-center gap-1 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                    className={`inline-flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] transition-colors ${
                       importAllAgents
-                        ? 'border-brand bg-accent-tint font-medium text-accent-ink'
-                        : 'border-line bg-field text-ink-2 hover:bg-hover'
+                        ? 'bg-accent-tint font-medium text-accent-ink'
+                        : 'bg-field/60 text-ink-2 hover:bg-hover hover:text-ink'
                     }`}
                   >
                     {importAllAgents ? <CheckIcon className="size-3" /> : null}
@@ -1071,10 +1127,10 @@ export function SkillSettings() {
                         type="button"
                         data-testid={`skill-import-agent-${agent.id}`}
                         onClick={() => toggleImportAgent(agent.id)}
-                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] transition-colors ${
                           selected
-                            ? 'border-brand bg-accent-tint font-medium text-accent-ink'
-                            : 'border-line bg-field text-ink-2 hover:bg-hover'
+                            ? 'bg-accent-tint font-medium text-accent-ink'
+                            : 'bg-field/60 text-ink-2 hover:bg-hover hover:text-ink'
                         }`}
                       >
                         <BackendLogo backend={agent} size="sm" />

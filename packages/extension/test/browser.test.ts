@@ -5,7 +5,11 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CdpClient, type CdpSocketLike } from '../src/browser/CdpClient.ts';
-import { EmbeddedBrowserManager, normalizeBrowserUrl } from '../src/browser/EmbeddedBrowserManager.ts';
+import {
+  EmbeddedBrowserManager,
+  normalizeBrowserUrl,
+  resolveChromiumUserDataDir,
+} from '../src/browser/EmbeddedBrowserManager.ts';
 import {
   BrowserMcpServer,
   BUILTIN_BROWSER_MCP_ID,
@@ -46,6 +50,49 @@ describe('EmbeddedBrowser & BrowserMcpServer', () => {
     expect(normalizeBrowserUrl('https://github.com')).toBe('https://github.com');
     expect(() => normalizeBrowserUrl('javascript:alert(1)')).toThrow(/Unsupported URL scheme/u);
     expect(() => normalizeBrowserUrl('file:///etc/passwd')).toThrow(/Unsupported URL scheme/u);
+  });
+
+  it('resolveChromiumUserDataDir 在 WSL2 启动 Windows 浏览器时避开 \\\\wsl.localhost 9P 路径并落到 Windows NTFS 盘符', () => {
+    // 1. 普通 Linux 原生浏览器直接使用 storageRoot/browser-profile
+    const nativeLinux = resolveChromiumUserDataDir('/home/u/.halo', '/usr/bin/chromium', {
+      platform: 'linux',
+    });
+    expect(nativeLinux).toEqual({
+      linuxDir: '/home/u/.halo/browser-profile',
+      arg: '/home/u/.halo/browser-profile',
+      isWslWinExe: false,
+    });
+
+    // 2. WSL2 + Windows chrome.exe 且 storageRoot 在 Linux ext4（wslpath 返回 \\wsl.localhost\...）：必须改用 Windows NTFS 目录
+    const wslExt4 = resolveChromiumUserDataDir(
+      '/home/u/.vscode-server/data/User/globalStorage/izrio.harness-deck',
+      '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe',
+      {
+        platform: 'linux',
+        env: {},
+        toWinPath: () => '\\\\wsl.localhost\\Ubuntu\\home\\u\\.vscode-server\\browser-profile',
+        probeWinEnv: (name) => (name === 'LOCALAPPDATA' ? 'C:\\Users\\alice\\AppData\\Local' : undefined),
+      },
+    );
+    expect(wslExt4.isWslWinExe).toBe(true);
+    expect(wslExt4.arg).toMatch(/^C:\\Users\\alice\\AppData\\Local\\Halo\\browser-profile-[0-9a-f]{12}$/u);
+    expect(wslExt4.arg).not.toContain('wsl.localhost');
+    expect(wslExt4.linuxDir).toMatch(/^\/mnt\/c\/Users\/alice\/AppData\/Local\/Halo\/browser-profile-[0-9a-f]{12}$/u);
+
+    // 3. WSL2 + Windows chrome.exe 且 storageRoot 本身已在 /mnt/d/... 盘符：直接复用该 NTFS 路径
+    const wslDrive = resolveChromiumUserDataDir(
+      '/mnt/d/work/halo',
+      '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe',
+      {
+        platform: 'linux',
+        toWinPath: () => 'D:\\work\\halo\\browser-profile',
+      },
+    );
+    expect(wslDrive).toEqual({
+      linuxDir: '/mnt/d/work/halo/browser-profile',
+      arg: 'D:\\work\\halo\\browser-profile',
+      isWslWinExe: true,
+    });
   });
 
   it('CdpClient 支持请求响应匹配、事件订阅与断连清理', async () => {

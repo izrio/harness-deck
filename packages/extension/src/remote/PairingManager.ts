@@ -104,3 +104,70 @@ export class PairingManager {
     return { ok: true, scope: current.scope, routeKind: current.routeKind };
   }
 }
+
+export const HANDOFF_TTL_MS = 90 * 1000;
+const MAX_PENDING_HANDOFFS = 16;
+
+interface PendingHandoff {
+  readonly digest: Buffer;
+  readonly deviceId: string;
+  readonly expiresAt: number;
+}
+
+/**
+ * 跨入口无缝切换一次性票据管理器（LAN ↔ Tailscale ↔ Quick Tunnel ↔ Custom Tunnel）：
+ * - 已登录设备切换访问域名时由宿主签发 90 秒单次有效票据（通过 URL `#handoff=` 传递）
+ * - 在目标域名核验成功后立即作废并签发对应 Origin 的 HttpOnly Cookie，避免离开工位后被锁在配对页
+ */
+export class HandoffManager {
+  private readonly tickets: PendingHandoff[] = [];
+
+  constructor(private readonly now: () => number = () => Date.now()) {}
+
+  issue(deviceId: string, ttlMs = HANDOFF_TTL_MS): { readonly token: string; readonly expiresAt: number } {
+    this.prune();
+    const token = randomBytes(18).toString('base64url');
+    const expiresAt = this.now() + ttlMs;
+    this.tickets.push({ digest: digestCode(token), deviceId, expiresAt });
+    while (this.tickets.length > MAX_PENDING_HANDOFFS) {
+      this.tickets.shift();
+    }
+    return { token, expiresAt };
+  }
+
+  redeem(submittedToken: string): { readonly ok: true; readonly deviceId: string } | { readonly ok: false } {
+    this.prune();
+    const clean = submittedToken.trim();
+    if (!clean) return { ok: false };
+    const candidate = digestCode(clean);
+    for (let i = 0; i < this.tickets.length; i += 1) {
+      const entry = this.tickets[i]!;
+      if (timingSafeEqual(candidate, entry.digest)) {
+        this.tickets.splice(i, 1);
+        return { ok: true, deviceId: entry.deviceId };
+      }
+    }
+    return { ok: false };
+  }
+
+  revokeForDevice(deviceId: string): void {
+    for (let i = this.tickets.length - 1; i >= 0; i -= 1) {
+      if (this.tickets[i]!.deviceId === deviceId) {
+        this.tickets.splice(i, 1);
+      }
+    }
+  }
+
+  clear(): void {
+    this.tickets.length = 0;
+  }
+
+  private prune(): void {
+    const ts = this.now();
+    for (let i = this.tickets.length - 1; i >= 0; i -= 1) {
+      if (ts >= this.tickets[i]!.expiresAt) {
+        this.tickets.splice(i, 1);
+      }
+    }
+  }
+}

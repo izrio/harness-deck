@@ -1,5 +1,26 @@
 # 更新记录 / Changelog
 
+## 0.16.0
+
+**远程体验全面强化、设置模块去线留白重设计、在线 `skills.sh` / MCP 市场代理互通、无运行时初始化引导页与 WSL2 浏览器及权限稳定性修复**：全面补强移动端远程互通闭环（离线幂等暂存队列、扫码即配对、通知深链直达会话、跨入口 90 秒一次性 `#handoff=` 无感续签、一键 `cloudflared` 临时公网 HTTPS 隧道、飞书/企业微信/钉钉/Telegram/Slack/Discord 等 9 种 IM Webhook 预设、IDE 顶栏远程快捷弹窗、设备重命名与实时权限切换）；按「去线留白、布局自解释」重构整个设置模块，服务商新增/编辑改为弹窗并展示各厂商离线品牌图标；首页在无可用运行时时进入独立初始化引导页；修复 WSL2 下内置浏览器启动报错（`LockFileEx` 9P 崩溃与 NAT 下 CDP 桥接）、新建会话 `auto` 权限回退默认、在线市场未走代理及分支弹窗「拉取」按钮溢出问题。
+
+**Remote access overhaul, borderless Settings redesign, proxy-aware `skills.sh` & MCP online marketplaces, runtime setup page, and WSL2 browser / permission fixes**: Strengthened the end-to-end mobile remote experience with an idempotent offline outbox, one-scan auto-pairing, notification session deep-links, seamless cross-route `#handoff=` ticket renewal, one-click `cloudflared` Quick Tunnel (`*.trycloudflare.com`), 9 IM Webhook presets (Feishu, WeCom, DingTalk, Telegram, Slack, Discord, Bark, ntfy, custom), an IDE header remote quick-access popover, and live device scope switching & renaming; redesigned the entire Settings module around borderless whitespace and self-explanatory layout, moved Provider creation/editing into a modal dialog with brand vendor icons, added a dedicated Runtime Setup onboarding page when no runtime is available, and fixed WSL2 embedded browser launch (`LockFileEx` on 9P + NAT stdio CDP bridge), new-session `auto` permission reverting to default, proxy-aware online marketplaces, and branch popover Fetch button overflow.
+
+- **远程体验全面强化**：
+  - **离线容错、扫码即配对与跨入口续签**：`ConnectionSupervisor` 在断网/切后台重连期间自动暂存幂等写操作并在重连后按序补发；扫码携带 `#code=` 自动换取设备 Cookie；推送通知携带完整 `externalUrl` 直达目标会话；新增 90 秒一次性 `#handoff=` 跨入口票据，在局域网 / 快速公网 / Tailscale / 自定义隧道间切换免重扫。
+  - **一键临时公网隧道与主流 IM Webhook**：新增 `QuickTunnelService` 支持探测与托管本机 `cloudflared` 临时公网 HTTPS 隧道（零账号解锁公网访问与 Web Push）；Webhook 扩展支持飞书（HMAC-SHA256 加签）、企业微信、钉钉（加签）、Telegram（Chat ID）、Slack、Discord、Bark、ntfy 与自定义。
+  - **IDE 顶栏快捷入口与设备管理**：顶部标题栏新增远程状态/开关/二维码快捷弹窗；已配对设备支持随时重命名与实时切换 `read-only` / `operate` 权限（立即对活跃 WebSocket 生效）。
+  **Remote access overhaul**: Added an idempotent offline outbox during WebSocket reconnects, one-scan `#code=` auto-pairing, clickable `externalUrl` session deep-links, and 90s single-use `#handoff=` tickets for seamless cross-route switching without re-scanning; added one-click `cloudflared` Quick Tunnel (`*.trycloudflare.com`) and 9 IM Webhook presets (Feishu/DingTalk HMAC signing, WeCom, Telegram, Slack, Discord, Bark, ntfy, custom); added an IDE header remote quick-access popover plus device renaming and live `read-only` ↔ `operate` scope switching.
+- **设置模块重设计、服务商厂商图标弹窗与无运行时初始化页**：
+  - 全量设置页采用「去线留白、减少辅助文案」的柔和色块层级布局；服务商新增/编辑改为 `shadcn-ui` 弹窗并展示火山方舟、智谱 GLM、阿里云百炼、Kimi、MiniMax、OpenAI、DeepSeek、Claude、Gemini 等离线品牌矢量图标。
+  - 新增 `RuntimeSetupView`：当本机尚未安装任何运行时或当前运行时缺失时展示独立初始化页，支持一键启用已检测到运行时或一键 npm 安装。
+  **Borderless Settings redesign, Provider modal with vendor icons & Runtime Setup page**: Redesigned all Settings panels with borderless surface hierarchy and minimal copy; moved Provider creation/editing into a `shadcn-ui` Dialog displaying offline brand vector logos across presets and saved providers; added `RuntimeSetupView` when no runtime is available, enabling one-click activation or npm installation.
+- **在线技能 / MCP 市场与 WSL2 / 权限 / 布局修复**：
+  - 技能市场与 MCP 市场统一接入 `createProxyAwareFetch`（遵循 IDE `http.proxy` 与 `HTTP(S)_PROXY`），技能市场新增 `skills.sh` 在线模糊搜索与安装热度展示，MCP 市场升级对接官方 `v0.1` 注册表并兼容回退 `v0`。
+  - 修复 WSL2 启动 Windows Chrome/Edge 因 `--user-data-dir` 指向 `\\wsl.localhost` 9P 路径触发 `LockFileEx (code=21)` 崩溃的问题，改落 Windows NTFS 盘符目录并内置 WSL2 NAT 下 PowerShell `.NET ClientWebSocket` 管道 CDP 桥接。
+  - 修复 ACP / CodeBuddy / Claude / ZCode 新建会话默认选中 `auto` 后在输入或发首条消息时被回退为默认权限的问题，以及分支弹窗内「拉取」按钮溢出右边界的问题。
+  **Online marketplaces & WSL2 / permission / layout fixes**: Routed both Skills and MCP marketplaces through `createProxyAwareFetch` (respecting IDE `http.proxy` and proxy env vars), integrated `skills.sh` live search and install counts, and upgraded MCP Registry to `v0.1` with `v0` fallback; fixed WSL2 Windows Chrome/Edge `LockFileEx (code=21)` crashes by placing `--user-data-dir` on Windows NTFS and bridging CDP over PowerShell `.NET ClientWebSocket` stdio in WSL2 NAT mode; fixed new-session `auto` permissions reverting to default across ACP/CodeBuddy/Claude/ZCode and fixed the Fetch button overflowing the branch switcher popover.
+
 ## 0.15.1
 
 **发布流程修复与桌面端安装包上线**：修复干净环境下 `pnpm typecheck` 失败（桌面端自动安装的 Electron 类型与轻量类型声明冲突），此前 0.14.0 与 0.15.0 因此未能成功发布；GitHub Release 现同时提供 Windows（NSIS）、macOS（dmg / zip，Intel 与 Apple Silicon）与 Linux（AppImage）桌面端安装包及 SHA-256 校验。本版本一并包含 0.15.0 与 0.14.0 的全部改动：Halo 品牌升级、右侧栏内置浏览器与 AI MCP 操控、在线 MCP / 技能市场与本地技能导入、CodeMirror 6 编辑与增强 Diff、右侧栏终端、跨底层 Git 检查点回滚与会话分叉、全局命令面板（`Ctrl/Cmd+K`）等。

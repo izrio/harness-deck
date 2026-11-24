@@ -1,6 +1,6 @@
 {
   "name": "@harness-deck/desktop",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "private": true,
   "description": "Halo desktop shell (Electron)",
   "author": "izrio",

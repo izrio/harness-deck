@@ -352,8 +352,27 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                   <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="start" sideOffset={6} className="w-64 p-2">
-                <div className="mb-1.5 px-1 text-[11px] font-medium text-ink-3">{t('wb.changes.switchBranch')}</div>
+              <PopoverContent align="start" sideOffset={6} className="w-64 max-w-[calc(100vw-24px)] overflow-hidden p-2">
+                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+                  <span className="truncate text-[11px] font-medium text-ink-3">{t('wb.changes.switchBranch')}</span>
+                  {state.remote ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      disabled={busy}
+                      className="shrink-0 text-ink-2 hover:text-ink"
+                      onClick={() => {
+                        setBranchPopoverOpen(false);
+                        setBusy(true);
+                        post({ type: 'sourceControlFetch', payload: {} });
+                      }}
+                    >
+                      <RefreshIcon className="size-3" />
+                      <span>{t('wb.changes.fetch')}</span>
+                    </Button>
+                  ) : null}
+                </div>
                 <div className="max-h-44 overflow-y-auto">
                   {(state.branches ?? []).map((b) => {
                     const current = b === state.branch;
@@ -382,6 +401,7 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') createNewBranch();
                     }}
+                    className="min-w-0 flex-1"
                   />
                   <Button
                     type="button"
@@ -394,24 +414,6 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                     <PlusIcon className="size-3" />
                   </Button>
                 </div>
-                {state.remote ? (
-                  <div className="mt-1.5 flex items-center justify-end border-t border-line pt-1.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      disabled={busy}
-                      onClick={() => {
-                        setBranchPopoverOpen(false);
-                        setBusy(true);
-                        post({ type: 'sourceControlFetch', payload: {} });
-                      }}
-                    >
-                      <RefreshIcon className="size-3" />
-                      <span>{t('wb.changes.fetch')}</span>
-                    </Button>
-                  </div>
-                ) : null}
               </PopoverContent>
             </Popover>
           ) : (

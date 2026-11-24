@@ -12,7 +12,9 @@ import { applyHostMessage, resetStoreForTests } from '../src/store.ts';
 import {
   ConnectionSupervisor,
   computeReconnectDelayMs,
+  extractHandoffTokenFromHash,
   extractPairCodeFromHash,
+  extractSessionIdFromSearch,
   probeFallbackRoute,
   type SocketLike,
   type TransportStatus,
@@ -124,9 +126,87 @@ describe('HD-22 ConnectionSupervisor 与传输抽象', () => {
     supervisor.dispose();
   });
 
-  it('extractPairCodeFromHash 正确解析 URL fragment 中的 code', () => {
+  it('extractPairCodeFromHash / extractHandoffTokenFromHash / extractSessionIdFromSearch 正确解析 URL 参数', () => {
     expect(extractPairCodeFromHash('#code=abc-123_XYZ')).toBe('abc-123_XYZ');
     expect(extractPairCodeFromHash('')).toBeUndefined();
+    expect(extractHandoffTokenFromHash('#handoff=tok-999')).toBe('tok-999');
+    expect(extractHandoffTokenFromHash('#code=abc')).toBeUndefined();
+    expect(extractSessionIdFromSearch('?session=sess-42&foo=1')).toBe('sess-42');
+    expect(extractSessionIdFromSearch('')).toBeUndefined();
+  });
+
+  it('ConnectionSupervisor 在断网重连期间缓存幂等操作并在重连成功后按序补发', () => {
+    const sockets: Array<{
+      readyState: number;
+      sent: unknown[];
+      onopen: ((e: unknown) => void) | null;
+      onmessage: ((e: { data: unknown }) => void) | null;
+      onclose: ((e: { code?: number; reason?: string }) => void) | null;
+      onerror: ((e: unknown) => void) | null;
+      send: (data: string) => void;
+      close: (code?: number, reason?: string) => void;
+      emitOpen: () => void;
+    }> = [];
+    const pendingCounts: number[] = [];
+
+    const supervisor = new ConnectionSupervisor({
+      wsUrl: () => 'ws://127.0.0.1:9999/ws',
+      createSocket: () => {
+        const s = {
+          readyState: 0,
+          sent: [] as unknown[],
+          onopen: null as ((e: unknown) => void) | null,
+          onmessage: null as ((e: { data: unknown }) => void) | null,
+          onclose: null as ((e: { code?: number; reason?: string }) => void) | null,
+          onerror: null as ((e: unknown) => void) | null,
+          send(data: string) {
+            this.sent.push(JSON.parse(data));
+          },
+          close(code?: number, reason?: string) {
+            this.readyState = 3;
+            this.onclose?.({ code, reason });
+          },
+          emitOpen() {
+            this.readyState = 1;
+            this.onopen?.({});
+          },
+        };
+        sockets.push(s);
+        return s as SocketLike;
+      },
+      onHostMessage: () => undefined,
+      onPendingCountChange: (c) => pendingCounts.push(c),
+    });
+
+    supervisor.start();
+    // 建连前发送两条幂等消息 + 一条重复 commandId，应当进入 outbox 并去重
+    expect(
+      supervisor.sendMessage({ type: 'sendMessage', commandId: 'cmd-1', payload: { text: 'hello' } }),
+    ).toBe(true);
+    expect(
+      supervisor.sendMessage({ type: 'sendMessage', commandId: 'cmd-1', payload: { text: 'hello' } }),
+    ).toBe(true);
+    expect(
+      supervisor.sendMessage({
+        type: 'respondApproval',
+        commandId: 'cmd-2',
+        payload: { id: 'ap-1', decision: 'allow' },
+      }),
+    ).toBe(true);
+    expect(supervisor.getPendingCount()).toBe(2);
+
+    // 建连成功后先发 visibility + ready，再按序补发缓存的两条操作并清空计数
+    sockets[0]!.emitOpen();
+    expect(supervisor.getPendingCount()).toBe(0);
+    expect(pendingCounts).toEqual([1, 2, 0]);
+    expect(sockets[0]!.sent).toEqual([
+      { type: 'visibility', payload: { visible: true } },
+      { type: 'ready', payload: {} },
+      { type: 'sendMessage', commandId: 'cmd-1', payload: { text: 'hello' } },
+      { type: 'respondApproval', commandId: 'cmd-2', payload: { id: 'ap-1', decision: 'allow' } },
+    ]);
+
+    supervisor.dispose();
   });
 
   it('probeFallbackRoute 按 LAN -> Tailscale -> Tunnel 优先级跳过当前与不可达路由', async () => {
@@ -331,6 +411,68 @@ describe('HD-23 本地 QR 编码与远程互通设置页', () => {
 
     fireEvent.click(screen.getByTestId('remote-refresh-network-btn'));
     expect(vscode.posted).toContainEqual({ type: 'refreshRemoteNetwork', payload: {} });
+
+    // 设备支持实时切换权限（operate -> read-only）与重命名弹窗
+    fireEvent.keyDown(screen.getByTestId('remote-device-actions-dev-1'), { key: 'Enter' });
+    fireEvent.click(screen.getByTestId('remote-toggle-scope-dev-1'));
+    expect(vscode.posted).toContainEqual({
+      type: 'updateRemoteDevice',
+      payload: { deviceId: 'dev-1', scope: 'read-only' },
+    });
+
+    fireEvent.keyDown(screen.getByTestId('remote-device-actions-dev-1'), { key: 'Enter' });
+    fireEvent.click(screen.getByTestId('remote-rename-dev-1'));
+    expect(screen.getByTestId('remote-device-rename-dialog')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('remote-device-rename-input'), { target: { value: '我的 iPhone' } });
+    fireEvent.click(screen.getByTestId('remote-device-rename-confirm'));
+    expect(vscode.posted).toContainEqual({
+      type: 'updateRemoteDevice',
+      payload: { deviceId: 'dev-1', name: '我的 iPhone' },
+    });
+
+    // 一键公网临时隧道探测与开关
+    fireEvent.click(screen.getByTestId('remote-quick-tunnel-probe-btn'));
+    expect(vscode.posted).toContainEqual({ type: 'probeQuickTunnel', payload: {} });
+    fireEvent.click(screen.getByTestId('remote-quick-tunnel-switch'));
+    expect(vscode.posted).toContainEqual({ type: 'setQuickTunnelEnabled', payload: { enabled: true } });
+  });
+
+  it('IDE 顶栏提供远程快捷入口浮层（开关、生成配对码、直达远程设置）', () => {
+    render(<App />);
+    act(() =>
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          remote: {
+            enabled: true,
+            running: true,
+            port: 37890,
+            bindHost: '0.0.0.0',
+            interfaces: [{ name: 'eth0', address: '192.168.1.10' }],
+            selectedHost: '192.168.1.10',
+            scope: 'operate',
+            connectedClients: 2,
+            devices: [],
+            quickTunnel: { installed: true, status: 'running', url: 'https://fast-owl.trycloudflare.com' },
+          },
+        }),
+      }),
+    );
+
+    const trigger = screen.getByTestId('ide-remote-btn');
+    expect(trigger.textContent).toContain('2');
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('ide-remote-popover')).toBeTruthy();
+
+    // 开启了 Quick Tunnel 时，顶栏一键生成配对码优先选择 quick-tunnel 路由
+    fireEvent.click(screen.getByTestId('ide-remote-generate-qr'));
+    expect(vscode.posted).toContainEqual({
+      type: 'generateRemotePairing',
+      payload: { scope: 'operate', routeKind: 'quick-tunnel' },
+    });
+
+    fireEvent.click(screen.getByTestId('ide-remote-open-settings'));
+    expect(screen.getByTestId('settings-remote')).toBeTruthy();
   });
 
   it('RemoteSettings 在 WSL2 NAT 模式下展示 Windows 端口转发命令与刷新入口', () => {

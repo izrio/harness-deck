@@ -65,7 +65,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
               </div>
             ) : candidates.length === 0 ? (
               <div
-                className="rounded-control bg-field px-3 py-5 text-center text-[12px] text-ink-3 shadow-hairline"
+                className="rounded-xl bg-field/60 px-3 py-6 text-center text-[12px] text-ink-3"
                 data-testid="mcp-import-empty"
               >
                 {t('settings.mcp.import.empty')}
@@ -95,7 +95,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
                 </div>
 
                 <div
-                  className="flex max-h-56 flex-col gap-1.5 overflow-y-auto rounded-control border border-line bg-field p-2"
+                  className="flex max-h-56 flex-col gap-1.5 overflow-y-auto rounded-xl bg-field/55 p-2"
                   data-testid="mcp-import-candidates"
                 >
                   {candidates.map((item) => {
@@ -103,7 +103,7 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
                     return (
                       <label
                         key={item.key}
-                        className="flex cursor-pointer items-start gap-2 rounded-control bg-surface px-2.5 py-2 shadow-hairline"
+                        className="flex cursor-pointer items-start gap-2 rounded-lg bg-canvas/85 px-2.5 py-2 transition-colors hover:bg-canvas dark:bg-page/55"
                         data-testid={`mcp-candidate-${item.name}`}
                       >
                         <Checkbox
@@ -150,10 +150,10 @@ export function McpImportDialog({ agents, mcp, importOpen, setImportOpen, select
                       type="button"
                       data-testid={`mcp-import-agent-${agent.id}`}
                       onClick={() => toggleImportAgent(agent.id)}
-                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-chip border px-2.5 py-1 text-[11.5px] transition-colors ${
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] transition-colors ${
                         selected
-                          ? 'border-brand bg-accent-tint font-medium text-accent-ink'
-                          : 'border-line bg-field text-ink-2 hover:bg-hover'
+                          ? 'bg-accent-tint font-medium text-accent-ink'
+                          : 'bg-field/60 text-ink-2 hover:bg-hover hover:text-ink'
                       }`}
                     >
                       <BackendLogo backend={agent} size="sm" />

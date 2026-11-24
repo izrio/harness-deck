@@ -296,6 +296,7 @@ function parseAntigravityTokenMeta(raw: string): {
       undefined;
     const email =
       (typeof json?.email === 'string' && json.email.trim().toLowerCase()) ||
+      (typeof json?.id_token_email === 'string' && json.id_token_email.trim().toLowerCase()) ||
       decodeJwtEmailUnsafe(token?.id_token ?? json?.id_token) ||
       undefined;
     const expiryMs = parseEpochMs(token?.expiry);

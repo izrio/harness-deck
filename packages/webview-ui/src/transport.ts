@@ -34,6 +34,8 @@ export interface TransportState {
   readonly routes: readonly RemoteRouteEntry[];
   readonly suggestedRoute?: RemoteRouteEntry;
   readonly pendingPairCode?: string;
+  readonly pendingSessionId?: string;
+  readonly pendingOutboxCount: number;
   readonly error?: string;
   readonly reconnectAttempt: number;
 }
@@ -56,6 +58,16 @@ export const WS_REVOKED_CODE = 4001;
 
 const ROUTES_STORAGE_KEY = 'harness-deck:remote-routes';
 const WS_OPEN_STATE = 1;
+const MAX_PENDING_OUTBOX = 32;
+
+/** 断网/重连期间可安全暂存并在重连成功后按序补发的消息类型（带幂等 commandId 或终态操作）。 */
+const QUEUEABLE_OUTBOX_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
+  'sendMessage',
+  'respondApproval',
+  'answerQuestion',
+  'runScheduleNow',
+  'interrupt',
+]);
 
 export function computeReconnectDelayMs(attempt: number, randomValue: number = Math.random()): number {
   const clamped = Math.max(0, Math.min(attempt, 6));
@@ -70,6 +82,22 @@ export function extractPairCodeFromHash(hash: string): string | undefined {
   const params = new URLSearchParams(clean);
   const code = params.get('code')?.trim();
   return code || undefined;
+}
+
+export function extractHandoffTokenFromHash(hash: string): string | undefined {
+  const clean = hash.replace(/^#/u, '');
+  if (!clean) return undefined;
+  const params = new URLSearchParams(clean);
+  const token = params.get('handoff')?.trim();
+  return token || undefined;
+}
+
+export function extractSessionIdFromSearch(search: string): string | undefined {
+  const clean = search.replace(/^\?/u, '');
+  if (!clean) return undefined;
+  const params = new URLSearchParams(clean);
+  const sessionId = params.get('session')?.trim();
+  return sessionId || undefined;
 }
 
 export function detectDefaultDeviceName(userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : ''): string {
@@ -90,6 +118,7 @@ export interface ConnectionSupervisorDeps {
   readonly createSocket: (url: string) => SocketLike;
   readonly onHostMessage: (message: HostToWebview) => void;
   readonly onStatusChange?: (status: TransportStatus, attempt: number) => void;
+  readonly onPendingCountChange?: (count: number) => void;
   readonly onRevoked?: () => void;
   readonly isOnline?: () => boolean;
   readonly isVisible?: () => boolean;
@@ -103,6 +132,7 @@ export class ConnectionSupervisor {
   private reconnectTimer: unknown;
   private heartbeatTimer: unknown;
   private pongTimeoutTimer: unknown;
+  private readonly outbox: WebviewToHost[] = [];
   private status: TransportStatus = 'offline';
   private attempt = 0;
   private disposed = false;
@@ -124,6 +154,16 @@ export class ConnectionSupervisor {
 
   getAttempt(): number {
     return this.attempt;
+  }
+
+  getPendingCount(): number {
+    return this.outbox.length;
+  }
+
+  clearOutbox(): void {
+    if (this.outbox.length === 0) return;
+    this.outbox.length = 0;
+    this.deps.onPendingCountChange?.(0);
   }
 
   start(): void {
@@ -185,9 +225,23 @@ export class ConnectionSupervisor {
   }
 
   sendMessage(message: WebviewToHost): boolean {
-    if (!this.socket || this.socket.readyState !== WS_OPEN_STATE) return false;
-    this.sendRaw(message);
-    return true;
+    if (this.socket && this.socket.readyState === WS_OPEN_STATE) {
+      this.sendRaw(message);
+      return true;
+    }
+    if (this.started && QUEUEABLE_OUTBOX_TYPES.has(message.type)) {
+      const cmdId = 'commandId' in message ? message.commandId : undefined;
+      if (cmdId && this.outbox.some((item) => 'commandId' in item && item.commandId === cmdId)) {
+        return true;
+      }
+      this.outbox.push(message);
+      if (this.outbox.length > MAX_PENDING_OUTBOX) {
+        this.outbox.shift();
+      }
+      this.deps.onPendingCountChange?.(this.outbox.length);
+      return true;
+    }
+    return false;
   }
 
   private setStatus(next: TransportStatus): void {
@@ -260,6 +314,7 @@ export class ConnectionSupervisor {
       const visible = this.deps.isVisible ? this.deps.isVisible() : true;
       this.sendRaw({ type: 'visibility', payload: { visible } });
       this.sendRaw({ type: 'ready', payload: {} });
+      this.flushOutbox();
     };
 
     sock.onmessage = (event) => {
@@ -291,6 +346,7 @@ export class ConnectionSupervisor {
       if (event?.code === WS_REVOKED_CODE) {
         this.started = false;
         this.attempt = 0;
+        this.clearOutbox();
         this.setStatus('unauthenticated');
         this.deps.onRevoked?.();
         return;
@@ -348,6 +404,16 @@ export class ConnectionSupervisor {
     }, delay);
   }
 
+  private flushOutbox(): void {
+    if (this.outbox.length === 0) return;
+    if (!this.socket || this.socket.readyState !== WS_OPEN_STATE) return;
+    const queued = this.outbox.splice(0, this.outbox.length);
+    this.deps.onPendingCountChange?.(0);
+    for (const msg of queued) {
+      this.sendRaw(msg);
+    }
+  }
+
   private sendRaw(data: unknown): void {
     if (!this.socket || this.socket.readyState !== WS_OPEN_STATE) return;
     try {
@@ -378,6 +444,7 @@ export function loadKnownRoutes(): readonly RemoteRouteEntry[] {
         typeof item === 'object' &&
         ((item as RemoteRouteEntry).kind === 'lan' ||
           (item as RemoteRouteEntry).kind === 'tailscale' ||
+          (item as RemoteRouteEntry).kind === 'quick-tunnel' ||
           (item as RemoteRouteEntry).kind === 'tunnel') &&
         typeof (item as RemoteRouteEntry).url === 'string',
     );
@@ -389,7 +456,8 @@ export function loadKnownRoutes(): readonly RemoteRouteEntry[] {
 const ROUTE_PRIORITY: Readonly<Record<RemoteRouteKind, number>> = {
   lan: 0,
   tailscale: 1,
-  tunnel: 2,
+  'quick-tunnel': 2,
+  tunnel: 3,
 };
 
 /** 按 LAN -> Tailscale -> 自定义隧道 顺序探测除当前入口外首个可达的备用路由（HD-26）。 */

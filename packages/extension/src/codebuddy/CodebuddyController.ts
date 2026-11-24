@@ -832,7 +832,24 @@ export class CodebuddyController implements ChatBackendController {
 
         const proj = this.projectionFor(currentKey);
         const wasRunning = proj.running;
+        const desiredModeBeforeInit = proj.mode;
         proj.applyEvent(event);
+        if (
+          event.type === 'system' &&
+          event.subtype === 'init' &&
+          desiredModeBeforeInit &&
+          desiredModeBeforeInit !== 'bypassPermissions' &&
+          typeof event.permissionMode === 'string' &&
+          event.permissionMode &&
+          event.permissionMode !== desiredModeBeforeInit
+        ) {
+          const activeLink = this.links.get(currentKey);
+          if (activeLink?.running) {
+            void activeLink
+              .sendControlRequest({ subtype: 'set_permission_mode', mode: desiredModeBeforeInit }, 8_000)
+              .catch(() => undefined);
+          }
+        }
         if (proj.title) this.remember(currentKey, proj.title);
 
         if (wasRunning && !proj.running && event.type === 'result') {

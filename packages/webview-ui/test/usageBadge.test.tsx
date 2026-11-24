@@ -344,4 +344,98 @@ describe('订阅用量标识', () => {
     act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: secondId, quota } }));
     expect(screen.getByTestId('usage-badge').textContent).toContain('58%');
   });
+
+  it('同批次乱序到达的旧 requestId 回包不会覆盖新请求的额度结果', () => {
+    const firstId = mount();
+    vscode.reset();
+    // 切换账号触发 secondId
+    act(() =>
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            { id: 'system:claude', backendId: 'claude', label: '本机默认账号', isSystemDefault: true, status: 'authenticated' },
+            { id: 'claude-2', backendId: 'claude', label: 'b@example.com', isSystemDefault: false, status: 'authenticated' },
+          ],
+          channels: { claude: { mode: 'official', accountId: 'claude-2' } },
+        },
+      }),
+    );
+    const secondReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const secondId = secondReq && secondReq.type === 'fetchQuota' ? secondReq.payload.requestId : -1;
+    expect(secondId).toBeGreaterThan(firstId);
+
+    // 模拟 secondId 先返回成功，紧接着旧的 firstId 乱序返回 unavailable（同一 React 批次内）
+    act(() => {
+      store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: secondId, quota } });
+      store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: firstId, error: 'unavailable' } });
+    });
+    expect(screen.getByTestId('usage-badge').textContent).toContain('58%');
+  });
+
+  it('账号列表同步到当前激活账号的新额度时自动展示，且连接态遇临时 unavailable 会在 3 秒后补查一次', async () => {
+    vi.useFakeTimers();
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          connection: 'connected',
+          backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+          accounts: {
+            items: [
+              { id: 'agy-1', backendId: 'antigravity', label: 'user@gmail.com', isSystemDefault: false, status: 'authenticated' },
+            ],
+            channels: { antigravity: { mode: 'official', accountId: 'agy-1' } },
+          },
+        }),
+      }),
+    );
+    render(createElement(UsageBadge));
+    const req1 = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const id1 = req1 && req1.type === 'fetchQuota' ? req1.payload.requestId : -1;
+
+    // 首次探测返回 unavailable 后，3 秒自动补查一次
+    vscode.reset();
+    act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: id1, error: 'unavailable' } }));
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_100);
+    });
+    const retryReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    expect(retryReq).toBeTruthy();
+    const retryId = retryReq && retryReq.type === 'fetchQuota' ? retryReq.payload.requestId : -1;
+    act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: retryId, error: 'unavailable' } }));
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+
+    // 之后宿主通过 accounts 广播当前账号的新额度，徽标立即可见
+    const freshQuota: QuotaView = {
+      windows: [
+        { kind: 'weekly', label: 'gemini', usedPercent: 27, remainingPercent: 73 },
+        { kind: 'session', label: 'gemini', usedPercent: 4, remainingPercent: 96 },
+      ],
+      queriedAt: Date.now() + 10_000,
+    };
+    act(() =>
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            {
+              id: 'agy-1',
+              backendId: 'antigravity',
+              label: 'user@gmail.com',
+              isSystemDefault: false,
+              status: 'authenticated',
+              quota: freshQuota,
+            },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'agy-1' } },
+        },
+      }),
+    );
+    expect(screen.getByTestId('usage-badge').textContent).toContain('96%');
+    expect(screen.getByTestId('usage-ring-outer').getAttribute('data-percent')).toBe('73');
+    expect(screen.getByTestId('usage-ring-inner').getAttribute('data-percent')).toBe('96');
+  });
 });

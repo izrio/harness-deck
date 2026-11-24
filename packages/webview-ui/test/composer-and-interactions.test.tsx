@@ -2,9 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { PendingInteraction } from '@harness-deck/shared';
+import { App } from '../src/App.tsx';
 import { Composer } from '../src/components/Composer.tsx';
 import { InteractionCard } from '../src/components/Interactions.tsx';
-import { applyHostMessage } from '../src/store.ts';
+import { applyHostMessage, closeSettingsPage, setActiveModule } from '../src/store.ts';
 import { makeSnapshot, mockVsCodeApi } from './setup.ts';
 
 const vscode = mockVsCodeApi();
@@ -163,5 +164,63 @@ describe('InteractionCard resilience', () => {
       <InteractionCard interaction={{ kind: 'question', id: 'q-empty', questions: [] }} />,
     );
     expect(container.firstChild).toBeNull();
+  });
+});
+
+describe('RuntimeSetupView 首页无运行时初始化引导', () => {
+  it('全部运行时未安装时展示初始化页面而非首页与输入框，并支持一键安装', () => {
+    closeSettingsPage();
+    setActiveModule('sessions');
+    render(<App />);
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          runtime: { kind: 'notInstalled' },
+          connection: 'idle',
+          backends: {
+            active: 'dsh',
+            nodeEnv: { checked: true, hasNode: true, hasNpm: true },
+            items: [
+              { id: 'dsh', name: 'DeepSeek', kind: 'dsh', available: false, npmPackage: '@deepseek-ai/dsh' },
+              { id: 'claude', name: 'Claude Code', kind: 'claude', available: false, npmPackage: '@anthropic-ai/claude-code' },
+            ],
+          },
+        }),
+      });
+    });
+
+    expect(screen.getByTestId('runtime-setup-page')).toBeTruthy();
+    expect(screen.queryByTestId('suggestions')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('runtime-setup-install-claude'));
+    expect(vscode.posted).toContainEqual({ type: 'installBackend', payload: { id: 'claude' } });
+  });
+
+  it('当前运行时未安装但本机已有其他运行时时，可一键启用并切换', () => {
+    closeSettingsPage();
+    setActiveModule('sessions');
+    render(<App />);
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          runtime: { kind: 'notInstalled' },
+          connection: 'idle',
+          backends: {
+            active: 'dsh',
+            nodeEnv: { checked: true, hasNode: true, hasNpm: true },
+            items: [
+              { id: 'dsh', name: 'DeepSeek', kind: 'dsh', available: false, npmPackage: '@deepseek-ai/dsh' },
+              { id: 'claude', name: 'Claude Code', kind: 'claude', available: true, version: '1.2.3' },
+            ],
+          },
+        }),
+      });
+    });
+
+    expect(screen.getByTestId('runtime-setup-installed')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('runtime-setup-use-claude'));
+    expect(vscode.posted).toContainEqual({ type: 'selectBackend', payload: { id: 'claude' } });
   });
 });

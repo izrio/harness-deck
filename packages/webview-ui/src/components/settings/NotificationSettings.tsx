@@ -1,5 +1,6 @@
 /**
- * 设置 -> 界面 -> 通知：系统通知开关、后台窗口过滤、触发时机配置与测试通知。
+ * 设置 -> 界面 -> 通知：
+ * 去线留白：将总开关与触发时机自然分为两个留白区块，移除卡片内灰底分割栏与行间横线。
  */
 import type { NotificationPreferences } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
@@ -31,14 +32,15 @@ export function NotificationSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-5" data-testid="settings-notifications">
+    <div className="flex flex-col gap-8" data-testid="settings-notifications">
       <SettingsSection
         title={t('settings.notifications.title')}
         actions={
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="xs"
+            className="text-ink-2 hover:text-ink"
             data-testid="notif-test-btn"
             onClick={() => postToHost({ type: 'testNotification', payload: {} })}
           >
@@ -47,14 +49,13 @@ export function NotificationSettings() {
           </Button>
         }
       >
-        <div className="divide-y divide-line/60">
+        <div className="flex flex-col gap-0.5 p-1.5">
           <SwitchRow
             testId="notif-enabled"
             label={t('settings.notifications.enabled')}
             checked={notifications.enabled}
             onChange={(enabled) => update({ enabled })}
           />
-
           <SwitchRow
             testId="notif-only-unfocused"
             label={t('settings.notifications.onlyUnfocused')}
@@ -63,12 +64,10 @@ export function NotificationSettings() {
             onChange={(onlyWhenUnfocused) => update({ onlyWhenUnfocused })}
           />
         </div>
+      </SettingsSection>
 
-        <div className="border-y border-line/60 bg-field/40 px-4 py-2 text-[11px] font-medium text-ink-3">
-          {t('settings.notifications.triggers')}
-        </div>
-
-        <div className="divide-y divide-line/60">
+      <SettingsSection title={t('settings.notifications.triggers')}>
+        <div className="flex flex-col gap-0.5 p-1.5">
           <SwitchRow
             testId="notif-attention"
             label={t('settings.notifications.onAttention')}
@@ -118,7 +117,7 @@ function SwitchRow({
 }) {
   return (
     <div
-      className="flex items-center justify-between gap-4 px-4 py-3 aria-disabled:opacity-50"
+      className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 aria-disabled:opacity-45 aria-disabled:hover:bg-transparent dark:hover:bg-hover/35"
       aria-disabled={disabled}
     >
       <span className="min-w-0 flex-1 text-[12.5px] text-ink">{label}</span>

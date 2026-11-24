@@ -492,7 +492,9 @@ describe('CodebuddyController 多标签并发会话', () => {
     await controller.handle({ type: 'selectPermission', payload: { preset: 'bypassPermissions' } });
     expect(await controller.send('继续')).toBe(true);
     const link = spawned[0]!;
-    link.emit({ type: 'system', subtype: 'init', session_id: 'cb-bypass' });
+    // CLI 收到 --permission-mode default 后在 init 中回报 default，不能覆盖客户端的 bypassPermissions
+    link.emit({ type: 'system', subtype: 'init', session_id: 'cb-bypass', permissionMode: 'default' });
+    expect(controller.snapshot().permissions.current).toBe('bypassPermissions');
 
     // 普通工具自动放行
     const bashResp = await link.ask('r1', { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' } });
@@ -511,6 +513,40 @@ describe('CodebuddyController 多标签并发会话', () => {
       payload: { id: card!.id, answers: [{ id: 'q1', selected: ['是'] }] },
     });
     expect(await qPromise).toMatchObject({ allowed: true });
+
+    controller.dispose();
+  });
+
+  it('新建会话默认选中 auto 时，首条消息收到 init 的 permissionMode=default 不会被回退为默认权限', async () => {
+    const spawned: FakeCodebuddyLink[] = [];
+    const controller = new CodebuddyController({
+      workspacePath: '/w',
+      post: () => undefined,
+      log: () => undefined,
+      openExternal: () => undefined,
+      showLogs: () => undefined,
+      restartRuntime: () => undefined,
+      loadActiveSessionId: () => undefined,
+      saveActiveSessionId: () => undefined,
+      loadSessions: () => [],
+      saveSessions: () => undefined,
+      workbench: noWorkbench,
+      codebuddyConfigDir: () => '/nonexistent-codebuddy-dir',
+      renderDelayMs: 0,
+    });
+    controller.setSpawner(async (params) => {
+      const link = new FakeCodebuddyLink(params);
+      spawned.push(link);
+      return link;
+    });
+
+    expect(controller.snapshot().permissions.current).toBe('auto');
+    expect(await controller.send('帮我检查')).toBe(true);
+    const link = spawned[0]!;
+    link.emit({ type: 'system', subtype: 'init', session_id: 'cb-auto-1', permissionMode: 'default' });
+
+    expect(controller.snapshot().permissions.current).toBe('auto');
+    expect(link.controlRequests).toContainEqual({ subtype: 'set_permission_mode', mode: 'auto' });
 
     controller.dispose();
   });

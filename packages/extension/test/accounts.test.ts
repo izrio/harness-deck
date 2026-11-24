@@ -685,6 +685,28 @@ describe('AccountIsolation & AccountInspector', () => {
         env,
       });
       assert.equal(secrets.map.get(accountSlotSecretKey(systemAccountId('antigravity'))), newerDisk);
+
+      // 4. Antigravity CLI 1.5+ 的 id_token_email 顶层字段能被识别为账号邮箱并用于同账号比对
+      const agyWithIdTokenEmail = JSON.stringify({
+        auth_method: 'oauth',
+        id_token_email: 'cli-user@gmail.com',
+        token: {
+          access_token: 'access-cli',
+          refresh_token: 'refresh-cli',
+          expiry: new Date(nowMs + 3600_000).toISOString(),
+        },
+      });
+      await secrets.store(accountSlotSecretKey('agy-cli-email'), agyWithIdTokenEmail);
+      const inspected = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: 'agy-cli-email',
+        storageRoot: join(root, 'storage'),
+        baseEnv: env,
+        secrets,
+        now: () => nowMs,
+      });
+      assert.equal(inspected.status, 'authenticated');
+      assert.equal(inspected.identity, 'cli-user@gmail.com');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

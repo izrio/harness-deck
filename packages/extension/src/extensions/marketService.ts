@@ -1,8 +1,9 @@
 /**
  * 在线扩展市场服务（MCP 市场 + Agent 技能市场）：
- * - MCP 市场：实时对接官方 MCP Registry API（https://registry.modelcontextprotocol.io/v0/servers），
- *   解析 remotes（Streamable HTTP / SSE）与 packages（npm / pypi / oci），带 TTL 缓存与离线精选兜底。
- * - 技能市场：实时扫描官方开源 SKILL.md 仓库树并抓取最新 SKILL.md Frontmatter，带 TTL 缓存与离线精选兜底。
+ * - MCP 市场：实时对接官方 MCP Registry API（https://registry.modelcontextprotocol.io/v0.1/servers，兼容 v0），
+ *   解析 remotes（Streamable HTTP / SSE）与 packages（npm / pypi / oci），通过代理感知 fetch 发起请求，带 TTL 缓存与离线精选兜底。
+ * - 技能市场：实时对接 skills.sh 在线搜索市场与官方开源 SKILL.md 仓库树（anthropics/skills、vercel-labs/agent-skills），
+ *   支持在线关键词检索与安装热度排序，通过代理感知 fetch 发起请求，带 TTL 缓存与离线精选兜底。
  */
 import type {
   McpMarketCategory,
@@ -13,12 +14,17 @@ import type {
   SkillMarketItem,
   SkillMarketState,
 } from '@harness-deck/shared';
+import { createProxyAwareFetch, type FetchLike } from '../providers/proxyFetch.ts';
 import { parseSkillMarkdown } from './skillService.ts';
 
-const MCP_REGISTRY_ENDPOINT = 'https://registry.modelcontextprotocol.io/v0/servers';
+const MCP_REGISTRY_ENDPOINTS = [
+  'https://registry.modelcontextprotocol.io/v0.1/servers',
+  'https://registry.modelcontextprotocol.io/v0/servers',
+] as const;
+const SKILLS_SH_SEARCH_ENDPOINT = 'https://skills.sh/api/search';
 const MCP_MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const SKILL_MARKET_CACHE_TTL_MS = 10 * 60 * 1000;
-const FETCH_TIMEOUT_MS = 8_000;
+const FETCH_TIMEOUT_MS = 12_000;
 const MAX_RESPONSE_BYTES = 1_500_000;
 const USER_AGENT = 'Halo-IDE-Extension/1.0';
 
@@ -337,11 +343,11 @@ const BUILTIN_MCP_BY_NAME = new Map<string, McpMarketItem>(
 );
 
 const mcpMarketCache = new Map<string, { readonly expiresAt: number; readonly state: McpMarketState }>();
-let skillMarketCache: { readonly expiresAt: number; readonly state: SkillMarketState } | undefined;
+const skillMarketCache = new Map<string, { readonly expiresAt: number; readonly state: SkillMarketState }>();
 
 export function clearMarketCacheForTests(): void {
   mcpMarketCache.clear();
-  skillMarketCache = undefined;
+  skillMarketCache.clear();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -350,7 +356,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function fetchTextCapped(
   url: string,
-  fetchImpl: typeof fetch,
+  fetchImpl: FetchLike,
   accept = 'application/json',
 ): Promise<string> {
   const response = await fetchImpl(url, {
@@ -549,7 +555,8 @@ export function parseMcpRegistryPayload(payload: unknown): McpMarketItem[] {
 export async function fetchOnlineMcpMarket(options?: {
   readonly query?: string;
   readonly force?: boolean;
-  readonly fetchImpl?: typeof fetch;
+  readonly fetchImpl?: FetchLike;
+  readonly getHttpProxy?: () => string | undefined;
 }): Promise<McpMarketState> {
   const cleanQuery = options?.query?.trim() ?? '';
   const cacheKey = cleanQuery.toLowerCase();
@@ -561,14 +568,26 @@ export async function fetchOnlineMcpMarket(options?: {
     }
   }
 
-  const fetchImpl = options?.fetchImpl ?? fetch;
+  const fetchImpl: FetchLike = options?.fetchImpl ?? createProxyAwareFetch(options?.getHttpProxy);
   try {
-    const url = new URL(MCP_REGISTRY_ENDPOINT);
-    url.searchParams.set('limit', '40');
-    if (cleanQuery) {
-      url.searchParams.set('search', cleanQuery);
+    let raw: string | undefined;
+    let lastError: unknown;
+    for (const endpoint of MCP_REGISTRY_ENDPOINTS) {
+      const url = new URL(endpoint);
+      url.searchParams.set('limit', '40');
+      if (cleanQuery) {
+        url.searchParams.set('search', cleanQuery);
+      }
+      try {
+        raw = await fetchTextCapped(url.toString(), fetchImpl);
+        break;
+      } catch (err) {
+        lastError = err;
+      }
     }
-    const raw = await fetchTextCapped(url.toString(), fetchImpl);
+    if (raw === undefined) {
+      throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'MCP registry unavailable'));
+    }
     const parsed = parseMcpRegistryPayload(JSON.parse(raw));
     // 无搜索词时把离线精选里的核心常用项合并到前部去重，保证常用服务器始终一触即达
     const merged: McpMarketItem[] = [];
@@ -608,9 +627,63 @@ export async function fetchOnlineMcpMarket(options?: {
   }
 }
 
+/** 解析 skills.sh 在线搜索 API 返回的 JSON 为统一的 SkillMarketItem 列表。 */
+export function parseSkillsShPayload(payload: unknown): SkillMarketItem[] {
+  if (!isRecord(payload) || !Array.isArray(payload.skills)) return [];
+  const items: SkillMarketItem[] = [];
+  const seen = new Set<string>();
+  for (const raw of payload.skills) {
+    if (!isRecord(raw)) continue;
+    const source = typeof raw.source === 'string' ? raw.source.trim() : '';
+    const skillId = typeof raw.skillId === 'string' ? raw.skillId.trim() : '';
+    const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : skillId;
+    if (!source || !name || !/^[^/\s]+\/[^/\s]+$/u.test(source)) continue;
+    const dedupeKey = `${source.toLowerCase()}:${name.toLowerCase()}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const subpath = skillId ? `skills/${skillId}` : '';
+    const builtin = BUILTIN_SKILL_BY_KEY.get(`${source.toLowerCase()}:${subpath.toLowerCase()}`);
+    const installs =
+      typeof raw.installs === 'number' && Number.isFinite(raw.installs) && raw.installs >= 0
+        ? Math.round(raw.installs)
+        : undefined;
+    const desc =
+      (typeof raw.description === 'string' && raw.description.trim()) ||
+      builtin?.description ||
+      `${source} · ${name}`;
+
+    items.push({
+      id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : `${source}:${name}`,
+      name,
+      repo: source,
+      ref: 'main',
+      subpath: builtin?.subpath ?? subpath,
+      category: builtin?.category ?? inferSkillCategory(name, desc),
+      description: desc,
+      ...(builtin?.descZh ? { descZh: builtin.descZh } : {}),
+      ...(builtin?.descEn ? { descEn: builtin.descEn } : {}),
+      ...(installs !== undefined ? { installs } : {}),
+    });
+  }
+  return items;
+}
+
+async function fetchSkillsShSearch(
+  query: string,
+  limit: number,
+  fetchImpl: FetchLike,
+): Promise<SkillMarketItem[]> {
+  const url = new URL(SKILLS_SH_SEARCH_ENDPOINT);
+  url.searchParams.set('q', query);
+  url.searchParams.set('limit', String(limit));
+  const raw = await fetchTextCapped(url.toString(), fetchImpl);
+  return parseSkillsShPayload(JSON.parse(raw));
+}
+
 async function fetchRepoSkills(
   source: SkillRepoSource,
-  fetchImpl: typeof fetch,
+  fetchImpl: FetchLike,
 ): Promise<SkillMarketItem[]> {
   const treeUrl = `https://api.github.com/repos/${source.repo}/git/trees/${encodeURIComponent(source.ref)}?recursive=1`;
   const rawTree = await fetchTextCapped(treeUrl, fetchImpl, 'application/vnd.github+json');
@@ -669,40 +742,96 @@ async function fetchRepoSkills(
 }
 
 export async function fetchOnlineSkillMarket(options?: {
+  readonly query?: string;
   readonly force?: boolean;
-  readonly fetchImpl?: typeof fetch;
+  readonly fetchImpl?: FetchLike;
+  readonly getHttpProxy?: () => string | undefined;
 }): Promise<SkillMarketState> {
+  const cleanQuery = options?.query?.trim() ?? '';
+  const cacheKey = cleanQuery.toLowerCase();
   const now = Date.now();
-  if (!options?.force && skillMarketCache && skillMarketCache.expiresAt > now) {
-    return skillMarketCache.state;
+  if (!options?.force) {
+    const cached = skillMarketCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.state;
+    }
   }
 
-  const fetchImpl = options?.fetchImpl ?? fetch;
-  const settled = await Promise.allSettled(
-    OFFICIAL_SKILL_REPOS.map((repo) => fetchRepoSkills(repo, fetchImpl)),
-  );
+  const fetchImpl: FetchLike = options?.fetchImpl ?? createProxyAwareFetch(options?.getHttpProxy);
 
-  const collected: SkillMarketItem[] = [];
-  const seen = new Set<string>();
+  // 带关键词（>=2 字符）时直接调用 skills.sh 在线模糊检索
+  if (cleanQuery.length >= 2) {
+    try {
+      const searched = await fetchSkillsShSearch(cleanQuery, 40, fetchImpl);
+      const state: SkillMarketState = {
+        items: searched,
+        source: 'online',
+        query: cleanQuery,
+        updatedAt: now,
+      };
+      skillMarketCache.set(cacheKey, { expiresAt: now + SKILL_MARKET_CACHE_TTL_MS, state });
+      return state;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        items: BUILTIN_SKILL_MARKET,
+        source: 'fallback',
+        query: cleanQuery,
+        updatedAt: now,
+        error: detail,
+      };
+    }
+  }
+
+  // 默认浏览态：并发拉取官方 GitHub 仓库（完整 SKILL.md 简介与精确 subpath）+ skills.sh 热门在线技能，任一成功即在线态
+  const [repoSettled, shSettled] = await Promise.all([
+    Promise.allSettled(OFFICIAL_SKILL_REPOS.map((repo) => fetchRepoSkills(repo, fetchImpl))),
+    Promise.allSettled([
+      fetchSkillsShSearch('skill', 24, fetchImpl),
+      fetchSkillsShSearch('react', 16, fetchImpl),
+    ]),
+  ]);
+
+  const byRepoName = new Map<string, SkillMarketItem>();
   const errors: string[] = [];
 
-  for (const res of settled) {
+  for (const res of repoSettled) {
     if (res.status === 'fulfilled') {
       for (const item of res.value) {
-        const key = item.id.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        collected.push(item);
+        const key = `${item.repo.toLowerCase()}:${item.name.toLowerCase()}`;
+        if (!byRepoName.has(key)) {
+          byRepoName.set(key, item);
+        }
       }
     } else {
       errors.push(res.reason instanceof Error ? res.reason.message : String(res.reason));
     }
   }
 
+  for (const res of shSettled) {
+    if (res.status === 'fulfilled') {
+      for (const item of res.value) {
+        const key = `${item.repo.toLowerCase()}:${item.name.toLowerCase()}`;
+        const existing = byRepoName.get(key);
+        if (existing) {
+          if (item.installs !== undefined && existing.installs === undefined) {
+            byRepoName.set(key, { ...existing, installs: item.installs });
+          }
+        } else {
+          byRepoName.set(key, item);
+        }
+      }
+    } else {
+      errors.push(res.reason instanceof Error ? res.reason.message : String(res.reason));
+    }
+  }
+
+  const collected = [...byRepoName.values()];
   if (collected.length === 0) {
     return {
       items: BUILTIN_SKILL_MARKET,
       source: 'fallback',
+      ...(cleanQuery ? { query: cleanQuery } : {}),
       updatedAt: now,
       ...(errors.length > 0 ? { error: errors.join('; ') } : {}),
     };
@@ -711,8 +840,9 @@ export async function fetchOnlineSkillMarket(options?: {
   const state: SkillMarketState = {
     items: collected,
     source: 'online',
+    ...(cleanQuery ? { query: cleanQuery } : {}),
     updatedAt: now,
   };
-  skillMarketCache = { expiresAt: now + SKILL_MARKET_CACHE_TTL_MS, state };
+  skillMarketCache.set(cacheKey, { expiresAt: now + SKILL_MARKET_CACHE_TTL_MS, state });
   return state;
 }

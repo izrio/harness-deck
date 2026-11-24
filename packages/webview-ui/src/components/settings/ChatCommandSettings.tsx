@@ -1,6 +1,6 @@
 /**
  * 设置 -> 会话 -> 聊天命令：
- * 保存常用提示词，在输入框输入 / 选用，填入后可改再发；所有 Agent 通用。
+ * 去线留白：移除行间横线与冗余「提示词」胶囊，让 /命令名 与正文预览直接自解释。
  */
 import { useState } from 'react';
 import type { ChatCommand } from '@harness-deck/shared';
@@ -9,7 +9,6 @@ import { useT } from '../../i18n.ts';
 import { closeSettingsPage, requestPrefill, setPreferencesLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { MoreIcon, PencilIcon, PlusIcon, SendIcon, SlashIcon, TrashIcon } from '../icons.tsx';
-import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -141,13 +140,13 @@ export function ChatCommandSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-5" data-testid="settings-chat-commands">
+    <div className="flex flex-col gap-8" data-testid="settings-chat-commands">
       <SettingsSection
         title={t('settings.commands.title')}
         actions={
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             data-testid="chat-command-add-btn"
             onClick={openAdd}
@@ -159,25 +158,22 @@ export function ChatCommandSettings() {
       >
         {chatCommands.length === 0 ? (
           <div
-            className="px-4 py-6 text-center text-[12px] text-ink-3"
+            className="px-4 py-10 text-center text-[12px] text-ink-3"
             data-testid="chat-commands-empty"
           >
             {t('settings.commands.empty')}
           </div>
         ) : (
-          <div className="divide-y divide-line/60">
+          <div className="flex flex-col gap-1 p-1.5">
             {chatCommands.map((cmd) => (
               <div
                 key={cmd.name}
-                className="flex items-start justify-between gap-3 px-3.5 py-3 transition-colors hover:bg-hover/35"
+                className="flex items-start justify-between gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-canvas/70 dark:hover:bg-hover/35"
                 data-testid={`chat-command-item-${cmd.name}`}
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                     <span className="font-mono text-[13px] font-semibold text-ink">/{cmd.name}</span>
-                    <ValuePill tone="accent" className="text-[10.5px]">
-                      {t('settings.commands.badge')}
-                    </ValuePill>
                     {cmd.description ? (
                       <span className="truncate text-[12px] text-ink-2">{cmd.description}</span>
                     ) : null}

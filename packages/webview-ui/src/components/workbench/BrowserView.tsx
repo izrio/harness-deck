@@ -664,7 +664,7 @@ export default function BrowserView() {
 
             {browser.error ? (
               <div
-                className="w-full rounded-lg border border-red/25 bg-red-tint/70 px-3 py-2 text-left text-[11.5px] leading-relaxed text-red"
+                className="max-h-40 w-full overflow-y-auto rounded-lg border border-red/25 bg-red-tint/70 px-3 py-2 text-left text-[11.5px] leading-relaxed break-all whitespace-pre-wrap text-red"
                 data-testid="browser-error"
               >
                 {browser.error}

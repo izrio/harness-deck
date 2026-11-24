@@ -7,7 +7,9 @@ import { useSyncExternalStore } from 'react';
 import type { BackendView, HostToWebview, WebviewToHost, WorkbenchModule } from '@harness-deck/shared';
 import {
   ConnectionSupervisor,
+  extractHandoffTokenFromHash,
   extractPairCodeFromHash,
+  extractSessionIdFromSearch,
   isIdeWebviewEnvironment,
   loadKnownRoutes,
   probeFallbackRoute,
@@ -20,7 +22,15 @@ import {
 } from './transport.ts';
 
 export type { MobileDeviceInfo, RemoteRouteEntry, TransportState, TransportStatus } from './transport.ts';
-export { ConnectionSupervisor, computeReconnectDelayMs, detectDefaultDeviceName, extractPairCodeFromHash, probeFallbackRoute } from './transport.ts';
+export {
+  ConnectionSupervisor,
+  computeReconnectDelayMs,
+  detectDefaultDeviceName,
+  extractHandoffTokenFromHash,
+  extractPairCodeFromHash,
+  extractSessionIdFromSearch,
+  probeFallbackRoute,
+} from './transport.ts';
 
 /** Webview 本地保存的状态（输入框草稿等），刷新和隐藏后仍在。 */
 export interface PersistedState {
@@ -96,6 +106,7 @@ let transportState: TransportState = {
   mode: isIdeWebviewEnvironment() ? 'ide' : 'mobile-web',
   status: isIdeWebviewEnvironment() ? 'ide' : 'checking',
   routes: typeof window !== 'undefined' && !isIdeWebviewEnvironment() ? loadKnownRoutes() : [],
+  pendingOutboxCount: 0,
   reconnectAttempt: 0,
 };
 
@@ -148,10 +159,14 @@ function ensureSupervisor(): ConnectionSupervisor {
           });
         }
       },
+      onPendingCountChange: (count) => {
+        updateTransportState({ pendingOutboxCount: count });
+      },
       onRevoked: () => {
         updateTransportState({
           device: undefined,
           status: 'unauthenticated',
+          pendingOutboxCount: 0,
           error: 'revoked',
         });
       },
@@ -166,16 +181,59 @@ async function checkMobileSession(): Promise<void> {
   if (typeof window === 'undefined') return;
 
   const pairCode = extractPairCodeFromHash(window.location.hash);
-  if (pairCode) {
+  const handoffToken = extractHandoffTokenFromHash(window.location.hash);
+  const sessionId = extractSessionIdFromSearch(window.location.search);
+  if (pairCode || handoffToken) {
     try {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
     } catch {
       // ignore
     }
+  }
+  if (pairCode) {
     updateTransportState({ pendingPairCode: pairCode });
+  }
+  if (sessionId) {
+    updateTransportState({ pendingSessionId: sessionId });
   }
 
   updateTransportState({ mode: 'mobile-web', status: 'checking', error: undefined });
+
+  // 跨入口无缝漫游票据：自动换取当前 Origin 的 HttpOnly Cookie，免重扫二维码
+  if (handoffToken) {
+    try {
+      const redeemRes = await fetch('/api/auth/handoff/redeem', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: handoffToken }),
+      });
+      if (redeemRes.ok) {
+        const redeemed = (await redeemRes.json()) as {
+          ok?: boolean;
+          device?: MobileDeviceInfo;
+          vapidPublicKey?: string;
+          routes?: RemoteRouteEntry[];
+        };
+        if (redeemed.ok && redeemed.device) {
+          const routes = Array.isArray(redeemed.routes) ? redeemed.routes : loadKnownRoutes();
+          if (routes.length > 0) saveKnownRoutes(routes);
+          updateTransportState({
+            device: redeemed.device,
+            ...(redeemed.vapidPublicKey ? { vapidPublicKey: redeemed.vapidPublicKey } : {}),
+            routes,
+            pendingPairCode: undefined,
+            error: undefined,
+          });
+          ensureSupervisor().start();
+          return;
+        }
+      }
+    } catch {
+      // 票据失效或网络异常时继续走常规会话检查
+    }
+  }
+
   try {
     const res = await fetch('/api/auth/session', {
       method: 'GET',
@@ -216,6 +274,48 @@ async function checkMobileSession(): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/** 消费通知深链（`?session=<id>`），消费后清理地址栏参数避免重复跳转。 */
+export function consumePendingDeepLinkSession(): string | undefined {
+  const id = transportState.pendingSessionId;
+  if (!id) return undefined;
+  updateTransportState({ pendingSessionId: undefined });
+  if (typeof window !== 'undefined') {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('session')) {
+        url.searchParams.delete('session');
+        const nextSearch = url.searchParams.toString();
+        window.history.replaceState(null, '', `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash}`);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return id;
+}
+
+/** 请求一次性跨入口漫游票据并跳转目标入口（目标 Origin 自动换取 Cookie 免重扫）。 */
+export async function navigateToRemoteRoute(targetUrl: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const cleanTarget = targetUrl.replace(/\/+$/u, '');
+  let finalUrl = `${cleanTarget}/`;
+  try {
+    const res = await fetch('/api/auth/handoff', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { ok?: boolean; token?: string };
+      if (data.ok && data.token) {
+        finalUrl = `${cleanTarget}/#handoff=${encodeURIComponent(data.token)}`;
+      }
+    }
+  } catch {
+    // 当前入口已离线时直接降级跳转目标地址
+  }
+  window.location.assign(finalUrl);
 }
 
 export async function pairWithHost(
@@ -262,13 +362,14 @@ export async function pairWithHost(
 }
 
 export async function logoutMobileDevice(): Promise<void> {
+  supervisor?.clearOutbox();
   supervisor?.stop('unauthenticated');
   try {
     await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
   } catch {
     // ignore network failure on logout
   }
-  updateTransportState({ device: undefined, status: 'unauthenticated', error: undefined });
+  updateTransportState({ device: undefined, status: 'unauthenticated', pendingOutboxCount: 0, error: undefined });
 }
 
 export function reconnectMobileTransport(): void {

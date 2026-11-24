@@ -1,7 +1,6 @@
 /**
  * 设置 -> Agent -> 账号：
- * 支持为不同智能体添加与登录多个官方渠道账号（原生目录隔离 / 凭据槽位快照 / 官方 API Key），
- * 并在每个智能体卡片上随时切换使用「官方渠道（指定账号）」或「第三方服务商」。
+ * 去线留白：移除隔离实现方式标签、卡片边框与行间分割线，用紧凑版面表达渠道与账号层级。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -28,14 +27,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-
-const REGION_DEFAULT_VALUE = '__default__';
 import { cn } from '../../lib/utils.ts';
 import { useT } from '../../i18n.ts';
 import { setSettingsTab, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { BackendLogo } from '../BackendLogo.tsx';
-import { ValuePill } from '../beautifului/index.ts';
 import {
   CheckIcon,
   CopyIcon,
@@ -51,8 +47,10 @@ import {
   SpinnerIcon,
   TerminalIcon,
   TrashIcon,
-  UsersIcon,
 } from '../icons.tsx';
+import { SettingsSection } from './SettingsSection.tsx';
+
+const REGION_DEFAULT_VALUE = '__default__';
 
 interface AccountEditorState {
   readonly isNew: boolean;
@@ -101,19 +99,6 @@ function editorFromAccount(account: AccountView): AccountEditorState {
   };
 }
 
-function statusTone(status: AccountView['status']): 'green' | 'orange' | 'accent' | 'neutral' {
-  switch (status) {
-    case 'authenticated':
-      return 'green';
-    case 'expired':
-      return 'orange';
-    case 'logging-in':
-      return 'accent';
-    default:
-      return 'neutral';
-  }
-}
-
 function formatQuotaChip(win: QuotaWindowView, t: ReturnType<typeof useT>): string {
   const kindLabel =
     win.kind === 'session'
@@ -147,7 +132,6 @@ export function AccountSettings() {
     postToHost({ type: 'refreshAccounts', payload: { includeQuota: true } });
   }, []);
 
-  // 保存新账号并立即登录：等待 Host 推送该新账号后自动触发 loginAccount
   useEffect(() => {
     if (!pendingLoginAfterCreate) return;
     const match = [...accountsState.items]
@@ -244,7 +228,6 @@ export function AccountSettings() {
   };
 
   const loginProgress = accountsState.loginProgress;
-  // 本地记住已关闭的进度对象：点击关闭后立即隐藏弹窗，Host 推送新的进度时再自动打开
   const [dismissedProgress, setDismissedProgress] = useState<AccountLoginProgress | undefined>();
   const [authCode, setAuthCode] = useState('');
   const loginOpen = Boolean(loginProgress) && loginProgress !== dismissedProgress;
@@ -276,41 +259,40 @@ export function AccountSettings() {
 
   return (
     <>
-      <div className="flex flex-col gap-2.5" data-testid="settings-accounts">
-        <div className="flex min-w-0 flex-col gap-1 px-0.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="m-0 truncate text-[13px] font-semibold tracking-tight text-ink">
-              {t('settings.accounts.title')}
-            </h3>
-            <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1.5">
+      <SettingsSection
+        title={t('settings.accounts.title')}
+        testId="settings-accounts"
+        surface="plain"
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-ink-2 hover:text-ink"
+              disabled={accountsState.checking === true}
+              data-testid="accounts-refresh"
+              onClick={() => postToHost({ type: 'refreshAccounts', payload: { includeQuota: true } })}
+            >
+              {accountsState.checking ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
+              <span>{accountsState.checking ? t('settings.accounts.refreshing') : t('settings.accounts.refresh')}</span>
+            </Button>
+            {multiAccountBackends.length > 0 ? (
               <Button
                 type="button"
-                variant="outline"
+                variant="default"
                 size="sm"
-                disabled={accountsState.checking === true}
-                data-testid="accounts-refresh"
-                onClick={() => postToHost({ type: 'refreshAccounts', payload: { includeQuota: true } })}
+                data-testid="accounts-add"
+                onClick={() => openAdd()}
               >
-                {accountsState.checking ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
-                <span>{accountsState.checking ? t('settings.accounts.refreshing') : t('settings.accounts.refresh')}</span>
+                <PlusIcon className="size-3.5" />
+                <span>{t('settings.accounts.add')}</span>
               </Button>
-              {multiAccountBackends.length > 0 ? (
-                <Button
-                  type="button"
-                  variant="default"
-                  size="sm"
-                  data-testid="accounts-add"
-                  onClick={() => openAdd()}
-                >
-                  <PlusIcon className="size-3.5" />
-                  <span>{t('settings.accounts.add')}</span>
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2.5">
+            ) : null}
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
           {backends.map((backend) => (
             <BackendAccountCard
               key={backend.id}
@@ -325,7 +307,7 @@ export function AccountSettings() {
             />
           ))}
         </div>
-      </div>
+      </SettingsSection>
 
       {/* 添加 / 编辑官方账号弹窗 */}
       <Dialog open={Boolean(editor)} onOpenChange={(open) => (!open ? closeEditor() : undefined)}>
@@ -453,7 +435,7 @@ export function AccountSettings() {
               ) : null}
 
               {editorAccountCap?.supportsSessionIsolation && !editor.isSystemDefault ? (
-                <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-inset/45 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-3 rounded-xl bg-field/60 px-3 py-2.5">
                   <span className="text-[12px] font-medium text-ink">
                     {t('settings.accounts.form.isolateSessions')}
                   </span>
@@ -465,7 +447,7 @@ export function AccountSettings() {
               ) : null}
 
               {editor.isNew ? (
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-3 px-0.5">
                   <span className="text-[12px] text-ink-2">{t('settings.accounts.form.setActive')}</span>
                   <Switch
                     checked={editor.setActive}
@@ -590,7 +572,7 @@ export function AccountSettings() {
           {loginProgress ? (
             <div className="flex min-w-0 flex-col gap-2.5">
               {loginProgress.deviceCode ? (
-                <div className="flex min-w-0 items-center justify-between gap-2 rounded-control border border-line bg-inset/60 px-3 py-2">
+                <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl bg-field/70 px-3 py-2.5">
                   <div className="min-w-0">
                     <div className="text-[11px] text-ink-3">{t('settings.accounts.loginModal.deviceCode')}</div>
                     <div className="font-mono text-[15px] font-semibold tracking-wider text-ink">
@@ -599,7 +581,7 @@ export function AccountSettings() {
                   </div>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     size="xs"
                     onClick={() => copyText('code', loginProgress.deviceCode!)}
                   >
@@ -610,7 +592,7 @@ export function AccountSettings() {
               ) : null}
 
               {loginProgress.authUrl ? (
-                <div className="flex min-w-0 flex-col gap-2 rounded-control border border-line bg-inset/45 p-2.5">
+                <div className="flex min-w-0 flex-col gap-2 rounded-xl bg-field/60 p-3">
                   <div
                     className="min-w-0 truncate font-mono text-[11.5px] text-ink-2"
                     title={loginProgress.authUrl}
@@ -629,7 +611,7 @@ export function AccountSettings() {
                     </Button>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="secondary"
                       size="xs"
                       onClick={() => copyText('url', loginProgress.authUrl!)}
                     >
@@ -680,7 +662,7 @@ export function AccountSettings() {
               ) : null}
 
               {loginProgress.command ? (
-                <div className="flex min-w-0 flex-col gap-1.5 rounded-control border border-line bg-inset/45 p-2.5">
+                <div className="flex min-w-0 flex-col gap-1.5 rounded-xl bg-field/60 p-3">
                   <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
                     <TerminalIcon className="size-3" />
                     <span>{t('settings.accounts.loginModal.command')}</span>
@@ -691,7 +673,7 @@ export function AccountSettings() {
                     </code>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="secondary"
                       size="xs"
                       onClick={() => copyText('cmd', loginProgress.command!)}
                     >
@@ -780,15 +762,6 @@ function BackendAccountCard({
     channel?.mode === 'official' ? (channel.accountId ?? `system:${backend.id}`) : undefined;
   const activeProviderId = channel?.mode === 'provider' ? channel.providerId : undefined;
 
-  const isolationHint =
-    accountCap?.isolation === 'config-dir'
-      ? t('settings.accounts.isolation.configDir')
-      : accountCap?.isolation === 'credential-slot'
-        ? t('settings.accounts.isolation.credentialSlot')
-        : accountCap?.isolation === 'api-key'
-          ? t('settings.accounts.isolation.apiKey')
-          : t('settings.accounts.isolation.single');
-
   const switchToOfficial = (accountId?: string) => {
     postToHost({
       type: 'setBackendChannel',
@@ -814,24 +787,19 @@ function BackendAccountCard({
 
   return (
     <Card
-      className="gap-0 overflow-hidden border-line/75 bg-surface/80 py-0 shadow-xs dark:bg-surface/75"
+      className="gap-0 overflow-hidden rounded-2xl border-0 bg-field/55 py-0 shadow-none dark:bg-surface/65"
       data-testid={`account-backend-card-${backend.id}`}
     >
       {/* 顶部：智能体信息 + 渠道模式切换（官方 ↔ 服务商） */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <BackendLogo backend={backend} />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[13px] font-semibold text-ink">{backend.name}</span>
-              <ValuePill className="text-[10.5px]">{isolationHint}</ValuePill>
-            </div>
-          </div>
+          <span className="truncate text-[13.5px] font-semibold text-ink">{backend.name}</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
           <div
-            className="inline-flex items-center gap-0.5 rounded-lg border border-line/80 bg-inset p-0.5 dark:bg-page/80"
+            className="inline-flex items-center gap-0.5 rounded-lg bg-canvas/85 p-0.5 dark:bg-page/60"
             role="group"
             aria-label={t('model.channel.label')}
           >
@@ -844,12 +812,11 @@ function BackendAccountCard({
               className={cn(
                 'px-2.5',
                 activeMode === 'official'
-                  ? 'font-medium shadow-xs'
+                  ? 'font-medium shadow-none'
                   : 'text-ink-3 hover:bg-hover/70 hover:text-ink',
               )}
               onClick={() => switchToOfficial()}
             >
-              <UsersIcon className="size-3" />
               <span>{t('settings.accounts.channelOfficial')}</span>
             </Button>
             <Button
@@ -862,7 +829,7 @@ function BackendAccountCard({
               className={cn(
                 'px-2.5',
                 activeMode === 'provider'
-                  ? 'font-medium shadow-xs'
+                  ? 'font-medium shadow-none'
                   : 'text-ink-3 hover:bg-hover/70 hover:text-ink',
               )}
               onClick={() => {
@@ -870,7 +837,6 @@ function BackendAccountCard({
                 if (target) switchToProvider(target);
               }}
             >
-              <KeyIcon className="size-3" />
               <span>{t('settings.accounts.channelProvider')}</span>
             </Button>
           </div>
@@ -878,8 +844,9 @@ function BackendAccountCard({
           {accountCap?.multiAccount ? (
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="xs"
+              className="text-ink-2 hover:text-ink"
               data-testid={`add-account-${backend.id}`}
               onClick={onAdd}
             >
@@ -890,10 +857,10 @@ function BackendAccountCard({
         </div>
       </div>
 
-      {/* 第三方服务商选择栏（当支持服务商且处于第三方模式时展示） */}
+      {/* 第三方服务商选择栏 */}
       {supportsProvider && activeMode === 'provider' ? (
-        <div className="px-3.5 pb-2.5">
-          <div className="flex flex-wrap items-center gap-2 rounded-control bg-inset/45 px-2.5 py-2">
+        <div className="px-4 pb-3.5">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-canvas/75 px-3 py-2 dark:bg-page/50">
             <KeyIcon className="size-3.5 shrink-0 text-accent-ink" />
             {compatibleProviders.length > 0 ? (
               <Select value={activeProviderId ?? ''} onValueChange={switchToProvider}>
@@ -916,7 +883,7 @@ function BackendAccountCard({
             ) : (
               <span className="flex-1 text-[12px] text-ink-3">{t('settings.accounts.noCompatibleProvider')}</span>
             )}
-            <Button type="button" variant="outline" size="sm" onClick={() => setSettingsTab('providers')}>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSettingsTab('providers')}>
               {t('settings.accounts.gotoProviders')}
             </Button>
           </div>
@@ -925,7 +892,7 @@ function BackendAccountCard({
 
       {/* 官方账号列表 */}
       {accounts.length > 0 ? (
-        <div className="divide-y divide-line/40 border-t border-line/40 bg-inset/20">
+        <div className="flex flex-col gap-0.5 px-2 pb-2">
           {accounts.map((acc) => {
             const isCurrent = activeMode === 'official' && activeAccountId === acc.id;
             const canEdit = true;
@@ -936,14 +903,19 @@ function BackendAccountCard({
             const showDelete = !acc.isSystemDefault;
             const hasPrimary = showUse || showLogin || canEdit;
             const hasSecondary = showLogout || showDelete;
+            const visibleQuotaWindows = (acc.quota?.windows ?? []).filter(
+              (win) => win.label.trim().toLowerCase() !== '3p',
+            );
+            const showIdentity = Boolean(acc.identity && acc.identity !== acc.label);
+
             return (
               <div
                 key={acc.id}
                 data-testid={`account-row-${acc.id}`}
-                className="flex items-center justify-between gap-2 px-3.5 py-2 transition-colors hover:bg-hover/35"
+                className="flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 transition-colors hover:bg-canvas/70 dark:hover:bg-hover/35"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <span
                       className={cn('size-2 shrink-0 rounded-full', isCurrent ? 'bg-green' : 'bg-ink-4')}
                       data-testid={isCurrent ? `account-active-${acc.id}` : `account-dot-${acc.id}`}
@@ -953,39 +925,37 @@ function BackendAccountCard({
                     <span className={cn('text-[12.5px]', isCurrent ? 'font-semibold text-ink' : 'font-medium text-ink-2')}>
                       {acc.label}
                     </span>
-                    {acc.isSystemDefault ? (
-                      <ValuePill className="text-[10.5px]">{t('settings.accounts.systemBadge')}</ValuePill>
+
+                    {acc.status === 'logging-in' ? (
+                      <span className="inline-flex items-center gap-1 text-[11.5px] text-accent-ink">
+                        <SpinnerIcon className="size-2.5" />
+                        <span>{t(statusKey)}</span>
+                      </span>
+                    ) : acc.status === 'expired' ? (
+                      <span className="text-[11.5px] font-medium text-orange">{t(statusKey)}</span>
+                    ) : acc.status !== 'authenticated' ? (
+                      <span className="text-[11.5px] text-ink-3">{t(statusKey)}</span>
                     ) : null}
-                    <ValuePill tone={statusTone(acc.status)} className="text-[10.5px]">
-                      {acc.status === 'logging-in' ? <SpinnerIcon className="size-2.5" /> : null}
-                      <span>{t(statusKey)}</span>
-                    </ValuePill>
-                    {acc.plan ? <ValuePill className="text-[10.5px]">{acc.plan}</ValuePill> : null}
+
+                    {acc.plan ? <span className="text-[11.5px] text-ink-3">{acc.plan}</span> : null}
                     {acc.isolateSessions ? (
-                      <ValuePill className="text-[10.5px]">{t('settings.accounts.isolatedSessionBadge')}</ValuePill>
+                      <span className="text-[11px] text-ink-3">{t('settings.accounts.isolatedSessionBadge')}</span>
                     ) : null}
                   </div>
 
-                  {(() => {
-                    const visibleQuotaWindows = (acc.quota?.windows ?? []).filter(
-                      (win) => win.label.trim().toLowerCase() !== '3p',
-                    );
-                    const showIdentity = Boolean(acc.identity && acc.identity !== acc.label);
-                    if (!showIdentity && visibleQuotaWindows.length === 0) return null;
-                    return (
-                      <div className="mt-1 flex flex-wrap items-center gap-2 pl-4 text-[11.5px] text-ink-3">
-                        {showIdentity ? <span className="truncate font-mono">{acc.identity}</span> : null}
-                        {visibleQuotaWindows.slice(0, 3).map((win, idx) => (
-                          <span
-                            key={`${win.kind}:${win.label}:${idx}`}
-                            className="rounded bg-inset px-1.5 py-0.5 text-[10.5px] text-ink-2"
-                          >
-                            {formatQuotaChip(win, t)}
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })()}
+                  {showIdentity || visibleQuotaWindows.length > 0 ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-2 pl-4 text-[11.5px] text-ink-3 tabular-nums">
+                      {showIdentity ? <span className="truncate font-mono">{acc.identity}</span> : null}
+                      {visibleQuotaWindows.slice(0, 3).map((win, idx) => (
+                        <span
+                          key={`${win.kind}:${win.label}:${idx}`}
+                          className="rounded-md bg-canvas/75 px-1.5 py-0.5 text-[10.5px] text-ink-2 dark:bg-page/45"
+                        >
+                          {formatQuotaChip(win, t)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 {hasPrimary || hasSecondary ? (

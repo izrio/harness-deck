@@ -13,6 +13,7 @@ import {
   parseWebviewMessage,
   type HostIdeKind,
   type HostToWebview,
+  type RemoteQuickTunnelView,
   type RemoteRouteKind,
   type RemoteScope,
   type RemoteState,
@@ -37,8 +38,9 @@ import {
   type WslHostNetworkProbe,
   type WslHostNetworkSnapshot,
 } from './NetworkInterfaces.ts';
-import { PairingManager } from './PairingManager.ts';
+import { HandoffManager, PairingManager } from './PairingManager.ts';
 import type { PushService } from './PushService.ts';
+import { QuickTunnelManager, type QuickTunnelExec, type QuickTunnelSpawn } from './QuickTunnelService.ts';
 import { authorizeRemoteMessage, isAllowedHostHeader, isAllowedOriginHeader } from './ScopeGuard.ts';
 import {
   configureTailscaleServe,
@@ -219,12 +221,16 @@ export interface RemoteBridgeServerOptions {
   readonly onStateChange: () => void;
   readonly log: (line: string) => void;
   readonly tailscaleExec?: TailscaleExec;
+  readonly quickTunnelExec?: QuickTunnelExec;
+  readonly quickTunnelSpawn?: QuickTunnelSpawn;
   readonly wslNetworkProbe?: WslHostNetworkProbe;
   readonly now?: () => number;
 }
 
 export class RemoteBridgeServer {
   private readonly pairing: PairingManager;
+  private readonly handoffs: HandoffManager;
+  private readonly quickTunnel: QuickTunnelManager;
   private config: StoredRemoteConfig;
   private server: Server | undefined;
   private wss: WebSocketServer | undefined;
@@ -237,6 +243,13 @@ export class RemoteBridgeServer {
 
   constructor(private readonly options: RemoteBridgeServerOptions) {
     this.pairing = new PairingManager(options.now);
+    this.handoffs = new HandoffManager(options.now);
+    this.quickTunnel = new QuickTunnelManager({
+      ...(options.quickTunnelExec ? { exec: options.quickTunnelExec } : {}),
+      ...(options.quickTunnelSpawn ? { spawn: options.quickTunnelSpawn } : {}),
+      onStateChange: () => options.onStateChange(),
+      log: options.log,
+    });
     this.config = parseRemoteConfig(options.globalState.get<unknown>(REMOTE_CONFIG_KEY));
     // WSL 环境下后台静默预探测一次 Windows 宿主机局域网网卡（不阻塞扩展激活；单测绑定 loopback 时跳过）
     const bindHost = this.options.bindHost;
@@ -367,17 +380,56 @@ export class RemoteBridgeServer {
   }
 
   async revokeDevice(deviceId: string): Promise<RemoteState> {
+    this.handoffs.revokeForDevice(deviceId);
     await this.options.deviceAuth.revokeDevice(deviceId);
     this.options.clientHub.disconnectDevice(deviceId, 4001, 'Device revoked');
     this.options.onStateChange();
     return this.getState();
   }
 
+  async updateDevice(
+    deviceId: string,
+    patch: { readonly name?: string; readonly scope?: RemoteScope },
+  ): Promise<{ readonly state: RemoteState; readonly affectedClientIds: readonly string[] }> {
+    const updated = await this.options.deviceAuth.updateDevice(deviceId, patch);
+    const affectedClientIds =
+      updated && patch.scope ? this.options.clientHub.updateDeviceScope(deviceId, updated.scope) : [];
+    this.options.onStateChange();
+    return { state: this.getState(), affectedClientIds };
+  }
+
   async disconnectAllRemote(): Promise<RemoteState> {
     this.pairing.clear();
+    this.handoffs.clear();
     this.options.clientHub.disconnectAllRemote(4000, 'Emergency disconnect');
     this.options.onStateChange();
     return this.getState();
+  }
+
+  async probeQuickTunnel(): Promise<RemoteQuickTunnelView> {
+    return await this.quickTunnel.probe();
+  }
+
+  async setQuickTunnelEnabled(enabled: boolean): Promise<RemoteQuickTunnelView> {
+    if (!enabled) {
+      await this.quickTunnel.stop(true);
+      return (
+        this.quickTunnel.getView() ?? {
+          installed: true,
+          status: 'stopped',
+        }
+      );
+    }
+    if (!this.config.enabled) {
+      await this.setEnabled(true);
+    } else if (!this.isRunning) {
+      await this.start();
+    }
+    const port = this.listeningPort ?? this.options.port ?? 0;
+    if (!port) {
+      return { installed: true, status: 'error', error: 'Remote bridge is not running' };
+    }
+    return await this.quickTunnel.start(port);
   }
 
   async probeTailscale(): Promise<RemoteTailscaleView> {
@@ -443,6 +495,10 @@ export class RemoteBridgeServer {
           : preferredAddress;
       routes.push({ kind: 'lan', url: `http://${host}:${this.listeningPort}` });
     }
+    const qtUrl = this.quickTunnel.getUrl();
+    if (qtUrl) {
+      routes.push({ kind: 'quick-tunnel', url: qtUrl });
+    }
     if (this.tailscale?.serveUrl && this.tailscale.serveEnabled) {
       routes.push({ kind: 'tailscale', url: this.tailscale.serveUrl });
     }
@@ -450,6 +506,19 @@ export class RemoteBridgeServer {
       routes.push({ kind: 'tunnel', url: this.config.tunnelUrl });
     }
     return routes;
+  }
+
+  /** 返回推送外链优先使用的完整会话地址（外网 HTTPS 优先，退化到 LAN）。 */
+  buildSessionUrl(sessionId?: string): string | undefined {
+    if (!this.isRunning) return undefined;
+    const base =
+      this.quickTunnel.getUrl() ??
+      (this.tailscale?.serveEnabled ? this.tailscale.serveUrl : undefined) ??
+      this.config.tunnelUrl ??
+      this.getRoutes().find((r) => r.kind === 'lan')?.url;
+    if (!base) return undefined;
+    const cleanBase = base.replace(/\/+$/u, '');
+    return sessionId ? `${cleanBase}/?session=${encodeURIComponent(sessionId)}` : `${cleanBase}/`;
   }
 
   getState(): RemoteState {
@@ -461,6 +530,7 @@ export class RemoteBridgeServer {
     const wslNat = this.buildWslNatInfo(selectedHost, localAddresses, wslAddress);
     const connectedDevices = this.options.clientHub.connectedDeviceIds();
     const pairing = this.pairing.current();
+    const quickTunnel = this.quickTunnel.getView();
     return {
       enabled: this.config.enabled,
       running: this.isRunning,
@@ -473,6 +543,7 @@ export class RemoteBridgeServer {
       devices: this.options.deviceAuth.listViews(connectedDevices),
       ...(pairing ? { pairing } : {}),
       ...(this.tailscale ? { tailscale: this.tailscale } : {}),
+      ...(quickTunnel ? { quickTunnel } : {}),
       ...(this.config.tunnelUrl ? { tunnelUrl: this.config.tunnelUrl } : {}),
       push: this.options.pushService.getConfig(),
       ...(wslNat ? { wslNat } : {}),
@@ -544,6 +615,8 @@ export class RemoteBridgeServer {
 
   async stop(): Promise<void> {
     this.pairing.clear();
+    this.handoffs.clear();
+    await this.quickTunnel.stop(false);
     if (this.pairingExpiryTimer) {
       clearTimeout(this.pairingExpiryTimer);
       this.pairingExpiryTimer = undefined;
@@ -576,6 +649,9 @@ export class RemoteBridgeServer {
   }
 
   private resolvePairingBaseUrl(routeKind: RemoteRouteKind): string {
+    if (routeKind === 'quick-tunnel' && this.quickTunnel.getUrl()) {
+      return this.quickTunnel.getUrl()!;
+    }
     if (routeKind === 'tailscale' && this.tailscale?.serveUrl) {
       return this.tailscale.serveUrl;
     }
@@ -638,6 +714,16 @@ export class RemoteBridgeServer {
     const tailscaleServeUrl = this.tailscale?.serveUrl ?? this.config.tailscaleServeUrl;
     if (tailscaleServeUrl) {
       origins.add(tailscaleServeUrl.toLowerCase());
+    }
+    const quickTunnelUrl = this.quickTunnel.getUrl();
+    if (quickTunnelUrl) {
+      try {
+        const parsed = new URL(quickTunnelUrl);
+        hosts.add(parsed.hostname.toLowerCase());
+        origins.add(parsed.origin.toLowerCase());
+      } catch {
+        // ignore
+      }
     }
     return { hosts, origins };
   }
@@ -722,6 +808,54 @@ export class RemoteBridgeServer {
         {
           ok: true,
           device: { id: device.id, name: device.name, scope: device.scope },
+          vapidPublicKey: this.options.pushService.getVapidPublicKey(),
+          routes: this.getRoutes(),
+        },
+        { 'Set-Cookie': cookie },
+      );
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/auth/handoff') {
+      const cookies = parseCookieHeader(req.headers.cookie);
+      const device = this.options.deviceAuth.verifyCookie(cookies[REMOTE_COOKIE_NAME]);
+      if (!device) {
+        sendJson(res, 401, { ok: false, error: 'Unauthorized' });
+        return;
+      }
+      const ticket = this.handoffs.issue(device.id);
+      sendJson(res, 200, { ok: true, token: ticket.token, expiresAt: ticket.expiresAt });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/auth/handoff/redeem') {
+      let body: Record<string, unknown> | undefined;
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        sendJson(res, 413, { ok: false, error: 'Payload too large' });
+        return;
+      }
+      const token = typeof body?.token === 'string' ? body.token : '';
+      const redeemed = this.handoffs.redeem(token);
+      if (!redeemed.ok) {
+        sendJson(res, 401, { ok: false, reason: 'expired' });
+        return;
+      }
+      const issued = await this.options.deviceAuth.issueAdditionalCookie(redeemed.deviceId);
+      if (!issued) {
+        sendJson(res, 401, { ok: false, reason: 'revoked' });
+        return;
+      }
+      const secure = this.isSecureRequest(req) ? '; Secure' : '';
+      const cookie = `${REMOTE_COOKIE_NAME}=${encodeURIComponent(issued.cookieValue)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${REMOTE_SESSION_MAX_AGE_SEC}${secure}`;
+      this.options.onStateChange();
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          device: { id: issued.device.id, name: issued.device.name, scope: issued.device.scope },
           vapidPublicKey: this.options.pushService.getVapidPublicKey(),
           routes: this.getRoutes(),
         },
@@ -886,7 +1020,8 @@ export class RemoteBridgeServer {
         const parsed = parseWebviewMessage(rawObj);
         if (!parsed) return;
 
-        const auth = authorizeRemoteMessage(device.scope, parsed);
+        const liveScope = this.options.clientHub.getClient(clientId)?.scope ?? this.options.deviceAuth.getDevice(device.id)?.scope ?? device.scope;
+        const auth = authorizeRemoteMessage(liveScope, parsed);
         if (!auth.ok) {
           this.options.clientHub.sendTo(clientId, {
             type: 'toast',

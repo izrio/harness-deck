@@ -2,16 +2,37 @@
  * 移动端推送服务（HD-27）：
  * - 本地 VAPID P-256 密钥生成与持久化（免自建云中继）
  * - 标准 RFC 8291 (aes128gcm) 负载加密与 RFC 8292 (VAPID ES256 JWT) 鉴权
- * - 通用 Webhook 兜底（Bark / ntfy / 自定义 JSON），兼容纯局域网 HTTP 场景
- * - 尊重桌面活跃静默抑制开关（suppressWhenFocused）
+ * - 主流 IM / Webhook 适配（Bark / ntfy / 飞书 / 企业微信 / 钉钉 / Telegram / Slack / Discord / 自定义 JSON）
+ * - 支持携带完整可点击远程会话链接（externalUrl）与桌面聚焦静默抑制（suppressWhenFocused）
  */
-import { createCipheriv, createECDH, createPrivateKey, createSign, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createECDH,
+  createHmac,
+  createPrivateKey,
+  createSign,
+  generateKeyPairSync,
+  hkdfSync,
+  randomBytes,
+} from 'node:crypto';
 import type { RemotePushConfig, RemoteWebhookConfig, RemoteWebhookPreset } from '@harness-deck/shared';
 import type { KeyValueStore } from '../host/HostPlatform.ts';
 import type { DeviceAuthStore, WebPushSubscriptionRecord } from './DeviceAuthStore.ts';
 
 const VAPID_KEYS_STORAGE_KEY = 'harnessDeck.remote.vapid';
 const PUSH_CONFIG_STORAGE_KEY = 'harnessDeck.remote.pushConfig';
+
+const VALID_PRESETS: ReadonlySet<RemoteWebhookPreset> = new Set([
+  'bark',
+  'ntfy',
+  'feishu',
+  'wecom',
+  'dingtalk',
+  'telegram',
+  'slack',
+  'discord',
+  'custom',
+]);
 
 export interface VapidKeyPair {
   readonly publicKey: string; // base64url 65-byte uncompressed P-256 point
@@ -39,7 +60,10 @@ export interface PushPayload {
   readonly title: string;
   readonly body: string;
   readonly sessionId?: string;
+  /** Web Push 相对路径（如 `/?session=xxx`），由 PWA Service Worker 在当前 Origin 打开。 */
   readonly url?: string;
+  /** Webhook / IM 外部推送用的完整可点击 URL（优先 Quick Tunnel / Tailscale / 自定义隧道 / LAN）。 */
+  readonly externalUrl?: string;
 }
 
 export function generateVapidKeys(): VapidKeyPair {
@@ -71,7 +95,10 @@ function parsePushConfig(raw: unknown): StoredRemotePushConfig {
   const obj = raw as Record<string, unknown>;
   const wh = obj.webhook && typeof obj.webhook === 'object' ? (obj.webhook as Record<string, unknown>) : {};
   const preset: RemoteWebhookPreset =
-    wh.preset === 'ntfy' || wh.preset === 'custom' || wh.preset === 'bark' ? wh.preset : 'bark';
+    typeof wh.preset === 'string' && VALID_PRESETS.has(wh.preset as RemoteWebhookPreset)
+      ? (wh.preset as RemoteWebhookPreset)
+      : 'bark';
+  const secret = typeof wh.secret === 'string' && wh.secret.trim() ? wh.secret.trim() : undefined;
   return {
     webPushEnabled: typeof obj.webPushEnabled === 'boolean' ? obj.webPushEnabled : DEFAULT_PUSH_CONFIG.webPushEnabled,
     suppressWhenFocused:
@@ -82,6 +109,7 @@ function parsePushConfig(raw: unknown): StoredRemotePushConfig {
       enabled: typeof wh.enabled === 'boolean' ? wh.enabled : false,
       preset,
       url: typeof wh.url === 'string' ? wh.url : '',
+      ...(secret ? { secret } : {}),
     },
   };
 }
@@ -146,9 +174,14 @@ export function encryptWebPushPayload(
   return Buffer.concat([salt, rs, idlen, asPublic, encrypted]);
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
+}
+
 export function formatWebhookRequest(
   config: RemoteWebhookConfig,
   payload: PushPayload,
+  nowMs = Date.now(),
 ): { readonly url: string; readonly headers: Record<string, string>; readonly body: string } | undefined {
   const rawUrl = config.url.trim();
   if (!rawUrl) return undefined;
@@ -160,41 +193,161 @@ export function formatWebhookRequest(
     return undefined;
   }
 
-  if (config.preset === 'bark') {
-    return {
-      url: parsed.toString(),
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({
-        title: payload.title,
+  const linkUrl = payload.externalUrl ?? payload.url;
+  const secret = config.secret?.trim() || undefined;
+  const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
+
+  switch (config.preset) {
+    case 'bark':
+      return {
+        url: parsed.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          title: payload.title,
+          body: payload.body,
+          group: 'Halo',
+          ...(linkUrl ? { url: linkUrl } : {}),
+        }),
+      };
+
+    case 'ntfy':
+      return {
+        url: parsed.toString(),
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          Title: payload.title,
+          ...(linkUrl && /^https?:\/\//iu.test(linkUrl) ? { Click: linkUrl } : {}),
+        },
         body: payload.body,
-        group: 'Halo',
-        ...(payload.url ? { url: payload.url } : {}),
-      }),
-    };
+      };
+
+    case 'feishu': {
+      const timestamp = String(Math.floor(nowMs / 1000));
+      const sign = secret
+        ? createHmac('sha256', `${timestamp}\n${secret}`).update('').digest('base64')
+        : undefined;
+      const lines: unknown[][] = [[{ tag: 'text', text: payload.body }]];
+      if (linkUrl && /^https?:\/\//iu.test(linkUrl)) {
+        lines.push([{ tag: 'a', text: '打开会话', href: linkUrl }]);
+      }
+      return {
+        url: parsed.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          ...(sign ? { timestamp, sign } : {}),
+          msg_type: 'post',
+          content: {
+            post: {
+              zh_cn: {
+                title: payload.title,
+                content: lines,
+              },
+            },
+          },
+        }),
+      };
+    }
+
+    case 'wecom': {
+      const mdLines = [`**${payload.title}**`, payload.body];
+      if (linkUrl && /^https?:\/\//iu.test(linkUrl)) {
+        mdLines.push(`[打开会话](${linkUrl})`);
+      }
+      return {
+        url: parsed.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          msgtype: 'markdown',
+          markdown: { content: mdLines.join('\n') },
+        }),
+      };
+    }
+
+    case 'dingtalk': {
+      const targetUrl = new URL(parsed.toString());
+      if (secret) {
+        const timestamp = String(nowMs);
+        const sign = createHmac('sha256', secret).update(`${timestamp}\n${secret}`).digest('base64');
+        targetUrl.searchParams.set('timestamp', timestamp);
+        targetUrl.searchParams.set('sign', sign);
+      }
+      const mdLines = [`### ${payload.title}`, payload.body];
+      if (linkUrl && /^https?:\/\//iu.test(linkUrl)) {
+        mdLines.push(`[打开会话](${linkUrl})`);
+      }
+      return {
+        url: targetUrl.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          msgtype: 'markdown',
+          markdown: { title: payload.title, text: mdLines.join('\n\n') },
+        }),
+      };
+    }
+
+    case 'telegram': {
+      const targetUrl = new URL(parsed.toString());
+      const chatId = targetUrl.searchParams.get('chat_id')?.trim() || secret;
+      targetUrl.searchParams.delete('chat_id');
+      const lines = [`<b>${escapeHtml(payload.title)}</b>`, escapeHtml(payload.body)];
+      if (linkUrl && /^https?:\/\//iu.test(linkUrl)) {
+        lines.push(`<a href="${escapeHtml(linkUrl)}">Open Session</a>`);
+      }
+      return {
+        url: targetUrl.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          ...(chatId ? { chat_id: chatId } : {}),
+          text: lines.join('\n'),
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        }),
+      };
+    }
+
+    case 'slack': {
+      const linkSuffix = linkUrl && /^https?:\/\//iu.test(linkUrl) ? `\n<${linkUrl}|Open Session>` : '';
+      return {
+        url: parsed.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          text: `*${payload.title}*\n${payload.body}${linkSuffix}`,
+        }),
+      };
+    }
+
+    case 'discord': {
+      const color = payload.kind === 'unexpectedExit' ? 0xef4444 : payload.kind === 'attention' ? 0xf59e0b : 0x3b82f6;
+      return {
+        url: parsed.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          embeds: [
+            {
+              title: payload.title,
+              description: payload.body,
+              ...(linkUrl && /^https?:\/\//iu.test(linkUrl) ? { url: linkUrl } : {}),
+              color,
+            },
+          ],
+        }),
+      };
+    }
+
+    default:
+      return {
+        url: parsed.toString(),
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          event: payload.kind,
+          title: payload.title,
+          message: payload.body,
+          ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
+          ...(linkUrl ? { url: linkUrl } : {}),
+          timestamp: nowMs,
+        }),
+      };
   }
-  if (config.preset === 'ntfy') {
-    return {
-      url: parsed.toString(),
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        Title: payload.title,
-        ...(payload.url ? { Click: payload.url } : {}),
-      },
-      body: payload.body,
-    };
-  }
-  return {
-    url: parsed.toString(),
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({
-      event: payload.kind,
-      title: payload.title,
-      message: payload.body,
-      ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
-      ...(payload.url ? { url: payload.url } : {}),
-      timestamp: Date.now(),
-    }),
-  };
 }
 
 export class PushService {
@@ -242,12 +395,16 @@ export class PushService {
       readonly enabled?: boolean;
       readonly preset?: RemoteWebhookPreset;
       readonly url?: string;
+      readonly secret?: string;
     };
   }): Promise<RemotePushConfig> {
+    const nextSecret =
+      patch.webhook?.secret !== undefined ? patch.webhook.secret.trim() : this.config.webhook.secret;
     const nextWebhook: RemoteWebhookConfig = {
       enabled: patch.webhook?.enabled ?? this.config.webhook.enabled,
       preset: patch.webhook?.preset ?? this.config.webhook.preset,
       url: patch.webhook?.url !== undefined ? patch.webhook.url.trim() : this.config.webhook.url,
+      ...(nextSecret ? { secret: nextSecret } : {}),
     };
     this.config = {
       webPushEnabled: patch.webPushEnabled ?? this.config.webPushEnabled,

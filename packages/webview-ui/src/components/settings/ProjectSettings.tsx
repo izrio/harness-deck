@@ -1,6 +1,6 @@
 /**
  * 设置 -> 项目：
- * 最近使用的项目列表、多根工作区文件夹切换，以及每个项目新建 Worktree 时复制的文件、准备命令和验收命令配置。
+ * 去线留白：移除行间分割线与左竖线选中条，使用柔和背景层区分选中项目与 Worktree 表单。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { WorktreeProjectConfig } from '@harness-deck/shared';
@@ -10,7 +10,6 @@ import { cn } from '../../lib/utils.ts';
 import { setProjectsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { FolderIcon, FolderOpenIcon, GitBranchIcon, MoreIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
-import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -99,7 +98,7 @@ export function ProjectSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-5" data-testid="settings-projects">
+    <div className="flex flex-col gap-8" data-testid="settings-projects">
       <SettingsSection
         title={t('settings.projects.recent')}
         actions={
@@ -108,8 +107,9 @@ export function ProjectSettings() {
               {folder ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
+                  className="text-ink-2 hover:text-ink"
                   data-testid="project-switch-folder-btn"
                   onClick={() => postToHost({ type: 'selectFolder', payload: {} })}
                 >
@@ -120,7 +120,7 @@ export function ProjectSettings() {
               ) : null}
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 data-testid="project-add-btn"
                 onClick={() => postToHost({ type: 'addRecentProject', payload: {} })}
@@ -133,11 +133,11 @@ export function ProjectSettings() {
         }
       >
         {projects.recent.length === 0 ? (
-          <div className="px-4 py-6 text-center text-[12px] text-ink-3" data-testid="projects-empty">
+          <div className="px-4 py-10 text-center text-[12px] text-ink-3" data-testid="projects-empty">
             {t('settings.projects.empty')}
           </div>
         ) : (
-          <div className="divide-y divide-line/60">
+          <div className="flex flex-col gap-1 p-1.5">
             {projects.recent.map((project, index) => {
               const selected = project.path === activePath;
               return (
@@ -145,8 +145,10 @@ export function ProjectSettings() {
                   key={project.path}
                   data-testid={`recent-project-${index}`}
                   className={cn(
-                    'flex items-center gap-2.5 px-3.5 py-2.5 transition-colors duration-150',
-                    selected ? 'bg-accent-tint/45 shadow-[inset_2px_0_0_0_var(--accent)]' : 'hover:bg-hover/35',
+                    'flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-colors duration-150',
+                    selected
+                      ? 'bg-canvas dark:bg-page/65'
+                      : 'hover:bg-canvas/65 dark:hover:bg-hover/35',
                   )}
                 >
                   <button
@@ -156,9 +158,16 @@ export function ProjectSettings() {
                   >
                     <FolderIcon className={cn('size-4 shrink-0', selected ? 'text-accent-ink' : 'text-ink-3')} />
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5">
-                        <span className="truncate text-[12.5px] font-medium text-ink">{project.name}</span>
-                        {project.isCurrent ? <ValuePill tone="accent" className="text-[10px]">{t('settings.projects.current')}</ValuePill> : null}
+                      <span className="flex items-center gap-2">
+                        <span className={cn('truncate text-[12.5px]', selected ? 'font-semibold text-ink' : 'font-medium text-ink')}>
+                          {project.name}
+                        </span>
+                        {project.isCurrent ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-accent-ink">
+                            <span className="size-1.5 rounded-full bg-brand" />
+                            <span>{t('settings.projects.current')}</span>
+                          </span>
+                        ) : null}
                       </span>
                       <span className="block truncate font-mono text-[11px] text-ink-3">{project.path}</span>
                     </span>
@@ -221,8 +230,9 @@ export function ProjectSettings() {
             <>
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="xs"
+                className="text-ink-2 hover:text-ink"
                 data-testid="project-create-wt-btn"
                 onClick={() => {
                   if (isMobileRemote) {
@@ -233,13 +243,14 @@ export function ProjectSettings() {
                   }
                 }}
               >
-                <GitBranchIcon className="size-3.5" />
+                <GitBranchIcon className="size-3" />
                 <span>{t('settings.projects.createWorktree')}</span>
               </Button>
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="xs"
+                className="text-ink-2 hover:text-ink"
                 data-testid="project-remove-wt-btn"
                 onClick={() => {
                   if (isMobileRemote) {
@@ -249,24 +260,25 @@ export function ProjectSettings() {
                   }
                 }}
               >
-                <TrashIcon className="size-3.5" />
+                <TrashIcon className="size-3" />
                 <span>{t('settings.projects.removeWorktree')}</span>
               </Button>
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="xs"
+                className="text-ink-2 hover:text-ink"
                 data-testid="project-run-verify-btn"
                 onClick={() => postToHost({ type: 'runProjectVerify', payload: { path: activePath } })}
               >
-                <TerminalIcon className="size-3.5" />
+                <TerminalIcon className="size-3" />
                 <span>{t('settings.projects.runVerify')}</span>
               </Button>
             </>
           }
         >
-          <div className="primitive-card-pad flex flex-col gap-3">
-            <label className="flex flex-col gap-1">
+          <div className="flex flex-col gap-4 p-4">
+            <label className="flex flex-col gap-1.5">
               <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.copyFiles')}</span>
               <Textarea
                 data-testid="project-copy-files"
@@ -279,7 +291,7 @@ export function ProjectSettings() {
               />
             </label>
 
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1.5">
               <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.setupCommands')}</span>
               <Textarea
                 data-testid="project-setup-commands"
@@ -292,7 +304,7 @@ export function ProjectSettings() {
               />
             </label>
 
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1.5">
               <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.verifyCommands')}</span>
               <Textarea
                 data-testid="project-verify-commands"
@@ -306,7 +318,7 @@ export function ProjectSettings() {
             </label>
 
             {!isMobileRemote ? (
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex items-center justify-end gap-2.5 pt-1">
                 {justSaved ? <span className="text-[11.5px] text-green">{t('settings.projects.saved')}</span> : null}
                 <Button type="button" size="sm" data-testid="project-save-btn" onClick={saveConfig}>
                   {t('settings.projects.saveConfig')}
@@ -316,6 +328,7 @@ export function ProjectSettings() {
           </div>
         </SettingsSection>
       ) : null}
+
       <Dialog open={createWtOpen} onOpenChange={setCreateWtOpen}>
         <DialogContent data-testid="mobile-create-worktree-dialog">
           <DialogHeader>

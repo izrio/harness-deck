@@ -154,7 +154,7 @@ export function ProviderModelTable({ editor, batchOpen, setBatchOpen, batchText,
 
       {batchOpen ? (
         <div
-          className="flex flex-col gap-2 rounded-card border border-line bg-field/60 p-2.5"
+          className="flex flex-col gap-2 rounded-xl bg-canvas/75 p-3 dark:bg-page/45"
           data-testid="provider-batch-box"
         >
           <Textarea

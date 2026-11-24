@@ -1,7 +1,7 @@
 /**
  * 辅助设置模块：
- * - GeneralSettings（归入「会话 -> 会话」）：编辑器上下文与每轮改动卡片显示开关、会话快捷操作
- * - AdvancedSettings（归入「其他 -> 运行时与诊断」）：定时任务默认权限、运行时路径、Profile、ACP 排查日志与 VS Code 原生设置入口
+ * - GeneralSettings（会话 -> 会话）：去线留白，无分割线开关列表
+ * - AdvancedSettings（其他 -> 运行时与诊断）：按语义拆分为「默认行为 / 可执行路径双列网格 / 快捷操作」，消除 10 行堆叠横线
  */
 import { useEffect, useState } from 'react';
 import type { AdvancedPreferences, PreferencesState } from '@harness-deck/shared';
@@ -56,8 +56,9 @@ export function GeneralSettings() {
           session.id ? (
             <Button
               type="button"
-              variant="outline"
-              size="sm"
+              variant="ghost"
+              size="xs"
+              className="text-ink-2 hover:text-ink"
               data-testid="rename-session-btn"
               onClick={() => {
                 if (clientSurface === 'mobile-web') {
@@ -68,34 +69,35 @@ export function GeneralSettings() {
                 }
               }}
             >
-              <PencilIcon className="size-3 text-ink-3" />
+              <PencilIcon className="size-3" />
               <span>{t('header.rename')}</span>
             </Button>
           ) : undefined
         }
       >
-      <div className="divide-y divide-line/60">
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-          <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.includeActiveEditor')}</span>
-          <Switch
-            data-testid="pref-include-active"
-            aria-label={t('settings.includeActiveEditor')}
-            checked={preferences.includeActiveEditor}
-            onCheckedChange={(checked) => updatePref({ includeActiveEditor: checked })}
-          />
-        </div>
+        <div className="flex flex-col gap-0.5 p-1.5">
+          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
+            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.includeActiveEditor')}</span>
+            <Switch
+              data-testid="pref-include-active"
+              aria-label={t('settings.includeActiveEditor')}
+              checked={preferences.includeActiveEditor}
+              onCheckedChange={(checked) => updatePref({ includeActiveEditor: checked })}
+            />
+          </div>
 
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-          <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.showTurnChanges')}</span>
-          <Switch
-            data-testid="pref-show-turn-changes"
-            aria-label={t('settings.showTurnChanges')}
-            checked={preferences.showTurnChanges}
-            onCheckedChange={(checked) => updatePref({ showTurnChanges: checked })}
-          />
+          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
+            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.showTurnChanges')}</span>
+            <Switch
+              data-testid="pref-show-turn-changes"
+              aria-label={t('settings.showTurnChanges')}
+              checked={preferences.showTurnChanges}
+              onCheckedChange={(checked) => updatePref({ showTurnChanges: checked })}
+            />
+          </div>
         </div>
-      </div>
       </SettingsSection>
+
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent data-testid="mobile-rename-dialog">
           <DialogHeader>
@@ -176,34 +178,53 @@ export function AdvancedSettings() {
   };
 
   return (
-    <SettingsSection title={t('settings.advanced.title')} testId="settings-advanced">
-      <div className="divide-y divide-line/60">
-        <div className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] font-medium text-ink">{t('settings.schedules.title')}</span>
-          <Select
-            value={preferences.schedulePermission ?? 'danger-full-access'}
-            onValueChange={(value) =>
-              updateSchedulePermission(value as NonNullable<PreferencesState['schedulePermission']>)
-            }
-          >
-            <SelectTrigger
-              size="sm"
-              className="w-full"
-              data-testid="pref-schedule-permission"
-              aria-label={t('settings.schedules.title')}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="danger-full-access">{t('wb.schedules.permFull')}</SelectItem>
-              <SelectItem value="workspace-write">{t('wb.schedules.permWorkspace')}</SelectItem>
-              <SelectItem value="read-only">{t('wb.schedules.permRead')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+    <div className="flex flex-col gap-8" data-testid="settings-advanced">
+      {/* 1. 权限与诊断开关 */}
+      <SettingsSection title={t('settings.advanced.title')}>
+        <div className="flex flex-col gap-1 p-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl px-3 py-2.5">
+            <span className="text-[12.5px] font-medium text-ink">{t('settings.schedules.title')}</span>
+            <div className="w-52">
+              <Select
+                value={preferences.schedulePermission ?? 'danger-full-access'}
+                onValueChange={(value) =>
+                  updateSchedulePermission(value as NonNullable<PreferencesState['schedulePermission']>)
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full"
+                  data-testid="pref-schedule-permission"
+                  aria-label={t('settings.schedules.title')}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="danger-full-access">{t('wb.schedules.permFull')}</SelectItem>
+                  <SelectItem value="workspace-write">{t('wb.schedules.permWorkspace')}</SelectItem>
+                  <SelectItem value="read-only">{t('wb.schedules.permRead')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-        <label className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshPath')}</span>
+          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
+            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.advanced.backendTrace')}</span>
+            <Switch
+              data-testid="adv-backend-trace"
+              aria-label={t('settings.advanced.backendTrace')}
+              disabled={isMobileRemote}
+              checked={advanced.backendTrace}
+              onCheckedChange={(checked) => updateAdvanced({ backendTrace: checked })}
+            />
+          </div>
+        </div>
+      </SettingsSection>
+
+      {/* 2. 可执行文件路径（双列紧凑网格，无需额外分组标题与分割线） */}
+      <section className="grid grid-cols-1 gap-x-4 gap-y-4 rounded-2xl bg-field/55 p-4 sm:grid-cols-2 dark:bg-surface/65">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.dshPath')}</span>
           <Input
             size="sm"
             data-testid="adv-dsh-path"
@@ -217,8 +238,8 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.dshProfile')}</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.dshProfile')}</span>
           <Input
             size="sm"
             data-testid="adv-dsh-profile"
@@ -232,8 +253,8 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.zcodePath')}</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.zcodePath')}</span>
           <Input
             size="sm"
             data-testid="adv-zcode-path"
@@ -247,8 +268,8 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.claudePath')}</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.claudePath')}</span>
           <Input
             size="sm"
             data-testid="adv-claude-path"
@@ -262,8 +283,8 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.piPath')}</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.piPath')}</span>
           <Input
             size="sm"
             data-testid="adv-pi-path"
@@ -277,8 +298,8 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codexPath')}</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.codexPath')}</span>
           <Input
             size="sm"
             data-testid="adv-codex-path"
@@ -292,8 +313,8 @@ export function AdvancedSettings() {
           />
         </label>
 
-        <label className="flex flex-col gap-1.5 px-4 py-3">
-          <span className="text-[12.5px] text-ink-2">{t('settings.advanced.codebuddyPath')}</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.codebuddyPath')}</span>
           <Input
             size="sm"
             data-testid="adv-codebuddy-path"
@@ -306,43 +327,33 @@ export function AdvancedSettings() {
             onKeyDown={(e) => e.key === 'Enter' && updateAdvanced({ codebuddyPath: codebuddyPath.trim() })}
           />
         </label>
+      </section>
 
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-          <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.advanced.backendTrace')}</span>
-          <Switch
-            data-testid="adv-backend-trace"
-            aria-label={t('settings.advanced.backendTrace')}
-            disabled={isMobileRemote}
-            checked={advanced.backendTrace}
-            onCheckedChange={(checked) => updateAdvanced({ backendTrace: checked })}
-          />
+      {/* 3. 快捷操作（直接落在画布上，无外框） */}
+      {!isMobileRemote ? (
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <Button type="button" variant="secondary" size="sm" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
+            <RefreshIcon className="size-3.5 text-ink-2" />
+            <span>{t('header.restart')}</span>
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
+            <LogIcon className="size-3.5 text-ink-2" />
+            <span>{t('header.logs')}</span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-auto text-ink-2 hover:text-ink"
+            data-testid="open-vscode-settings"
+            onClick={() => postToHost({ type: 'openSettings', payload: {} })}
+          >
+            {t(hostKind === 'jetbrains' ? 'settings.openIde' : 'settings.openVscode')}
+          </Button>
         </div>
-
-        {!isMobileRemote ? (
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-            <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'restartRuntime', payload: {} })}>
-              <RefreshIcon className="size-3.5 text-ink-3" />
-              <span>{t('header.restart')}</span>
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => postToHost({ type: 'showLogs', payload: {} })}>
-              <LogIcon className="size-3.5 text-ink-3" />
-              <span>{t('header.logs')}</span>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="ml-auto text-ink-2 hover:text-ink"
-              data-testid="open-vscode-settings"
-              onClick={() => postToHost({ type: 'openSettings', payload: {} })}
-            >
-              {t(hostKind === 'jetbrains' ? 'settings.openIde' : 'settings.openVscode')}
-            </Button>
-          </div>
-        ) : (
-          <p className="m-0 px-4 py-3 text-[11.5px] text-ink-3">{t('remote.mobileBlockedHint')}</p>
-        )}
-      </div>
-    </SettingsSection>
+      ) : (
+        <p className="m-0 px-1 text-[11.5px] text-ink-3">{t('remote.mobileBlockedHint')}</p>
+      )}
+    </div>
   );
 }

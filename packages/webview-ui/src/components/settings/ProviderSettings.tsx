@@ -13,7 +13,7 @@ import { useT } from '../../i18n.ts';
 import { setProtocolGatewayLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { ValuePill } from '../beautifului/index.ts';
-import { LogIcon, PlusIcon, ServerIcon } from '../icons.tsx';
+import { LogIcon, PlusIcon } from '../icons.tsx';
 import { editorFromPreset, editorFromProvider, emptyModelRow, nextRowKey, toEditableRow } from './providers/providerEditor.ts';
 import type { EditableModelRow, ProviderEditorState } from './providers/providerEditor.ts';
 import { GatewayLogsDialog } from './providers/GatewayLogsDialog.tsx';
@@ -37,9 +37,7 @@ export function ProviderSettings() {
 
   const customPreset = PROVIDER_PRESETS.find((p) => p.id === 'custom') ?? PROVIDER_PRESETS[0]!;
 
-  const [editor, setEditor] = useState<ProviderEditorState | undefined>(() =>
-    providers.length === 0 ? editorFromPreset(customPreset, locale) : undefined,
-  );
+  const [editor, setEditor] = useState<ProviderEditorState | undefined>(undefined);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [logsOpen, setLogsOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -370,54 +368,53 @@ export function ProviderSettings() {
   );
 
   return (
-    <div className="flex flex-col gap-5" data-testid="settings-providers">
+    <div className="flex flex-col gap-8" data-testid="settings-providers">
       {/* 本地协议转换网关（OpenAI 兼容 -> Claude Anthropic，默认关闭） */}
       <section
-        className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card"
+        className="flex items-center justify-between gap-3 rounded-2xl bg-field/55 px-4 py-3.5 dark:bg-surface/65"
         data-testid="provider-protocol-gateway-card"
       >
-        <div className="primitive-card-pad flex items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <ServerIcon className="size-3.5 shrink-0 text-accent-ink" />
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.providers.gatewayTitle')}</h3>
-              {protocolGatewayEnabled ? (
-                <ValuePill tone="green" className="font-mono text-[10.5px]">
-                  {protocolGatewayOrigin
-                    ? t('settings.providers.gatewayRunningBadge', protocolGatewayOrigin)
-                    : t('settings.providers.gatewayEnabledBadge')}
-                </ValuePill>
-              ) : (
-                <ValuePill className="text-[10.5px]">{t('settings.providers.gatewayOffBadge')}</ValuePill>
-              )}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              data-testid="provider-gateway-logs-btn"
-              onClick={() => setLogsOpen(true)}
-            >
-              <LogIcon className="size-3.5" />
-              <span>{t('settings.providers.gatewayLogsBtn')}</span>
-              {gatewayLogs.length > 0 ? (
-                <ValuePill
-                  tone={gatewayLogs.some((l) => l.level === 'error') ? 'red' : 'neutral'}
-                  className="px-1.5 py-0 text-[10px]"
-                >
-                  {gatewayLogs.length}
-                </ValuePill>
-              ) : null}
-            </Button>
-            <Switch
-              data-testid="provider-protocol-gateway-switch"
-              aria-label={t('settings.providers.gatewayTitle')}
-              checked={protocolGatewayEnabled}
-              onCheckedChange={toggleProtocolGateway}
-            />
-          </div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-0.5">
+          <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.providers.gatewayTitle')}</h3>
+          {protocolGatewayEnabled ? (
+            <span className="inline-flex items-center gap-1.5 font-mono text-[11.5px] text-green">
+              <span className="size-1.5 rounded-full bg-green" />
+              <span>
+                {protocolGatewayOrigin
+                  ? t('settings.providers.gatewayRunningBadge', protocolGatewayOrigin)
+                  : t('settings.providers.gatewayEnabledBadge')}
+              </span>
+            </span>
+          ) : (
+            <span className="text-[11.5px] text-ink-3">{t('settings.providers.gatewayOffBadge')}</span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-ink-2 hover:text-ink"
+            data-testid="provider-gateway-logs-btn"
+            onClick={() => setLogsOpen(true)}
+          >
+            <LogIcon className="size-3.5" />
+            <span>{t('settings.providers.gatewayLogsBtn')}</span>
+            {gatewayLogs.length > 0 ? (
+              <ValuePill
+                tone={gatewayLogs.some((l) => l.level === 'error') ? 'red' : 'neutral'}
+                className="px-1.5 py-0 text-[10px]"
+              >
+                {gatewayLogs.length}
+              </ValuePill>
+            ) : null}
+          </Button>
+          <Switch
+            data-testid="provider-protocol-gateway-switch"
+            aria-label={t('settings.providers.gatewayTitle')}
+            checked={protocolGatewayEnabled}
+            onCheckedChange={toggleProtocolGateway}
+          />
         </div>
       </section>
 
@@ -425,7 +422,7 @@ export function ProviderSettings() {
       <SettingsSection
         title={t('settings.providers.title')}
         actions={
-          <Button type="button" variant="outline" size="sm" data-testid="provider-add-btn" onClick={() => openAdd()}>
+          <Button type="button" variant="secondary" size="sm" data-testid="provider-add-btn" onClick={() => openAdd()}>
             <PlusIcon className="size-3.5" />
             <span>{t('settings.providers.add')}</span>
           </Button>
@@ -433,13 +430,13 @@ export function ProviderSettings() {
       >
         {providers.length === 0 ? (
           <div
-            className="px-4 py-6 text-center text-[12px] text-ink-3"
+            className="px-4 py-8 text-center text-[12px] text-ink-3"
             data-testid="providers-empty"
           >
             {t('settings.providers.empty')}
           </div>
         ) : (
-          <div className="divide-y divide-line/60">
+          <div className="flex flex-col gap-1 p-1.5">
             {providers.map((item) => (
               <SavedProviderCard
                 key={item.id}
@@ -456,9 +453,9 @@ export function ProviderSettings() {
         )}
       </SettingsSection>
 
-      {/* 服务商新增 / 编辑表单 */}
+      {/* 服务商新增 / 编辑弹窗 */}
       {editor ? (
-        <ProviderEditorForm locale={locale} providers={providers} protocolGatewayEnabled={protocolGatewayEnabled} backends={backends} workbenchAgents={workbenchAgents} editor={editor} setEditor={setEditor} detailsOpen={detailsOpen} setDetailsOpen={setDetailsOpen} batchOpen={batchOpen} setBatchOpen={setBatchOpen} batchText={batchText} setBatchText={setBatchText} formError={formError} pendingFetchId={pendingFetchId} fetchError={fetchError} boundOwnerByBackend={boundOwnerByBackend} boundOwnerByWbAgent={boundOwnerByWbAgent} closeEditor={closeEditor} selectPreset={selectPreset} updateModelRow={updateModelRow} addModelRow={addModelRow} removeModelRow={removeModelRow} applyBatchPaste={applyBatchPaste} triggerFetchModels={triggerFetchModels} toggleBackendBind={toggleBackendBind} toggleWbAgentBind={toggleWbAgentBind} saveProvider={saveProvider} validModelOptions={validModelOptions} compatibilitySummary={compatibilitySummary} hasAnyUrl={hasAnyUrl} />
+        <ProviderEditorForm locale={locale} protocolGatewayEnabled={protocolGatewayEnabled} backends={backends} workbenchAgents={workbenchAgents} editor={editor} setEditor={setEditor} detailsOpen={detailsOpen} setDetailsOpen={setDetailsOpen} batchOpen={batchOpen} setBatchOpen={setBatchOpen} batchText={batchText} setBatchText={setBatchText} formError={formError} pendingFetchId={pendingFetchId} fetchError={fetchError} boundOwnerByBackend={boundOwnerByBackend} boundOwnerByWbAgent={boundOwnerByWbAgent} closeEditor={closeEditor} selectPreset={selectPreset} updateModelRow={updateModelRow} addModelRow={addModelRow} removeModelRow={removeModelRow} applyBatchPaste={applyBatchPaste} triggerFetchModels={triggerFetchModels} toggleBackendBind={toggleBackendBind} toggleWbAgentBind={toggleWbAgentBind} saveProvider={saveProvider} validModelOptions={validModelOptions} compatibilitySummary={compatibilitySummary} hasAnyUrl={hasAnyUrl} />
       ) : null}
 
       <GatewayLogsDialog open={logsOpen} logs={gatewayLogs} onOpenChange={setLogsOpen} />

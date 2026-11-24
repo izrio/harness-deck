@@ -66,6 +66,14 @@ export interface BrowserFrameEvent {
   readonly timestamp: number;
 }
 
+export interface QuotaFetchResult {
+  readonly requestId: number;
+  readonly quota?: QuotaView;
+  readonly error?: string;
+}
+
+const MAX_QUOTA_RESULTS = 16;
+
 export interface Toast {
   readonly id: number;
   readonly level: 'info' | 'error';
@@ -96,11 +104,9 @@ export interface ViewState {
     readonly error?: string;
   };
   /** 最近一次官方订阅额度查询结果；`quota` 缺失表示不可用。 */
-  readonly quotaFetchResult?: {
-    readonly requestId: number;
-    readonly quota?: QuotaView;
-    readonly error?: string;
-  };
+  readonly quotaFetchResult?: QuotaFetchResult;
+  /** 按 requestId 索引的近期订阅额度查询结果，防止并发或乱序回包互相覆盖。 */
+  readonly quotaFetchResults: Readonly<Record<number, QuotaFetchResult>>;
   readonly session: SessionHeader;
   readonly sessionKey: string;
   readonly items: readonly Item[];
@@ -247,6 +253,7 @@ const initialState: ViewState = {
   providers: { items: [], protocolGatewayEnabled: false },
   accounts: { items: [], channels: {} },
   extensions: { skills: { items: [] }, mcp: { servers: [] } },
+  quotaFetchResults: {},
   session: { title: '', running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
   sessionKey: '',
   items: [],
@@ -673,9 +680,26 @@ export function applyHostMessage(message: HostToWebview): void {
     case 'providerModelsFetched':
       set({ providerFetchResult: message.payload });
       return;
-    case 'quotaFetched':
-      set({ quotaFetchResult: message.payload });
+    case 'quotaFetched': {
+      const payload = message.payload;
+      const nextMap: Record<number, QuotaFetchResult> = {
+        ...state.quotaFetchResults,
+        [payload.requestId]: payload,
+      };
+      const keys = Object.keys(nextMap);
+      if (keys.length > MAX_QUOTA_RESULTS) {
+        const sorted = keys.map(Number).sort((a, b) => a - b);
+        for (const oldKey of sorted.slice(0, sorted.length - MAX_QUOTA_RESULTS)) {
+          delete nextMap[oldKey];
+        }
+      }
+      const nextLatest =
+        !state.quotaFetchResult || payload.requestId >= state.quotaFetchResult.requestId
+          ? payload
+          : state.quotaFetchResult;
+      set({ quotaFetchResult: nextLatest, quotaFetchResults: nextMap });
       return;
+    }
     case 'session':
       set({ session: message.payload });
       return;

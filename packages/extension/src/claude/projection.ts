@@ -268,7 +268,9 @@ export class ClaudeSessionProjection {
       case 'system': {
         if (raw.subtype === 'init') {
           if (typeof raw.model === 'string' && raw.model) this.model = raw.model;
-          if (typeof raw.permissionMode === 'string' && raw.permissionMode) this.mode = raw.permissionMode;
+          if (typeof raw.permissionMode === 'string' && raw.permissionMode && !this.mode) {
+            this.mode = raw.permissionMode;
+          }
           if (Array.isArray(raw.slash_commands)) {
             this.slashCommands = raw.slash_commands.filter((c): c is string => typeof c === 'string' && c.trim().length > 0);
           }

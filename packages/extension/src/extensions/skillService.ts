@@ -427,7 +427,20 @@ export async function scanSkillsFromGit(params: {
   const source = parseGitSkillSource(params.repoUrl, params.ref, params.subpath);
   const cloned = await cloneGitRepoToTemp(source, params.env);
   try {
-    const discovered = await discoverSkillsInDir(cloned.repoDir, source.subpath);
+    let discovered: DiscoveredSkillDir[];
+    try {
+      discovered = await discoverSkillsInDir(cloned.repoDir, source.subpath);
+    } catch (err) {
+      if (!source.subpath) throw err;
+      // skills.sh 返回的技能可能位于根目录或自定义子目录（而非固定 skills/<id>）：回退全仓扫描并按技能名/目录名精确匹配
+      const targetName = posix.basename(source.subpath).toLowerCase();
+      const allInRepo = await discoverSkillsInDir(cloned.repoDir);
+      const matched = allInRepo.filter(
+        (d) => d.name.toLowerCase() === targetName || posix.basename(d.subpath).toLowerCase() === targetName,
+      );
+      if (matched.length === 0) throw err;
+      discovered = matched;
+    }
     return {
       repoUrl: source.repoUrl,
       ...(source.ref ? { ref: source.ref } : {}),
@@ -452,7 +465,20 @@ export async function installSkillsFromGit(params: {
   const source = parseGitSkillSource(params.repoUrl, params.ref, params.subpath);
   const cloned = await cloneGitRepoToTemp(source, params.env);
   try {
-    const discovered = await discoverSkillsInDir(cloned.repoDir, source.subpath);
+    let discovered: DiscoveredSkillDir[];
+    try {
+      discovered = await discoverSkillsInDir(cloned.repoDir, source.subpath);
+    } catch (err) {
+      if (!source.subpath) throw err;
+      // skills.sh 返回的技能可能位于根目录或自定义子目录（而非固定 skills/<id>）：回退全仓扫描并按技能名/目录名精确匹配
+      const targetName = posix.basename(source.subpath).toLowerCase();
+      const allInRepo = await discoverSkillsInDir(cloned.repoDir);
+      const matched = allInRepo.filter(
+        (d) => d.name.toLowerCase() === targetName || posix.basename(d.subpath).toLowerCase() === targetName,
+      );
+      if (matched.length === 0) throw err;
+      discovered = matched;
+    }
     const pickedSet = params.selectedSubpaths ? new Set(params.selectedSubpaths) : undefined;
     const toInstall = pickedSet ? discovered.filter((d) => pickedSet.has(d.subpath)) : discovered;
     if (toInstall.length === 0) {
@@ -744,7 +770,20 @@ export async function syncInstalledSkill(params: {
   const source = parseGitSkillSource(existing.repoUrl, existing.ref, existing.subpath);
   const cloned = await cloneGitRepoToTemp(source, params.env);
   try {
-    const discovered = await discoverSkillsInDir(cloned.repoDir, source.subpath);
+    let discovered: DiscoveredSkillDir[];
+    try {
+      discovered = await discoverSkillsInDir(cloned.repoDir, source.subpath);
+    } catch (err) {
+      if (!source.subpath) throw err;
+      // skills.sh 返回的技能可能位于根目录或自定义子目录（而非固定 skills/<id>）：回退全仓扫描并按技能名/目录名精确匹配
+      const targetName = posix.basename(source.subpath).toLowerCase();
+      const allInRepo = await discoverSkillsInDir(cloned.repoDir);
+      const matched = allInRepo.filter(
+        (d) => d.name.toLowerCase() === targetName || posix.basename(d.subpath).toLowerCase() === targetName,
+      );
+      if (matched.length === 0) throw err;
+      discovered = matched;
+    }
     const matched =
       discovered.find((d) => d.subpath === (existing.subpath ?? '')) ??
       discovered.find((d) => normalizeSkillId(d.name) === targetId) ??

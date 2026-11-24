@@ -295,7 +295,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(workbench.register(() => runtime.onWorkspaceChanged()));
 
   const provider = new ChatViewProvider(context.extensionUri, {
-    onMessage: (message) => runtime.handleWebviewMessage(message),
+    onMessage: (message, clientId) => runtime.handleWebviewMessage(message, clientId),
+    onPanelOpen: (clientId, send) => runtime.registerIdeClient?.(clientId, send) ?? (() => undefined),
     onViewVisible: () => runtime.onViewVisible(),
     locale: getLocale,
     log: safeLog,

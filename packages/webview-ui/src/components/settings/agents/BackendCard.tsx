@@ -19,7 +19,6 @@ import {
   TrashIcon,
   UsersIcon,
 } from '../../icons.tsx';
-import { ValuePill } from '../../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
@@ -119,227 +118,232 @@ export function BackendCard({
   return (
     <>
       <Card
-        className="flex-row items-center gap-3 border-line/75 bg-surface/80 px-3.5 py-2.5 shadow-xs transition-colors hover:border-line-strong/80 hover:bg-surface dark:bg-surface/75"
+        className="flex-row items-center gap-3.5 rounded-2xl border-0 bg-field/55 px-4 py-3 shadow-none transition-colors hover:bg-field/85 dark:bg-surface/65 dark:hover:bg-surface/90"
         data-testid={`settings-backend-${backend.id}`}
       >
-      <BackendLogo backend={backend} />
+        <BackendLogo backend={backend} />
 
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[13px] font-semibold text-ink">{backend.name}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[13px] font-semibold text-ink">{backend.name}</span>
 
-          {backend.busy ? (
-            <ValuePill tone="accent" className="text-[10.5px]">
-              <SpinnerIcon className="size-2.5" />
-              <span>{t(`settings.backend.busy.${backend.busy}` as MessageKey)}</span>
-            </ValuePill>
-          ) : backend.available === undefined ? (
-            <ValuePill className="text-[10.5px]">
-              <SpinnerIcon className="size-2.5" />
-              <span>{t('backend.checking')}</span>
-            </ValuePill>
-          ) : backend.available ? (
-            <ValuePill tone="green" className="text-[10.5px]">
-              <span className="size-1.5 rounded-full bg-green" />
-              <span>{t('backend.installed')}</span>
-              {backend.version ? (
-                <code className="font-mono text-[10.5px]">{t('settings.backend.version', backend.version)}</code>
-              ) : null}
-            </ValuePill>
-          ) : (
-            <ValuePill tone="orange" className="text-[10.5px]">
-              <span className="size-1.5 rounded-full bg-orange" />
-              <span>{t('backend.missing')}</span>
-            </ValuePill>
-          )}
+            {backend.busy ? (
+              <span className="inline-flex items-center gap-1 text-[11.5px] text-accent-ink">
+                <SpinnerIcon className="size-3" />
+                <span>{t(`settings.backend.busy.${backend.busy}` as MessageKey)}</span>
+              </span>
+            ) : backend.available === undefined ? (
+              <span className="inline-flex items-center gap-1 text-[11.5px] text-ink-3">
+                <SpinnerIcon className="size-3" />
+                <span>{t('backend.checking')}</span>
+              </span>
+            ) : backend.available ? (
+              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-3">
+                <span className="size-1.5 rounded-full bg-green" aria-label={t('backend.installed')} />
+                {backend.version ? (
+                  <code className="font-mono text-[11.5px] text-ink-3">
+                    {t('settings.backend.version', backend.version)}
+                  </code>
+                ) : null}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-orange">
+                <span className="size-1.5 rounded-full bg-orange" />
+                <span>{t('backend.missing')}</span>
+              </span>
+            )}
 
-          {isDefault ? (
-            <ValuePill className="text-[10.5px]" data-testid={`backend-default-badge-${backend.id}`}>
-              {t('settings.backend.default')}
-            </ValuePill>
+            {isDefault ? (
+              <span
+                className="rounded-md bg-canvas/85 px-1.5 py-0.5 text-[10.5px] font-medium text-ink-2 dark:bg-page/55"
+                data-testid={`backend-default-badge-${backend.id}`}
+              >
+                {t('settings.backend.default')}
+              </span>
+            ) : null}
+
+            {backend.running ? (
+              <span
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-accent-ink"
+                data-testid={`backend-running-badge-${backend.id}`}
+              >
+                <SpinnerIcon className="size-2.5" />
+                <span>{t('settings.backend.running')}</span>
+              </span>
+            ) : !active && backend.alive ? (
+              <span
+                className="inline-flex items-center gap-1 text-[11px] text-green"
+                data-testid={`backend-alive-badge-${backend.id}`}
+              >
+                <span className="size-1.5 rounded-full bg-green" />
+                <span>{t('settings.backend.alive')}</span>
+              </span>
+            ) : null}
+          </div>
+
+          {!backend.npmPackage && backend.available === false && (backend.installHint || backend.command) ? (
+            <p className="mt-1 mb-0 truncate font-mono text-[11.5px] text-ink-3">
+              {backend.installHint ?? backend.command}
+            </p>
           ) : null}
-          {backend.kind === 'acp' ? <ValuePill className="text-[10.5px]">ACP</ValuePill> : null}
-          {backend.custom ? <ValuePill className="text-[10.5px]">{t('settings.agents.customBadge')}</ValuePill> : null}
-          {backend.overridden ? (
-            <ValuePill className="text-[10.5px]">{t('settings.agents.overriddenBadge')}</ValuePill>
-          ) : null}
-          {backend.running ? (
-            <ValuePill tone="accent" className="text-[10.5px]" data-testid={`backend-running-badge-${backend.id}`}>
-              <SpinnerIcon className="size-2.5" />
-              <span>{t('settings.backend.running')}</span>
-            </ValuePill>
-          ) : !active && backend.alive ? (
-            <ValuePill tone="green" className="text-[10.5px]" data-testid={`backend-alive-badge-${backend.id}`}>
-              <span className="size-1.5 rounded-full bg-green" />
-              <span>{t('settings.backend.alive')}</span>
-            </ValuePill>
-          ) : null}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5">
           {boundProvider ? (
             <button
               type="button"
               data-testid={`backend-bound-provider-${backend.id}`}
               onClick={() => setSettingsTab('providers')}
-              className="inline-flex cursor-pointer items-center border-0 bg-transparent p-0"
+              className="inline-flex max-w-44 cursor-pointer items-center gap-1.5 rounded-lg bg-accent-tint/75 px-2.5 py-1 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-85"
             >
-              <ValuePill tone="accent" className="text-[10.5px] hover:opacity-85">
-                <KeyIcon className="size-2.5" />
-                <span>{t('settings.providers.boundBadge', boundProvider.name)}</span>
-              </ValuePill>
+              <KeyIcon className="size-3 shrink-0" />
+              <span className="truncate">{t('settings.providers.boundBadge', boundProvider.name)}</span>
             </button>
           ) : activeAccount ? (
             <button
               type="button"
               data-testid={`backend-active-account-${backend.id}`}
               onClick={() => setSettingsTab('accounts')}
-              className="inline-flex cursor-pointer items-center border-0 bg-transparent p-0"
+              className="inline-flex max-w-44 cursor-pointer items-center gap-1.5 rounded-lg bg-canvas/80 px-2.5 py-1 text-[11.5px] text-ink-2 transition-colors hover:bg-canvas hover:text-ink dark:bg-page/45 dark:hover:bg-page/75"
             >
-              <ValuePill className="text-[10.5px] hover:opacity-85">
-                <UsersIcon className="size-2.5" />
-                <span>{t('settings.accounts.officialBadge', activeAccount.label)}</span>
-              </ValuePill>
+              <UsersIcon className="size-3 shrink-0" />
+              <span className="truncate">{t('settings.accounts.officialBadge', activeAccount.label)}</span>
             </button>
           ) : null}
-        </div>
 
-        {!backend.npmPackage && backend.available === false && (backend.installHint || backend.command) ? (
-          <p className="mt-1 mb-0 font-mono text-[11.5px] text-ink-3">{backend.installHint ?? backend.command}</p>
-        ) : null}
-      </div>
-
-      {hasPrimaryActions || hasDestructiveActions ? (
-        <div className="shrink-0">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="shrink-0 text-ink-2 hover:text-ink"
-                data-testid={`backend-actions-${backend.id}`}
-                aria-label={t('common.moreActions')}
-                title={t('common.moreActions')}
-              >
-                <MoreIcon className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-44">
-              {showSetDefault ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`default-backend-${backend.id}`}
-                  onSelect={() => postToHost({ type: 'selectBackend', payload: { id: backend.id } })}
+          {hasPrimaryActions || hasDestructiveActions ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0 text-ink-2 hover:text-ink"
+                  data-testid={`backend-actions-${backend.id}`}
+                  aria-label={t('common.moreActions')}
+                  title={t('common.moreActions')}
                 >
-                  <CheckIcon className="size-3.5 text-ink-2" />
-                  <span>{t('settings.backend.setDefault')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showSwitchVersion ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`switch-version-menu-${backend.id}`}
-                  disabled={!npmReady || isBusy}
-                  onSelect={() => {
-                    setPickedVersion(backend.version ?? '');
-                    setVersionDialogOpen(true);
-                  }}
-                >
-                  <HistoryIcon className="size-3.5 text-ink-2" />
-                  <span>{t('settings.backend.switchVersion')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showInstall ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`install-backend-menu-${backend.id}`}
-                  disabled={!npmReady || isBusy}
-                  onSelect={() => {
-                    setPickedVersion('');
-                    setVersionDialogOpen(true);
-                  }}
-                >
-                  <DownloadIcon className="size-3.5 text-ink-2" />
-                  <span>{t('settings.backend.install')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showCopyInstall ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`copy-install-${backend.id}`}
-                  onSelect={() => {
-                    void navigator.clipboard?.writeText(backend.installCommand!);
-                  }}
-                >
-                  <CopyIcon className="size-3.5 text-ink-2" />
-                  <span>{t('settings.backend.copyCommand')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showApiKey ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  onSelect={() => postToHost({ type: 'configureApiKey', payload: {} })}
-                >
-                  <KeyIcon className="size-3.5 text-ink-2" />
-                  <span>{t('apiKey.configure')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showWebUi ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`open-webui-${backend.id}`}
-                  onSelect={() => postToHost({ type: 'openWebUI', payload: {} })}
-                >
-                  <GlobeIcon className="size-3.5 text-ink-2" />
-                  <span>{t('header.openWebUI')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showEdit ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`edit-backend-${backend.id}`}
-                  onSelect={onEdit}
-                >
-                  <PencilIcon className="size-3.5 text-ink-2" />
-                  <span>{t('settings.agents.edit')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showReset ? (
-                <DropdownMenuItem
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`reset-backend-${backend.id}`}
-                  onSelect={() => postToHost({ type: 'deleteBackendProfile', payload: { id: backend.id } })}
-                >
-                  <ReplyIcon className="size-3.5 text-ink-2" />
-                  <span>{t('settings.agents.resetOverride')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {hasPrimaryActions && hasDestructiveActions ? <DropdownMenuSeparator /> : null}
-              {showUninstall ? (
-                <DropdownMenuItem
-                  variant="destructive"
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`uninstall-backend-${backend.id}`}
-                  disabled={!npmReady || isBusy}
-                  onSelect={() => postToHost({ type: 'uninstallBackend', payload: { id: backend.id } })}
-                >
-                  <TrashIcon className="size-3.5" />
-                  <span>{t('settings.backend.uninstall')}</span>
-                </DropdownMenuItem>
-              ) : null}
-              {showDelete ? (
-                <DropdownMenuItem
-                  variant="destructive"
-                  className="gap-2 text-[12.5px]"
-                  data-testid={`delete-backend-${backend.id}`}
-                  onSelect={() => postToHost({ type: 'deleteBackendProfile', payload: { id: backend.id } })}
-                >
-                  <TrashIcon className="size-3.5" />
-                  <span>{t('settings.agents.delete')}</span>
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <MoreIcon className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-44">
+                {showSetDefault ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`default-backend-${backend.id}`}
+                    onSelect={() => postToHost({ type: 'selectBackend', payload: { id: backend.id } })}
+                  >
+                    <CheckIcon className="size-3.5 text-ink-2" />
+                    <span>{t('settings.backend.setDefault')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showSwitchVersion ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`switch-version-menu-${backend.id}`}
+                    disabled={!npmReady || isBusy}
+                    onSelect={() => {
+                      setPickedVersion(backend.version ?? '');
+                      setVersionDialogOpen(true);
+                    }}
+                  >
+                    <HistoryIcon className="size-3.5 text-ink-2" />
+                    <span>{t('settings.backend.switchVersion')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showInstall ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`install-backend-menu-${backend.id}`}
+                    disabled={!npmReady || isBusy}
+                    onSelect={() => {
+                      setPickedVersion('');
+                      setVersionDialogOpen(true);
+                    }}
+                  >
+                    <DownloadIcon className="size-3.5 text-ink-2" />
+                    <span>{t('settings.backend.install')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showCopyInstall ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`copy-install-${backend.id}`}
+                    onSelect={() => {
+                      void navigator.clipboard?.writeText(backend.installCommand!);
+                    }}
+                  >
+                    <CopyIcon className="size-3.5 text-ink-2" />
+                    <span>{t('settings.backend.copyCommand')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showApiKey ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    onSelect={() => postToHost({ type: 'configureApiKey', payload: {} })}
+                  >
+                    <KeyIcon className="size-3.5 text-ink-2" />
+                    <span>{t('apiKey.configure')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showWebUi ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`open-webui-${backend.id}`}
+                    onSelect={() => postToHost({ type: 'openWebUI', payload: {} })}
+                  >
+                    <GlobeIcon className="size-3.5 text-ink-2" />
+                    <span>{t('header.openWebUI')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showEdit ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`edit-backend-${backend.id}`}
+                    onSelect={onEdit}
+                  >
+                    <PencilIcon className="size-3.5 text-ink-2" />
+                    <span>{t('settings.agents.edit')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showReset ? (
+                  <DropdownMenuItem
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`reset-backend-${backend.id}`}
+                    onSelect={() => postToHost({ type: 'deleteBackendProfile', payload: { id: backend.id } })}
+                  >
+                    <ReplyIcon className="size-3.5 text-ink-2" />
+                    <span>{t('settings.agents.resetOverride')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {hasPrimaryActions && hasDestructiveActions ? <DropdownMenuSeparator /> : null}
+                {showUninstall ? (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`uninstall-backend-${backend.id}`}
+                    disabled={!npmReady || isBusy}
+                    onSelect={() => postToHost({ type: 'uninstallBackend', payload: { id: backend.id } })}
+                  >
+                    <TrashIcon className="size-3.5" />
+                    <span>{t('settings.backend.uninstall')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+                {showDelete ? (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    className="gap-2 text-[12.5px]"
+                    data-testid={`delete-backend-${backend.id}`}
+                    onSelect={() => postToHost({ type: 'deleteBackendProfile', payload: { id: backend.id } })}
+                  >
+                    <TrashIcon className="size-3.5" />
+                    <span>{t('settings.agents.delete')}</span>
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
-      ) : null}
       </Card>
 
       {backend.npmPackage && backend.npmOwned !== false ? (
