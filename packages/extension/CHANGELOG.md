@@ -1,5 +1,16 @@
 # 更新记录 / Changelog
 
+## 0.15.1
+
+**发布流程修复与桌面端安装包上线**：修复干净环境下 `pnpm typecheck` 失败（桌面端自动安装的 Electron 类型与轻量类型声明冲突），此前 0.14.0 与 0.15.0 因此未能成功发布；GitHub Release 现同时提供 Windows（NSIS）、macOS（dmg / zip，Intel 与 Apple Silicon）与 Linux（AppImage）桌面端安装包及 SHA-256 校验。本版本一并包含 0.15.0 与 0.14.0 的全部改动：Halo 品牌升级、右侧栏内置浏览器与 AI MCP 操控、在线 MCP / 技能市场与本地技能导入、CodeMirror 6 编辑与增强 Diff、右侧栏终端、跨底层 Git 检查点回滚与会话分叉、全局命令面板（`Ctrl/Cmd+K`）等。
+
+**Release pipeline fix & desktop installers available**: Fixed the clean-CI `pnpm typecheck` failure (auto-installed Electron types conflicting with the lightweight declaration) that had prevented 0.14.0 and 0.15.0 from ever publishing; GitHub Releases now attach Windows (NSIS), macOS (dmg/zip for Intel and Apple Silicon), and Linux (AppImage) desktop installers with SHA-256 checksums. This release also includes all changes from 0.15.0 and 0.14.0: Halo rebrand, built-in browser with AI MCP control, live MCP/skills marketplaces and local skill import, CodeMirror 6 editor with enhanced diff review, right-panel terminal, cross-backend Git checkpoints and session fork, and the global command palette (`Ctrl/Cmd+K`).
+
+- **发版流水线修复**：移除 `packages/desktop` 的 `electron` peerDependency（pnpm 会自动安装真实 Electron，导致类型检查与轻量声明冲突），CI 干净检出可正常通过类型检查；桌面端 `preload` 改为 `.cts` 编译为 CommonJS，并在打包态从 `resources` 解析 sidecar / Webview 资源。
+  **Release pipeline fix**: Removed the desktop package's `electron` peerDependency (pnpm auto-installed the real Electron and broke type-checking against the lightweight declaration); the sandboxed preload is now compiled to CommonJS from `.cts`, and packaged builds resolve sidecar/Webview assets from `resources`.
+- **三平台桌面端安装包**：`release.yml` 新增 Windows / macOS / Linux 打包任务，随 Release 上传 `.exe`、`.dmg`、Halo zip 与 `.AppImage` 并生成 SHA-256；macOS 未配置证书时会补 ad-hoc 签名。
+  **Desktop installers for three platforms**: The release workflow now builds on Windows/macOS/Linux and uploads `.exe`, `.dmg`, Halo zip, and `.AppImage` assets with SHA-256 checksums; macOS builds get an ad-hoc signature when no certificate is configured.
+
 ## 0.15.0
 
 **品牌升级为 Halo、右侧栏内置浏览器与 AI 操控、在线实时 MCP / 技能市场、本地技能一键导入与全面设置系统打磨**：全系统产品名称统一更名为 **Halo**；右侧面板新增「浏览器」标签页（内置 CDP 实时画面交互与 MCP 工具联动，让智能体直接查看和操作页面）；扩展设置中的 **MCP 服务器** 与 **Agent 技能（SKILL.md）** 均重构为「已安装 / 市场」双标签与独立卡片布局，由宿主在线实时拉取官方 MCP Registry 与开源技能仓库并支持一键刷新与离线精选兜底，同时新增本地技能目录扫描与导入；全面精简设置页冗余说明文案、统一行间距与行间分割线，并在 MCP / 技能卡片及智能体下拉选择中全面接入运行时图标，进一步打磨首页空态、账号渠道切换对比度与移动端底部输入框间距。
@@ -14,8 +25,6 @@
   **Live online MCP & Skills marketplaces + local skill import**: Split MCP and Skills into two-tab (**Installed** / **Marketplace**) standalone-card views; added host-side `marketService` fetching live entries from the official MCP Registry API (with debounced online search, caching, and manual refresh) and official GitHub skill repos (`SKILL.md` frontmatter), with seamless offline curated fallback; added local `SKILL.md` scanning and one-click import.
 - **设置系统精简、行间分割线与运行时图标统一**：精简各设置页解释性文字，统一采用 `divide-y` 行间分割线与规范留白；MCP / 技能卡片、弹窗与智能体下拉选择器全面展示运行时图标（含 OpenAI Blossom 样式 Codex 图标），并修复官方/第三方渠道切换对比度、右侧栏标签溢出滚动条、AI 提交图标误旋转、总览角标对比度及移动端底部输入框安全间距。
   **Settings declutter, divided rows & runtime icons**: Removed verbose explanatory prose across Settings and standardized `divide-y` row spacing; added runtime icons (`BackendLogo`, including the OpenAI Blossom Codex icon) to MCP/Skill cards, dialogs, and agent dropdowns; fixed official/third-party toggle contrast, right-panel tab scrollbar overflow, spinning AI commit icon, sidebar overview badge contrast, and mobile composer bottom safe-area spacing.
-- **桌面端安装包纳入发布流程**：Electron 桌面端新增三平台打包（Windows NSIS、macOS dmg/zip、Linux AppImage）并随 GitHub Release 一并发布；修复打包后 sidecar / Webview 资源路径与沙箱 preload 的 CommonJS 编译。
-  **Desktop installers in releases**: Added Electron desktop packaging for Windows (NSIS), macOS (dmg/zip), and Linux (AppImage) to the release workflow, with packaged-mode paths for the sidecar/Webview assets and a CommonJS-compiled sandboxed preload.
 
 ## 0.14.0
 

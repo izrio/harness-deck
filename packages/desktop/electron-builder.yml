@@ -6,6 +6,7 @@ electronVersion: 45.4.1
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 asar: true
 npmRebuild: false
+afterPack: scripts/after-pack.cjs
 
 directories:
   buildResources: build
