@@ -28,6 +28,14 @@ import {
 } from './config.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+// 打包后 sidecar 与 Webview 静态资源随安装包放在 resources 目录，需显式指向它们；
+// 开发态仍按仓库相对路径解析（packages/extension/dist/...）。
+if (app.isPackaged) {
+  process.env.HARNESS_DECK_SIDECAR ??= join(process.resourcesPath, 'sidecar.cjs');
+  process.env.HARNESS_DECK_WEBVIEW_DIST ??= join(process.resourcesPath, 'webview');
+}
+
 const config = resolveDesktopConfig();
 const windowStatePath = join(config.configRoot, 'desktop-window.json');
 
@@ -120,7 +128,9 @@ function toggleMainWindow(): void {
 
 function resolveAppIcon(): unknown {
   try {
-    const iconPath = join(dirname(config.sidecarEntry), '..', 'media', 'icon.png');
+    const iconPath = app.isPackaged
+      ? join(process.resourcesPath, 'media', 'icon.png')
+      : join(dirname(config.sidecarEntry), '..', 'media', 'icon.png');
     return nativeImage.createFromPath(iconPath);
   } catch {
     return nativeImage.createEmpty();
@@ -140,7 +150,8 @@ async function createMainWindow(url: string): Promise<void> {
     icon: resolveAppIcon(),
     backgroundColor: '#1b1d24',
     webPreferences: {
-      preload: join(here, 'preload.js'),
+      // 沙箱化 preload 必须是 CommonJS，由 src/preload.cts 编译为 dist/preload.cjs。
+      preload: join(here, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

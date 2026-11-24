@@ -129,7 +129,8 @@ pnpm check:changed --dry-run # 只打印将执行的命令
 
 1. **推送前验证**：确保 `pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm build` 全部通过。
 2. **同步版本号与更新日志**（若需要发版）：
-   - 同步更新 `packages/extension/package.json` 的 `"version"` 与 `packages/jetbrains/build.gradle.kts` 的 `version = "<x.y.z>"`（`release.yml` 会校验两者必须与标签 `v<x.y.z>` 一致）。
+   - 同步更新 `packages/extension/package.json` 的 `"version"`、`packages/jetbrains/build.gradle.kts` 的 `version = "<x.y.z>"` 与 `packages/desktop/package.json` 的 `"version"`（`release.yml` 会校验三者必须与标签 `v<x.y.z>` 一致）。
+   - 发版会同时产出 VS Code `.vsix`、JetBrains `.zip` 与桌面端安装包（Windows `.exe` / macOS `.dmg` / Linux `.AppImage`）；桌面端由 `packages/desktop` 的 electron-builder 配置打包，`electronVersion` 固定在 `packages/desktop/electron-builder.yml`。
    - 在 `packages/extension/CHANGELOG.md` 顶部添加 `## <x.y.z>` 节（中英双语），`release.yml` 会提取该节作为 Release 说明。
 3. **提交、打标签并推送**：
    ```bash

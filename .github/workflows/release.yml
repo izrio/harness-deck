@@ -1,4 +1,4 @@
-# 发布：分别打包 VS Code 插件（vsix）与 JetBrains / IDEA 插件（zip），创建 GitHub Release 并附上安装包。
+# 发布：分别打包 VS Code 插件（vsix）、JetBrains / IDEA 插件（zip）与 Electron 桌面端安装包（exe / dmg / AppImage），创建 GitHub Release 并附上安装包。
 # - 推送 v* 标签时自动运行（例如 git tag v0.5.0 && git push origin v0.5.0）；
 # - 也可以在 Actions 页面手动运行，填写标签（标签不存在时在当前提交上创建）。
 # 标签必须与 packages/extension/package.json 及 packages/jetbrains/build.gradle.kts 的版本一致；发布说明取 CHANGELOG.md 里对应版本的一节。
@@ -122,9 +122,62 @@ jobs:
           name: release-jetbrains
           path: release-jetbrains/*
 
+  desktop:
+    name: Build desktop app (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: release-desktop-linux
+            paths: |
+              packages/desktop/release/*.AppImage
+          - os: macos-latest
+            artifact: release-desktop-macos
+            paths: |
+              packages/desktop/release/*.dmg
+              packages/desktop/release/Halo-*.zip
+          - os: windows-latest
+            artifact: release-desktop-windows
+            paths: |
+              packages/desktop/release/*.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check tag matches desktop package version
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./packages/desktop/package.json').version")"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::标签 $TAG 与 packages/desktop/package.json 的版本 $VERSION 不一致"
+            exit 1
+          fi
+
+      # 桌面端把 sidecar 与 Webview 静态资源作为 extraResources 打进安装包，先构建它们。
+      - run: pnpm build
+
+      - name: Package desktop app
+        working-directory: packages/desktop
+        env:
+          # 未配置签名证书：跳过 macOS 代码签名自动发现，产出未签名安装包。
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: pnpm run package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+
   release:
     name: Publish GitHub Release
-    needs: [vscode, jetbrains]
+    needs: [vscode, jetbrains, desktop]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -139,6 +192,26 @@ jobs:
         with:
           name: release-jetbrains
           path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-desktop-linux
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-desktop-macos
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-desktop-windows
+          path: release
+
+      - name: Checksums for desktop assets
+        run: |
+          shopt -s nullglob
+          cd release
+          for file in *.exe *.dmg *.AppImage Halo-*.zip; do
+            sha256sum "$file" > "$file.sha256"
+          done
 
       - name: Prepare release notes
         run: |
@@ -165,6 +238,15 @@ jobs:
             echo "2. 在 IDE 设置「Plugins → ⚙ → Install Plugin from Disk…」选择该压缩包安装。"
             echo "   In IDE Settings → Plugins → ⚙ → Install Plugin from Disk…, select the zip archive."
             echo
+            echo "### 桌面端 / Desktop (Windows / macOS / Linux)"
+            echo
+            echo "下载对应平台的安装包（未签名，首次打开可能需要在系统设置中允许）："
+            echo "Download the installer for your platform (unsigned; the OS may ask you to allow it on first launch):"
+            echo
+            echo "- Windows: \`Halo-${VERSION}-win-x64.exe\`"
+            echo "- macOS: \`Halo-${VERSION}-mac-*.dmg\`"
+            echo "- Linux: \`Halo-${VERSION}-linux-*.AppImage\`（\`chmod +x\` 后直接运行）"
+            echo
             echo "### 底层 / Backends"
             echo
             echo "至少装好一个底层：dsh（0.2.1-rc.5 及以上，DeepSeek Desktop 菜单「管理 dsh 命令…」或 \`npm install -g @deepseek-ai/dsh\`）、Claude Code（\`npm install -g @anthropic-ai/claude-code\`）、Codex（\`npm install -g @openai/codex\`）、CodeBuddy（\`npm install -g @tencent-ai/codebuddy-code\`）、Pi（\`npm install -g @earendil-works/pi-coding-agent\`）、ZCode（\`npm install -g zcode-app-cli\`）或 OpenCode（\`npm install -g opencode-ai\`）。"
@@ -174,6 +256,9 @@ jobs:
             echo
             echo "- \`harness-deck-${VERSION}.vsix\`: \`$(cut -d' ' -f1 "release/harness-deck-${VERSION}.vsix.sha256")\`"
             echo "- \`harness-deck-jetbrains-${VERSION}.zip\`: \`$(cut -d' ' -f1 "release/harness-deck-jetbrains-${VERSION}.zip.sha256")\`"
+            for file in release/Halo-*.sha256; do
+              echo "- \`$(basename "$file" .sha256)\`: \`$(cut -d' ' -f1 "$file")\`"
+            done
             echo
             echo "## 更新内容 / Changes"
             cat release/changes.md
@@ -182,14 +267,16 @@ jobs:
 
       - name: Create or update release
         run: |
+          shopt -s nullglob
           FLAGS=()
           if [ "${{ github.event.inputs.prerelease }}" = "true" ]; then FLAGS+=(--prerelease); fi
+          ASSETS=(release/*.vsix release/*.zip release/*.exe release/*.dmg release/*.AppImage release/*.sha256)
           if gh release view "$TAG" > /dev/null 2>&1; then
             # 重新运行时更新已有的 Release，替换安装包
             gh release edit "$TAG" --title "Halo ${TAG}" --notes-file release/notes.md "${FLAGS[@]}"
-            gh release upload "$TAG" release/*.vsix release/*.zip release/*.sha256 --clobber
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
           else
-            gh release create "$TAG" release/*.vsix release/*.zip release/*.sha256 \
+            gh release create "$TAG" "${ASSETS[@]}" \
               --title "Halo ${TAG}" \
               --notes-file release/notes.md \
               --target "$GITHUB_SHA" \

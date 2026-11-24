@@ -24,6 +24,7 @@ jobs:
       - run: pnpm test
       - run: pnpm perf:check
       - run: pnpm package
+      - run: pnpm --filter @harness-deck/desktop run build
       - uses: actions/upload-artifact@v4
         with:
           name: vsix

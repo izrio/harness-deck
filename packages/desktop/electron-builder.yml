@@ -1,0 +1,56 @@
+# Halo 桌面端打包配置：产物只含编译后的 dist、headless sidecar 与 Webview 静态资源。
+# electron 不在依赖里（避免 CI 每个任务都下载二进制），由 electronVersion 指定打包时下载的版本。
+appId: io.github.izrio.harnessdeck
+productName: Halo
+electronVersion: 45.4.1
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+asar: true
+npmRebuild: false
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - dist/**/*
+  - package.json
+
+extraResources:
+  - from: ../extension/dist/sidecar.cjs
+    to: sidecar.cjs
+  - from: ../extension/dist/webview
+    to: webview
+  - from: ../extension/media/icon.png
+    to: media/icon.png
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+
+win:
+  icon: build/icon.png
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  executableName: halo
+  icon: build/icon.png
+  category: Development
+  target:
+    - AppImage

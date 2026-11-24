@@ -2,19 +2,17 @@
   "name": "@harness-deck/desktop",
   "version": "0.15.0",
   "private": true,
+  "description": "Halo desktop shell (Electron)",
+  "author": "izrio",
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
+    "package": "pnpm run build && electron-builder --publish never",
     "start": "electron ./dist/main.js"
   },
-  "peerDependencies": {
-    "electron": ">=31.0.0"
-  },
-  "peerDependenciesMeta": {
-    "electron": {
-      "optional": true
-    }
+  "devDependencies": {
+    "electron-builder": "^26.18.0"
   }
 }

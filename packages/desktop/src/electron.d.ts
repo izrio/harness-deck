@@ -1,6 +1,13 @@
 /**
  * 轻量 Electron 类型声明（无需在 CI 里下载 150MB 二进制即可完整完成严格类型检查）。
  */
+declare namespace NodeJS {
+  interface Process {
+    /** Electron 打包后指向安装包 resources 目录（@types/node 未声明）。 */
+    resourcesPath: string;
+  }
+}
+
 declare module 'electron' {
   export interface BrowserWindowOptions {
     width?: number;
@@ -58,6 +65,7 @@ declare module 'electron' {
     createFromDataURL(url: string): unknown;
   };
   export const app: {
+    isPackaged: boolean;
     whenReady(): Promise<void>;
     quit(): void;
     on(event: string, listener: (...args: unknown[]) => void): void;

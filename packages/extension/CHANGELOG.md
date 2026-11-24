@@ -14,6 +14,8 @@
   **Live online MCP & Skills marketplaces + local skill import**: Split MCP and Skills into two-tab (**Installed** / **Marketplace**) standalone-card views; added host-side `marketService` fetching live entries from the official MCP Registry API (with debounced online search, caching, and manual refresh) and official GitHub skill repos (`SKILL.md` frontmatter), with seamless offline curated fallback; added local `SKILL.md` scanning and one-click import.
 - **设置系统精简、行间分割线与运行时图标统一**：精简各设置页解释性文字，统一采用 `divide-y` 行间分割线与规范留白；MCP / 技能卡片、弹窗与智能体下拉选择器全面展示运行时图标（含 OpenAI Blossom 样式 Codex 图标），并修复官方/第三方渠道切换对比度、右侧栏标签溢出滚动条、AI 提交图标误旋转、总览角标对比度及移动端底部输入框安全间距。
   **Settings declutter, divided rows & runtime icons**: Removed verbose explanatory prose across Settings and standardized `divide-y` row spacing; added runtime icons (`BackendLogo`, including the OpenAI Blossom Codex icon) to MCP/Skill cards, dialogs, and agent dropdowns; fixed official/third-party toggle contrast, right-panel tab scrollbar overflow, spinning AI commit icon, sidebar overview badge contrast, and mobile composer bottom safe-area spacing.
+- **桌面端安装包纳入发布流程**：Electron 桌面端新增三平台打包（Windows NSIS、macOS dmg/zip、Linux AppImage）并随 GitHub Release 一并发布；修复打包后 sidecar / Webview 资源路径与沙箱 preload 的 CommonJS 编译。
+  **Desktop installers in releases**: Added Electron desktop packaging for Windows (NSIS), macOS (dmg/zip), and Linux (AppImage) to the release workflow, with packaged-mode paths for the sidecar/Webview assets and a CommonJS-compiled sandboxed preload.
 
 ## 0.14.0
 
