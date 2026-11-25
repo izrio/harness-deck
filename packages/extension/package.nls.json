@@ -39,6 +39,7 @@
   "config.ui.terminalFontSize": "Font size (px) for terminal and command output. `0` uses the default `12`.",
   "config.ui.terminalLineHeight": "Line height for terminal and command output. `0` uses the default `1.6`.",
   "config.ui.showTurnChanges": "Show a changed-files card at the end of each reply. Off by default: the bar above the input box already lists the files changed in this session.",
+  "config.quota.enabled": "Automatically fetch and display official subscription usage/quota for supported agents (Claude Code, Antigravity, CodeBuddy). Enabled by default; when turned off, no quota endpoints or CLI usage commands are called.",
   "submenu.editor": "Halo",
   "config.title": "Halo",
   "container.title": "Halo",

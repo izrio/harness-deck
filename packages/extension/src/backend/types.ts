@@ -137,6 +137,7 @@ export interface ControllerHostOptions {
     readonly language?: PreferencesState['language'];
     readonly includeActiveEditor?: boolean;
     readonly showTurnChanges?: boolean;
+    readonly fetchQuota?: boolean;
     readonly schedulePermission?: PreferencesState['schedulePermission'];
     readonly notifications?: Partial<NonNullable<PreferencesState['notifications']>>;
     readonly advanced?: Partial<NonNullable<PreferencesState['advanced']>>;

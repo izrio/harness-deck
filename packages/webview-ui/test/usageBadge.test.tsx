@@ -773,4 +773,121 @@ describe('订阅用量标识', () => {
     );
     expect(screen.queryByTestId('usage-badge')).toBeNull();
   });
+
+  it('初始状态为 unauthenticated 但 fetchQuota 成功查回额度并随后将状态升为 authenticated 时，保持展示且不重复强制请求', () => {
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          connection: 'connected',
+          backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+          accounts: {
+            items: [
+              { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'unauthenticated' },
+            ],
+            channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+          },
+        }),
+      }),
+    );
+    render(createElement(UsageBadge));
+    const req = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const reqId = req && req.type === 'fetchQuota' ? req.payload.requestId : -1;
+    expect(reqId).toBeGreaterThan(0);
+
+    vscode.reset();
+    const liveQuota: QuotaView = {
+      windows: [
+        { kind: 'weekly', label: 'gemini', usedPercent: 25, remainingPercent: 75 },
+        { kind: 'session', label: 'gemini', usedPercent: 99, remainingPercent: 1 },
+      ],
+      queriedAt: Date.now(),
+    };
+    act(() => {
+      store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: reqId, quota: liveQuota } });
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            {
+              id: 'system:antigravity',
+              backendId: 'antigravity',
+              label: '本机默认账号',
+              isSystemDefault: true,
+              status: 'authenticated',
+              quota: liveQuota,
+            },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+        },
+      });
+    });
+
+    expect(screen.getByTestId('usage-badge').textContent).toContain('1%');
+    expect(vscode.posted.filter((m) => m.type === 'fetchQuota')).toHaveLength(0);
+  });
+
+  it('设置关闭「获取订阅用量」时不发起任何探测并隐藏徽标；重新开启后立即探测展示', () => {
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          connection: 'connected',
+          backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+          preferences: { language: 'zh', includeActiveEditor: true, showTurnChanges: false, fetchQuota: false },
+          accounts: {
+            items: [
+              {
+                id: 'system:antigravity',
+                backendId: 'antigravity',
+                label: '本机默认账号',
+                isSystemDefault: true,
+                status: 'authenticated',
+                quota: { windows: [{ kind: 'session', label: 'gemini', usedPercent: 20, remainingPercent: 80 }], queriedAt: Date.now() },
+              },
+            ],
+            channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+          },
+        }),
+      }),
+    );
+
+    render(createElement(UsageBadge));
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+    expect(vscode.posted.filter((m) => m.type === 'fetchQuota')).toHaveLength(0);
+
+    // 重新打开开关：立即触发一次 fetchQuota 并展示额度
+    act(() =>
+      store.applyHostMessage({
+        type: 'preferences',
+        payload: { language: 'zh', includeActiveEditor: true, showTurnChanges: false, fetchQuota: true },
+      }),
+    );
+    const reqs = vscode.posted.filter((m) => m.type === 'fetchQuota');
+    expect(reqs).toHaveLength(1);
+    const reqId = reqs[0]!.type === 'fetchQuota' ? reqs[0]!.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: reqId,
+          quota: { windows: [{ kind: 'session', label: 'gemini', usedPercent: 15, remainingPercent: 85 }], queriedAt: Date.now() },
+        },
+      }),
+    );
+    const badge = screen.getByTestId('usage-badge');
+    expect(badge.querySelector('[data-animated-number]')?.getAttribute('data-target')).toBe('85');
+    expect(badge.getAttribute('aria-label')).toContain('85%');
+
+    // 再次关闭开关：立刻隐藏徽标且不再发起任何请求
+    vscode.reset();
+    act(() =>
+      store.applyHostMessage({
+        type: 'preferences',
+        payload: { language: 'zh', includeActiveEditor: true, showTurnChanges: false, fetchQuota: false },
+      }),
+    );
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+    expect(vscode.posted.filter((m) => m.type === 'fetchQuota')).toHaveLength(0);
+  });
 });

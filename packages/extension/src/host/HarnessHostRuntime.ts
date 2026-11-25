@@ -72,6 +72,7 @@ import {
   isAntigravityTokenUsable,
   isNotOlderAntigravityToken,
   prepareAccountLaunchPatch,
+  readAntigravityDiskTokenRaw,
   readAntigravityPrimaryTokenRaw,
   removeIsolatedAccountData,
   switchAntigravityCredentialSlot,
@@ -182,6 +183,7 @@ import {
   queryClaudeQuota,
   queryCodebuddyQuota,
   quotaProviderFor,
+  type QuotaServiceOptions,
 } from '../quota/provider.ts';
 import {
   bindProviderSetting,
@@ -292,6 +294,7 @@ export interface HarnessHostRuntimeOptions {
   readonly remoteBindHost?: string;
   readonly tailscaleExec?: TailscaleExec;
   readonly fetchImpl?: typeof fetch;
+  readonly runAntigravityUsageCli?: QuotaServiceOptions['runCliUsage'];
 }
 
 export function createHarnessHostRuntime(
@@ -916,6 +919,8 @@ export function createHarnessHostRuntime(
     return result;
   };
 
+  const isQuotaFetchEnabled = (): boolean => platform.settings.get<boolean>('quota.enabled', true);
+
   const readPreferences = (): PreferencesState => {
     const rawLang = platform.settings.get<string>('ui.language', 'auto');
     const language: PreferencesState['language'] = rawLang === 'zh' || rawLang === 'en' ? rawLang : 'auto';
@@ -923,6 +928,7 @@ export function createHarnessHostRuntime(
       language,
       includeActiveEditor: platform.settings.get<boolean>('context.includeActiveEditor', true),
       showTurnChanges: platform.settings.get<boolean>('ui.showTurnChanges', false),
+      fetchQuota: isQuotaFetchEnabled(),
       schedulePermission: readSchedulePermission(),
       notifications: readNotificationPreferences(),
       advanced: readAdvancedPreferences(),
@@ -1132,6 +1138,7 @@ export function createHarnessHostRuntime(
     const rawChannels = readBackendChannels();
     const loginProg = accountAuthFlow.progress;
 
+    const quotaEnabled = isQuotaFetchEnabled();
     const channels: Record<string, BackendChannelBinding> = {};
     const items: AccountView[] = [];
 
@@ -1161,7 +1168,7 @@ export function createHarnessHostRuntime(
         ...(sysInsp?.expiresAt !== undefined ? { expiresAt: sysInsp.expiresAt } : {}),
         ...(sysInsp?.hasSecret !== undefined ? { hasSecret: sysInsp.hasSecret } : {}),
         ...(sysInsp?.hasUsageCookie !== undefined ? { hasUsageCookie: sysInsp.hasUsageCookie } : {}),
-        ...(sysInsp?.quota ? { quota: sysInsp.quota } : {}),
+        ...(quotaEnabled && sysInsp?.quota ? { quota: sysInsp.quota } : {}),
         ...(sysInsp?.checkedAt !== undefined ? { checkedAt: sysInsp.checkedAt } : {}),
         ...(sysInsp?.error ? { error: sysInsp.error } : {}),
       });
@@ -1190,7 +1197,7 @@ export function createHarnessHostRuntime(
           ...(insp?.expiresAt !== undefined ? { expiresAt: insp.expiresAt } : {}),
           ...(insp?.hasSecret !== undefined ? { hasSecret: insp.hasSecret } : {}),
           ...(insp?.hasUsageCookie !== undefined ? { hasUsageCookie: insp.hasUsageCookie } : {}),
-          ...(insp?.quota ? { quota: insp.quota } : {}),
+          ...(quotaEnabled && insp?.quota ? { quota: insp.quota } : {}),
           ...(insp?.checkedAt !== undefined ? { checkedAt: insp.checkedAt } : {}),
           createdAt: acc.createdAt,
           ...(insp?.error ? { error: insp.error } : {}),
@@ -1221,32 +1228,73 @@ export function createHarnessHostRuntime(
     pushBackends();
   };
 
+  const resolveAntigravityCliCommand = async (profile: BackendProfile | undefined): Promise<string | undefined> => {
+    if (!profile || profile.kind !== 'acp') return undefined;
+    const cached = cachedExecutables.get(profile.id)?.command;
+    if (cached) return cached;
+    const acpEnv = processEnv(profile.env);
+    const located = await locateExecutable(profile.command, {
+      env: acpEnv,
+      platform: process.platform,
+      extraDirs: extraSearchDirsForCommand(profile.command, acpEnv, process.platform),
+    });
+    return located.kind === 'found' ? located.command : undefined;
+  };
+
   const inspectOneAccount = async (
     backendId: string,
     accountId: string,
     account: AccountConfig | undefined,
     includeQuota = false,
   ): Promise<void> => {
+    const effectiveIncludeQuota = includeQuota && isQuotaFetchEnabled();
     const clientVersion = installedVersions.get(backendId);
     const activeAccountId = activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts());
+    const isActiveSlot = activeAccountId === accountId;
+    const lowerBackend = backendId.toLowerCase();
+    let cliCommand: string | undefined;
+    if (lowerBackend === 'antigravity' && effectiveIncludeQuota && isActiveSlot) {
+      const canUseCli = isSystemAccountId(accountId)
+        ? !lastActiveAntigravityAccountId || isSystemAccountId(lastActiveAntigravityAccountId)
+        : lastActiveAntigravityAccountId === accountId;
+      if (canUseCli) {
+        const profile = profiles().find((p) => p.id === backendId);
+        cliCommand = await resolveAntigravityCliCommand(profile);
+      }
+    }
     const res = await inspectOfficialAccount({
       backendId,
       accountId,
       ...(account ? { account } : {}),
-      isActiveSlot: activeAccountId === accountId,
+      isActiveSlot,
       storageRoot,
       baseEnv: processEnv(),
       secrets: platform.secrets,
-      includeQuota,
+      includeQuota: effectiveIncludeQuota,
       getHttpProxy: () => platform.settings.getHttpProxy(),
       ...(clientVersion ? { clientVersion } : {}),
+      ...(cliCommand ? { cliCommand } : {}),
+      ...(runtimeOptions.runAntigravityUsageCli ? { runAntigravityUsageCli: runtimeOptions.runAntigravityUsageCli } : {}),
     });
     const prev = accountInspections.get(accountId);
-    const mergedIdentity = res.identity ?? (!includeQuota && res.status === 'authenticated' ? prev?.identity : undefined);
+    // Antigravity 凭据托管在系统 Keyring / ADC 时，仅检查磁盘文件会误判为 unauthenticated；
+    // 若此前已通过实时额度探测验证为 authenticated，非强制额度巡检绝不将其降级清空。
+    if (
+      lowerBackend === 'antigravity' &&
+      isSystemAccountId(accountId) &&
+      isActiveSlot &&
+      !effectiveIncludeQuota &&
+      res.status === 'unauthenticated' &&
+      prev?.status === 'authenticated' &&
+      prev.quota
+    ) {
+      return;
+    }
+    const mergedIdentity = res.identity ?? (!effectiveIncludeQuota && res.status === 'authenticated' ? prev?.identity : undefined);
     accountInspections.set(accountId, {
       ...res,
       ...(mergedIdentity ? { identity: mergedIdentity } : {}),
-      ...(!includeQuota && prev?.quota && res.status === 'authenticated' ? { quota: prev.quota } : {}),
+      ...(!effectiveIncludeQuota && isQuotaFetchEnabled() && prev?.quota && res.status === 'authenticated' ? { quota: prev.quota } : {}),
       checkedAt: Date.now(),
     });
     // 若用户新增账号时留空名称（使用自动占位名），登录识别出真实邮箱/用户名后自动回写，免去手动命名
@@ -1745,6 +1793,18 @@ export function createHarnessHostRuntime(
     }
     if (patch.showTurnChanges !== undefined) {
       await writeSetting('ui', 'showTurnChanges', patch.showTurnChanges);
+    }
+    if (patch.fetchQuota !== undefined) {
+      await writeSetting('quota', 'enabled', patch.fetchQuota);
+      if (!patch.fetchQuota) {
+        for (const [accId, insp] of accountInspections.entries()) {
+          if (insp.quota) {
+            const { quota: _dropped, ...rest } = insp;
+            accountInspections.set(accId, rest);
+          }
+        }
+        pushAccounts();
+      }
     }
     if (patch.schedulePermission !== undefined) {
       await writeSetting(
@@ -3008,6 +3068,18 @@ export function createHarnessHostRuntime(
         chat?.workspaceChanged();
         pushPreferences();
       }
+      if (affects('quota.enabled')) {
+        if (!isQuotaFetchEnabled()) {
+          for (const [accId, insp] of accountInspections.entries()) {
+            if (insp.quota) {
+              const { quota: _dropped, ...rest } = insp;
+              accountInspections.set(accId, rest);
+            }
+          }
+        }
+        pushAccounts();
+        pushPreferences();
+      }
       if (
         affects('notifications') ||
         affects('backendTrace') ||
@@ -3428,6 +3500,11 @@ export function createHarnessHostRuntime(
     if (message.type === 'fetchQuota') {
       const { requestId, force } = message.payload;
       void (async () => {
+        // 用户在设置里关闭「获取订阅用量」时，彻底跳过凭据读取、网络请求与 CLI 探测。
+        if (!isQuotaFetchEnabled()) {
+          post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
+          return;
+        }
         // Claude / Antigravity / CodeBuddy 分别有自己的订阅额度来源；其它底层直接回 unavailable，
         // 不读凭据、不发请求。绑定第三方服务商时（Claude / CodeBuddy）实际消耗的是编程套餐额度，
         // 官方订阅额度不再适用，同样隐藏。切换账号/重启底层期间 active 会短暂置空，必须按 targetBackendId
@@ -3450,40 +3527,51 @@ export function createHarnessHostRuntime(
             ? undefined
             : readAccounts().find((a) => a.id === activeAccId);
           // Antigravity 按激活账号槽位精确解析凭据：优先采用同账号且更新的磁盘续期 token，否则直接用该槽位快照，
-          // 绝不误读其他账号的磁盘凭据或 IDE 备用凭据（jetski-standalone-oauth-token）导致切换账号后串号。
+          // 绝不误读其他账号的磁盘凭据导致切换账号后串号；若凭据在系统 Keyring 或 access_token 过期且确认当前磁盘/Keyring 归属本槽位，
+          // 允许回退官方 `agy -p /usage --output-format json`。
           let antigravityRawToken: string | undefined;
           let antigravityDiskMatchedSlot = false;
           let staleSystemSlotReplaced = false;
+          let canUseAntigravityCli = false;
           if (providerId === 'antigravity') {
+            const envNow = processEnv();
             const storedSlot = (await platform.secrets.get(accountSlotSecretKey(activeAccId)))?.trim();
-            const diskPrimary = (await readAntigravityPrimaryTokenRaw(processEnv()))?.trim();
+            const diskPrimary = (await readAntigravityPrimaryTokenRaw(envNow))?.trim();
+            const diskCandidate = isSystemAccountId(activeAccId)
+              ? (diskPrimary && isAntigravityTokenUsable(diskPrimary)
+                  ? diskPrimary
+                  : ((await readAntigravityDiskTokenRaw(envNow))?.trim() ?? diskPrimary))
+              : diskPrimary;
+            let diskBelongsToCustomAccount = false;
+            if (isSystemAccountId(activeAccId) && diskCandidate) {
+              const otherAccounts = readAccounts().filter((a) => a.backendId === backendId);
+              for (const other of otherAccounts) {
+                const otherSlot = (await platform.secrets.get(accountSlotSecretKey(other.id)))?.trim();
+                if (otherSlot && antigravityTokensSameAccount(otherSlot, diskCandidate)) {
+                  diskBelongsToCustomAccount = true;
+                  break;
+                }
+              }
+            }
             if (storedSlot) {
               if (
-                diskPrimary &&
-                antigravityTokensSameAccount(storedSlot, diskPrimary) &&
-                isNotOlderAntigravityToken(diskPrimary, storedSlot)
+                diskCandidate &&
+                !diskBelongsToCustomAccount &&
+                antigravityTokensSameAccount(storedSlot, diskCandidate) &&
+                isNotOlderAntigravityToken(diskCandidate, storedSlot)
               ) {
-                antigravityRawToken = diskPrimary;
+                antigravityRawToken = diskCandidate;
                 antigravityDiskMatchedSlot = true;
               } else if (
                 isSystemAccountId(activeAccId) &&
                 !isAntigravityTokenUsable(storedSlot) &&
-                diskPrimary &&
-                isAntigravityTokenUsable(diskPrimary) &&
+                diskCandidate &&
+                isAntigravityTokenUsable(diskCandidate) &&
                 (!lastActiveAntigravityAccountId || lastActiveAntigravityAccountId === activeAccId)
               ) {
-                // 系统默认槽位已过期且本机 CLI 主凭据有效时，确认磁盘凭据不属于其他自定义账号后再自愈恢复，严防串号
-                const otherAccounts = readAccounts().filter((a) => a.backendId === backendId);
-                let belongsToCustomAccount = false;
-                for (const other of otherAccounts) {
-                  const otherSlot = (await platform.secrets.get(accountSlotSecretKey(other.id)))?.trim();
-                  if (otherSlot && antigravityTokensSameAccount(otherSlot, diskPrimary)) {
-                    belongsToCustomAccount = true;
-                    break;
-                  }
-                }
-                if (!belongsToCustomAccount) {
-                  antigravityRawToken = diskPrimary;
+                // 系统默认槽位已过期且本机磁盘凭据有效时，确认磁盘凭据不属于其他自定义账号后再自愈恢复，严防串号
+                if (!diskBelongsToCustomAccount) {
+                  antigravityRawToken = diskCandidate;
                   antigravityDiskMatchedSlot = true;
                   staleSystemSlotReplaced = true;
                 } else {
@@ -3492,12 +3580,17 @@ export function createHarnessHostRuntime(
               } else {
                 antigravityRawToken = storedSlot;
               }
+              canUseAntigravityCli = isSystemAccountId(activeAccId)
+                ? !diskBelongsToCustomAccount && (!lastActiveAntigravityAccountId || lastActiveAntigravityAccountId === activeAccId)
+                : lastActiveAntigravityAccountId === activeAccId || antigravityDiskMatchedSlot;
             } else if (!isSystemAccountId(activeAccId)) {
               post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
               return;
             } else if (lastActiveAntigravityAccountId && !isSystemAccountId(lastActiveAntigravityAccountId)) {
               post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
               return;
+            } else {
+              canUseAntigravityCli = !diskBelongsToCustomAccount;
             }
           }
           const accPatch = await prepareAccountLaunchPatch({
@@ -3516,12 +3609,18 @@ export function createHarnessHostRuntime(
                 ? queryAntigravityQuota
                 : queryCodebuddyQuota;
           const clientVersion = installedVersions.get(backendId);
+          const antigravityCliCommand =
+            providerId === 'antigravity' && canUseAntigravityCli ? await resolveAntigravityCliCommand(profile) : undefined;
           const debugReasons: string[] = [];
           const quota = await query({
             env: accPatch.env,
             getHttpProxy: () => platform.settings.getHttpProxy(),
             ...(clientVersion ? { clientVersion } : {}),
             ...(antigravityRawToken !== undefined ? { rawTokenJson: antigravityRawToken } : {}),
+            ...(antigravityCliCommand ? { cliCommand: antigravityCliCommand } : {}),
+            ...(providerId === 'antigravity' && runtimeOptions.runAntigravityUsageCli
+              ? { runCliUsage: runtimeOptions.runAntigravityUsageCli }
+              : {}),
             onDebug: (detail) => {
               debugReasons.push(detail);
             },
@@ -3538,7 +3637,11 @@ export function createHarnessHostRuntime(
             if (providerId === 'antigravity') {
               if (staleSystemSlotReplaced && antigravityRawToken) {
                 await platform.secrets.store(accountSlotSecretKey(activeAccId), antigravityRawToken).catch(() => undefined);
-              } else if (antigravityDiskMatchedSlot || (isSystemAccountId(activeAccId) && !antigravityRawToken)) {
+              } else if (
+                antigravityDiskMatchedSlot ||
+                (isSystemAccountId(activeAccId) && !antigravityRawToken) ||
+                canUseAntigravityCli
+              ) {
                 await syncActiveAntigravitySlotFromDisk({
                   accountId: activeAccId,
                   secrets: platform.secrets,
@@ -3548,7 +3651,7 @@ export function createHarnessHostRuntime(
             }
             const prev = accountInspections.get(activeAccId);
             accountInspections.set(activeAccId, {
-              status: prev?.status ?? 'authenticated',
+              status: 'authenticated',
               ...(prev?.identity ? { identity: prev.identity } : {}),
               ...(prev?.plan ? { plan: prev.plan } : {}),
               ...(prev?.expiresAt !== undefined ? { expiresAt: prev.expiresAt } : {}),
@@ -3557,7 +3660,7 @@ export function createHarnessHostRuntime(
               quota,
               checkedAt: Date.now(),
             });
-            if (prev?.quota?.queriedAt !== quota.queriedAt) {
+            if (prev?.quota?.queriedAt !== quota.queriedAt || prev?.status !== 'authenticated') {
               pushAccounts();
             }
           } else {
@@ -3764,6 +3867,8 @@ export function createHarnessHostRuntime(
           baseEnv: processEnv(),
           secrets: platform.secrets,
         });
+        accountInspections.delete(id);
+        clearQuotaCacheFor(quotaProviderFor(profiles().find((p) => p.id === backendId)));
         bumpAccountRevision(backendId);
         await inspectOneAccount(backendId, id, foundAccount, false);
         pushAccounts();

@@ -194,6 +194,7 @@ export const PREVIEW_PREFERENCES: PreferencesState = {
   language: 'auto',
   includeActiveEditor: true,
   showTurnChanges: true,
+  fetchQuota: true,
   schedulePermission: 'danger-full-access',
   notifications: {
     enabled: true,

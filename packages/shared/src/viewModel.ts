@@ -674,6 +674,8 @@ export interface PreferencesState {
   readonly language: 'auto' | 'zh' | 'en';
   readonly includeActiveEditor: boolean;
   readonly showTurnChanges: boolean;
+  /** 是否自动探测并展示官方订阅用量/额度（默认开启；关闭后不调用额度接口）。 */
+  readonly fetchQuota?: boolean;
   /** 定时任务无人值守默认权限（默认 danger-full-access「全部放行」）。 */
   readonly schedulePermission?: 'danger-full-access' | 'workspace-write' | 'read-only';
   readonly notifications?: NotificationPreferences;

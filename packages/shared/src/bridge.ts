@@ -515,6 +515,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       language: z.enum(['auto', 'zh', 'en']).optional(),
       includeActiveEditor: z.boolean().optional(),
       showTurnChanges: z.boolean().optional(),
+      fetchQuota: z.boolean().optional(),
       schedulePermission: z.enum(['danger-full-access', 'workspace-write', 'read-only']).optional(),
       notifications: z
         .object({

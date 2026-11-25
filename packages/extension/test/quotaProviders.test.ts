@@ -6,6 +6,7 @@ import type { FetchLike } from '../src/providers/proxyFetch.ts';
 import {
   ANTIGRAVITY_CACHE_MS,
   clearAntigravityQuotaCache,
+  parseAntigravityUsageCliOutput,
   queryAntigravityQuota,
 } from '../src/quota/antigravity.ts';
 import {
@@ -329,6 +330,176 @@ describe('Antigravity 订阅额度查询', () => {
       'https://cloudcode-pa.googleapis.com http-401',
     ]);
     expect(httpReasons.join(';')).not.toContain('secret-http-fail-token');
+  });
+
+  it('解析 agy -p /usage --output-format json 输出（兼容 snake_case 与剩余 0% 省略字段）', () => {
+    const cliStdout = JSON.stringify({
+      conversation_id: '',
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            {
+              name: 'Gemini Models',
+              description: 'Models within this group: Gemini 4 Neon, Gemini 4 Carbon',
+              buckets: [
+                {
+                  id: 'gemini-weekly',
+                  name: 'Weekly Limit Remaining',
+                  window: 'weekly',
+                  remaining_fraction: 0.7488,
+                  reset_time: '2026-12-02T07:15:22Z',
+                },
+                {
+                  id: 'gemini-5h',
+                  name: 'Five Hour Limit Remaining',
+                  window: '5h',
+                  // 模拟 Go json:",omitempty" 在剩余额度恰好为 0 时省略 remaining_fraction
+                  reset_time: '2026-11-25T12:15:22Z',
+                },
+              ],
+            },
+            {
+              name: 'Claude and GPT models',
+              description: 'Models within this group: Claude Opus 5.5, GPT-OSS 120B',
+              buckets: [
+                {
+                  id: '3p-5h',
+                  name: 'Five Hour Limit Remaining',
+                  window: '5h',
+                  remaining_fraction: 1,
+                  reset_time: '2026-11-25T14:54:59Z',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const parsed = parseAntigravityUsageCliOutput(`non-json debug line\n${cliStdout}\n`, NOW);
+    expect(parsed).toEqual({
+      windows: [
+        {
+          kind: 'weekly',
+          label: 'gemini',
+          models: ['Gemini 4 Neon', 'Gemini 4 Carbon'],
+          usedPercent: 25.1,
+          remainingPercent: 74.9,
+          resetsAt: Date.parse('2026-12-02T07:15:22Z'),
+        },
+        {
+          kind: 'session',
+          label: 'gemini',
+          models: ['Gemini 4 Neon', 'Gemini 4 Carbon'],
+          usedPercent: 100,
+          remainingPercent: 0,
+          resetsAt: Date.parse('2026-11-25T12:15:22Z'),
+        },
+        {
+          kind: 'session',
+          label: '3p',
+          models: ['Claude Opus 5.5', 'GPT-OSS 120B'],
+          usedPercent: 0,
+          remainingPercent: 100,
+        },
+      ],
+      queriedAt: NOW,
+    });
+
+    expect(parseAntigravityUsageCliOutput(JSON.stringify({ status: 'ERROR', command: { name: 'usage', data: {} } }), NOW)).toBeUndefined();
+  });
+
+  it('凭据位于系统 Keyring 或 access_token 过期 / 直连失败时回退官方 CLI 查询并缓存合并并发；空主目录不触发 CLI', async () => {
+    const cliPayload = JSON.stringify({
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            {
+              name: 'Gemini Models',
+              buckets: [
+                { id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.75, reset_time: '2026-12-02T07:15:22Z' },
+                { id: 'gemini-5h', window: '5h', remaining_fraction: 0.01, reset_time: '2026-11-25T12:15:22Z' },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    // 1. 全新空 HOME（从未初始化 ~/.gemini）：不启动 CLI，直接返回 undefined
+    let cliCalls = 0;
+    const brandNewHome = await emptyHome();
+    const emptyRes = await queryAntigravityQuota({
+      env: brandNewHome,
+      cliCommand: '/fake/agy',
+      runCliUsage: async () => {
+        cliCalls += 1;
+        return cliPayload;
+      },
+      now: () => NOW,
+    });
+    expect(emptyRes).toBeUndefined();
+    expect(cliCalls).toBe(0);
+
+    // 2. 存在 ~/.gemini（例如 token 托管在 OS Keyring 无磁盘文件）：并发回退 CLI 仅执行一次并命中 5 分钟缓存
+    const keyringHome = await emptyHome();
+    await mkdir(join(keyringHome.HOME!, '.gemini', 'antigravity-cli'), { recursive: true });
+    let releaseCli: (() => void) | undefined;
+    const cliGate = new Promise<void>((resolve) => {
+      releaseCli = resolve;
+    });
+    const runCliUsage = async () => {
+      cliCalls += 1;
+      await cliGate;
+      return cliPayload;
+    };
+    const [q1, q2] = await Promise.all([
+      queryAntigravityQuota({ env: keyringHome, cliCommand: '/fake/agy', runCliUsage, now: () => NOW }),
+      (async () => {
+        const p = queryAntigravityQuota({ env: keyringHome, cliCommand: '/fake/agy', runCliUsage, now: () => NOW });
+        releaseCli?.();
+        return p;
+      })(),
+    ]);
+    expect(cliCalls).toBe(1);
+    expect(q1?.windows.map((w) => [w.kind, w.remainingPercent])).toEqual([
+      ['weekly', 75],
+      ['session', 1],
+    ]);
+    expect(q2?.windows).toEqual(q1?.windows);
+
+    // 缓存有效期内再次查询直接命中缓存
+    const q3 = await queryAntigravityQuota({
+      env: keyringHome,
+      cliCommand: '/fake/agy',
+      runCliUsage: async () => {
+        cliCalls += 1;
+        return cliPayload;
+      },
+      now: () => NOW + ANTIGRAVITY_CACHE_MS - 1,
+    });
+    expect(cliCalls).toBe(1);
+    expect(q3?.windows).toEqual(q1?.windows);
+
+    // 3. 磁盘 token 有效但直连 HTTP 401 时，自动回退 CLI 查询成功
+    clearAntigravityQuotaCache();
+    const httpFailEnv = await writeToken(agyToken(AGY_EXPIRY, 'http-401-token'));
+    const fallbackQuota = await queryAntigravityQuota({
+      env: httpFailEnv,
+      fetchImpl: async () => new Response('unauthorized', { status: 401 }),
+      cliCommand: '/fake/agy',
+      runCliUsage: async () => {
+        cliCalls += 1;
+        return cliPayload;
+      },
+      now: () => NOW,
+    });
+    expect(cliCalls).toBe(2);
+    expect(fallbackQuota?.windows[1]?.remainingPercent).toBe(1);
   });
 });
 

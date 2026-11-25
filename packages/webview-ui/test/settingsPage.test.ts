@@ -409,6 +409,10 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     expect(posted).toContainEqual({ type: 'setPreferences', payload: { includeActiveEditor: false } });
     fireEvent.click(screen.getByTestId('pref-show-turn-changes'));
     expect(posted).toContainEqual({ type: 'setPreferences', payload: { showTurnChanges: true } });
+    const quotaSwitch = screen.getByTestId('pref-fetch-quota');
+    expect(quotaSwitch.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(quotaSwitch);
+    expect(posted).toContainEqual({ type: 'setPreferences', payload: { fetchQuota: false } });
   });
 
   it('会话 -> 聊天命令：存好的提示词可在输入框输入 / 选用并填入后修改再发送，且所有 Agent 通用', () => {

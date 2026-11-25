@@ -106,19 +106,29 @@ export async function readAntigravityPrimaryTokenRaw(
   return undefined;
 }
 
-/** 读取本机当前 Antigravity OAuth 凭据文件内容（优先 CLI 凭据，其次 IDE 凭据）。 */
+/** 读取本机当前 Antigravity OAuth 凭据文件内容（优先 CLI 凭据，其次 IDE 凭据；若两者属同账号则优先采用未过期或更新的一份）。 */
 export async function readAntigravityDiskTokenRaw(
   env?: Readonly<Record<string, string | undefined>>,
+  now = Date.now(),
 ): Promise<string | undefined> {
-  for (const fp of [antigravityPrimaryTokenPath(env), antigravityFallbackTokenPath(env)]) {
-    try {
-      const raw = await readFile(fp, 'utf8');
-      if (raw.trim()) return raw;
-    } catch {
-      // try next
+  const [primary, fallback] = await Promise.all([
+    readFile(antigravityPrimaryTokenPath(env), 'utf8').then((raw) => (raw.trim() ? raw : undefined), () => undefined),
+    readFile(antigravityFallbackTokenPath(env), 'utf8').then((raw) => (raw.trim() ? raw : undefined), () => undefined),
+  ]);
+  if (primary && fallback) {
+    const primaryMeta = parseAntigravityTokenMeta(primary);
+    const primaryUsable = isAntigravityTokenUsable(primary, now);
+    const fallbackUsable = isAntigravityTokenUsable(fallback, now);
+    const sameAccount = antigravityTokensSameAccount(primary, fallback);
+    if (!primaryUsable && fallbackUsable && (sameAccount || !primaryMeta.refreshToken)) {
+      return fallback;
     }
+    if (primaryUsable && fallbackUsable && sameAccount && !isNotOlderAntigravityToken(primary, fallback)) {
+      return fallback;
+    }
+    return primary;
   }
-  return undefined;
+  return primary ?? fallback;
 }
 
 /** 删除本机 Antigravity CLI 主凭据文件（不触碰 IDE 独立凭据文件）。 */

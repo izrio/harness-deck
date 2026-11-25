@@ -305,6 +305,7 @@ const initialState: ViewState = {
     language: 'auto',
     includeActiveEditor: true,
     showTurnChanges: false,
+    fetchQuota: true,
     schedulePermission: 'danger-full-access',
     notifications: {
       enabled: true,

@@ -19,6 +19,14 @@ export interface QuotaServiceOptions {
   readonly rawTokenJson?: string;
   /** 读取 Antigravity 磁盘凭据时是否允许回退 IDE 独立凭据文件（多账号隔离时应为 false）。 */
   readonly allowIdeFallback?: boolean;
+  /** 可选：解析后的底层 CLI 可执行文件路径（如 Antigravity 的 `agy`），用于凭据在系统 Keyring / access_token 过期 / 直连失败时通过官方 CLI 回退查询。 */
+  readonly cliCommand?: string;
+  /** 可选：注入 Antigravity CLI 额度查询命令执行器（测试用）。 */
+  readonly runCliUsage?: (options: {
+    readonly command: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+    readonly signal?: AbortSignal;
+  }) => Promise<string | undefined>;
   /** 非敏感失败原因诊断回调（严禁包含任何 token / cookie / 认证头原文）。 */
   readonly onDebug?: (detail: string) => void;
 }

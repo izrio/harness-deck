@@ -62,6 +62,7 @@ const WATCHED_SETTING_KEYS = [
   'ui.terminalFontSize',
   'ui.terminalLineHeight',
   'ui.showTurnChanges',
+  'quota.enabled',
   'ui.language',
   'notifications',
   'backendTrace',

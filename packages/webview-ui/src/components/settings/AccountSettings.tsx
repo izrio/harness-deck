@@ -128,6 +128,7 @@ export function AccountSettings() {
   const backends = useView((s) => s.backends.items);
   const providers = useView((s) => s.providers.items);
   const protocolGatewayEnabled = useView((s) => s.providers.protocolGatewayEnabled === true);
+  const fetchQuotaEnabled = useView((s) => s.preferences.fetchQuota !== false);
   const accountsState = useView((s) => s.accounts);
 
   const [editor, setEditor] = useState<AccountEditorState | undefined>();
@@ -142,8 +143,8 @@ export function AccountSettings() {
   useEffect(() => {
     if (initialRefreshedRef.current) return;
     initialRefreshedRef.current = true;
-    postToHost({ type: 'refreshAccounts', payload: { includeQuota: true } });
-  }, []);
+    postToHost({ type: 'refreshAccounts', payload: { includeQuota: fetchQuotaEnabled } });
+  }, [fetchQuotaEnabled]);
 
   useEffect(() => {
     if (!pendingLoginAfterCreate) return;
@@ -285,7 +286,7 @@ export function AccountSettings() {
               className="text-ink-2 hover:text-ink"
               disabled={accountsState.checking === true}
               data-testid="accounts-refresh"
-              onClick={() => postToHost({ type: 'refreshAccounts', payload: { includeQuota: true } })}
+              onClick={() => postToHost({ type: 'refreshAccounts', payload: { includeQuota: fetchQuotaEnabled } })}
             >
               {accountsState.checking ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
               <span>{accountsState.checking ? t('settings.accounts.refreshing') : t('settings.accounts.refresh')}</span>
@@ -707,7 +708,7 @@ export function AccountSettings() {
                 onClick={() => {
                   postToHost({
                     type: 'refreshAccounts',
-                    payload: { backendId: loginProgress.backendId, includeQuota: true },
+                    payload: { backendId: loginProgress.backendId, includeQuota: fetchQuotaEnabled },
                   });
                 }}
               >

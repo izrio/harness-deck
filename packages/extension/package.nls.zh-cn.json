@@ -39,6 +39,7 @@
   "config.ui.terminalFontSize": "终端命令输出的字号（px）。`0` 表示默认 `12`。",
   "config.ui.terminalLineHeight": "终端命令输出的行高。`0` 表示默认 `1.6`。",
   "config.ui.showTurnChanges": "每轮回复结束时在对话里显示改动文件卡片。默认关闭：输入框上方的会话改动栏已经列出了本会话改过的文件。",
+  "config.quota.enabled": "自动探测并展示支持智能体（Claude Code、Antigravity、CodeBuddy）的官方订阅用量/额度。默认开启；关闭后不再探测用量，也不会调用任何额度接口或 CLI 查询命令。",
   "submenu.editor": "Halo",
   "config.title": "Halo",
   "container.title": "Halo",

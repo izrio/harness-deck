@@ -14,7 +14,7 @@ import type { SecretStore } from '../host/HostPlatform.ts';
 import { createProxyAwareFetch, type FetchLike } from '../providers/proxyFetch.ts';
 import { queryAntigravityQuota } from '../quota/antigravity.ts';
 import { queryCodebuddyQuota } from '../quota/codebuddy.ts';
-import { parseEpochMs, rec, type Rec } from '../quota/util.ts';
+import { parseEpochMs, rec, type QuotaServiceOptions, type Rec } from '../quota/util.ts';
 import {
   accountApiKeySecretKey,
   accountCookieSecretKey,
@@ -374,14 +374,20 @@ async function inspectCodebuddy(params: {
 }
 
 async function queryAntigravitySlotQuota(params: {
-  readonly rawTokenJson: string;
+  readonly rawTokenJson?: string;
+  readonly env?: Readonly<Record<string, string | undefined>>;
   readonly getHttpProxy?: () => string | undefined;
   readonly clientVersion?: string;
+  readonly cliCommand?: string;
+  readonly runCliUsage?: QuotaServiceOptions['runCliUsage'];
 }): Promise<QuotaView | undefined> {
   return await queryAntigravityQuota({
-    rawTokenJson: params.rawTokenJson,
+    ...(params.rawTokenJson !== undefined ? { rawTokenJson: params.rawTokenJson } : {}),
+    ...(params.env ? { env: params.env } : {}),
     ...(params.getHttpProxy ? { getHttpProxy: params.getHttpProxy } : {}),
     ...(params.clientVersion ? { clientVersion: params.clientVersion } : {}),
+    ...(params.cliCommand ? { cliCommand: params.cliCommand } : {}),
+    ...(params.runCliUsage ? { runCliUsage: params.runCliUsage } : {}),
   });
 }
 
@@ -440,8 +446,10 @@ async function inspectAntigravity(params: {
   readonly getHttpProxy?: () => string | undefined;
   readonly fetchImpl?: FetchLike;
   readonly clientVersion?: string;
+  readonly cliCommand?: string;
+  readonly runCliUsage?: QuotaServiceOptions['runCliUsage'];
 }): Promise<AccountInspectionResult> {
-  const { accountId, isActiveSlot, env, secrets, now, includeQuota, getHttpProxy, fetchImpl, clientVersion } = params;
+  const { accountId, isActiveSlot, env, secrets, now, includeQuota, getHttpProxy, fetchImpl, clientVersion, cliCommand, runCliUsage } = params;
   const slotKey = accountSlotSecretKey(accountId);
   const storedRaw = (await secrets.get(slotKey))?.trim();
   let raw = storedRaw;
@@ -454,7 +462,7 @@ async function inspectAntigravity(params: {
     ? isActiveSlot !== false
     : isActiveSlot === true && Boolean(storedRaw);
   if (canReadDisk) {
-    const diskRaw = (await readAntigravityDiskTokenRaw(env))?.trim();
+    const diskRaw = (await readAntigravityDiskTokenRaw(env, now))?.trim();
     if (diskRaw && (!storedRaw || antigravityTokensSameAccount(storedRaw, diskRaw))) {
       raw = diskRaw;
       if (isActiveSlot === true && diskRaw !== storedRaw) {
@@ -462,8 +470,26 @@ async function inspectAntigravity(params: {
       }
     }
   }
+  const activeCliCommand = isActiveSlot !== false ? cliCommand : undefined;
   if (!raw) {
     if (isSystemAccountId(accountId) && isActiveSlot !== false) {
+      if (includeQuota === true && activeCliCommand) {
+        const cliQuota = await queryAntigravitySlotQuota({
+          env,
+          ...(getHttpProxy ? { getHttpProxy } : {}),
+          ...(clientVersion ? { clientVersion } : {}),
+          cliCommand: activeCliCommand,
+          ...(runCliUsage ? { runCliUsage } : {}),
+        }).catch(() => undefined);
+        if (cliQuota) {
+          return {
+            status: 'authenticated',
+            plan: 'Google OAuth',
+            hasSecret: true,
+            quota: cliQuota,
+          };
+        }
+      }
       const hasPrimary = await pathExists(antigravityPrimaryTokenPath(env));
       const hasFallback = await pathExists(antigravityFallbackTokenPath(env));
       if (hasPrimary || hasFallback) {
@@ -487,21 +513,55 @@ async function inspectAntigravity(params: {
     (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
     (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
     '';
-  if (!accessToken && !refreshToken) return { status: 'unauthenticated' };
-
-  const expiresAt = parseEpochMs(token?.expiry);
-  const accessTokenExpired = expiresAt !== undefined && expiresAt <= now;
-  // Google OAuth access_token 约 1 小时过期，只要存在 refresh_token，`agy` 运行时会自动刷新，仍为可用登录态
-  const expired = accessTokenExpired && !refreshToken;
   const idPayload = decodeJwtPayloadUnsafe(token?.id_token ?? json?.id_token);
   let email =
     (typeof json?.email === 'string' && json.email.trim()) ||
     (typeof json?.id_token_email === 'string' && json.id_token_email.trim()) ||
     (typeof idPayload?.email === 'string' && idPayload.email.trim()) ||
     undefined;
+  if (!accessToken && !refreshToken) {
+    // agy 将 token 迁移到系统 Keyring 后，磁盘文件可能仅保留 email / project_id / user_tier 等元数据
+    const hasMetadata = Boolean(
+      email ||
+        (typeof json?.project_id === 'string' && json.project_id.trim()) ||
+        (typeof json?.user_tier === 'string' && json.user_tier.trim()),
+    );
+    if (isSystemAccountId(accountId) && isActiveSlot !== false && includeQuota === true && activeCliCommand) {
+      const cliQuota = await queryAntigravitySlotQuota({
+        env,
+        ...(getHttpProxy ? { getHttpProxy } : {}),
+        ...(clientVersion ? { clientVersion } : {}),
+        cliCommand: activeCliCommand,
+        ...(runCliUsage ? { runCliUsage } : {}),
+      }).catch(() => undefined);
+      if (cliQuota) {
+        return {
+          status: 'authenticated',
+          ...(email ? { identity: email } : {}),
+          plan: 'Google OAuth',
+          hasSecret: true,
+          quota: cliQuota,
+        };
+      }
+    }
+    if (isSystemAccountId(accountId) && isActiveSlot !== false && hasMetadata) {
+      return {
+        status: 'unknown',
+        ...(email ? { identity: email } : {}),
+      };
+    }
+    return { status: 'unauthenticated' };
+  }
+
+  const expiresAt = parseEpochMs(token?.expiry);
+  const accessTokenExpired = expiresAt !== undefined && expiresAt <= now;
+  // Google OAuth access_token 约 1 小时过期，只要存在 refresh_token，`agy` 运行时会自动刷新，仍为可用登录态
+  const expired = accessTokenExpired && !refreshToken;
 
   const shouldQueryUserInfo = !email && !accessTokenExpired && Boolean(accessToken) && (includeQuota === true || Boolean(fetchImpl));
-  const shouldQueryQuota = !accessTokenExpired && Boolean(accessToken) && includeQuota === true;
+  const shouldQueryQuota =
+    includeQuota === true &&
+    ((!accessTokenExpired && Boolean(accessToken)) || (Boolean(activeCliCommand) && !expired));
 
   const [fetchedEmail, quota] = await Promise.all([
     shouldQueryUserInfo
@@ -514,8 +574,11 @@ async function inspectAntigravity(params: {
     shouldQueryQuota
       ? queryAntigravitySlotQuota({
           rawTokenJson: raw,
+          env,
           ...(getHttpProxy ? { getHttpProxy } : {}),
           ...(clientVersion ? { clientVersion } : {}),
+          ...(activeCliCommand ? { cliCommand: activeCliCommand } : {}),
+          ...(runCliUsage ? { runCliUsage } : {}),
         }).catch(() => undefined)
       : Promise.resolve(undefined),
   ]);
@@ -596,9 +659,25 @@ export async function inspectOfficialAccount(params: {
   readonly getHttpProxy?: () => string | undefined;
   readonly fetchImpl?: FetchLike;
   readonly clientVersion?: string;
+  readonly cliCommand?: string;
+  readonly runAntigravityUsageCli?: QuotaServiceOptions['runCliUsage'];
   readonly now?: () => number;
 }): Promise<AccountInspectionResult> {
-  const { backendId, accountId, account, isActiveSlot, storageRoot, baseEnv, secrets, includeQuota, getHttpProxy, fetchImpl, clientVersion } = params;
+  const {
+    backendId,
+    accountId,
+    account,
+    isActiveSlot,
+    storageRoot,
+    baseEnv,
+    secrets,
+    includeQuota,
+    getHttpProxy,
+    fetchImpl,
+    clientVersion,
+    cliCommand,
+    runAntigravityUsageCli,
+  } = params;
   const now = (params.now ?? Date.now)();
   const normalized = backendId.toLowerCase();
   const userHome = resolveUserHome(baseEnv);
@@ -675,6 +754,8 @@ export async function inspectOfficialAccount(params: {
       ...(getHttpProxy ? { getHttpProxy } : {}),
       ...(fetchImpl ? { fetchImpl } : {}),
       ...(clientVersion ? { clientVersion } : {}),
+      ...(cliCommand ? { cliCommand } : {}),
+      ...(runAntigravityUsageCli ? { runCliUsage: runAntigravityUsageCli } : {}),
     });
   }
 

@@ -143,6 +143,7 @@ OpenCode 支持 Build / Plan 模式与模型切换；Antigravity 只能用账号
 | `harnessDeck.ui.theme` | `dark` | 界面主题：`dark`（深色，默认）、`light`（浅色）、`system`（跟随系统 / VS Code） |
 | `harnessDeck.ui.codeFontFamily` | 空 | 代码、文件路径和命令输出的字体 |
 | `harnessDeck.ui.showTurnChanges` | `false` | 每轮回复结束时在对话里显示改动文件卡片（dsh） |
+| `harnessDeck.quota.enabled` | `true` | 自动探测并展示官方订阅用量/额度；关闭后不调用任何额度接口 |
 
 从 DSH Copilot 升级时，原来的 `dsh.*` 设置会在第一次启动时自动搬到 `harnessDeck.*` 下。DSH Copilot 是另一个扩展 id，升级后可以把它卸载。
 
@@ -185,7 +186,7 @@ A VS Code chat panel for coding agents: streaming replies, compact tool rows, ap
 
 **Differences**: all backends support streaming, tool rows, approvals, to-dos, stop, diffs, models/modes, session history, concurrent multi-tab sessions, session changes bar, and serial worktree sessions. Message steering is supported on DeepSeek, Pi, ZCode, and Codex; subagent cards on DeepSeek, Codex, and CodeBuddy; question cards on DeepSeek, ZCode, and Codex; subscription quota on Claude Code, CodeBuddy, and Antigravity; per-turn file rollback, `/goal`, and the browser Web UI link are DeepSeek-only.
 
-**Settings**: `harnessDeck.backends`, `harnessDeck.accounts`, `harnessDeck.backendChannels`, `harnessDeck.providers`, `harnessDeck.dsh.path`, `harnessDeck.dsh.profile`, `harnessDeck.claude.path`, `harnessDeck.codex.path`, `harnessDeck.codebuddy.path`, `harnessDeck.pi.path`, `harnessDeck.zcode.path`, `harnessDeck.context.includeActiveEditor`, `harnessDeck.ui.language`, `harnessDeck.ui.fontSize`, `harnessDeck.ui.fontFamily`, `harnessDeck.ui.codeFontFamily`, `harnessDeck.ui.showTurnChanges`.
+**Settings**: `harnessDeck.backends`, `harnessDeck.accounts`, `harnessDeck.backendChannels`, `harnessDeck.providers`, `harnessDeck.dsh.path`, `harnessDeck.dsh.profile`, `harnessDeck.claude.path`, `harnessDeck.codex.path`, `harnessDeck.codebuddy.path`, `harnessDeck.pi.path`, `harnessDeck.zcode.path`, `harnessDeck.context.includeActiveEditor`, `harnessDeck.ui.language`, `harnessDeck.ui.fontSize`, `harnessDeck.ui.fontFamily`, `harnessDeck.ui.codeFontFamily`, `harnessDeck.ui.showTurnChanges`, `harnessDeck.quota.enabled`.
 
 **Official Accounts & Channel Switching**: manage multiple official accounts per agent under Settings → Agent → Accounts (isolated config directories / credential slots / official API keys with optional isolated sessions and per-account subscription quota) and switch any agent between official accounts and third-party providers from Settings, the Model Picker header, or the Command Palette (`Switch Model Channel / Official Account`). For sign-ins that require pasting an authorization code (e.g. Antigravity), the sign-in dialog asks for the code (or the callback page URL) after browser authorization and only reports success once it is submitted.
 

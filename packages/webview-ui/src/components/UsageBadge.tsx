@@ -614,6 +614,7 @@ function accountStatusOf(state: ReturnType<typeof getState>): string {
 }
 
 function supportsQuotaOf(state: ReturnType<typeof getState>): boolean {
+  if (state.preferences.fetchQuota === false) return false;
   const active = state.backends.active;
   if (!active) return false;
   const activeBackend = state.backends.items.find((b) => b.id === active);
@@ -662,6 +663,7 @@ export function UsageBadge() {
   const scopeChangedAtRef = useRef(0);
   const needsReconnectRefreshRef = useRef(false);
   const inFlightRef = useRef(false);
+  const prevSupportsQuotaRef = useRef(supportsQuota);
   const prevConnectedRef = useRef(connected);
   const prevHasModelsRef = useRef(hasModels);
   const prevRunningRef = useRef(running);
@@ -727,11 +729,14 @@ export function UsageBadge() {
   useEffect(() => {
     const prevScope = lastScope.current;
     const scopeChanged = prevScope !== quotaScope;
+    const prevSupportsQuota = prevSupportsQuotaRef.current;
+    const supportsQuotaChanged = prevSupportsQuota !== supportsQuota;
     const prevStatus = prevAccountStatusRef.current;
     const statusChanged = prevStatus !== accountStatus;
     const becameConnected = !prevConnectedRef.current && connected;
     const loadedModels = !prevHasModelsRef.current && hasModels;
     const finishedTurn = prevRunningRef.current && !running;
+    prevSupportsQuotaRef.current = supportsQuota;
     prevConnectedRef.current = connected;
     prevHasModelsRef.current = hasModels;
     prevRunningRef.current = running;
@@ -757,6 +762,25 @@ export function UsageBadge() {
       return;
     }
 
+    // 设置项「获取订阅用量」切换：关闭时立刻隐藏并中止后续探测；重新打开时立即探测一次。
+    if (supportsQuotaChanged) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = undefined;
+      if (!supportsQuota) {
+        inFlightRef.current = false;
+        requestIdRef.current = 0;
+        quotaRef.current = undefined;
+        setQuota(undefined);
+        setUnavailable(false);
+        return;
+      }
+      retriedForScopeRef.current = false;
+      unavailableAtRef.current = 0;
+      setUnavailable(false);
+      requestQuota(false, false);
+      return;
+    }
+
     // 同一底层同一账号仅状态变化：仅在明确退出/过期或从无效状态完成登录时联动，
     // 绝不因冷启动首次查到额度后的 unknown -> authenticated 广播清空当前额度或打断在途请求。
     if (statusChanged) {
@@ -773,7 +797,9 @@ export function UsageBadge() {
         (prevStatus === 'unauthenticated' || prevStatus === 'expired' || prevStatus === 'logging-in')
       ) {
         setUnavailable(false);
-        requestQuota(true, false);
+        if (!quotaRef.current && !inFlightRef.current) {
+          requestQuota(true, false);
+        }
         return;
       }
     }
@@ -851,8 +877,8 @@ export function UsageBadge() {
     }
   }, [fetchResults, supportsQuota, connected]);
 
-  // 宿主查不到额度、或查询期间用户切到了别的底层/账号：标识彻底消失。
-  if (!quota || unavailable || (fetchedForScope.current !== undefined && fetchedForScope.current !== quotaScope)) return null;
+  // 宿主查不到额度、用户关闭用量获取、或查询期间用户切到了别的底层/账号：标识彻底消失。
+  if (!supportsQuota || !quota || unavailable || (fetchedForScope.current !== undefined && fetchedForScope.current !== quotaScope)) return null;
 
   const quotaMode = resolveQuotaMode(quota);
   const isCreditsMode = quotaMode === 'credits';
@@ -900,7 +926,7 @@ export function UsageBadge() {
   const enter = () => {
     clearTimeout(closeTimer.current);
     // 缓存没过期时直接用宿主侧缓存；悬浮只读，不制造额外请求。
-    if (Date.now() - quota.queriedAt >= QUOTA_CACHE_MS) requestQuota();
+    if (supportsQuotaOf(getState()) && Date.now() - quota.queriedAt >= QUOTA_CACHE_MS) requestQuota();
     openTimer.current = setTimeout(() => setOpen(true), OPEN_DELAY);
   };
   const leave = () => {

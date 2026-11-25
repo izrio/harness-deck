@@ -932,4 +932,184 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
     clearAntigravityQuotaCache();
     await rm(home, { recursive: true, force: true });
   });
+
+  it('Antigravity 凭据位于系统 Keyring（无磁盘 token 文件）时通过官方 CLI 查到额度，并同步认证态不被后续仅磁盘巡检覆盖', async () => {
+    clearAntigravityQuotaCache();
+    const home = await emptyTempHome();
+    vi.stubEnv('HOME', home);
+    await mkdir(join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+
+    const env = createFakePlatform({
+      initialSettings: {
+        defaultBackend: 'antigravity',
+        backendChannels: { antigravity: { mode: 'official', accountId: systemAccountId('antigravity') } },
+      },
+    });
+
+    let cliCalls = 0;
+    const cliStdout = JSON.stringify({
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            {
+              name: 'Gemini Models',
+              buckets: [
+                { id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.75, reset_time: '2026-12-02T07:15:22Z' },
+                { id: 'gemini-5h', window: '5h', remaining_fraction: 0.01, reset_time: '2026-11-25T12:15:22Z' },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, {
+      createBackend: factory.createBackend,
+      runAntigravityUsageCli: async () => {
+        cliCalls += 1;
+        return cliStdout;
+      },
+    });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    // 预置一个假的缓存可执行路径以覆盖 CI/无 agy 机器
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'refreshAccounts', payload: { backendId: 'antigravity', includeQuota: false } });
+    await flushAsync();
+
+    // 即使本机磁盘无 token 文件导致首次巡检为 unauthenticated，若 CLI 路径存在，fetchQuota 仍能查出实时额度并升级为 authenticated
+    const fakeBinDir = join(home, 'bin');
+    await mkdir(fakeBinDir, { recursive: true });
+    const fakeAgy = join(fakeBinDir, process.platform === 'win32' ? 'agy.cmd' : 'agy');
+    await writeFile(fakeAgy, '#!/bin/sh\necho "{}"\n', { mode: 0o755 });
+    vi.stubEnv('PATH', `${fakeBinDir}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`);
+
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 201 } });
+    await flushAsync();
+
+    const fetched = env.posted.find((m) => m.type === 'quotaFetched' && m.payload.requestId === 201);
+    expect(fetched).toBeTruthy();
+    if (fetched?.type === 'quotaFetched') {
+      expect(fetched.payload.quota?.windows.map((w) => [w.kind, w.remainingPercent])).toEqual([
+        ['weekly', 75],
+        ['session', 1],
+      ]);
+    }
+    expect(cliCalls).toBe(1);
+
+    const accountsMsg = [...env.posted].reverse().find((m) => m.type === 'accounts');
+    expect(accountsMsg?.type).toBe('accounts');
+    if (accountsMsg?.type === 'accounts') {
+      const sysAcc = accountsMsg.payload.items.find((a) => a.id === systemAccountId('antigravity'));
+      expect(sysAcc?.status).toBe('authenticated');
+      expect(sysAcc?.quota?.windows).toHaveLength(2);
+    }
+
+    // 后续仅检查磁盘的 refreshAccounts(includeQuota=false) 不得把已认证的 Keyring 账号降级回 unauthenticated
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'refreshAccounts', payload: { backendId: 'antigravity', includeQuota: false } });
+    await flushAsync();
+    const afterDiskInspect = [...env.posted].reverse().find((m) => m.type === 'accounts');
+    if (afterDiskInspect?.type === 'accounts') {
+      const sysAcc = afterDiskInspect.payload.items.find((a) => a.id === systemAccountId('antigravity'));
+      expect(sysAcc?.status).toBe('authenticated');
+      expect(sysAcc?.quota?.windows).toHaveLength(2);
+    }
+
+    clearAntigravityQuotaCache();
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('关闭 quota.enabled 开关时彻底跳过 fetchQuota 与 refreshAccounts 的用量探测（不发 HTTP 也不调 CLI）', async () => {
+    clearAntigravityQuotaCache();
+    const home = await emptyTempHome();
+    vi.stubEnv('HOME', home);
+    const futureExpiry = new Date(Date.now() + 3600_000).toISOString();
+    const validToken = JSON.stringify({
+      id_token_email: 'user@gmail.com',
+      token: { access_token: 'valid-access', refresh_token: 'valid-refresh', expiry: futureExpiry },
+    });
+    await mkdir(join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    await writeFile(antigravityPrimaryTokenPath({ HOME: home }), validToken, 'utf8');
+
+    const env = createFakePlatform({
+      initialSettings: {
+        defaultBackend: 'antigravity',
+        'quota.enabled': false,
+        backendChannels: { antigravity: { mode: 'official', accountId: systemAccountId('antigravity') } },
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    let cliCalls = 0;
+
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, {
+      createBackend: factory.createBackend,
+      runAntigravityUsageCli: async () => {
+        cliCalls += 1;
+        return '{}';
+      },
+    });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    // 1. fetchQuota 直接返回 unavailable，不发 HTTP 也不调 CLI
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 301, force: true } });
+    await flushAsync();
+
+    const reply = env.posted.find((m) => m.type === 'quotaFetched' && m.payload.requestId === 301);
+    expect(reply).toBeTruthy();
+    if (reply?.type === 'quotaFetched') {
+      expect(reply.payload.quota).toBeUndefined();
+      expect(reply.payload.error).toBeTruthy();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(cliCalls).toBe(0);
+
+    // 2. refreshAccounts(includeQuota: true) 同样被强制降级为不探测额度
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'refreshAccounts', payload: { backendId: 'antigravity', includeQuota: true } });
+    await flushAsync();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(cliCalls).toBe(0);
+
+    // 3. 通过 setPreferences 重新开启后可正常拉取；再次关闭则清除 accounts 里的 quota 广播
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          groups: [{ displayName: 'Gemini Models', buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.64 }] }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    runtime.handleWebviewMessage({ type: 'setPreferences', payload: { fetchQuota: true } });
+    await flushAsync();
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 302 } });
+    await flushAsync();
+    const enabledReply = env.posted.find((m) => m.type === 'quotaFetched' && m.payload.requestId === 302);
+    expect(enabledReply?.type).toBe('quotaFetched');
+    if (enabledReply?.type === 'quotaFetched') {
+      expect(enabledReply.payload.quota?.windows[0]?.remainingPercent).toBe(64);
+    }
+
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'setPreferences', payload: { fetchQuota: false } });
+    await flushAsync();
+    const afterOff = [...env.posted].reverse().find((m) => m.type === 'accounts');
+    expect(afterOff?.type).toBe('accounts');
+    if (afterOff?.type === 'accounts') {
+      const sysAcc = afterOff.payload.items.find((a) => a.id === systemAccountId('antigravity'));
+      expect(sysAcc?.quota).toBeUndefined();
+    }
+
+    clearAntigravityQuotaCache();
+    await rm(home, { recursive: true, force: true });
+  });
 });

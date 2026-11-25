@@ -1,5 +1,17 @@
 # 更新记录 / Changelog
 
+## 0.18.1
+
+### 中文
+
+- **Antigravity 订阅额度查询完善**：新增官方 `agy -p /usage --output-format json` 回退查询与 5 分钟并发去重缓存，兼容 OS Keyring 凭据托管、`jetski-standalone-oauth-token`、`access_token` 过期自动续期及 0% 剩余额度省略字段；修复 Keyring 场景下账号巡检误判未登录并冲掉额度的问题。
+- **订阅用量开关设置**：设置页（会话 → 会话）新增「获取订阅用量」开关（对应 `harnessDeck.quota.enabled`，默认开启）；关闭后立即隐藏底栏用量标识，彻底跳过用量探测且不调用任何额度接口或 CLI 查询命令。
+
+### English
+
+- **Antigravity Quota Reliability**: Added official `agy -p /usage --output-format json` fallback with 5-minute caching and in-flight deduplication, supporting OS Keyring credentials, `jetski-standalone-oauth-token`, expired access tokens, and omitted `0%` fields; prevented Keyring accounts from being downgraded to unauthenticated.
+- **Subscription Usage Toggle**: Added a "Fetch subscription usage" switch in Settings (`harnessDeck.quota.enabled`, enabled by default) that hides the usage badge and skips all quota API and CLI probes when turned off.
+
 ## 0.18.0
 
 ### 中文

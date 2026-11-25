@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Halo",
   "description": "%extension.description%",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -337,6 +337,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "%config.ui.showTurnChanges%"
+        },
+        "harnessDeck.quota.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.quota.enabled%"
         },
         "harnessDeck.ui.theme": {
           "type": "string",

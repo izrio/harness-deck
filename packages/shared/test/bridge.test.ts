@@ -41,9 +41,9 @@ describe('parseWebviewMessage', () => {
       type: 'removeWorktree',
       payload: { path: '/repo-wt' },
     });
-    expect(parseWebviewMessage({ type: 'setPreferences', payload: { language: 'zh', showTurnChanges: true } })).toEqual({
+    expect(parseWebviewMessage({ type: 'setPreferences', payload: { language: 'zh', showTurnChanges: true, fetchQuota: false } })).toEqual({
       type: 'setPreferences',
-      payload: { language: 'zh', showTurnChanges: true },
+      payload: { language: 'zh', showTurnChanges: true, fetchQuota: false },
     });
     expect(
       parseWebviewMessage({

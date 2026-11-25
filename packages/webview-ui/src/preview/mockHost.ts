@@ -611,6 +611,7 @@ function installMockHost(): void {
           ...(p.language !== undefined ? { language: p.language } : {}),
           ...(p.includeActiveEditor !== undefined ? { includeActiveEditor: p.includeActiveEditor } : {}),
           ...(p.showTurnChanges !== undefined ? { showTurnChanges: p.showTurnChanges } : {}),
+          ...(p.fetchQuota !== undefined ? { fetchQuota: p.fetchQuota } : {}),
           ...(p.schedulePermission !== undefined ? { schedulePermission: p.schedulePermission } : {}),
           ...(p.chatCommands !== undefined ? { chatCommands: p.chatCommands } : {}),
           ...(p.notifications && preferences.notifications
@@ -634,6 +635,10 @@ function installMockHost(): void {
       case 'fetchQuota': {
         // 预览模式按当前后端返回模拟额度形态，方便直接查看双圆环用量标识与悬浮明细。
         const { requestId } = message.payload;
+        if (preferences.fetchQuota === false) {
+          postToWebview({ type: 'quotaFetched', payload: { requestId, error: 'unavailable' } });
+          return;
+        }
         const now = Date.now();
         const quota: QuotaView | undefined =
           backends.active === 'dsh'

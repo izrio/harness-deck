@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "io.harnessdeck"
-version = "0.18.0"
+version = "0.18.1"
 
 repositories {
     mavenCentral()

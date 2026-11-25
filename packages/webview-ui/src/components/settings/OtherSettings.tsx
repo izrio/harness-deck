@@ -95,6 +95,19 @@ export function GeneralSettings() {
               onCheckedChange={(checked) => updatePref({ showTurnChanges: checked })}
             />
           </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
+            <div className="min-w-0 flex-1">
+              <div className="text-[12.5px] text-ink">{t('settings.fetchQuota')}</div>
+              <div className="mt-0.5 text-[11.5px] text-ink-3">{t('settings.fetchQuotaHint')}</div>
+            </div>
+            <Switch
+              data-testid="pref-fetch-quota"
+              aria-label={t('settings.fetchQuota')}
+              checked={preferences.fetchQuota !== false}
+              onCheckedChange={(checked) => updatePref({ fetchQuota: checked })}
+            />
+          </div>
         </div>
       </SettingsSection>
 

@@ -765,6 +765,57 @@ describe('AccountIsolation & AccountInspector', () => {
       assert.equal(reauthSw.activated, true);
       assert.equal(await readFile(tokenPath, 'utf8'), reauthedSameEmail);
       assert.equal(secrets.map.get(accountSlotSecretKey(systemAccountId('antigravity'))), reauthedSameEmail);
+
+      // 8. Keyring 迁移后磁盘仅保留元数据（无 access_token / refresh_token）时：
+      //    不误判为 unauthenticated；带 cliCommand 且 includeQuota=true 时可通过 CLI 识别为 authenticated 并带回额度
+      await secrets.delete(accountSlotSecretKey(systemAccountId('antigravity')));
+      await writeFile(
+        tokenPath,
+        JSON.stringify({ id_token_email: 'keyring@gmail.com', project_id: 'demo-proj' }),
+        'utf8',
+      );
+      const metaOnly = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: systemAccountId('antigravity'),
+        isActiveSlot: true,
+        storageRoot: join(root, 'storage'),
+        baseEnv: env,
+        secrets,
+        includeQuota: false,
+        now: () => nowMs,
+      });
+      assert.equal(metaOnly.status, 'unknown');
+      assert.equal(metaOnly.identity, 'keyring@gmail.com');
+
+      const keyringQuota = await inspectOfficialAccount({
+        backendId: 'antigravity',
+        accountId: systemAccountId('antigravity'),
+        isActiveSlot: true,
+        storageRoot: join(root, 'storage'),
+        baseEnv: env,
+        secrets,
+        includeQuota: true,
+        cliCommand: '/fake/agy',
+        runAntigravityUsageCli: async () =>
+          JSON.stringify({
+            status: 'SUCCESS',
+            command: {
+              name: 'usage',
+              data: {
+                groups: [
+                  {
+                    name: 'Gemini Models',
+                    buckets: [{ id: 'gemini-5h', window: '5h', remaining_fraction: 0.42 }],
+                  },
+                ],
+              },
+            },
+          }),
+        now: () => nowMs,
+      });
+      assert.equal(keyringQuota.status, 'authenticated');
+      assert.equal(keyringQuota.identity, 'keyring@gmail.com');
+      assert.equal(keyringQuota.quota?.windows[0]?.remainingPercent, 42);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
