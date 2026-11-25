@@ -67,8 +67,11 @@ import { EmbeddedBrowserManager } from '../browser/EmbeddedBrowserManager.ts';
 import { AccountAuthFlowManager } from '../accounts/AccountAuthFlow.ts';
 import { inspectOfficialAccount, type AccountInspectionResult } from '../accounts/AccountInspector.ts';
 import {
+  antigravityTokensSameAccount,
   clearAccountCredentials,
+  isNotOlderAntigravityToken,
   prepareAccountLaunchPatch,
+  readAntigravityPrimaryTokenRaw,
   removeIsolatedAccountData,
   switchAntigravityCredentialSlot,
   switchCodebuddyCredentialSlot,
@@ -243,6 +246,7 @@ const WORKBENCH_MESSAGE_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'sourceControlDiscardHunk',
   'sourceControlCheckoutBranch',
   'sourceControlCreateBranch',
+  'sourceControlDeleteBranch',
   'sourceControlPull',
   'sourceControlFetch',
   'sourceControlGenerateCommitMessage',
@@ -3420,7 +3424,7 @@ export function createHarnessHostRuntime(
       return;
     }
     if (message.type === 'fetchQuota') {
-      const { requestId } = message.payload;
+      const { requestId, force } = message.payload;
       void (async () => {
         // Claude / Antigravity / CodeBuddy 分别有自己的订阅额度来源；其它底层直接回 unavailable，
         // 不读凭据、不发请求。绑定第三方服务商时（Claude / CodeBuddy）实际消耗的是编程套餐额度，
@@ -3433,6 +3437,9 @@ export function createHarnessHostRuntime(
           post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
           return;
         }
+        if (force) {
+          clearQuotaCacheFor(providerId);
+        }
         try {
           const activeAccId =
             activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts()) ??
@@ -3440,10 +3447,28 @@ export function createHarnessHostRuntime(
           const accCfg = isSystemAccountId(activeAccId)
             ? undefined
             : readAccounts().find((a) => a.id === activeAccId);
-          // Antigravity 切换到尚未登录的新槽位时，磁盘仍保留上一账号的凭据文件；不误读旧账号额度
-          if (providerId === 'antigravity' && !isSystemAccountId(activeAccId)) {
+          // Antigravity 按激活账号槽位精确解析凭据：优先采用同账号且更新的磁盘续期 token，否则直接用该槽位快照，
+          // 绝不误读其他账号的磁盘凭据或 IDE 备用凭据（jetski-standalone-oauth-token）导致切换账号后串号。
+          let antigravityRawToken: string | undefined;
+          let antigravityDiskMatchedSlot = false;
+          if (providerId === 'antigravity') {
             const storedSlot = (await platform.secrets.get(accountSlotSecretKey(activeAccId)))?.trim();
-            if (!storedSlot) {
+            const diskPrimary = (await readAntigravityPrimaryTokenRaw(processEnv()))?.trim();
+            if (storedSlot) {
+              if (
+                diskPrimary &&
+                antigravityTokensSameAccount(storedSlot, diskPrimary) &&
+                isNotOlderAntigravityToken(diskPrimary, storedSlot)
+              ) {
+                antigravityRawToken = diskPrimary;
+                antigravityDiskMatchedSlot = true;
+              } else {
+                antigravityRawToken = storedSlot;
+              }
+            } else if (!isSystemAccountId(activeAccId)) {
+              post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
+              return;
+            } else if (lastActiveAntigravityAccountId && !isSystemAccountId(lastActiveAntigravityAccountId)) {
               post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
               return;
             }
@@ -3468,6 +3493,7 @@ export function createHarnessHostRuntime(
             env: accPatch.env,
             getHttpProxy: () => platform.settings.getHttpProxy(),
             ...(clientVersion ? { clientVersion } : {}),
+            ...(antigravityRawToken !== undefined ? { rawTokenJson: antigravityRawToken } : {}),
           });
           // 先回传单播结果给请求方，再广播 accounts：避免 pushAccounts 变更账号 status 导致前端提前作废当前 requestId。
           post(
@@ -3476,7 +3502,10 @@ export function createHarnessHostRuntime(
               : { type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } },
           );
           if (quota) {
-            if (providerId === 'antigravity') {
+            if (
+              providerId === 'antigravity' &&
+              (antigravityDiskMatchedSlot || (isSystemAccountId(activeAccId) && !antigravityRawToken))
+            ) {
               await syncActiveAntigravitySlotFromDisk({
                 accountId: activeAccId,
                 secrets: platform.secrets,
@@ -3561,29 +3590,46 @@ export function createHarnessHostRuntime(
         if (payload.setActive) {
           const lowerSavedBackend = saved.backendId.toLowerCase();
           const prevOwner = currentSlotOwner(saved.backendId);
-          if (lowerSavedBackend === 'antigravity') {
-            const sw = await switchAntigravityCredentialSlot({
-              targetAccountId: saved.id,
-              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
-              secrets: platform.secrets,
-              env: processEnv(),
-            });
-            if (sw.activated) lastActiveAntigravityAccountId = saved.id;
-          } else if (lowerSavedBackend === 'codebuddy') {
-            const sw = await switchCodebuddyCredentialSlot({
-              targetAccountId: saved.id,
-              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
-              secrets: platform.secrets,
-              env: processEnv(),
-            });
-            if (sw.activated) lastActiveCodebuddyAccountId = saved.id;
-          }
+          const wasActiveSaved = active?.backend.profile.id === saved.backendId;
           clearQuotaCacheFor(quotaProviderFor(profiles().find((p) => p.id === saved.backendId)));
           const nextChannels = setBackendChannelSetting(readBackendChannels(), saved.backendId, {
             mode: 'official',
             accountId: saved.id,
           });
           await writeSetting(undefined, 'backendChannels', nextChannels);
+          const managedSaved = managedBackends.get(saved.backendId);
+          if (managedSaved) {
+            managedSaved.boundProviderSignature = boundProviderSignatureFor(saved.backendId);
+          }
+          if (managedSaved || lowerSavedBackend === 'antigravity' || lowerSavedBackend === 'codebuddy') {
+            void enqueueBackendTransition(async () => {
+              if (managedBackends.has(saved.backendId)) {
+                await stopAndDeleteManagedBackend(saved.backendId);
+              }
+              if (lowerSavedBackend === 'antigravity') {
+                const sw = await switchAntigravityCredentialSlot({
+                  targetAccountId: saved.id,
+                  ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                  secrets: platform.secrets,
+                  env: processEnv(),
+                });
+                if (sw.activated) lastActiveAntigravityAccountId = saved.id;
+              } else if (lowerSavedBackend === 'codebuddy') {
+                const sw = await switchCodebuddyCredentialSlot({
+                  targetAccountId: saved.id,
+                  ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                  secrets: platform.secrets,
+                  env: processEnv(),
+                });
+                if (sw.activated) lastActiveCodebuddyAccountId = saved.id;
+              }
+              if (wasActiveSaved) {
+                await activateBackend(saved.backendId, false);
+              } else {
+                pushBackends();
+              }
+            });
+          }
         }
         if (payload.usageCookie !== undefined) {
           clearQuotaCacheFor(quotaProviderFor(profiles().find((p) => p.id === saved.backendId)));
@@ -3702,6 +3748,8 @@ export function createHarnessHostRuntime(
           return;
         }
         const caps = backendCapabilities(profile);
+        const wasActiveBackend = active?.backend.profile.id === backendId;
+        const prevOwner = mode === 'official' ? currentSlotOwner(backendId) : undefined;
         let nextBinding: BackendChannelBinding;
         if (mode === 'provider') {
           if (caps.protocols.kind !== 'supported') {
@@ -3724,32 +3772,62 @@ export function createHarnessHostRuntime(
           nextBinding = { mode: 'provider', providerId: target.id };
         } else {
           const targetAccountId = accountId?.trim() || systemAccountId(backendId);
-          const prevOwner = currentSlotOwner(backendId);
           nextBinding = { mode: 'official', accountId: targetAccountId };
-          if (backendId.toLowerCase() === 'antigravity') {
-            const sw = await switchAntigravityCredentialSlot({
-              targetAccountId,
-              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
-              secrets: platform.secrets,
-              env: processEnv(),
-            });
-            if (sw.activated) lastActiveAntigravityAccountId = targetAccountId;
-          } else if (backendId.toLowerCase() === 'codebuddy') {
-            const sw = await switchCodebuddyCredentialSlot({
-              targetAccountId,
-              ...(prevOwner ? { previousAccountId: prevOwner } : {}),
-              secrets: platform.secrets,
-              env: processEnv(),
-            });
-            if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
+          // 清除目标账号在内存里缓存的旧额度，避免切换瞬间前端闪现过期的历史额度
+          const prevInsp = accountInspections.get(targetAccountId);
+          if (prevInsp?.quota) {
+            const { quota: _staleQuota, ...restInsp } = prevInsp;
+            accountInspections.set(targetAccountId, restInsp);
           }
         }
         clearQuotaCacheFor(quotaProviderFor(profile));
         const nextChannels = setBackendChannelSetting(readBackendChannels(), backendId, nextBinding);
         await writeSetting(undefined, 'backendChannels', nextChannels);
+        const existingManaged = managedBackends.get(backendId);
+        if (existingManaged) {
+          // 提前同步签名，避免 onDidChangeConfiguration 重复触发一次并行重启
+          existingManaged.boundProviderSignature = boundProviderSignatureFor(backendId);
+        }
         pushAccounts();
         pushProviders();
-        syncManagedBackendsForChannelChange(backendId);
+        const lowerBackend = backendId.toLowerCase();
+        const needsSlotSwitch =
+          nextBinding.mode === 'official' && (lowerBackend === 'antigravity' || lowerBackend === 'codebuddy');
+        if (existingManaged || needsSlotSwitch) {
+          void enqueueBackendTransition(async () => {
+            // 先彻底停止旧账号的底层进程，再切换磁盘凭据槽位，防止退出中的旧进程回写旧账号 token 覆盖新槽位
+            if (managedBackends.has(backendId)) {
+              await stopAndDeleteManagedBackend(backendId);
+            }
+            if (nextBinding.mode === 'official') {
+              const targetAccountId = nextBinding.accountId ?? systemAccountId(backendId);
+              if (lowerBackend === 'antigravity') {
+                const sw = await switchAntigravityCredentialSlot({
+                  targetAccountId,
+                  ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                  secrets: platform.secrets,
+                  env: processEnv(),
+                });
+                if (sw.activated) lastActiveAntigravityAccountId = targetAccountId;
+              } else if (lowerBackend === 'codebuddy') {
+                const sw = await switchCodebuddyCredentialSlot({
+                  targetAccountId,
+                  ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                  secrets: platform.secrets,
+                  env: processEnv(),
+                });
+                if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
+              }
+            }
+            if (wasActiveBackend) {
+              await activateBackend(backendId, false);
+            } else {
+              pushBackends();
+            }
+          });
+        } else {
+          syncManagedBackendsForChannelChange(backendId);
+        }
         const sysId = systemAccountId(backendId);
         const channelLabel =
           nextBinding.mode === 'provider'
@@ -4620,7 +4698,12 @@ export function createHarnessHostRuntime(
       return;
     }
     if (message.type === 'browserResize') {
-      void browserManager.resize(message.payload.width, message.payload.height, message.payload.preset);
+      void browserManager.resize(
+        message.payload.width,
+        message.payload.height,
+        message.payload.preset,
+        message.payload.deviceScaleFactor,
+      );
       return;
     }
     if (message.type === 'browserMouse') {
@@ -4644,6 +4727,88 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'browserClearConsole') {
       browserManager.clearConsole();
+      return;
+    }
+    if (message.type === 'browserClearNetwork') {
+      browserManager.clearNetwork();
+      return;
+    }
+    if (message.type === 'browserGetNetworkBody') {
+      void (async () => {
+        const res = await browserManager.getNetworkBody(message.payload.requestId);
+        post({ type: 'browserNetworkBody', payload: res });
+      })();
+      return;
+    }
+    if (message.type === 'browserInspectAt') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void (async () => {
+        const element = await browserManager.inspectAt(message.payload.x, message.payload.y);
+        post({
+          type: 'browserInspectResult',
+          payload: {
+            mode: message.payload.select ? 'select' : 'hover',
+            ...(element ? { element } : {}),
+          },
+        });
+      })();
+      return;
+    }
+    if (message.type === 'browserSelectElement') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void (async () => {
+        const element = await browserManager.selectElement(message.payload.selector, message.payload.scrollIntoView);
+        post({
+          type: 'browserInspectResult',
+          payload: {
+            mode: 'select',
+            ...(element ? { element } : {}),
+          },
+        });
+      })();
+      return;
+    }
+    if (message.type === 'browserEditElementStyle') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void (async () => {
+        const element = await browserManager.editElementStyle(
+          message.payload.selector,
+          message.payload.property,
+          message.payload.value,
+        );
+        if (element) {
+          post({
+            type: 'browserInspectResult',
+            payload: { mode: 'select', element },
+          });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'browserEvalConsole') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void browserManager.evalConsole(message.payload.expression);
+      return;
+    }
+    if (message.type === 'browserClipboard') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void (async () => {
+        const { action, text } = message.payload;
+        if (action === 'copy' || action === 'cut') {
+          const copied = await browserManager.copySelection(action === 'cut');
+          if (copied) {
+            await platform.writeClipboard(copied).catch(() => undefined);
+            post({ type: 'browserClipboardData', payload: { text: copied } });
+          }
+        } else if (action === 'paste') {
+          const toInsert = text !== undefined ? text : ((await platform.readClipboard?.().catch(() => '')) ?? '');
+          if (toInsert) {
+            await browserManager.pasteText(toInsert);
+          }
+        } else if (action === 'selectAll') {
+          await browserManager.selectAll();
+        }
+      })();
       return;
     }
     if (message.type === 'browserRequestFrame') {

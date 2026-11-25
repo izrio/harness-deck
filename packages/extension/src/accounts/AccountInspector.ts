@@ -6,9 +6,8 @@
  * - 绝不把任何 Token、Refresh Token、Cookie 或明文 API Key 返回给调用方或写入日志；
  * - 不主动刷新会破坏 CLI 自身 token rotation 的 OAuth 凭据。
  */
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import type { AccountAuthStatus, AccountConfig, QuotaView } from '@harness-deck/shared';
 import { queryClaudeQuota } from '../claude/quota.ts';
 import type { SecretStore } from '../host/HostPlatform.ts';
@@ -350,8 +349,13 @@ async function inspectCodebuddy(params: {
       ...env,
       CODEBUDDY_CONFIG_DIR: configDir,
       ...(internetEnv ? { CODEBUDDY_INTERNET_ENVIRONMENT: internetEnv } : {}),
-      ...(savedCookie ? { CODEBUDDY_COOKIE: savedCookie } : {}),
     };
+    if (!isSystemAccountId(accountId)) {
+      delete quotaEnv.CODEBUDDY_COOKIE;
+    }
+    if (savedCookie) {
+      quotaEnv.CODEBUDDY_COOKIE = savedCookie;
+    }
     quota = await queryCodebuddyQuota({
       env: quotaEnv,
       ...(getHttpProxy ? { getHttpProxy } : {}),
@@ -374,20 +378,11 @@ async function queryAntigravitySlotQuota(params: {
   readonly getHttpProxy?: () => string | undefined;
   readonly clientVersion?: string;
 }): Promise<QuotaView | undefined> {
-  // 通过临时 HOME 复用现有 queryAntigravityQuota，不修改真实用户主目录
-  const tempHome = await mkdtemp(join(tmpdir(), 'hd-agy-quota-'));
-  try {
-    const tokenPath = join(tempHome, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
-    await mkdir(dirname(tokenPath), { recursive: true });
-    await writeFile(tokenPath, params.rawTokenJson, { encoding: 'utf8', mode: 0o600 });
-    return await queryAntigravityQuota({
-      env: { HOME: tempHome, USERPROFILE: tempHome },
-      ...(params.getHttpProxy ? { getHttpProxy: params.getHttpProxy } : {}),
-      ...(params.clientVersion ? { clientVersion: params.clientVersion } : {}),
-    });
-  } finally {
-    await rm(tempHome, { recursive: true, force: true }).catch(() => undefined);
-  }
+  return await queryAntigravityQuota({
+    rawTokenJson: params.rawTokenJson,
+    ...(params.getHttpProxy ? { getHttpProxy: params.getHttpProxy } : {}),
+    ...(params.clientVersion ? { clientVersion: params.clientVersion } : {}),
+  });
 }
 
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';

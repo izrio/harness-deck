@@ -21,9 +21,11 @@ import { locatePi } from '../pi/locate.ts';
 import { locateZcode } from '../zcode/locate.ts';
 import { accountSlotSecretKey, isSystemAccountId, systemAccountId } from './AccountStore.ts';
 import {
+  clearAntigravityPrimaryDiskToken,
   clearCodebuddyDiskAuth,
   prepareAccountLaunchPatch,
   readAntigravityDiskTokenRaw,
+  readAntigravityPrimaryTokenRaw,
   readCodebuddyDiskAuthSnapshot,
   writeAntigravityDiskTokenRaw,
   writeCodebuddyDiskAuthSnapshot,
@@ -267,7 +269,7 @@ export class AccountAuthFlowManager {
       activateSlot: false,
     });
 
-    // Antigravity 登录独立槽位前先备份磁盘上已有的官方凭据，防止覆盖用户原账号
+    // Antigravity 登录独立槽位前先备份磁盘上已有的官方凭据，并清理主凭据文件，避免 CLI 静默复用旧账号凭据
     let backupDiskToken: string | undefined;
     if (normalized === 'antigravity') {
       backupDiskToken = await readAntigravityDiskTokenRaw(baseEnv);
@@ -275,6 +277,9 @@ export class AccountAuthFlowManager {
         const owner = previousActiveAccountId || systemAccountId('antigravity');
         if (owner !== accountId) {
           await this.deps.secrets.store(accountSlotSecretKey(owner), backupDiskToken);
+        }
+        if (!isSystemAccountId(accountId)) {
+          await clearAntigravityPrimaryDiskToken(baseEnv);
         }
       }
     }
@@ -368,6 +373,12 @@ export class AccountAuthFlowManager {
         finished = true;
         child.kill();
         cleanup();
+        if (normalized === 'antigravity' && backupDiskToken && !isSystemAccountId(accountId)) {
+          void readAntigravityPrimaryTokenRaw(baseEnv).then((cur) => {
+            if (!cur) return writeAntigravityDiskTokenRaw(backupDiskToken!, baseEnv);
+            return undefined;
+          }).catch(() => undefined);
+        }
       },
       submitCode: (code: string) => {
         if (finished || !awaitingCode || !child.stdin || child.stdin.destroyed || !child.stdin.writable) return false;
@@ -432,8 +443,8 @@ export class AccountAuthFlowManager {
 
       void (async () => {
         if (code !== 0) {
-          // 登录失败时如果曾备份了 Antigravity 磁盘凭据且被破坏，尝试恢复
-          if (normalized === 'antigravity' && backupDiskToken && !(await readAntigravityDiskTokenRaw(baseEnv))) {
+          // 登录失败时如果曾备份了 Antigravity 磁盘凭据且主凭据文件被清理或破坏，恢复原凭据
+          if (normalized === 'antigravity' && backupDiskToken && !(await readAntigravityPrimaryTokenRaw(baseEnv))) {
             await writeAntigravityDiskTokenRaw(backupDiskToken, baseEnv).catch(() => undefined);
           }
           this.emit({
@@ -447,7 +458,10 @@ export class AccountAuthFlowManager {
 
         this.emit({ accountId, backendId, phase: 'verifying' });
         if (normalized === 'antigravity') {
-          const newToken = await readAntigravityDiskTokenRaw(baseEnv);
+          // 独立槽位只认 CLI 刚写入的主凭据文件，绝不回退读取 IDE 独立凭据文件以免串号
+          const newToken = isSystemAccountId(accountId)
+            ? await readAntigravityDiskTokenRaw(baseEnv)
+            : await readAntigravityPrimaryTokenRaw(baseEnv);
           if (newToken) {
             await this.deps.secrets.store(accountSlotSecretKey(accountId), newToken);
           }

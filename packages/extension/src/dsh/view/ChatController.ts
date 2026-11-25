@@ -118,6 +118,8 @@ export class ChatController implements ChatBackendController {
   private draftModel: ModelSelection | undefined;
   /** 新对话选择的权限预设，创建会话时应用。 */
   private draftPermission: string | undefined;
+  /** 回复进行中用户切换的权限预设，延后到下一轮发送前生效。 */
+  private readonly pendingPermissions = new Map<string, string>();
   private interactions: InteractionService | undefined;
   /** 每轮改动汇总的读取结果，键是 `sessionId:seq`。 */
   private readonly changes = new Map<string, ChangesSummary | 'unavailable' | 'loading'>();
@@ -896,6 +898,30 @@ export class ChatController implements ChatBackendController {
     return pending;
   }
 
+  private isSessionRunning(sessionId: string): boolean {
+    if (this.stream?.sessionId === sessionId && this.stream.status.kind === 'live') {
+      const events = this.stream.journal.events;
+      if (this.eventsMemo && this.eventsMemo.key[0] === events && this.eventsMemo.key[1] === events.length) {
+        return this.eventsMemo.value.turnOpen;
+      }
+      return projectEvents({ events, workspacePath: this.workspacePath, changes: () => undefined }).turnOpen;
+    }
+    return this.service?.sessions.find((s) => s.sessionId === sessionId)?.running ?? false;
+  }
+
+  private async flushPendingPermission(service: SessionService, sessionId: string): Promise<void> {
+    const pending = this.pendingPermissions.get(sessionId);
+    if (!pending) return;
+    this.pendingPermissions.delete(sessionId);
+    const current = (service.projections(sessionId).permissions as { currentValue?: string } | undefined)?.currentValue;
+    if (current === pending) return;
+    try {
+      await service.setPermission(sessionId, pending);
+    } catch (error) {
+      this.toast('error', t('permission.failed', describe(error)));
+    }
+  }
+
   private async selectPermission(preset: string, preConfirmed?: boolean): Promise<void> {
     if (preset === DANGER_PRESET && preConfirmed !== true) {
       const ok = await this.workbench.confirm(
@@ -910,6 +936,19 @@ export class ChatController implements ChatBackendController {
       this.scheduleRender();
       return;
     }
+    const currentEffective =
+      this.pendingPermissions.get(this.activeId) ??
+      (this.service.projections(this.activeId).permissions as { currentValue?: string } | undefined)?.currentValue;
+    if (currentEffective === preset) return;
+    if (this.isSessionRunning(this.activeId)) {
+      // 正在回复中：延后到下一轮发送前再切换权限，不打断当前回合
+      this.pendingPermissions.set(this.activeId, preset);
+      const optionLabel = this.service.permissions?.options.find((o) => o.value === preset)?.name ?? preset;
+      this.toast('info', t('permission.nextTurn', optionLabel));
+      this.scheduleRender();
+      return;
+    }
+    this.pendingPermissions.delete(this.activeId);
     try {
       await this.service.setPermission(this.activeId, preset);
     } catch (error) {
@@ -981,6 +1020,9 @@ export class ChatController implements ChatBackendController {
       return false;
     }
     try {
+      if (!this.isSessionRunning(sessionId)) {
+        await this.flushPendingPermission(service, sessionId);
+      }
       await service.prompt(sessionId, withContext(text, attachments, this.workspacePath), undefined, images);
       if (this.editorContext.hasPinned) {
         this.editorContext.clearPinned();
@@ -1004,6 +1046,9 @@ export class ChatController implements ChatBackendController {
         const original = queuedText(this.service?.projections(sessionId).inbox, payload.itemId);
         if (original === undefined) return;
         await client.updateQueue(sessionId, payload.itemId, { kind: 'remove' });
+        if (this.service && !this.isSessionRunning(sessionId)) {
+          await this.flushPendingPermission(this.service, sessionId);
+        }
         await this.service?.prompt(sessionId, original);
       } else if (payload.action === 'edit') {
         // 界面上只编辑正文；原消息末尾的上下文块原样保留
@@ -1371,7 +1416,7 @@ export class ChatController implements ChatBackendController {
     const interactions = sessionId ? (this.interactions?.pendingFor(sessionId) ?? []).map((p) => interactionView(p, viewContext)) : [];
     const catalog = service?.permissions;
     const currentPermission = sessionId
-      ? (projections.permissions as { currentValue?: string } | undefined)?.currentValue
+      ? (this.pendingPermissions.get(sessionId) ?? (projections.permissions as { currentValue?: string } | undefined)?.currentValue)
       : (this.draftPermission ?? catalog?.defaultPreset);
     const permissions: PermissionState = {
       options: catalog?.options.map((o) => o.value) ?? [],

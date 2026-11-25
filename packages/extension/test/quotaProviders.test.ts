@@ -251,6 +251,35 @@ describe('Antigravity 订阅额度查询', () => {
     await queryAntigravityQuota({ env, fetchImpl, now: () => current });
     expect(calls).toBe(3);
   });
+
+  it('传入 rawTokenJson 时严格使用该账号槽位凭据，绝不误读磁盘或 IDE 备用凭据', async () => {
+    const env = await writeToken(agyToken(AGY_EXPIRY, 'disk-account-a-token'), 'jetski-standalone-oauth-token');
+    const seenAuth: string[] = [];
+    const fetchImpl: FetchLike = async (_input, init) => {
+      seenAuth.push((init?.headers as Record<string, string>).authorization ?? '');
+      return jsonResponse(agyQuota);
+    };
+
+    // 有效槽位 JSON：直接走该账号的 access_token
+    const okQuota = await queryAntigravityQuota({
+      env,
+      rawTokenJson: JSON.stringify(agyToken(AGY_EXPIRY, 'slot-account-b-token')),
+      fetchImpl,
+      now: () => NOW,
+    });
+    expect(okQuota?.windows).toHaveLength(4);
+    expect(seenAuth).toEqual(['Bearer slot-account-b-token']);
+
+    // 过期槽位 JSON：直接返回 undefined，绝不回退读取磁盘上的 disk-account-a-token
+    const expiredQuota = await queryAntigravityQuota({
+      env,
+      rawTokenJson: JSON.stringify(agyToken('2026-11-19T11:59:59.000Z', 'expired-slot-b')),
+      fetchImpl,
+      now: () => NOW,
+    });
+    expect(expiredQuota).toBeUndefined();
+    expect(seenAuth).toEqual(['Bearer slot-account-b-token']);
+  });
 });
 
 describe('CodeBuddy 订阅额度查询', () => {
@@ -313,12 +342,22 @@ describe('CodeBuddy 订阅额度查询', () => {
       expect(h.cookie).toBe(COOKIE);
       expect(h['user-agent']).toContain('Chrome/131');
     }
+    expect(quota?.mode).toBe('credits');
     expect(quota?.windows).toEqual([
-      { kind: 'cycle', label: '', usedPercent: 25, remainingPercent: 75, resetsAt: NOW },
+      {
+        kind: 'cycle',
+        label: '',
+        usedPercent: 25,
+        remainingPercent: 75,
+        remainingAmount: 75,
+        totalAmount: 100,
+        usedAmount: 25,
+        resetsAt: NOW,
+      },
     ]);
   });
 
-  it('宽容解析字段名与重置时间，并追加命名的周期包窗口', async () => {
+  it('宽容解析字段名与重置时间，保留积分数并追加命名的周期包窗口', async () => {
     const env = { ...(await emptyHome()), CODEBUDDY_COOKIE: 'session=tolerant' };
     const reset = Date.parse('2026-11-25T00:00:00.239Z');
     const fetchImpl: FetchLike = async (input, init) => {
@@ -333,6 +372,7 @@ describe('CodeBuddy 订阅额度查询', () => {
             packages: [
               { packageName: 'Pro', used: 5, total: 50, reset_at: (NOW + 1000) / 1000 },
               { name: 'Starter', usedPercent: 0.5 },
+              { name: 'Bonus', balance: 320 },
               { name: 'Expired', used: 1, total: 2, reset_at: (NOW - 1000) / 1000 },
             ],
           },
@@ -342,10 +382,30 @@ describe('CodeBuddy 订阅额度查询', () => {
 
     const quota = await queryCodebuddyQuota({ env, fetchImpl, now: () => NOW });
 
+    expect(quota?.mode).toBe('credits');
     expect(quota?.windows).toEqual([
-      { kind: 'cycle', label: '', usedPercent: 15, remainingPercent: 85, resetsAt: reset },
-      { kind: 'cycle', label: 'Pro', usedPercent: 10, remainingPercent: 90, resetsAt: NOW + 1000 },
+      {
+        kind: 'cycle',
+        label: '',
+        usedPercent: 15,
+        remainingPercent: 85,
+        remainingAmount: 170,
+        totalAmount: 200,
+        usedAmount: 30,
+        resetsAt: reset,
+      },
+      {
+        kind: 'cycle',
+        label: 'Pro',
+        usedPercent: 10,
+        remainingPercent: 90,
+        remainingAmount: 45,
+        totalAmount: 50,
+        usedAmount: 5,
+        resetsAt: NOW + 1000,
+      },
       { kind: 'cycle', label: 'Starter', usedPercent: 50, remainingPercent: 50 },
+      { kind: 'cycle', label: 'Bonus', usedPercent: 0, remainingPercent: 100, remainingAmount: 320 },
     ]);
   });
 
@@ -380,5 +440,36 @@ describe('CodeBuddy 订阅额度查询', () => {
     clearCodebuddyQuotaCache();
     await queryCodebuddyQuota({ env, fetchImpl, now: () => current });
     expect(usageCalls).toBe(3);
+  });
+
+  it('指定 CODEBUDDY_CONFIG_DIR 时不回退读取默认 ~/.codebuddy/usage-cookie 以免多账号串号', async () => {
+    const home = await emptyHome();
+    await mkdir(join(home.HOME!, '.codebuddy'), { recursive: true });
+    await writeFile(join(home.HOME!, '.codebuddy', 'usage-cookie'), 'session=default-account', 'utf8');
+    const isolatedDir = join(home.HOME!, 'isolated-cb');
+    await mkdir(isolatedDir, { recursive: true });
+
+    let calls = 0;
+    const fetchImpl: FetchLike = async () => {
+      calls += 1;
+      return jsonResponse(CB_USAGE);
+    };
+    // 隔离账号未配自己的 cookie 时返回 undefined，不串读默认账号 cookie
+    expect(await queryCodebuddyQuota({ env: { ...home, CODEBUDDY_CONFIG_DIR: isolatedDir }, fetchImpl, now: () => NOW })).toBeUndefined();
+    expect(calls).toBe(0);
+
+    // 隔离账号配了自己的 cookie 文件后仅读取自己的 cookie
+    let seenCookie: string | undefined;
+    await writeFile(join(isolatedDir, 'usage-cookie'), 'session=isolated-account', 'utf8');
+    const q = await queryCodebuddyQuota({
+      env: { ...home, CODEBUDDY_CONFIG_DIR: isolatedDir },
+      fetchImpl: async (_input, init) => {
+        seenCookie = (init?.headers as Record<string, string>).cookie;
+        return jsonResponse(CB_USAGE);
+      },
+      now: () => NOW,
+    });
+    expect(q?.mode).toBe('credits');
+    expect(seenCookie).toBe('session=isolated-account');
   });
 });

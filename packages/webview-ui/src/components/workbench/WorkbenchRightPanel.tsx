@@ -11,6 +11,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent a
 import type { FileCandidate, SourceControlFileView } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useIsMobile } from '../../hooks/use-mobile.ts';
@@ -432,7 +433,8 @@ function WorkspaceFilesPane() {
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex flex-col px-2 py-2">
         {panelFiles.loading && panelFiles.items.length === 0 ? (
           <div className="px-2 py-6 text-center text-[12px] text-ink-3">{t('wb.rightPanel.filesLoading')}</div>
         ) : panelFiles.items.length === 0 ? (
@@ -490,7 +492,8 @@ function WorkspaceFilesPane() {
             />
           </div>
         )}
-      </div>
+        </div>
+      </ScrollArea>
     </div>
   );
 }

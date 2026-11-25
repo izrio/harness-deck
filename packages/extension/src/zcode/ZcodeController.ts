@@ -122,6 +122,8 @@ export class ZcodeController implements ChatBackendController {
   private hasRuntimeModelCatalog = false;
   private selectedModel: ZcodePreferredModel | undefined;
   private draftMode = 'auto';
+  /** 回复进行中用户切换的权限模式，延后到下一轮发送前生效。 */
+  private readonly pendingModes = new Map<string, string>();
   private agentCommands: CommandView[] = [];
   private readonly skillCatalogInjected = new Set<string>();
   private readonly editorContext: EditorContext;
@@ -832,6 +834,11 @@ export class ZcodeController implements ChatBackendController {
 
     try {
       await this.ensureSessionActive(link, sessionId);
+      const pendingMode = this.pendingModes.get(sessionId);
+      if (pendingMode !== undefined) {
+        this.pendingModes.delete(sessionId);
+        await this.applyMode(sessionId, pendingMode, false);
+      }
       // ensureSessionActive 可能刚刚从 session/resume 拿到完整的模型与默认思考档位目录，发消息前补全一次 reasoningLevel
       if (this.selectedModel && !resolvedEffort) {
         const refreshedEffort = this.resolveReasoningLevel(
@@ -1036,7 +1043,10 @@ export class ZcodeController implements ChatBackendController {
   }
 
   private currentMode(): string {
-    return (this.activeId ? this.projections.get(this.activeId)?.mode : undefined) ?? this.draftMode;
+    return (
+      (this.activeId ? (this.pendingModes.get(this.activeId) ?? this.projections.get(this.activeId)?.mode) : undefined) ??
+      this.draftMode
+    );
   }
 
   private async setMode(mode: string, preConfirmed?: boolean): Promise<void> {
@@ -1050,6 +1060,15 @@ export class ZcodeController implements ChatBackendController {
     }
     this.draftMode = mode;
     if (this.activeId) {
+      const projection = this.projectionFor(this.activeId);
+      if (projection.running) {
+        // 正在回复中：延后到下一轮发送前再应用权限，不影响当前回合
+        this.pendingModes.set(this.activeId, mode);
+        this.toast('info', t('permission.nextTurn', displayName));
+        this.scheduleRender();
+        return;
+      }
+      this.pendingModes.delete(this.activeId);
       await this.applyMode(this.activeId, mode, false);
     }
     this.scheduleRender();

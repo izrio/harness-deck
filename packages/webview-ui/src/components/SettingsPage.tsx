@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Sidebar,
   SidebarContent,
@@ -196,17 +197,17 @@ export function SettingsPage() {
               );
             })}
           </div>
-          <div
+          <ScrollArea
             role="tabpanel"
             id={`settings-panel-${activeTab}`}
             aria-labelledby={`settings-tab-${activeTab}`}
             data-testid="settings-content"
-            className="topbar-scroll-fade min-h-0 min-w-0 flex-1 overflow-y-auto px-4 pt-3 pb-10"
+            className="topbar-scroll-fade min-h-0 min-w-0 flex-1"
           >
-            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-8">
+            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-8 px-4 pt-3 pb-10">
               {renderActiveTab(activeTab)}
             </div>
-          </div>
+          </ScrollArea>
         </div>
       ) : (
         <SidebarProvider keyboardShortcut={false} persistCookie={false} className="min-h-0 flex-1 overflow-hidden">
@@ -278,17 +279,17 @@ export function SettingsPage() {
             </SidebarContent>
           </Sidebar>
 
-          <div
+          <ScrollArea
             role="tabpanel"
             id={`settings-panel-${activeTab}`}
             aria-labelledby={`settings-tab-${activeTab}`}
             data-testid="settings-content"
-            className="topbar-scroll-fade min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-7 sm:px-10 sm:py-9"
+            className="topbar-scroll-fade min-h-0 min-w-0 flex-1"
           >
-            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-9 pb-8">
+            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-9 px-6 py-7 pb-8 sm:px-10 sm:py-9">
               {renderActiveTab(activeTab)}
             </div>
-          </div>
+          </ScrollArea>
         </SidebarProvider>
       )}
     </div>

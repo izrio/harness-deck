@@ -388,18 +388,23 @@ describe('Claude Code 原生接入（claude -p）', () => {
       },
     });
 
-    // 3. 在线切换模型与权限模式
+    // 3. 在线切换模型（立即生效）与权限模式（回复进行中延后到下一轮生效）
     await controller.handle({ type: 'selectModel', payload: { provider: 'anthropic', model: 'opus' } });
     expect(controlSent).toContainEqual({ subtype: 'set_model', model: 'opus' });
 
     await controller.handle({ type: 'selectPermission', payload: { preset: 'plan' } });
-    expect(controlSent).toContainEqual({ subtype: 'set_permission_mode', mode: 'plan' });
+    expect(controlSent).not.toContainEqual({ subtype: 'set_permission_mode', mode: 'plan' });
+    expect(controller.snapshot().permissions.current).toBe('plan');
 
     emitEvent!({ type: 'assistant', message: { content: [{ type: 'text', text: '检查完毕。' }] } });
     emitEvent!({ type: 'result', subtype: 'success', session_id: 'claude-real-99', is_error: false });
 
     const finalAssistant = controller.snapshot().items.find((i): i is Extract<Item, { kind: 'assistant' }> => i.kind === 'assistant');
     expect(finalAssistant?.markdown).toBe('检查完毕。');
+
+    // 下一轮发送前自动下发延后的权限切换
+    await controller.handle({ type: 'sendMessage', payload: { text: '第二轮继续' } });
+    expect(controlSent).toContainEqual({ subtype: 'set_permission_mode', mode: 'plan' });
     controller.dispose();
   });
 

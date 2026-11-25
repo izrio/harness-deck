@@ -1,5 +1,29 @@
 # 更新记录 / Changelog
 
+## 0.17.0
+
+**内置浏览器开发者工具与高清剪贴板交互、双模式订阅余量（百分比双圆环 + 积分余额式）与每轮实时动画刷新、Git 本地分支删除（二次确认）、全局 `shadcn-ui` `ScrollArea` 升级、回复中权限下一轮生效及多账号切换额度隔离修复**：为内置浏览器补齐高清 DPR 画面渲染、跨源/哈希地址切换修复、完整复制/剪切/粘贴/全选与右键菜单，以及支持左/下/右停靠的 DevTools（DOM 元素选中调试、Console REPL 与 Network 抓包）；订阅余量扩展为百分比双圆环与积分余额（如 CodeBuddy 积分胶囊 + 5 格能量条 + 积分钱包浮层）双模式，每轮对话结束自动刷新并平滑播放数字与进度条动画；支持在底栏与 Git 面板删除非当前本地分支（带二次确认与强制 `-D` 选项）；将模型选择、分支/项目浮层、侧栏、设置页与工作台滚动容器统一升级为 `shadcn-ui` `ScrollArea`；新增会话按钮移至标签栏最右侧；修复回复中切换权限改为下一轮生效、权限下拉双背景高亮以及多账号切换后仍读取上一账号额度的串号问题。
+
+**Built-in Browser DevTools & HiDPI clipboard interaction, dual-mode quota display (percent rings + credits wallet) with per-turn animated refresh, local Git branch deletion with confirmation, `shadcn-ui` `ScrollArea` rollout, next-turn permission changes & multi-account quota isolation fixes**: Upgraded the built-in browser with HiDPI DPR rendering, cross-origin/hash navigation fixes, full copy/cut/paste/select-all and context menu support, and dockable left/bottom/right DevTools (DOM element inspection & live style editing, Console REPL, and Network inspector); added dual-mode quota visualization supporting both concentric percent rings and a credits balance mode (e.g., CodeBuddy coin pill, 5-cell energy gauge, and wallet popover) with automatic post-turn refresh and smooth number/progress animations; added local Git branch deletion with secondary confirmation and optional force `-D` across both composer footer and Git panel; adopted `shadcn-ui` `ScrollArea` across popovers, sidebars, settings, and workbench panes; moved the New Session `+` button to the far right of the tab bar; deferred mid-turn permission changes to the next turn, fixed `GlideMenu` double active backgrounds, and resolved multi-account switching quota cross-contamination across Antigravity, CodeBuddy, and Claude.
+
+- **内置浏览器高清渲染、DevTools 与剪贴板支持**：
+  - 透传设备 DPR（最高 2x）、高质量帧与静止/导航后无损帧补帧，并修复跨源跳转、同页 `#hash` 导航与地址栏输入切换不生效的问题。
+  - 新增 `BrowserDevTools`：支持停靠在左侧 / 底部 / 右侧并拖动调整尺寸，内置 Elements（DOM 元素选中调试、面包屑、盒模型、实时行内样式编辑）、Console（分级筛选与 JS REPL）与 Network（请求捕获、Headers/Payload/Response 与复制 cURL）。
+  - 补齐内置浏览器的拖拽划词选中、复制/剪切/粘贴/全选快捷键与右键菜单支持。
+  **Built-in browser HiDPI rendering, DevTools & clipboard**: Added DPR passthrough (up to 2x), crisp lossless idle/post-navigation frames, and fixes for cross-origin / `#hash` / URL-bar navigation; introduced `BrowserDevTools` with left/bottom/right docking, DOM element inspection & live style editing, Console REPL, and Network capture with cURL export; added drag selection, copy/cut/paste/select-all shortcuts, and a viewport context menu.
+- **双模式订阅余量、每轮自动刷新与数字/进度动画**：
+  - 订阅余量支持「百分比双圆环」与「积分余额」两种模式：CodeBuddy 等积分制服务保留真实剩余/总计/已用积分数，底栏展示硬币图标、积分余额与 5 格竖向能量条，悬浮展示主积分卡与资源包明细。
+  - 每轮对话结束后自动跳过缓存刷新最新额度，移除浮层内冗长的模型清单小字，并为数字变动与进度条/圆环过渡添加平滑动画。
+  **Dual-mode quota display, post-turn refresh & animations**: Added a dedicated `credits` mode alongside dual concentric percent rings (preserving exact remaining/total/used credits for CodeBuddy with a coin pill, 5-cell energy gauge, and wallet/packs popover); automatically refreshes quota after every turn, removes cluttered model-list subtitles, and animates number and bar/ring transitions.
+- **Git 本地分支删除、标签栏与全局 `ScrollArea` 体验打磨**：
+  - 输入框底栏与 Git 面板的分支弹窗均支持删除非当前本地分支，弹出 `shadcn-ui` 二次确认框并支持勾选强制删除未合并提交（`git branch -D`）。
+  - 新增会话 `+` 图标按钮移至会话标签栏最右侧；模型/权限/分支/补全浮层、侧栏、设置页与工作台面板统一接入 `shadcn-ui` `ScrollArea` 替代系统原生滚动条。
+  **Local branch deletion, TabBar polish & `ScrollArea` rollout**: Added local branch deletion with a secondary confirmation dialog (and optional force `-D`) to both composer footer and Git panel branch popovers; moved the New Session `+` icon button to the far right of `TabBar`; replaced native scrollbars across pickers, popovers, sidebars, Settings, and workbench panes with `shadcn-ui` `ScrollArea`.
+- **权限下一轮生效、下拉双背景与多账号切换额度隔离修复**：
+  - 正在回复期间切换权限档位不再中断或立即改动当前回合，改为记录并在下一轮发送时生效，同时修复 `GlideMenu` 打开权限菜单时出现双高亮背景的问题。
+  - 修复多账号切换后仍读取上一账号额度的问题：Antigravity 额度查询严格按当前激活账号槽位 `rawTokenJson` 隔离且不误读 IDE 备用凭据，切换渠道时先停旧进程再换槽位并清空过期缓存，CodeBuddy / Claude 独立账号隔离宿主机 Cookie 与配置目录环境变量，前端切换账号强制刷新并在重连后自动补查。
+  **Next-turn permissions, menu highlight & multi-account quota fixes**: Deferred mid-turn permission changes to the next turn across all backends and fixed `GlideMenu` double active backgrounds; fixed multi-account quota leakage by isolating Antigravity slot queries via `rawTokenJson`, stopping old backend processes before swapping credential slots, clearing inherited CodeBuddy/Claude env cookies/config dirs for isolated accounts, and forcing fresh quota probes on account switch and reconnect.
+
 ## 0.16.0
 
 **远程体验全面强化、设置模块去线留白重设计、在线 `skills.sh` / MCP 市场代理互通、无运行时初始化引导页与 WSL2 浏览器及权限稳定性修复**：全面补强移动端远程互通闭环（离线幂等暂存队列、扫码即配对、通知深链直达会话、跨入口 90 秒一次性 `#handoff=` 无感续签、一键 `cloudflared` 临时公网 HTTPS 隧道、飞书/企业微信/钉钉/Telegram/Slack/Discord 等 9 种 IM Webhook 预设、IDE 顶栏远程快捷弹窗、设备重命名与实时权限切换）；按「去线留白、布局自解释」重构整个设置模块，服务商新增/编辑改为弹窗并展示各厂商离线品牌图标；首页在无可用运行时时进入独立初始化引导页；修复 WSL2 下内置浏览器启动报错（`LockFileEx` 9P 崩溃与 NAT 下 CDP 桥接）、新建会话 `auto` 权限回退默认、在线市场未走代理及分支弹窗「拉取」按钮溢出问题。

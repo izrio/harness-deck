@@ -5,6 +5,7 @@ import type {
   AccountLoginProgress,
   AccountsState,
   AppearanceState,
+  BrowserDomElement,
   BrowserState,
   ClientSurface,
   CommandView,
@@ -164,7 +165,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('sourceControlDiscardHunk'),
     payload: z.object({ patch: z.string().min(1).max(500_000), confirmed: z.boolean().optional() }),
   }),
-  /** 分支切换 / 新建分支 / 拉取 / 抓取（P0-2）。 */
+  /** 分支切换 / 新建分支 / 删除分支 / 拉取 / 抓取（P0-2）。 */
   z.object({
     type: z.literal('sourceControlCheckoutBranch'),
     payload: z.object({ branch: z.string().min(1).max(200) }),
@@ -172,6 +173,14 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('sourceControlCreateBranch'),
     payload: z.object({ branch: z.string().min(1).max(200) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlDeleteBranch'),
+    payload: z.object({
+      branch: z.string().trim().min(1).max(200),
+      force: z.boolean().optional(),
+      confirmed: z.boolean().optional(),
+    }),
   }),
   z.object({ type: z.literal('sourceControlPull'), payload: empty }),
   z.object({ type: z.literal('sourceControlFetch'), payload: empty }),
@@ -249,6 +258,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       executablePath: z.string().max(1_024).optional(),
       width: z.number().int().min(320).max(2_560).optional(),
       height: z.number().int().min(240).max(2_000).optional(),
+      deviceScaleFactor: z.number().min(1).max(3).optional(),
     }),
   }),
   z.object({ type: z.literal('browserStop'), payload: empty }),
@@ -262,6 +272,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       width: z.number().int().min(320).max(2_560),
       height: z.number().int().min(240).max(2_000),
       preset: z.enum(['responsive', 'desktop', 'mobile']).optional(),
+      deviceScaleFactor: z.number().min(1).max(3).optional(),
     }),
   }),
   z.object({
@@ -271,6 +282,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       x: z.number().min(0).max(10_000),
       y: z.number().min(0).max(10_000),
       button: z.enum(['left', 'middle', 'right', 'none']).optional(),
+      buttons: z.number().int().min(0).max(63).optional(),
       clickCount: z.number().int().min(1).max(3).optional(),
       deltaX: z.number().min(-5_000).max(5_000).optional(),
       deltaY: z.number().min(-5_000).max(5_000).optional(),
@@ -293,6 +305,49 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('browserClearConsole'), payload: empty }),
   z.object({ type: z.literal('browserRequestFrame'), payload: empty }),
+  z.object({
+    type: z.literal('browserInspectAt'),
+    payload: z.object({
+      x: z.number().min(0).max(10_000),
+      y: z.number().min(0).max(10_000),
+      select: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserSelectElement'),
+    payload: z.object({
+      selector: z.string().min(1).max(2_048),
+      scrollIntoView: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserEditElementStyle'),
+    payload: z.object({
+      selector: z.string().min(1).max(2_048),
+      property: z.string().min(1).max(128),
+      value: z.string().max(1_024),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserEvalConsole'),
+    payload: z.object({
+      expression: z.string().min(1).max(8_192),
+    }),
+  }),
+  z.object({ type: z.literal('browserClearNetwork'), payload: empty }),
+  z.object({
+    type: z.literal('browserGetNetworkBody'),
+    payload: z.object({
+      requestId: z.string().min(1).max(256),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserClipboard'),
+    payload: z.object({
+      action: z.enum(['copy', 'cut', 'paste', 'selectAll']),
+      text: z.string().max(500_000).optional(),
+    }),
+  }),
   z.object({
     type: z.literal('sendMessage'),
     ...commandMeta,
@@ -773,8 +828,11 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       openaiResponsesUrl: z.string().max(2_000).optional(),
     }),
   }),
-  /** 悬浮上下文旁的用量标识时查询官方订阅额度；宿主按激活后端判断是否有官方 OAuth 凭据。 */
-  z.object({ type: z.literal('fetchQuota'), payload: z.object({ requestId: z.number().int() }) }),
+  /** 悬浮上下文旁的用量标识或回合结束时查询官方订阅额度；force=true 时跳过宿主缓存实时刷新。 */
+  z.object({
+    type: z.literal('fetchQuota'),
+    payload: z.object({ requestId: z.number().int(), force: z.boolean().optional() }),
+  }),
   /** 设置 -> Agent -> 账号：官方渠道多账号管理与智能体渠道路由切换（官方 ↔ 服务商）。 */
   z.object({
     type: z.literal('upsertAccount'),
@@ -1019,9 +1077,32 @@ export type HostToWebview =
       readonly type: 'browserFrame';
       readonly payload: {
         readonly data: string;
+        readonly format?: 'png' | 'jpeg';
         readonly width: number;
         readonly height: number;
         readonly timestamp: number;
+      };
+    }
+  | {
+      readonly type: 'browserInspectResult';
+      readonly payload: {
+        readonly mode: 'hover' | 'select';
+        readonly element?: BrowserDomElement;
+      };
+    }
+  | {
+      readonly type: 'browserNetworkBody';
+      readonly payload: {
+        readonly requestId: string;
+        readonly body?: string;
+        readonly base64Encoded?: boolean;
+        readonly error?: string;
+      };
+    }
+  | {
+      readonly type: 'browserClipboardData';
+      readonly payload: {
+        readonly text: string;
       };
     }
   | { readonly type: 'sessionCheckpoints'; readonly payload: { readonly sessionId: string; readonly turns: readonly number[] } };

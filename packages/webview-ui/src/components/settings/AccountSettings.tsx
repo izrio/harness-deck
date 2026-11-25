@@ -107,6 +107,19 @@ function formatQuotaChip(win: QuotaWindowView, t: ReturnType<typeof useT>): stri
         ? t('settings.accounts.quotaWindow.weekly')
         : t('settings.accounts.quotaWindow.cycle');
   const scope = win.label ? `${kindLabel}·${win.label}` : kindLabel;
+  if (win.remainingAmount !== undefined) {
+    const unit = win.unit?.trim() || t('usage.credits.unit');
+    const rem = new Intl.NumberFormat(undefined, {
+      maximumFractionDigits: Number.isInteger(win.remainingAmount) ? 0 : 1,
+    }).format(win.remainingAmount);
+    if (win.totalAmount !== undefined) {
+      const tot = new Intl.NumberFormat(undefined, {
+        maximumFractionDigits: Number.isInteger(win.totalAmount) ? 0 : 1,
+      }).format(win.totalAmount);
+      return `${scope} ${rem}/${tot} ${unit}`;
+    }
+    return `${scope} ${rem} ${unit}`;
+  }
   return `${scope} ${t('settings.accounts.quotaRemaining', Math.round(win.remainingPercent))}`;
 }
 

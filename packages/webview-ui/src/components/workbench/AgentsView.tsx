@@ -21,7 +21,7 @@ import {
   TrashIcon,
 } from '../icons.tsx';
 import { BackendLogo } from '../BackendLogo.tsx';
-import { GlideMenu, ValuePill } from '../beautifului/index.ts';
+import { focusActiveMenuRow, GlideMenu, ValuePill } from '../beautifului/index.ts';
 import { ModelPicker, type ModelPickerSelection } from '../ModelPicker.tsx';
 import { PermissionPicker } from '../PermissionPicker.tsx';
 import { getProjectOptions } from '@/lib/workbenchOptions';
@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -317,43 +318,46 @@ export function AgentsView() {
                           align="start"
                           sideOffset={6}
                           aria-label={t('wb.agents.fieldBackend')}
+                          onOpenAutoFocus={focusActiveMenuRow}
                           className="model-menu flex max-h-72 w-auto min-w-[200px] max-w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-1 shadow-overlay"
                         >
-                          <div role="menu" className="max-h-60 overflow-y-auto" data-testid="agent-runtime-list">
-                            <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
-                              {runtimeItems.map((b) => {
-                                const active = b.id === currentBackend.id;
-                                return (
-                                  <button
-                                    key={b.id}
-                                    type="button"
-                                    data-menu-row
-                                    role="menuitemradio"
-                                    aria-checked={active}
-                                    data-testid={`agent-runtime-option-${b.id}`}
-                                    onClick={() => {
-                                      setRuntimeMenuOpen(false);
-                                      if (b.id !== backendId) {
-                                        handleSelectBackend(b.id);
-                                      }
-                                    }}
-                                    className={cn(
-                                      'menu-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-[12.5px] transition-colors duration-100',
-                                      active
-                                        ? 'menu-item--active bg-field font-medium text-ink group-hover/glide-menu:bg-transparent'
-                                        : 'text-ink-2 hover:text-ink',
-                                    )}
-                                  >
-                                    <span className="inline-flex w-3.5 shrink-0 text-ink">
-                                      {active ? <CheckIcon className="size-3.5" strokeWidth={2.2} /> : null}
-                                    </span>
-                                    <BackendLogo backend={b} size="sm" />
-                                    <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                                  </button>
-                                );
-                              })}
-                            </GlideMenu>
-                          </div>
+                          <ScrollArea className="max-h-60">
+                            <div role="menu" data-testid="agent-runtime-list">
+                              <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
+                                {runtimeItems.map((b) => {
+                                  const active = b.id === currentBackend.id;
+                                  return (
+                                    <button
+                                      key={b.id}
+                                      type="button"
+                                      data-menu-row
+                                      role="menuitemradio"
+                                      aria-checked={active}
+                                      data-testid={`agent-runtime-option-${b.id}`}
+                                      onClick={() => {
+                                        setRuntimeMenuOpen(false);
+                                        if (b.id !== backendId) {
+                                          handleSelectBackend(b.id);
+                                        }
+                                      }}
+                                      className={cn(
+                                        'menu-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-[12.5px] transition-colors duration-100',
+                                        active
+                                          ? 'menu-item--active bg-field font-medium text-ink group-data-[gliding=true]/glide-menu:bg-transparent'
+                                          : 'text-ink-2 hover:text-ink',
+                                      )}
+                                    >
+                                      <span className="inline-flex w-3.5 shrink-0 text-ink">
+                                        {active ? <CheckIcon className="size-3.5" strokeWidth={2.2} /> : null}
+                                      </span>
+                                      <BackendLogo backend={b} size="sm" />
+                                      <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                                    </button>
+                                  );
+                                })}
+                              </GlideMenu>
+                            </div>
+                          </ScrollArea>
                         </PopoverContent>
                       </Popover>
                     </div>

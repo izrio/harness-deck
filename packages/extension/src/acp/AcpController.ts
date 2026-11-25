@@ -182,6 +182,8 @@ export class AcpController implements ChatBackendController {
   private creatingDraft: Promise<string | undefined> | undefined;
   /** 新建会话草稿尚未就绪前用户手动选择的权限模式，避免被默认 auto 逻辑覆盖。 */
   private pendingDraftMode: string | undefined;
+  /** 回复进行中用户切换的权限模式，延后到下一轮发送前生效。 */
+  private readonly pendingModes = new Map<string, string>();
   private readonly projections = new Map<string, AcpSessionProjection>();
   private readonly loading = new Set<string>();
   private listed: { id: string; cwd?: string; updatedAt: number; title?: string }[] = [];
@@ -1058,6 +1060,18 @@ export class AcpController implements ChatBackendController {
 
   private async prompt(link: AcpLink, sessionId: string, text: string, images: readonly PromptImage[]): Promise<void> {
     const projection = this.projectionFor(sessionId);
+    const pendingMode = this.pendingModes.get(sessionId);
+    if (pendingMode !== undefined) {
+      this.pendingModes.delete(sessionId);
+      const modeOpt = this.modeOption(projection);
+      if (modeOpt && modeOpt.currentValue !== pendingMode) {
+        try {
+          await this.setOption(sessionId, modeOpt.id, pendingMode, true);
+        } catch (error) {
+          this.toast('error', t('permission.failed', describe(error)));
+        }
+      }
+    }
     const allowImages = this.init?.agentCapabilities?.promptCapabilities?.image === true;
     if (images.length && !allowImages) this.toast('info', t('acp.noImages', this.agentName()));
     const sent = allowImages ? images : [];
@@ -1317,7 +1331,18 @@ export class AcpController implements ChatBackendController {
     }
     const sessionId = this.currentId() ?? (await this.ensureDraft());
     const option = this.modeOption();
-    if (!sessionId || !option || option.currentValue === mode) return;
+    if (!sessionId || !option) return;
+    const currentEffective = this.pendingModes.get(sessionId) ?? option.currentValue;
+    if (currentEffective === mode) return;
+    if (this.projections.get(sessionId)?.running) {
+      // 正在回复中：延后到下一轮发送前再调用 session/set_config_option，不影响当前回合
+      this.pendingModes.set(sessionId, mode);
+      const displayName = target?.name ?? option.options?.find((o) => o.value === mode)?.name ?? mode;
+      this.toast('info', t('permission.nextTurn', displayName));
+      this.scheduleRender();
+      return;
+    }
+    this.pendingModes.delete(sessionId);
     try {
       await this.setOption(sessionId, option.id, mode);
     } catch (error) {
@@ -1596,13 +1621,14 @@ export class AcpController implements ChatBackendController {
     const fallbackAutoMode = usingFallbackMode
       ? mode?.options?.find((o) => o.value.toLowerCase() === 'auto' && !isUnrestrictedMode(o.value, o.name))?.value
       : undefined;
+    const pendingSessionMode = sessionId ? this.pendingModes.get(sessionId) : undefined;
     const displayedMode = usingFallbackMode
       ? ((this.pendingDraftMode && mode?.options?.some((o) => o.value === this.pendingDraftMode)
           ? this.pendingDraftMode
           : undefined) ??
         fallbackAutoMode ??
         mode?.currentValue)
-      : mode?.currentValue;
+      : (pendingSessionMode ?? mode?.currentValue);
     const permissions: PermissionState = {
       options: (mode?.options ?? []).map((o) => o.value),
       ...(displayedMode ? { current: displayedMode } : {}),

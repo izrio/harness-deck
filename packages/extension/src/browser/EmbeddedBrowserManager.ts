@@ -15,6 +15,8 @@ import { join } from 'node:path';
 import type {
   BrowserAiActionView,
   BrowserConsoleEntry,
+  BrowserDomElement,
+  BrowserNetworkEntry,
   BrowserState,
   BrowserStatus,
   BrowserViewportPreset,
@@ -22,12 +24,19 @@ import type {
 import { CdpClient, type CdpSocketLike } from './CdpClient.ts';
 
 const MAX_CONSOLE_LOGS = 80;
+const MAX_NETWORK_REQUESTS = 120;
+const MAX_NETWORK_BODY_CHARS = 200_000;
+const NETWORK_EMIT_DEBOUNCE_MS = 80;
 const FRAME_MIN_INTERVAL_MS = 50;
+const CRISP_FRAME_SETTLE_MS = 260;
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 720;
+const DEFAULT_DEVICE_SCALE_FACTOR = 2;
+const SCREECAST_JPEG_QUALITY = 92;
 
 export interface BrowserFramePayload {
   readonly data: string;
+  readonly format?: 'png' | 'jpeg';
   readonly width: number;
   readonly height: number;
   readonly timestamp: number;
@@ -38,6 +47,7 @@ export interface BrowserMouseInput {
   readonly x: number;
   readonly y: number;
   readonly button?: 'left' | 'middle' | 'right' | 'none';
+  readonly buttons?: number;
   readonly clickCount?: number;
   readonly deltaX?: number;
   readonly deltaY?: number;
@@ -100,11 +110,11 @@ export function normalizeBrowserUrl(raw: string): string {
   if (/^about:blank$/iu.test(trimmed)) return 'about:blank';
 
   if (
-    /^localhost(?::\d+)?(?:\/|$)/iu.test(trimmed) ||
-    /^127\.0\.0\.1(?::\d+)?(?:\/|$)/u.test(trimmed) ||
-    /^\[::1\](?::\d+)?(?:\/|$)/u.test(trimmed) ||
-    /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/|$)/u.test(trimmed) ||
-    /^[a-z0-9.-]+:\d+(?:\/|$)/iu.test(trimmed)
+    /^localhost(?::\d+)?(?:[/?#]|$)/iu.test(trimmed) ||
+    /^127\.0\.0\.1(?::\d+)?(?:[/?#]|$)/u.test(trimmed) ||
+    /^\[::1\](?::\d+)?(?:[/?#]|$)/u.test(trimmed) ||
+    /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:[/?#]|$)/u.test(trimmed) ||
+    /^[a-z0-9.-]+:\d+(?:[/?#]|$)/iu.test(trimmed)
   ) {
     return `http://${trimmed}`;
   }
@@ -685,6 +695,166 @@ const SNAPSHOT_SCRIPT = `(() => {
   };
 })()`;
 
+const DOM_INSPECT_SERIALIZER = `function serializeElement(el) {
+  if (!el || el.nodeType !== 1) return null;
+  const esc = (s) => (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+    ? CSS.escape(s)
+    : String(s).replace(/([^a-zA-Z0-9_-])/g, '\\\\$1');
+  const labelOf = (node) => {
+    const tag = node.tagName.toLowerCase();
+    const idPart = node.id ? '#' + node.id : '';
+    const cls = typeof node.className === 'string'
+      ? node.className.trim().split(/\\s+/).filter(Boolean).slice(0, 3)
+      : [];
+    const clsPart = cls.length ? '.' + cls.join('.') : '';
+    return tag + idPart + clsPart;
+  };
+  const selectorOf = (node) => {
+    if (!node || node.nodeType !== 1) return '';
+    if (node === document.documentElement) return 'html';
+    if (node === document.body) return 'body';
+    if (node.id && document.querySelectorAll('#' + esc(node.id)).length === 1) {
+      return '#' + esc(node.id);
+    }
+    const parts = [];
+    let cur = node;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && depth < 12) {
+      if (cur === document.body) {
+        parts.unshift('body');
+        break;
+      }
+      if (cur === document.documentElement) {
+        parts.unshift('html');
+        break;
+      }
+      if (cur.id && document.querySelectorAll('#' + esc(cur.id)).length === 1) {
+        parts.unshift('#' + esc(cur.id));
+        break;
+      }
+      const tag = cur.tagName.toLowerCase();
+      let idx = 1;
+      let sib = cur.previousElementSibling;
+      while (sib) {
+        if (sib.tagName === cur.tagName) idx++;
+        sib = sib.previousElementSibling;
+      }
+      let sameTagCount = idx;
+      sib = cur.nextElementSibling;
+      while (sib) {
+        if (sib.tagName === cur.tagName) {
+          sameTagCount++;
+          break;
+        }
+        sib = sib.nextElementSibling;
+      }
+      parts.unshift(sameTagCount > 1 ? tag + ':nth-of-type(' + idx + ')' : tag);
+      cur = cur.parentElement;
+      depth++;
+    }
+    return parts.join(' > ');
+  };
+  const rect = el.getBoundingClientRect();
+  const cs = window.getComputedStyle(el);
+  const px = (v) => Math.round(parseFloat(v) || 0);
+  const styleKeys = [
+    'display', 'position', 'width', 'height', 'color', 'background-color',
+    'font-family', 'font-size', 'font-weight', 'line-height',
+    'margin', 'padding', 'border', 'border-radius',
+    'flex-direction', 'justify-content', 'align-items', 'gap',
+    'z-index', 'opacity', 'overflow'
+  ];
+  const computedStyles = {};
+  for (const k of styleKeys) {
+    const val = cs.getPropertyValue(k);
+    if (val) computedStyles[k] = val;
+  }
+  const attributes = Array.from(el.attributes || []).slice(0, 30).map((a) => ({
+    name: a.name,
+    value: String(a.value || '').slice(0, 300)
+  }));
+  const ancestors = [];
+  let anc = el.parentElement;
+  while (anc && anc.nodeType === 1 && ancestors.length < 10) {
+    ancestors.unshift({ label: labelOf(anc), selector: selectorOf(anc) });
+    anc = anc.parentElement;
+  }
+  const children = Array.from(el.children || []).slice(0, 40).map((child) => {
+    const txt = (child.innerText || child.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60);
+    return {
+      label: labelOf(child),
+      selector: selectorOf(child),
+      childCount: child.children ? child.children.length : 0,
+      ...(txt ? { textPreview: txt } : {})
+    };
+  });
+  const classes = typeof el.className === 'string'
+    ? el.className.trim().split(/\\s+/).filter(Boolean).slice(0, 20)
+    : [];
+  const textPreview = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+  const rawHtml = String(el.outerHTML || '');
+  const outerHtml = rawHtml.length > 2000 ? rawHtml.slice(0, 2000) + '…' : rawHtml;
+  return {
+    tag: el.tagName.toLowerCase(),
+    ...(el.id ? { id: el.id } : {}),
+    classes,
+    selector: selectorOf(el),
+    label: labelOf(el),
+    rect: {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    },
+    boxModel: {
+      margin: [px(cs.marginTop), px(cs.marginRight), px(cs.marginBottom), px(cs.marginLeft)],
+      border: [px(cs.borderTopWidth), px(cs.borderRightWidth), px(cs.borderBottomWidth), px(cs.borderLeftWidth)],
+      padding: [px(cs.paddingTop), px(cs.paddingRight), px(cs.paddingBottom), px(cs.paddingLeft)]
+    },
+    attributes,
+    inlineStyle: el.getAttribute('style') || '',
+    computedStyles,
+    ...(textPreview ? { textPreview } : {}),
+    outerHtml,
+    ancestors,
+    children
+  };
+}`;
+
+function normalizeCdpHeaders(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: Record<string, string> = {};
+  let count = 0;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (count >= 40) break;
+    out[k] = typeof v === 'string' ? v.slice(0, 500) : String(v ?? '').slice(0, 500);
+    count += 1;
+  }
+  return count > 0 ? out : undefined;
+}
+
+interface MutableNetworkEntry {
+  requestId: string;
+  url: string;
+  method: string;
+  resourceType: string;
+  status?: number;
+  statusText?: string;
+  mimeType?: string;
+  protocol?: string;
+  fromCache?: boolean;
+  encodedDataLength?: number;
+  durationMs?: number;
+  startedAt: number;
+  startMonoSec?: number;
+  finished: boolean;
+  failed?: boolean;
+  errorText?: string;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  postData?: string;
+}
+
 export interface EmbeddedBrowserManagerOptions {
   readonly storageRoot: string;
   readonly onStateChange: (state: BrowserState) => void;
@@ -705,6 +875,7 @@ export class EmbeddedBrowserManager {
   private canGoForward = false;
   private viewportWidth = DEFAULT_WIDTH;
   private viewportHeight = DEFAULT_HEIGHT;
+  private deviceScaleFactor = DEFAULT_DEVICE_SCALE_FACTOR;
   private viewportPreset: BrowserViewportPreset = 'responsive';
   private aiEnabled: boolean;
   private mcpUrl?: string;
@@ -714,6 +885,9 @@ export class EmbeddedBrowserManager {
   private lastAiAction?: BrowserAiActionView;
   private consoleLogs: BrowserConsoleEntry[] = [];
   private consoleSeq = 0;
+  private networkMap = new Map<string, MutableNetworkEntry>();
+  private networkOrder: string[] = [];
+  private networkEmitTimer?: ReturnType<typeof setTimeout>;
   private error?: string;
 
   private child?: ChildProcess;
@@ -722,6 +896,8 @@ export class EmbeddedBrowserManager {
   private pendingFrame?: BrowserFramePayload;
   private lastFrameSentAt = 0;
   private frameFlushTimer?: ReturnType<typeof setTimeout>;
+  private crispFrameTimer?: ReturnType<typeof setTimeout>;
+  private navigationSeq = 0;
   private launching?: Promise<BrowserState>;
   private disposed = false;
 
@@ -750,6 +926,10 @@ export class EmbeddedBrowserManager {
       ...(this.detectedExecutable ? { detectedExecutable: this.detectedExecutable } : {}),
       ...(this.lastAiAction ? { lastAiAction: this.lastAiAction } : {}),
       consoleLogs: [...this.consoleLogs],
+      networkRequests: this.networkOrder
+        .map((id) => this.networkMap.get(id))
+        .filter((entry): entry is MutableNetworkEntry => Boolean(entry))
+        .map(({ startMonoSec: _ignore, ...rest }): BrowserNetworkEntry => ({ ...rest })),
       ...(this.error ? { error: this.error } : {}),
     };
   }
@@ -780,6 +960,180 @@ export class EmbeddedBrowserManager {
     this.emitState();
   }
 
+  clearNetwork(): void {
+    this.networkMap.clear();
+    this.networkOrder = [];
+    this.emitState();
+  }
+
+  async getNetworkBody(requestId: string): Promise<{
+    readonly requestId: string;
+    readonly body?: string;
+    readonly base64Encoded?: boolean;
+    readonly error?: string;
+  }> {
+    const client = this.client;
+    if (!client?.connected) {
+      return { requestId, error: 'Browser is not running' };
+    }
+    try {
+      const res = await client.send<{ body?: string; base64Encoded?: boolean }>(
+        'Network.getResponseBody',
+        { requestId },
+        6_000,
+      );
+      const rawBody = typeof res.body === 'string' ? res.body : '';
+      const truncated =
+        rawBody.length > MAX_NETWORK_BODY_CHARS
+          ? `${rawBody.slice(0, MAX_NETWORK_BODY_CHARS)}\n… [truncated]`
+          : rawBody;
+      return {
+        requestId,
+        body: truncated,
+        base64Encoded: Boolean(res.base64Encoded),
+      };
+    } catch (error) {
+      return {
+        requestId,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async inspectAt(x: number, y: number): Promise<BrowserDomElement | undefined> {
+    const client = this.client;
+    if (!client?.connected) return undefined;
+    const clampedX = Math.max(0, Math.min(this.viewportWidth, Math.round(x)));
+    const clampedY = Math.max(0, Math.min(this.viewportHeight, Math.round(y)));
+    try {
+      const res = await client.send<{ result?: { value?: BrowserDomElement | null } }>(
+        'Runtime.evaluate',
+        {
+          expression: `(() => {
+            ${DOM_INSPECT_SERIALIZER}
+            let el = document.elementFromPoint(${clampedX}, ${clampedY});
+            while (el && el.shadowRoot) {
+              const inner = el.shadowRoot.elementFromPoint(${clampedX}, ${clampedY});
+              if (!inner || inner === el) break;
+              el = inner;
+            }
+            return serializeElement(el);
+          })()`,
+          returnByValue: true,
+          awaitPromise: false,
+        },
+        4_000,
+      );
+      return res.result?.value ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async selectElement(selector: string, scrollIntoView = false): Promise<BrowserDomElement | undefined> {
+    const client = this.client;
+    if (!client?.connected) return undefined;
+    try {
+      const res = await client.send<{ result?: { value?: BrowserDomElement | null } }>(
+        'Runtime.evaluate',
+        {
+          expression: `(() => {
+            ${DOM_INSPECT_SERIALIZER}
+            const el = document.querySelector(${JSON.stringify(selector)});
+            if (!el) return null;
+            if (${scrollIntoView ? 'true' : 'false'}) {
+              el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+            }
+            return serializeElement(el);
+          })()`,
+          returnByValue: true,
+          awaitPromise: false,
+        },
+        4_000,
+      );
+      if (scrollIntoView) {
+        void this.captureQuickFrame('png');
+      }
+      return res.result?.value ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async editElementStyle(selector: string, property: string, value: string): Promise<BrowserDomElement | undefined> {
+    const client = this.client;
+    if (!client?.connected) return undefined;
+    try {
+      const res = await client.send<{ result?: { value?: BrowserDomElement | null } }>(
+        'Runtime.evaluate',
+        {
+          expression: `(() => {
+            ${DOM_INSPECT_SERIALIZER}
+            const el = document.querySelector(${JSON.stringify(selector)});
+            if (!el) return null;
+            const prop = ${JSON.stringify(property.trim())};
+            const val = ${JSON.stringify(value.trim())};
+            if (val === '') el.style.removeProperty(prop);
+            else el.style.setProperty(prop, val);
+            return serializeElement(el);
+          })()`,
+          returnByValue: true,
+          awaitPromise: false,
+        },
+        4_000,
+      );
+      await this.captureQuickFrame('png');
+      return res.result?.value ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async evalConsole(expression: string): Promise<void> {
+    const trimmed = expression.trim();
+    if (!trimmed) return;
+    this.pushConsole('info', `> ${trimmed.slice(0, 480)}`);
+    const client = this.client;
+    if (!client?.connected) {
+      this.pushConsole('error', 'Browser is not running');
+      return;
+    }
+    try {
+      const res = await client.send<{
+        result?: { value?: unknown; description?: string; type?: string; subtype?: string };
+        exceptionDetails?: { text?: string; exception?: { description?: string } };
+      }>(
+        'Runtime.evaluate',
+        {
+          expression: trimmed,
+          awaitPromise: true,
+          returnByValue: true,
+          replMode: true,
+        },
+        8_000,
+      );
+      if (res.exceptionDetails) {
+        const errText = res.exceptionDetails.exception?.description || res.exceptionDetails.text || 'Evaluation error';
+        this.pushConsole('error', errText.slice(0, 500));
+        return;
+      }
+      const r = res.result;
+      let formatted: string;
+      if (!r) {
+        formatted = 'undefined';
+      } else if (r.value !== undefined) {
+        formatted = typeof r.value === 'string' ? JSON.stringify(r.value) : JSON.stringify(r.value, null, 2);
+      } else if (r.description !== undefined) {
+        formatted = r.description;
+      } else {
+        formatted = String(r.type ?? 'undefined');
+      }
+      this.pushConsole('log', `← ${formatted.slice(0, 500)}`);
+    } catch (error) {
+      this.pushConsole('error', (error instanceof Error ? error.message : String(error)).slice(0, 500));
+    }
+  }
+
   async ensureRunning(url?: string): Promise<void> {
     if (this.status === 'running' && this.client?.connected) {
       return;
@@ -796,12 +1150,28 @@ export class EmbeddedBrowserManager {
     readonly executablePath?: string;
     readonly width?: number;
     readonly height?: number;
+    readonly deviceScaleFactor?: number;
   }): Promise<BrowserState> {
-    if (this.launching) return this.launching;
+    if (this.launching) {
+      const state = await this.launching;
+      if (params?.url?.trim() && this.status === 'running' && this.client?.connected) {
+        const nextUrl = normalizeBrowserUrl(params.url);
+        if (nextUrl !== this.url) {
+          await this.navigate(nextUrl).catch(() => undefined);
+          return this.getState();
+        }
+      }
+      return state;
+    }
     this.launching = this.doLaunch(params).finally(() => {
       this.launching = undefined;
     });
     return this.launching;
+  }
+
+  private clampDeviceScaleFactor(raw?: number): number {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return this.deviceScaleFactor;
+    return Math.round(Math.max(1, Math.min(2, raw)) * 100) / 100;
   }
 
   private async doLaunch(params?: {
@@ -810,11 +1180,15 @@ export class EmbeddedBrowserManager {
     readonly executablePath?: string;
     readonly width?: number;
     readonly height?: number;
+    readonly deviceScaleFactor?: number;
   }): Promise<BrowserState> {
     await this.stopInternal(false);
 
     if (params?.width) this.viewportWidth = Math.max(320, Math.min(2_560, Math.round(params.width)));
     if (params?.height) this.viewportHeight = Math.max(240, Math.min(2_000, Math.round(params.height)));
+    if (params?.deviceScaleFactor !== undefined) {
+      this.deviceScaleFactor = this.clampDeviceScaleFactor(params.deviceScaleFactor);
+    }
 
     let targetUrl = 'about:blank';
     if (params?.url?.trim()) {
@@ -876,12 +1250,8 @@ export class EmbeddedBrowserManager {
       await Promise.all([
         client.send('Page.enable'),
         client.send('Runtime.enable'),
-        client.send('Emulation.setDeviceMetricsOverride', {
-          width: this.viewportWidth,
-          height: this.viewportHeight,
-          deviceScaleFactor: 1,
-          mobile: this.viewportPreset === 'mobile',
-        }),
+        client.send('Network.enable').catch(() => undefined),
+        this.applyViewportMetrics(client),
       ]);
 
       await this.startScreencast(client);
@@ -895,6 +1265,7 @@ export class EmbeddedBrowserManager {
         await this.navigate(targetUrl);
       } else {
         await this.syncNavigationState();
+        await this.captureQuickFrame('png');
       }
 
       return this.getState();
@@ -918,6 +1289,14 @@ export class EmbeddedBrowserManager {
     if (this.frameFlushTimer) {
       clearTimeout(this.frameFlushTimer);
       this.frameFlushTimer = undefined;
+    }
+    if (this.crispFrameTimer) {
+      clearTimeout(this.crispFrameTimer);
+      this.crispFrameTimer = undefined;
+    }
+    if (this.networkEmitTimer) {
+      clearTimeout(this.networkEmitTimer);
+      this.networkEmitTimer = undefined;
     }
     this.pendingFrame = undefined;
 
@@ -959,24 +1338,59 @@ export class EmbeddedBrowserManager {
     const normalized = normalizeBrowserUrl(rawUrl);
     await this.ensureRunning();
     const client = this.requireClient();
+    const navSeq = ++this.navigationSeq;
+    const prevUrl = this.url;
 
     this.loading = true;
     this.url = normalized;
     this.error = undefined;
     this.emitState();
 
-    const loadPromise = this.waitForLoadEvent(client, 15_000);
-    const navResult = await client.send<{ frameId?: string; errorText?: string }>('Page.navigate', { url: normalized });
-    if (navResult.errorText) {
-      this.loading = false;
-      this.error = navResult.errorText;
-      this.emitState();
-      throw new Error(`Navigation failed: ${navResult.errorText}`);
+    const loadWait = this.waitForLoadEvent(client, 15_000);
+    try {
+      const navResult = await client.send<{ frameId?: string; loaderId?: string; errorText?: string }>(
+        'Page.navigate',
+        { url: normalized },
+      );
+      if (navResult.errorText) {
+        loadWait.cancel();
+        if (navSeq === this.navigationSeq) {
+          this.loading = false;
+          this.error = navResult.errorText;
+          this.emitState();
+        }
+        throw new Error(`Navigation failed: ${navResult.errorText}`);
+      }
+      if (!navResult.loaderId) {
+        // 同文档导航（如仅切换 #hash 或重复提交相同地址）：Chrome 不会触发 loadEventFired，避免白等 15 秒
+        if (normalized === prevUrl) {
+          await client.send('Page.reload', { ignoreCache: false });
+          await loadWait.promise;
+        } else {
+          loadWait.cancel();
+          await this.sleep(60);
+        }
+      } else {
+        await loadWait.promise;
+      }
+      if (navSeq !== this.navigationSeq) {
+        return { url: this.url, title: this.title };
+      }
+      await this.syncNavigationState();
+      // 跨域导航在 Chromium --headless=new 下会切换 RenderFrameHost，重新挂载 screencast 防止画面卡死在旧页面
+      await this.restartScreencast(client);
+      await this.captureQuickFrame('png');
+      this.scheduleCrispFrame(350);
+      return { url: this.url, title: this.title };
+    } catch (error) {
+      loadWait.cancel();
+      if (navSeq === this.navigationSeq) {
+        this.loading = false;
+        this.error = error instanceof Error ? error.message : String(error);
+        this.emitState();
+      }
+      throw error;
     }
-    await loadPromise;
-    await this.syncNavigationState();
-    await this.captureQuickFrame();
-    return { url: this.url, title: this.title };
   }
 
   async goBack(): Promise<{ readonly url: string; readonly title: string }> {
@@ -990,10 +1404,17 @@ export class EmbeddedBrowserManager {
       if (target) {
         this.loading = true;
         this.emitState();
-        const loadPromise = this.waitForLoadEvent(client, 10_000);
-        await client.send('Page.navigateToHistoryEntry', { entryId: target.id });
-        await loadPromise;
+        const loadWait = this.waitForLoadEvent(client, 10_000);
+        try {
+          await client.send('Page.navigateToHistoryEntry', { entryId: target.id });
+          await loadWait.promise;
+        } finally {
+          loadWait.cancel();
+        }
         await this.syncNavigationState();
+        await this.restartScreencast(client);
+        await this.captureQuickFrame('png');
+        this.scheduleCrispFrame(300);
       }
     }
     return { url: this.url, title: this.title };
@@ -1010,10 +1431,17 @@ export class EmbeddedBrowserManager {
       if (target) {
         this.loading = true;
         this.emitState();
-        const loadPromise = this.waitForLoadEvent(client, 10_000);
-        await client.send('Page.navigateToHistoryEntry', { entryId: target.id });
-        await loadPromise;
+        const loadWait = this.waitForLoadEvent(client, 10_000);
+        try {
+          await client.send('Page.navigateToHistoryEntry', { entryId: target.id });
+          await loadWait.promise;
+        } finally {
+          loadWait.cancel();
+        }
         await this.syncNavigationState();
+        await this.restartScreencast(client);
+        await this.captureQuickFrame('png');
+        this.scheduleCrispFrame(300);
       }
     }
     return { url: this.url, title: this.title };
@@ -1023,36 +1451,48 @@ export class EmbeddedBrowserManager {
     const client = this.requireClient();
     this.loading = true;
     this.emitState();
-    const loadPromise = this.waitForLoadEvent(client, 15_000);
-    await client.send('Page.reload', { ignoreCache: false });
-    await loadPromise;
+    const loadWait = this.waitForLoadEvent(client, 15_000);
+    try {
+      await client.send('Page.reload', { ignoreCache: false });
+      await loadWait.promise;
+    } finally {
+      loadWait.cancel();
+    }
     await this.syncNavigationState();
-    await this.captureQuickFrame();
+    await this.restartScreencast(client);
+    await this.captureQuickFrame('png');
+    this.scheduleCrispFrame(300);
     return { url: this.url, title: this.title };
   }
 
-  async resize(width: number, height: number, preset?: BrowserViewportPreset): Promise<void> {
+  async resize(
+    width: number,
+    height: number,
+    preset?: BrowserViewportPreset,
+    deviceScaleFactor?: number,
+  ): Promise<void> {
     const nextW = Math.max(320, Math.min(2_560, Math.round(width)));
     const nextH = Math.max(240, Math.min(2_000, Math.round(height)));
     const nextPreset = preset ?? this.viewportPreset;
-    if (nextW === this.viewportWidth && nextH === this.viewportHeight && nextPreset === this.viewportPreset) {
+    const nextDpr = deviceScaleFactor !== undefined ? this.clampDeviceScaleFactor(deviceScaleFactor) : this.deviceScaleFactor;
+    if (
+      nextW === this.viewportWidth &&
+      nextH === this.viewportHeight &&
+      nextPreset === this.viewportPreset &&
+      nextDpr === this.deviceScaleFactor
+    ) {
       return;
     }
     this.viewportWidth = nextW;
     this.viewportHeight = nextH;
     this.viewportPreset = nextPreset;
+    this.deviceScaleFactor = nextDpr;
     this.emitState();
 
     if (!this.client?.connected) return;
     try {
-      await this.client.send('Emulation.setDeviceMetricsOverride', {
-        width: this.viewportWidth,
-        height: this.viewportHeight,
-        deviceScaleFactor: 1,
-        mobile: this.viewportPreset === 'mobile',
-      });
-      await this.client.send('Page.stopScreencast').catch(() => undefined);
-      await this.startScreencast(this.client);
+      await this.restartScreencast(this.client);
+      await this.captureQuickFrame('png');
     } catch {
       // ignore transient resize errors
     }
@@ -1083,14 +1523,127 @@ export class EmbeddedBrowserManager {
       up: 'mouseReleased',
     } as const;
 
+    const inferredButton =
+      input.button ??
+      (input.action === 'move'
+        ? input.buttons && (input.buttons & 1) !== 0
+          ? 'left'
+          : 'none'
+        : 'left');
+
     await client.send('Input.dispatchMouseEvent', {
       type: typeMap[input.action],
       x,
       y,
-      button: input.button ?? (input.action === 'move' ? 'none' : 'left'),
+      button: inferredButton,
+      ...(input.buttons !== undefined ? { buttons: input.buttons } : {}),
       clickCount: input.clickCount ?? (input.action === 'move' ? 0 : 1),
       modifiers,
     });
+  }
+
+  async copySelection(cut = false): Promise<string> {
+    const client = this.client;
+    if (!client?.connected) return '';
+    try {
+      const res = await client.send<{ result?: { value?: string } }>(
+        'Runtime.evaluate',
+        {
+          expression: `(() => {
+            let active = document.activeElement;
+            while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+              active = active.shadowRoot.activeElement;
+            }
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+              const start = typeof active.selectionStart === 'number' ? active.selectionStart : 0;
+              const end = typeof active.selectionEnd === 'number' ? active.selectionEnd : 0;
+              if (end > start) {
+                const value = String(active.value ?? '');
+                const selected = value.slice(start, end);
+                if (${cut ? 'true' : 'false'} && !active.readOnly && !active.disabled) {
+                  const next = value.slice(0, start) + value.slice(end);
+                  const proto = active.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                  if (setter) setter.call(active, next);
+                  else active.value = next;
+                  active.setSelectionRange(start, start);
+                  active.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                return selected;
+              }
+            }
+            const sel = window.getSelection();
+            const text = sel ? sel.toString() : '';
+            if (${cut ? 'true' : 'false'} && text) {
+              try { document.execCommand('cut'); } catch {}
+            }
+            return text;
+          })()`,
+          returnByValue: true,
+          awaitPromise: false,
+        },
+        4_000,
+      );
+      const text = typeof res.result?.value === 'string' ? res.result.value : '';
+      if (cut && text) {
+        await this.captureQuickFrame('png');
+      }
+      return text;
+    } catch {
+      return '';
+    }
+  }
+
+  async pasteText(text: string): Promise<void> {
+    const client = this.client;
+    if (!client?.connected || !text) return;
+    await client.send('Input.insertText', { text });
+    await this.captureQuickFrame('png');
+  }
+
+  async selectAll(): Promise<void> {
+    const client = this.client;
+    if (!client?.connected) return;
+    try {
+      await client.send(
+        'Runtime.evaluate',
+        {
+          expression: `(() => {
+            let active = document.activeElement;
+            while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+              active = active.shadowRoot.activeElement;
+            }
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && typeof active.select === 'function') {
+              active.select();
+              return;
+            }
+            if (active && active.isContentEditable) {
+              const range = document.createRange();
+              range.selectNodeContents(active);
+              const sel = window.getSelection();
+              if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+              return;
+            }
+            try {
+              if (document.execCommand('selectAll')) return;
+            } catch {}
+            const sel = window.getSelection();
+            if (sel && document.body) {
+              sel.selectAllChildren(document.body);
+            }
+          })()`,
+          returnByValue: true,
+          awaitPromise: false,
+        },
+        4_000,
+      );
+      await this.captureQuickFrame('png');
+    } catch {
+      // ignore
+    }
   }
 
   async dispatchKey(input: BrowserKeyInput): Promise<void> {
@@ -1116,6 +1669,17 @@ export class EmbeddedBrowserManager {
 
     const type = input.action === 'down' ? 'rawKeyDown' : 'keyUp';
     const keyCode = mapped?.keyCode ?? (input.key.length === 1 ? input.key.toUpperCase().charCodeAt(0) : 0);
+    const hasAccel = (modifiers & (2 | 4)) !== 0 && (modifiers & 1) === 0;
+    const hasShift = (modifiers & 8) !== 0;
+    const lowerKey = input.key.toLowerCase();
+    const commands =
+      input.action === 'down' && hasAccel
+        ? lowerKey === 'z'
+          ? [hasShift ? 'redo' : 'undo']
+          : lowerKey === 'y' && !hasShift
+            ? ['redo']
+            : undefined
+        : undefined;
 
     await client.send('Input.dispatchKeyEvent', {
       type,
@@ -1124,6 +1688,7 @@ export class EmbeddedBrowserManager {
       windowsVirtualKeyCode: keyCode,
       nativeVirtualKeyCode: keyCode,
       modifiers,
+      ...(commands ? { commands } : {}),
       ...(input.action === 'down' && mapped?.text && !hasModifier ? { text: mapped.text, unmodifiedText: mapped.text } : {}),
     });
   }
@@ -1550,10 +2115,12 @@ export class EmbeddedBrowserManager {
       if (!data) return;
       this.enqueueFrame({
         data,
+        format: 'jpeg',
         width: meta.deviceWidth ?? this.viewportWidth,
         height: meta.deviceHeight ?? this.viewportHeight,
         timestamp: Date.now(),
       });
+      this.scheduleCrispFrame(CRISP_FRAME_SETTLE_MS);
     });
 
     client.on('Page.frameNavigated', (params) => {
@@ -1565,9 +2132,26 @@ export class EmbeddedBrowserManager {
       }
     });
 
+    client.on('Page.navigatedWithinDocument', (params) => {
+      const nextUrl = typeof params.url === 'string' ? params.url : '';
+      if (nextUrl) {
+        this.url = nextUrl;
+        this.emitState();
+        void this.syncNavigationState();
+      }
+    });
+
+    client.on('Page.windowOpen', (params) => {
+      const targetUrl = typeof params.url === 'string' ? params.url.trim() : '';
+      if (targetUrl && targetUrl !== 'about:blank') {
+        void this.navigate(targetUrl).catch(() => undefined);
+      }
+    });
+
     client.on('Page.loadEventFired', () => {
       this.loading = false;
       void this.syncNavigationState();
+      this.scheduleCrispFrame(150);
     });
 
     client.on('Page.javascriptDialogOpening', () => {
@@ -1598,26 +2182,144 @@ export class EmbeddedBrowserManager {
       const text = (details?.exception?.description || details?.text || 'Uncaught exception').slice(0, 500);
       this.pushConsole('error', text);
     });
+
+    client.on('Network.requestWillBeSent', (params) => {
+      const requestId = typeof params.requestId === 'string' ? params.requestId : '';
+      const request = params.request as { url?: string; method?: string; headers?: unknown; postData?: string } | undefined;
+      if (!requestId || !request?.url) return;
+      if (request.url.startsWith('data:') && request.url.length > 512) return;
+      const startedAt =
+        typeof params.wallTime === 'number' && Number.isFinite(params.wallTime)
+          ? Math.round(params.wallTime * 1_000)
+          : Date.now();
+      const startMonoSec = typeof params.timestamp === 'number' ? params.timestamp : undefined;
+      const resourceType = typeof params.type === 'string' && params.type ? params.type : 'Other';
+      const requestHeaders = normalizeCdpHeaders(request.headers);
+      const postData = typeof request.postData === 'string' ? request.postData.slice(0, 20_000) : undefined;
+      const entry: MutableNetworkEntry = {
+        requestId,
+        url: request.url.slice(0, 2_048),
+        method: (request.method || 'GET').toUpperCase(),
+        resourceType,
+        startedAt,
+        ...(startMonoSec !== undefined ? { startMonoSec } : {}),
+        finished: false,
+        ...(requestHeaders ? { requestHeaders } : {}),
+        ...(postData ? { postData } : {}),
+      };
+      if (!this.networkMap.has(requestId)) {
+        this.networkOrder.push(requestId);
+        while (this.networkOrder.length > MAX_NETWORK_REQUESTS) {
+          const oldest = this.networkOrder.shift();
+          if (oldest) this.networkMap.delete(oldest);
+        }
+      }
+      this.networkMap.set(requestId, entry);
+      this.scheduleNetworkEmit();
+    });
+
+    client.on('Network.responseReceived', (params) => {
+      const requestId = typeof params.requestId === 'string' ? params.requestId : '';
+      const response = params.response as {
+        status?: number;
+        statusText?: string;
+        mimeType?: string;
+        protocol?: string;
+        fromDiskCache?: boolean;
+        fromServiceWorker?: boolean;
+        headers?: unknown;
+      } | undefined;
+      if (!requestId || !response) return;
+      const entry = this.networkMap.get(requestId);
+      if (!entry) return;
+      if (typeof response.status === 'number') entry.status = response.status;
+      if (typeof response.statusText === 'string') entry.statusText = response.statusText;
+      if (typeof response.mimeType === 'string') entry.mimeType = response.mimeType;
+      if (typeof response.protocol === 'string') entry.protocol = response.protocol;
+      if (response.fromDiskCache || response.fromServiceWorker) entry.fromCache = true;
+      const responseHeaders = normalizeCdpHeaders(response.headers);
+      if (responseHeaders) entry.responseHeaders = responseHeaders;
+      if (typeof params.type === 'string' && params.type) entry.resourceType = params.type;
+      this.scheduleNetworkEmit();
+    });
+
+    client.on('Network.loadingFinished', (params) => {
+      const requestId = typeof params.requestId === 'string' ? params.requestId : '';
+      const entry = requestId ? this.networkMap.get(requestId) : undefined;
+      if (!entry) return;
+      entry.finished = true;
+      if (typeof params.encodedDataLength === 'number') {
+        entry.encodedDataLength = Math.max(0, Math.round(params.encodedDataLength));
+      }
+      if (typeof params.timestamp === 'number' && entry.startMonoSec !== undefined) {
+        entry.durationMs = Math.max(0, Math.round((params.timestamp - entry.startMonoSec) * 1_000));
+      }
+      this.scheduleNetworkEmit();
+    });
+
+    client.on('Network.loadingFailed', (params) => {
+      const requestId = typeof params.requestId === 'string' ? params.requestId : '';
+      const entry = requestId ? this.networkMap.get(requestId) : undefined;
+      if (!entry) return;
+      entry.finished = true;
+      entry.failed = true;
+      entry.errorText = typeof params.errorText === 'string' ? params.errorText : 'Request failed';
+      if (typeof params.timestamp === 'number' && entry.startMonoSec !== undefined) {
+        entry.durationMs = Math.max(0, Math.round((params.timestamp - entry.startMonoSec) * 1_000));
+      }
+      this.scheduleNetworkEmit();
+    });
+  }
+
+  private async applyViewportMetrics(client: CdpClient): Promise<void> {
+    await client.send('Emulation.setDeviceMetricsOverride', {
+      width: this.viewportWidth,
+      height: this.viewportHeight,
+      deviceScaleFactor: this.deviceScaleFactor,
+      mobile: this.viewportPreset === 'mobile',
+    });
   }
 
   private async startScreencast(client: CdpClient): Promise<void> {
     await client.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: 75,
-      maxWidth: this.viewportWidth,
-      maxHeight: this.viewportHeight,
+      quality: SCREECAST_JPEG_QUALITY,
+      maxWidth: Math.round(this.viewportWidth * this.deviceScaleFactor),
+      maxHeight: Math.round(this.viewportHeight * this.deviceScaleFactor),
       everyNthFrame: 1,
     });
   }
 
-  private async captureQuickFrame(): Promise<void> {
+  private async restartScreencast(client: CdpClient): Promise<void> {
+    if (!client.connected) return;
+    await this.applyViewportMetrics(client).catch(() => undefined);
+    await client.send('Page.stopScreencast', undefined, 1_500).catch(() => undefined);
+    await this.startScreencast(client).catch(() => undefined);
+  }
+
+  private scheduleCrispFrame(delayMs: number): void {
+    if (this.disposed) return;
+    if (this.crispFrameTimer) clearTimeout(this.crispFrameTimer);
+    this.crispFrameTimer = setTimeout(() => {
+      this.crispFrameTimer = undefined;
+      if (this.disposed || this.status !== 'running' || !this.client?.connected) return;
+      void this.captureQuickFrame('png');
+    }, delayMs);
+  }
+
+  private async captureQuickFrame(format: 'png' | 'jpeg' = 'png'): Promise<void> {
     const client = this.client;
     if (!client?.connected) return;
     try {
-      const res = await client.send<{ data?: string }>('Page.captureScreenshot', { format: 'jpeg', quality: 75 }, 5_000);
+      const res = await client.send<{ data?: string }>(
+        'Page.captureScreenshot',
+        format === 'png' ? { format: 'png' } : { format: 'jpeg', quality: SCREECAST_JPEG_QUALITY },
+        5_000,
+      );
       if (res.data) {
         this.enqueueFrame({
           data: res.data,
+          format,
           width: this.viewportWidth,
           height: this.viewportHeight,
           timestamp: Date.now(),
@@ -1678,23 +2380,42 @@ export class EmbeddedBrowserManager {
     }
   }
 
-  private waitForLoadEvent(client: CdpClient, timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve) => {
+  private waitForLoadEvent(
+    client: CdpClient,
+    timeoutMs: number,
+  ): { readonly promise: Promise<void>; readonly cancel: () => void } {
+    let cancel: () => void = () => undefined;
+    const promise = new Promise<void>((resolve) => {
       let done = false;
+      let domTimer: ReturnType<typeof setTimeout> | undefined;
       const finish = () => {
         if (done) return;
         done = true;
         clearTimeout(timer);
+        if (domTimer) clearTimeout(domTimer);
         unsubLoad();
         unsubDom();
+        unsubSameDoc();
         resolve();
       };
+      cancel = finish;
       const timer = setTimeout(finish, timeoutMs);
       const unsubLoad = client.on('Page.loadEventFired', finish);
+      const unsubSameDoc = client.on('Page.navigatedWithinDocument', finish);
       const unsubDom = client.on('Page.domContentEventFired', () => {
-        setTimeout(finish, 250);
+        if (domTimer) clearTimeout(domTimer);
+        domTimer = setTimeout(finish, 250);
       });
     });
+    return { promise, cancel };
+  }
+
+  private scheduleNetworkEmit(): void {
+    if (this.disposed || this.networkEmitTimer) return;
+    this.networkEmitTimer = setTimeout(() => {
+      this.networkEmitTimer = undefined;
+      if (!this.disposed) this.emitState();
+    }, NETWORK_EMIT_DEBOUNCE_MS);
   }
 
   private pushConsole(level: BrowserConsoleEntry['level'], text: string): void {

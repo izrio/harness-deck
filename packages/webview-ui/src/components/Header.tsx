@@ -20,7 +20,6 @@ import {
   LayoutDashboardIcon,
   ListTodoIcon,
   PanelRightIcon,
-  PlusIcon,
   QrCodeIcon,
   SettingsIcon,
   SidebarIcon,
@@ -266,20 +265,6 @@ export function Header({
             </button>
           ) : null}
           {clientSurface !== 'mobile-web' ? <IdeRemoteQuickPopover /> : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            disabled={remoteReadOnly}
-            aria-label={t('header.new')}
-            title={t('header.newTab')}
-            onClick={() => {
-              setActiveModule('sessions');
-              postToHost({ type: 'newSession', payload: {} });
-            }}
-          >
-            <PlusIcon className="size-4" />
-          </Button>
           {clientSurface !== 'mobile-web' ? (
             <Button
               type="button"

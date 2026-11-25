@@ -555,49 +555,64 @@ select:focus-visible,
     var(--app-scrollbar-width) 100%;
 }
 
-/* ── Custom Scrollbars (modern pill thumb, iframe excluded) ── */
+/* ── Custom Scrollbars (fallback for native scroll containers; Radix ScrollArea hides native bars) ── */
 
-:where(:not(iframe))::-webkit-scrollbar {
+html,
+body,
+*:not(iframe):not([data-radix-scroll-area-viewport]) {
+  scrollbar-color: auto;
+  scrollbar-width: auto;
+}
+
+html [data-radix-scroll-area-viewport] {
+  scrollbar-width: none;
+}
+
+html [data-radix-scroll-area-viewport]::-webkit-scrollbar {
+  display: none;
+}
+
+html *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar {
   width: var(--app-scrollbar-width);
   height: var(--app-scrollbar-width);
 }
 
-:where(:not(iframe))::-webkit-scrollbar-button {
+html *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-:where(:not(iframe))::-webkit-scrollbar-track,
-:where(:not(iframe))::-webkit-scrollbar-corner {
+html *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar-track,
+html *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-:where(:not(iframe))::-webkit-scrollbar-thumb {
+html *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  border: 1px solid transparent;
+  border: 1.5px solid transparent;
   background-clip: padding-box;
-  background-color: rgb(0 0 0 / 16%);
+  background-color: rgb(0 0 0 / 12%);
 }
 
-:where(:not(iframe)):hover::-webkit-scrollbar-thumb {
-  background-color: rgb(0 0 0 / 26%);
+html *:not(iframe):not([data-radix-scroll-area-viewport]):hover::-webkit-scrollbar-thumb {
+  background-color: rgb(0 0 0 / 24%);
 }
 
-:where(:not(iframe))::-webkit-scrollbar-thumb:hover {
+html *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar-thumb:hover {
   background-color: rgb(0 0 0 / 38%);
 }
 
-.dark :where(:not(iframe))::-webkit-scrollbar-thumb {
-  background-color: rgb(255 255 255 / 32%);
+html.dark *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 16%);
 }
 
-.dark :where(:not(iframe)):hover::-webkit-scrollbar-thumb {
-  background-color: rgb(255 255 255 / 42%);
+html.dark *:not(iframe):not([data-radix-scroll-area-viewport]):hover::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 28%);
 }
 
-.dark :where(:not(iframe))::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(255 255 255 / 54%);
+html.dark *:not(iframe):not([data-radix-scroll-area-viewport])::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(255 255 255 / 44%);
 }
 
 /* ── Primitive spacing & layout alignment ─────────────── */
@@ -721,6 +736,28 @@ select:focus-visible,
   }
 }
 
+@keyframes quota-tick-down {
+  from {
+    opacity: 0.45;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes quota-tick-up {
+  from {
+    opacity: 0.45;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -733,6 +770,7 @@ select:focus-visible,
   [style*="fade-in"],
   [style*="pop-in"],
   [style*="to-bottom-in"],
+  [style*="quota-tick-"],
   .skeleton {
     animation: none !important;
   }

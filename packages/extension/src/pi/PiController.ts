@@ -556,10 +556,18 @@ export class PiController implements ChatBackendController {
           startLine ? { startLine, ...(endLine ? { endLine } : {}) } : undefined,
         );
       }
-      case 'selectPermission':
-        this.draftMode = message.payload.preset;
+      case 'selectPermission': {
+        const nextPreset = message.payload.preset;
+        if (nextPreset === this.draftMode) return;
+        this.draftMode = nextPreset;
+        if (this.activeId && this.projections.get(this.activeId)?.running) {
+          const info = PI_MODES.find((m) => m.id === nextPreset);
+          const displayName = info ? (getLocale() === 'zh' ? info.zh : info.en) : nextPreset;
+          this.toast('info', t('permission.nextTurn', displayName));
+        }
         this.scheduleRender();
         return;
+      }
       case 'saveAll':
         return this.workbench.saveAll();
       case 'openSettings':

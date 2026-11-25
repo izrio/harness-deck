@@ -29,6 +29,12 @@ describe('TabBar 跨智能体标签与图标渲染', () => {
     const tabBar = screen.getByTestId('tabs');
     expect(tabBar).not.toBeNull();
     expect(tabBar.querySelectorAll('[role="tab"]')).toHaveLength(1);
+
+    // 新增会话图标按钮位于会话标签栏最右侧，点击发送 newSession
+    const newSessionBtn = screen.getByTestId('tabbar-new-session-btn');
+    expect(tabBar.compareDocumentPosition(newSessionBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(newSessionBtn);
+    expect(vscode.posted).toContainEqual({ type: 'newSession', payload: {} });
   });
 
   it('同时展示 DeepSeek 与 Claude 标签，并在每个标题前显示对应智能体图标', () => {

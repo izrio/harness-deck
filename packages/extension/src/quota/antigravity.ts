@@ -41,40 +41,54 @@ function geminiDir(env: Readonly<Record<string, string | undefined>>): string {
   return join(env.HOME ?? env.USERPROFILE ?? homedir(), '.gemini');
 }
 
+/** 从单份 Antigravity OAuth 凭据 JSON 提取未过期的 access_token；返回状态以区分「有效/过期/无结构」。 */
+function parseAccessTokenFromRaw(
+  raw: string,
+  now: number,
+): { readonly kind: 'valid'; readonly accessToken: string } | { readonly kind: 'present-unusable' } | { readonly kind: 'invalid' } {
+  let json: Rec | undefined;
+  try {
+    json = rec(JSON.parse(raw));
+  } catch {
+    return { kind: 'invalid' };
+  }
+  const token = rec(json?.token);
+  if (!token) return { kind: 'invalid' };
+  const accessToken = token.access_token;
+  const refreshToken =
+    (typeof token.refresh_token === 'string' && token.refresh_token.trim()) ||
+    (typeof token.refreshToken === 'string' && token.refreshToken.trim()) ||
+    (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
+    (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
+    '';
+  if (typeof accessToken !== 'string' || !accessToken.trim()) {
+    return refreshToken ? { kind: 'present-unusable' } : { kind: 'invalid' };
+  }
+  const expiry = parseEpochMs(token.expiry);
+  if (expiry !== undefined && expiry <= now) {
+    return { kind: 'present-unusable' };
+  }
+  return { kind: 'valid', accessToken: accessToken.trim() };
+}
+
 /** 依次尝试 CLI / IDE 的凭据文件；若 CLI 主凭据文件存在且含有效结构但 access_token 已过期，不回退 IDE 凭据以免多账号切换时串号。 */
-async function readAccessToken(env: Readonly<Record<string, string | undefined>>, now: number): Promise<string | undefined> {
-  for (let i = 0; i < CREDENTIAL_FILES.length; i += 1) {
-    const file = CREDENTIAL_FILES[i]!;
+async function readAccessToken(
+  env: Readonly<Record<string, string | undefined>>,
+  now: number,
+  allowIdeFallback = true,
+): Promise<string | undefined> {
+  const files = allowIdeFallback ? CREDENTIAL_FILES : [CREDENTIAL_FILES[0]];
+  for (let i = 0; i < files.length; i += 1) {
+    const file = files[i]!;
     let raw: string;
     try {
       raw = await readFile(join(geminiDir(env), file), 'utf8');
     } catch {
       continue;
     }
-    let json: Rec | undefined;
-    try {
-      json = rec(JSON.parse(raw));
-    } catch {
-      continue;
-    }
-    const token = rec(json?.token);
-    const accessToken = token?.access_token;
-    const refreshToken =
-      (typeof token?.refresh_token === 'string' && token.refresh_token.trim()) ||
-      (typeof token?.refreshToken === 'string' && token.refreshToken.trim()) ||
-      (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
-      (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
-      '';
-    if (typeof accessToken !== 'string' || !accessToken.trim()) {
-      if (i === 0 && refreshToken) return undefined;
-      continue;
-    }
-    const expiry = parseEpochMs(token?.expiry);
-    if (expiry !== undefined && expiry <= now) {
-      if (i === 0 && refreshToken) return undefined;
-      continue;
-    }
-    return accessToken.trim();
+    const parsed = parseAccessTokenFromRaw(raw, now);
+    if (parsed.kind === 'valid') return parsed.accessToken;
+    if (i === 0 && parsed.kind === 'present-unusable') return undefined;
   }
   return undefined;
 }
@@ -180,7 +194,13 @@ function readWindows(json: Rec): QuotaWindowView[] {
 /** 查询 Antigravity 订阅额度；无凭据、凭据过期、请求失败或无有效窗口都返回 undefined。 */
 export async function queryAntigravityQuota(options: QuotaServiceOptions = {}): Promise<QuotaView | undefined> {
   const now = options.now ?? Date.now;
-  const token = await readAccessToken(options.env ?? process.env, now());
+  let token: string | undefined;
+  if (options.rawTokenJson !== undefined) {
+    const parsed = parseAccessTokenFromRaw(options.rawTokenJson, now());
+    token = parsed.kind === 'valid' ? parsed.accessToken : undefined;
+  } else {
+    token = await readAccessToken(options.env ?? process.env, now(), options.allowIdeFallback !== false);
+  }
   if (!token) return undefined;
 
   const ua = userAgent(options.clientVersion);

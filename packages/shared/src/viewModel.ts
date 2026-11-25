@@ -341,6 +341,9 @@ export interface ContextDetail {
   readonly performance?: RequestPerformance;
 }
 
+/** 订阅余量的展示模式：百分比双圆环（按时间窗口）或积分余额式（如 CodeBuddy）。 */
+export type QuotaDisplayMode = 'percent' | 'credits';
+
 /** 官方订阅的一个限额窗口（5 小时 / 每周 / 按模型的每周 / 计费周期）。百分比均为 0–100。 */
 export interface QuotaWindowView {
   readonly kind: 'session' | 'weekly' | 'weeklyModel' | 'cycle';
@@ -354,6 +357,12 @@ export interface QuotaWindowView {
   readonly models?: readonly string[];
   readonly usedPercent: number;
   readonly remainingPercent: number;
+  /** 积分模式下该窗口的绝对余额 / 总量 / 已用量（如 CodeBuddy 积分），底层未提供时为 undefined。 */
+  readonly remainingAmount?: number;
+  readonly totalAmount?: number;
+  readonly usedAmount?: number;
+  /** 可选自定义单位（如 `credits` / `积分`）；缺省时按界面语言包展示积分单位。 */
+  readonly unit?: string;
   /** 重置时间（epoch ms），底层没给或尚未消耗时为 undefined。 */
   readonly resetsAt?: number;
   readonly severity?: 'normal' | 'warning' | 'critical';
@@ -362,6 +371,8 @@ export interface QuotaWindowView {
 
 /** 官方订阅用量与限额余量。由宿主查询后下发，不含任何凭据信息。 */
 export interface QuotaView {
+  /** 展示模式：未指定时默认 `'percent'`（窗口包含绝对积分数时自动按 `'credits'` 展示）。 */
+  readonly mode?: QuotaDisplayMode;
   readonly windows: readonly QuotaWindowView[];
   /** 额外用量（按量计费的额度池），底层没开启时为 undefined。 */
   readonly extraUsage?: { readonly usedPercent: number; readonly remainingPercent: number };
@@ -1142,6 +1153,7 @@ export interface SourceControlActionResult {
     | 'discard'
     | 'checkout'
     | 'branch'
+    | 'deleteBranch'
     | 'pull'
     | 'fetch'
     | 'settle';
@@ -1496,6 +1508,67 @@ export interface BrowserAiActionView {
   readonly y?: number;
 }
 
+export interface BrowserDomBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface BrowserDomBreadcrumb {
+  readonly label: string;
+  readonly selector: string;
+}
+
+export interface BrowserDomChildSummary {
+  readonly label: string;
+  readonly selector: string;
+  readonly childCount: number;
+  readonly textPreview?: string;
+}
+
+export interface BrowserDomElement {
+  readonly tag: string;
+  readonly id?: string;
+  readonly classes: readonly string[];
+  readonly selector: string;
+  readonly label: string;
+  readonly rect: BrowserDomBox;
+  readonly boxModel?: {
+    readonly margin: readonly [number, number, number, number];
+    readonly border: readonly [number, number, number, number];
+    readonly padding: readonly [number, number, number, number];
+  };
+  readonly attributes: readonly { readonly name: string; readonly value: string }[];
+  readonly inlineStyle: string;
+  readonly computedStyles: Readonly<Record<string, string>>;
+  readonly textPreview?: string;
+  readonly outerHtml: string;
+  readonly ancestors: readonly BrowserDomBreadcrumb[];
+  readonly children: readonly BrowserDomChildSummary[];
+}
+
+export interface BrowserNetworkEntry {
+  readonly requestId: string;
+  readonly url: string;
+  readonly method: string;
+  readonly resourceType: string;
+  readonly status?: number;
+  readonly statusText?: string;
+  readonly mimeType?: string;
+  readonly protocol?: string;
+  readonly fromCache?: boolean;
+  readonly encodedDataLength?: number;
+  readonly durationMs?: number;
+  readonly startedAt: number;
+  readonly finished: boolean;
+  readonly failed?: boolean;
+  readonly errorText?: string;
+  readonly requestHeaders?: Readonly<Record<string, string>>;
+  readonly responseHeaders?: Readonly<Record<string, string>>;
+  readonly postData?: string;
+}
+
 export interface BrowserState {
   readonly status: BrowserStatus;
   readonly url: string;
@@ -1520,5 +1593,7 @@ export interface BrowserState {
   readonly lastAiAction?: BrowserAiActionView;
   /** 最近控制台日志与未捕获异常（环形缓冲）。 */
   readonly consoleLogs: readonly BrowserConsoleEntry[];
+  /** 最近网络请求记录（环形缓冲，供 DevTools Network 面板调试）。 */
+  readonly networkRequests?: readonly BrowserNetworkEntry[];
   readonly error?: string;
 }

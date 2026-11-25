@@ -146,11 +146,11 @@ describe('订阅用量标识', () => {
     expect(body).toContain('本计费周期');
     expect(body).toContain('本计费周期 · Pro');
     expect(body).toContain('Gemini 模型');
-    expect(body).toContain('Gemini 4 Neon · Gemini 3.8 Flash');
+    expect(body).not.toContain('Gemini 4 Neon · Gemini 3.8 Flash');
     expect(body).toContain('剩余 96%');
     expect(body).toContain('剩余 88%');
     expect(body).toContain('Claude 与 GPT 模型');
-    expect(body).toContain('Claude Opus 5.5 · GPT-OSS 120B');
+    expect(body).not.toContain('Claude Opus 5.5 · GPT-OSS 120B');
     expect(body).toContain('剩余 8%');
     expect(body).toContain('Gemini 4 Argon');
     expect(body).toContain('剩余 100%');
@@ -217,10 +217,11 @@ describe('订阅用量标识', () => {
       }),
     );
 
-    // 切换瞬间隐藏旧 0% 额度并发起新的 fetchQuota
+    // 切换瞬间隐藏旧 0% 额度并发起新的 force fetchQuota
     expect(screen.queryByTestId('usage-badge')).toBeNull();
     const secondReq = vscode.posted.find((m) => m.type === 'fetchQuota');
     expect(secondReq).toBeTruthy();
+    expect(secondReq && secondReq.type === 'fetchQuota' ? secondReq.payload.force : undefined).toBe(true);
     const secondId = secondReq && secondReq.type === 'fetchQuota' ? secondReq.payload.requestId : -1;
     act(() =>
       store.applyHostMessage({
@@ -437,5 +438,206 @@ describe('订阅用量标识', () => {
     expect(screen.getByTestId('usage-badge').textContent).toContain('96%');
     expect(screen.getByTestId('usage-ring-outer').getAttribute('data-percent')).toBe('73');
     expect(screen.getByTestId('usage-ring-inner').getAttribute('data-percent')).toBe('96');
+  });
+
+  it('每轮对话结束后强制刷新额度，并平滑过渡进度条与数字变化', async () => {
+    vi.useFakeTimers();
+    const requestId = mount();
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId,
+          quota: {
+            windows: [
+              { kind: 'weekly', label: 'gemini', usedPercent: 50, remainingPercent: 50 },
+              { kind: 'session', label: 'gemini', usedPercent: 20, remainingPercent: 80 },
+            ],
+            queriedAt: Date.now(),
+          },
+        },
+      }),
+    );
+
+    const badge = screen.getByTestId('usage-badge');
+    expect(badge.textContent).toContain('80%');
+
+    // 打开浮层以便观察进度条与数字动画
+    fireEvent.pointerEnter(badge);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    const fillsBefore = screen.getAllByTestId('usage-bar-fill');
+    expect(fillsBefore[0]!.className).toContain('transition-[width]');
+    expect((fillsBefore[0] as HTMLElement).style.width).toBe('50%');
+    expect((fillsBefore[1] as HTMLElement).style.width).toBe('80%');
+
+    // 开始一轮对话（running: false -> true），不触发额度刷新
+    vscode.reset();
+    act(() =>
+      store.applyHostMessage({
+        type: 'session',
+        payload: { ...claudeSnapshot().session, running: true },
+      }),
+    );
+    expect(vscode.posted.filter((m) => m.type === 'fetchQuota')).toHaveLength(0);
+
+    // 对话回合结束（running: true -> false）：立即带 force: true 刷新额度
+    act(() =>
+      store.applyHostMessage({
+        type: 'session',
+        payload: { ...claudeSnapshot().session, running: false },
+      }),
+    );
+    const refreshReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    expect(refreshReq).toBeTruthy();
+    expect(refreshReq && refreshReq.type === 'fetchQuota' ? refreshReq.payload.force : undefined).toBe(true);
+
+    // 宿主返回更新后的额度：进度条目标宽度立即更新，数字经动画过渡到目标值
+    const refreshId = refreshReq && refreshReq.type === 'fetchQuota' ? refreshReq.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: refreshId,
+          quota: {
+            windows: [
+              { kind: 'weekly', label: 'gemini', usedPercent: 53, remainingPercent: 47 },
+              { kind: 'session', label: 'gemini', usedPercent: 29, remainingPercent: 71 },
+            ],
+            queriedAt: Date.now() + 1_000,
+          },
+        },
+      }),
+    );
+
+    const fillsAfter = screen.getAllByTestId('usage-bar-fill').map((el) => (el as HTMLElement).style.width);
+    expect(fillsAfter).toEqual(['47%', '71%']);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(screen.getByTestId('usage-badge').textContent).toContain('71%');
+    expect(screen.getByTestId('usage-popover').textContent).toContain('剩余 47%');
+    expect(screen.getByTestId('usage-popover').textContent).toContain('剩余 71%');
+  });
+
+  it('积分模式（如 CodeBuddy）展示积分胶囊与 5 格能量条，悬浮展示主积分卡与资源包明细并支持数值动画', async () => {
+    vi.useFakeTimers();
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          backends: { items: [{ id: 'codebuddy', name: 'CodeBuddy', kind: 'codebuddy' }], active: 'codebuddy' },
+        }),
+      }),
+    );
+    render(createElement(UsageBadge));
+    const probe = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const requestId = probe && probe.type === 'fetchQuota' ? probe.payload.requestId : -1;
+
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId,
+          quota: {
+            mode: 'credits',
+            windows: [
+              {
+                kind: 'cycle',
+                label: '',
+                usedPercent: 63,
+                remainingPercent: 37,
+                remainingAmount: 1850,
+                totalAmount: 5000,
+                usedAmount: 3150,
+                resetsAt: Date.now() + 5 * 86_400_000,
+              },
+              {
+                kind: 'cycle',
+                label: 'Pro',
+                usedPercent: 20,
+                remainingPercent: 80,
+                remainingAmount: 800,
+                totalAmount: 1000,
+                usedAmount: 200,
+              },
+            ],
+            queriedAt: Date.now(),
+          },
+        },
+      }),
+    );
+
+    const badge = screen.getByTestId('usage-badge');
+    expect(badge.getAttribute('data-quota-mode')).toBe('credits');
+    expect(badge.textContent).toContain('1,850 积分');
+    expect(screen.queryByTestId('usage-dual-ring')).toBeNull();
+    expect(screen.getByTestId('usage-credit-gauge').getAttribute('data-percent')).toBe('37');
+
+    // 悬浮展开积分余额浮层
+    fireEvent.pointerEnter(badge);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    const popover = screen.getByTestId('usage-popover');
+    expect(popover.getAttribute('data-quota-mode')).toBe('credits');
+    expect(screen.getByTestId('usage-credits-hero').textContent).toContain('1,850');
+    expect(screen.getByTestId('usage-credits-hero').textContent).toContain('/ 5,000 积分');
+    expect(screen.getByTestId('usage-credits-hero').textContent).toContain('已用 3,150');
+    expect(screen.getByTestId('usage-credit-pack-Pro').textContent).toContain('800');
+    expect(screen.getByTestId('usage-credit-pack-Pro').textContent).toContain('/ 1,000 积分');
+
+    const fills = screen.getAllByTestId('usage-bar-fill').map((el) => (el as HTMLElement).style.width);
+    expect(fills).toEqual(['37%', '80%']);
+
+    // 回合结束后余额减少，触发积分数字与进度条平滑动画
+    vscode.reset();
+    act(() =>
+      store.applyHostMessage({
+        type: 'session',
+        payload: { ...claudeSnapshot().session, running: true },
+      }),
+    );
+    act(() =>
+      store.applyHostMessage({
+        type: 'session',
+        payload: { ...claudeSnapshot().session, running: false },
+      }),
+    );
+    const refreshReq = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const refreshId = refreshReq && refreshReq.type === 'fetchQuota' ? refreshReq.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: refreshId,
+          quota: {
+            mode: 'credits',
+            windows: [
+              {
+                kind: 'cycle',
+                label: '',
+                usedPercent: 65,
+                remainingPercent: 35,
+                remainingAmount: 1750,
+                totalAmount: 5000,
+                usedAmount: 3250,
+              },
+            ],
+            queriedAt: Date.now() + 1_000,
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByTestId('usage-credit-gauge').getAttribute('data-percent')).toBe('35');
+    expect((screen.getAllByTestId('usage-bar-fill')[0] as HTMLElement).style.width).toBe('35%');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(screen.getByTestId('usage-badge').textContent).toContain('1,750 积分');
+    expect(screen.getByTestId('usage-credits-hero').textContent).toContain('1,750');
   });
 });

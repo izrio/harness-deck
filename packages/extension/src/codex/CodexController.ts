@@ -1063,6 +1063,9 @@ export class CodexController implements ChatBackendController {
     this.draftMode = cfg.id;
     if (this.activeId) {
       this.threadModes.set(this.activeId, cfg.id);
+      if (this.projections.get(this.activeId)?.running) {
+        this.toast('info', t('permission.nextTurn', displayName));
+      }
     }
     this.scheduleRender();
   }

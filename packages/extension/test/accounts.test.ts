@@ -707,6 +707,31 @@ describe('AccountIsolation & AccountInspector', () => {
       });
       assert.equal(inspected.status, 'authenticated');
       assert.equal(inspected.identity, 'cli-user@gmail.com');
+
+      // 5. 从已登录的自定义账号切回尚未备份槽位的系统默认号时，绝不把自定义账号的磁盘 token 错拷给系统默认号
+      const sysKey = accountSlotSecretKey(systemAccountId('antigravity'));
+      await secrets.delete(sysKey);
+      await writeFile(tokenPath, agyWithIdTokenEmail, 'utf8');
+      const backToEmptySys = await switchAntigravityCredentialSlot({
+        targetAccountId: systemAccountId('antigravity'),
+        previousAccountId: 'agy-cli-email',
+        secrets,
+        env,
+      });
+      assert.equal(backToEmptySys.activated, false);
+      assert.equal(secrets.map.get(sysKey), undefined);
+
+      // 6. CodeBuddy 独立隔离账号绝不继承宿主环境变量里的 CODEBUDDY_COOKIE / CODEBUDDY_API_KEY
+      const cbPatch = await prepareAccountLaunchPatch({
+        backendId: 'codebuddy',
+        accountId: 'cb-isolated',
+        account: { id: 'cb-isolated', backendId: 'codebuddy', label: 'Work CB', createdAt: 1 },
+        storageRoot: join(root, 'storage'),
+        baseEnv: { HOME: fakeHome, CODEBUDDY_COOKIE: 'session=other-account', CODEBUDDY_API_KEY: 'sk-other' },
+        secrets,
+      });
+      assert.equal(cbPatch.env.CODEBUDDY_COOKIE, undefined);
+      assert.equal(cbPatch.env.CODEBUDDY_API_KEY, undefined);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

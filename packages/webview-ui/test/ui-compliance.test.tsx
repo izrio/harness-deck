@@ -5,6 +5,7 @@ import type { Item } from '@harness-deck/shared';
 import { App } from '../src/App.tsx';
 import { ItemView } from '../src/components/Items.tsx';
 import { InteractionCard } from '../src/components/Interactions.tsx';
+import { ModelPicker } from '../src/components/ModelPicker.tsx';
 import { applyHostMessage, resetStoreForTests } from '../src/store.ts';
 import { makeSnapshot, mockVsCodeApi } from './setup.ts';
 
@@ -120,5 +121,29 @@ describe('AGENTS.md UI 合规', () => {
     const allow = screen.getByRole('button', { name: '允许本次' });
     expect(allow.className).toContain('text-brand-foreground');
     expect(allow.className).not.toContain('text-white');
+  });
+
+  it('模型下拉列表使用 shadcn-ui ScrollArea 替代系统原生滚动条', () => {
+    act(() =>
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          models: {
+            current: { provider: 'antigravity', model: 'gemini-4-neon' },
+            options: [
+              { provider: 'antigravity', model: 'gemini-4-neon', name: 'Gemini 4 Neon', group: 'Gemini', efforts: [] },
+              { provider: 'antigravity', model: 'gemini-4-carbon', name: 'Gemini 4 Carbon', group: 'Gemini', efforts: [] },
+            ],
+          },
+        }),
+      }),
+    );
+    render(<ModelPicker disabled={false} />);
+    fireEvent.click(screen.getByTestId('model-picker'));
+    const list = screen.getByTestId('model-list');
+    const scrollArea = list.closest('[data-slot="scroll-area"]');
+    const viewport = list.closest('[data-slot="scroll-area-viewport"]');
+    expect(scrollArea).toBeTruthy();
+    expect(viewport).toBeTruthy();
   });
 });

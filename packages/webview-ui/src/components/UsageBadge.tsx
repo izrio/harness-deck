@@ -1,15 +1,20 @@
 /**
  * 上下文环旁的官方订阅用量标识：只有宿主查到官方订阅额度时才渲染。
- * 挂载时探测一次；悬浮时复用 5 分钟缓存刷新并展开 Popover，按模型池/窗口展示剩余额度与重置时间。
+ * 支持两种展示模式：
+ * - 百分比双圆环模式（`percent`，如 Claude / Antigravity 的 5 小时 + 每周窗口）
+ * - 积分余额模式（`credits`，如 CodeBuddy 的积分余额胶囊 + 5 格能量条 + 积分钱包浮层）
+ * 挂载时探测一次；每轮对话结束强制刷新；悬浮时复用 5 分钟缓存并展开 Popover。
  */
 import { useEffect, useRef, useState } from 'react';
-import { backendCapabilities, type QuotaView, type QuotaWindowView } from '@harness-deck/shared';
+import { backendCapabilities, type QuotaDisplayMode, type QuotaView, type QuotaWindowView } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '../lib/utils.ts';
 import { getState, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { useT } from '../i18n.ts';
+import { CoinsIcon } from './icons.tsx';
 
 /** 与宿主的额度缓存同频，缓存有效期内悬浮不再重复请求。 */
 const QUOTA_CACHE_MS = 300_000;
@@ -19,6 +24,147 @@ const CLOSE_DELAY = 250;
 const TRANSIENT_RETRY_MS = 3_000;
 /** 切回窗口/面板可见时自动补查的最小间隔，避免高频切换焦点制造重复请求。 */
 const FOCUS_RETRY_COOLDOWN_MS = 15_000;
+/** 额度数字平滑插值动画时长（ms）。 */
+const NUMBER_TWEEN_MS = 420;
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+function roundWithDecimals(value: number, decimals: number): number {
+  if (decimals <= 0) return Math.round(value);
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+/**
+ * 额度/积分平滑数字动画：
+ * - 首次挂载直接渲染目标值（无 0→N 闪烁）；
+ * - 后续数值变动时用 easeOutCubic 平滑插值滚动到新数值，并叠加轻微垂直微动效。
+ */
+function useAnimatedNumber(
+  target: number,
+  options?: { readonly min?: number; readonly max?: number; readonly decimals?: number },
+): { readonly display: number; readonly tickKey: number; readonly direction: 'up' | 'down' | 'none' } {
+  const min = options?.min ?? 0;
+  const max = options?.max ?? 100;
+  const decimals = options?.decimals ?? 0;
+  const clamped = Math.min(max, Math.max(min, Number.isFinite(target) ? target : min));
+  const rounded = roundWithDecimals(clamped, decimals);
+  const [display, setDisplay] = useState(rounded);
+  const [tickMeta, setTickMeta] = useState<{ readonly key: number; readonly dir: 'up' | 'down' | 'none' }>({
+    key: 0,
+    dir: 'none',
+  });
+  const currentRef = useRef(rounded);
+
+  useEffect(() => {
+    const from = currentRef.current;
+    if (from === rounded) return;
+    const dir: 'up' | 'down' = rounded < from ? 'down' : 'up';
+    setTickMeta((prev) => ({ key: prev.key + 1, dir }));
+
+    if (prefersReducedMotion() || typeof requestAnimationFrame !== 'function') {
+      currentRef.current = rounded;
+      setDisplay(rounded);
+      return;
+    }
+
+    const start = performance.now();
+    let rafId = 0;
+    const step = (now: number) => {
+      const progress = Math.min(1, Math.max(0, (now - start) / NUMBER_TWEEN_MS));
+      const eased = 1 - (1 - progress) ** 3;
+      const next = progress >= 1 ? rounded : roundWithDecimals(from + (rounded - from) * eased, decimals);
+      if (next !== currentRef.current) {
+        currentRef.current = next;
+        setDisplay(next);
+      }
+      if (progress < 1) {
+        rafId = requestAnimationFrame(step);
+      }
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [rounded, decimals]);
+
+  return { display, tickKey: tickMeta.key, direction: tickMeta.dir };
+}
+
+function AnimatedNumber({
+  value,
+  min = 0,
+  max = 100,
+  decimals = 0,
+  format = (n) => `${n}%`,
+  className,
+}: {
+  readonly value: number;
+  readonly min?: number;
+  readonly max?: number;
+  readonly decimals?: number;
+  readonly format?: (n: number) => string;
+  readonly className?: string;
+}) {
+  const { display, tickKey, direction } = useAnimatedNumber(value, { min, max, decimals });
+  const targetRounded = roundWithDecimals(Math.min(max, Math.max(min, Number.isFinite(value) ? value : min)), decimals);
+  return (
+    <span
+      key={tickKey > 0 ? tickKey : undefined}
+      data-animated-number
+      data-target={targetRounded}
+      className={cn('inline-block tabular-nums', className)}
+      style={
+        direction !== 'none'
+          ? {
+              animation: `${direction === 'down' ? 'quota-tick-down' : 'quota-tick-up'} 280ms var(--ease-out-strong) both`,
+            }
+          : undefined
+      }
+    >
+      {format(display)}
+    </span>
+  );
+}
+
+/** 格式化积分数：浮层内展示完整千分位数字；底栏紧凑胶囊遇到 ≥100,000 时缩写为 k / M。 */
+function formatCreditNumber(value: number, compact = false): string {
+  const safe = Math.max(0, Number.isFinite(value) ? value : 0);
+  if (compact && safe >= 1_000_000) {
+    return `${(safe / 1_000_000).toFixed(1).replace(/\.0$/u, '')}M`;
+  }
+  if (compact && safe >= 100_000) {
+    return `${(safe / 1_000).toFixed(1).replace(/\.0$/u, '')}k`;
+  }
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: Number.isInteger(safe) ? 0 : 1,
+  }).format(safe);
+}
+
+/** 判定当前额度采用百分比模式还是积分模式。 */
+function resolveQuotaMode(quota: QuotaView): QuotaDisplayMode {
+  if (quota.mode) return quota.mode;
+  if (quota.windows.some((w) => w.remainingAmount !== undefined || w.totalAmount !== undefined)) {
+    return 'credits';
+  }
+  return 'percent';
+}
+
+/** 积分模式下提取主积分账户（优先无标签总周期窗口）与附加资源包列表。 */
+function resolveCreditSummary(windows: readonly QuotaWindowView[]): {
+  readonly primary: QuotaWindowView;
+  readonly packs: readonly QuotaWindowView[];
+} {
+  const primary = windows.find((w) => !w.label.trim()) ?? windows[0]!;
+  return {
+    primary,
+    packs: windows.filter((w) => w !== primary),
+  };
+}
 
 type WindowSection =
   | { readonly type: 'single'; readonly key: string; readonly window: QuotaWindowView }
@@ -26,7 +172,6 @@ type WindowSection =
       readonly type: 'pool';
       readonly key: string;
       readonly label: string;
-      readonly models?: readonly string[];
       readonly windows: readonly QuotaWindowView[];
     };
 
@@ -59,31 +204,27 @@ function resetLabel(resetsAt: number | undefined, t: ReturnType<typeof useT>): s
 /** 把带池名的 5h/weekly 窗口按池聚合，保留首次出现顺序；无池名或周期/单模型窗口保持独立条目。 */
 function buildSections(windows: readonly QuotaWindowView[]): readonly WindowSection[] {
   const order: Array<{ readonly type: 'single'; readonly key: string; readonly window: QuotaWindowView } | { readonly type: 'pool'; readonly label: string }> = [];
-  const pools = new Map<string, { models?: readonly string[]; windows: QuotaWindowView[] }>();
+  const pools = new Map<string, QuotaWindowView[]>();
   for (const w of windows) {
     if ((w.kind === 'session' || w.kind === 'weekly') && w.label) {
       let group = pools.get(w.label);
       if (!group) {
-        group = { ...(w.models?.length ? { models: w.models } : {}), windows: [] };
+        group = [];
         pools.set(w.label, group);
         order.push({ type: 'pool', label: w.label });
-      } else if (!group.models && w.models?.length) {
-        group.models = w.models;
       }
-      group.windows.push(w);
+      group.push(w);
     } else {
       order.push({ type: 'single', key: `${w.kind}:${w.label}`, window: w });
     }
   }
   return order.map((entry) => {
     if (entry.type === 'single') return entry;
-    const group = pools.get(entry.label)!;
     return {
       type: 'pool',
       key: `pool:${entry.label}`,
       label: entry.label,
-      ...(group.models ? { models: group.models } : {}),
-      windows: group.windows,
+      windows: pools.get(entry.label)!,
     };
   });
 }
@@ -152,7 +293,7 @@ function DualUsageRing({
           data-testid="usage-ring-outer"
           data-percent={Math.round(outer)}
           className={cn(
-            'transition-[stroke-dashoffset] duration-300 ease-out',
+            'transition-[stroke-dashoffset,color] duration-500 ease-[var(--ease-out-strong)]',
             ringToneClass(outer, 'text-accent-ink'),
           )}
         />
@@ -184,7 +325,7 @@ function DualUsageRing({
           data-testid="usage-ring-inner"
           data-percent={Math.round(inner)}
           className={cn(
-            'transition-[stroke-dashoffset] duration-300 ease-out',
+            'transition-[stroke-dashoffset,color] duration-500 ease-[var(--ease-out-strong)]',
             ringToneClass(inner, 'text-green'),
           )}
         />
@@ -236,18 +377,209 @@ function WindowBar({
     <div className="flex flex-col gap-0.5">
       <div className="flex items-baseline justify-between gap-2 text-[11.5px] leading-4">
         <span className="min-w-0 truncate text-ink-2">{title}</span>
-        <span
+        <AnimatedNumber
+          value={remaining}
+          format={(n) => t('usage.remaining', n)}
           className={cn(
-            'shrink-0 font-mono tabular-nums',
+            'shrink-0 font-mono transition-colors duration-300',
             severity === 'critical' ? 'text-red' : severity === 'warning' ? 'text-orange' : 'text-ink',
           )}
-        >
-          {t('usage.remaining', Math.round(remaining))}
-        </span>
+        />
       </div>
-      <div className={cn('h-1.5 w-full overflow-hidden rounded-full bg-field shadow-hairline', barColor)}>
+      <div className={cn('h-1.5 w-full overflow-hidden rounded-full bg-field shadow-hairline transition-colors duration-300', barColor)}>
         <div
-          className="h-full rounded-full bg-current opacity-80"
+          className="h-full rounded-full bg-current opacity-80 transition-[width] duration-500 ease-[var(--ease-out-strong)]"
+          data-testid="usage-bar-fill"
+          style={{ width: `${remaining}%` }}
+        />
+      </div>
+      {reset ? <div className="text-[10.5px] leading-3.5 text-ink-3">{t('usage.resets', reset)}</div> : null}
+    </div>
+  );
+}
+
+/** 积分模式底栏 5 格能量条：每格按 20% 步进平滑填充高度与语义色，视觉上与百分比双圆环明显区分。 */
+function CreditEnergyGauge({
+  percent,
+  level,
+  className,
+}: {
+  readonly percent: number;
+  readonly level: 'low' | 'medium' | 'high';
+  readonly className?: string;
+}) {
+  const clamped = clampPercent(percent);
+  const fillClass = level === 'high' ? 'bg-red' : level === 'medium' ? 'bg-orange' : 'bg-green';
+
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="usage-credit-gauge"
+      data-percent={Math.round(clamped)}
+      className={cn('inline-flex items-end gap-[2px]', className)}
+    >
+      {[0, 1, 2, 3, 4].map((index) => {
+        const cellFill = Math.round(Math.min(1, Math.max(0, (clamped - index * 20) / 20)) * 100);
+        return (
+          <span
+            key={index}
+            className="flex h-[10px] w-[3px] items-end overflow-hidden rounded-full bg-ink-3/20"
+          >
+            <span
+              className={cn(
+                'w-full rounded-full transition-[height,background-color] duration-500 ease-[var(--ease-out-strong)]',
+                fillClass,
+              )}
+              style={{ height: `${cellFill}%` }}
+            />
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+/** 积分模式浮层主卡：突出剩余积分数、总量对比、已用消耗与 5 段刻度进度条。 */
+function CreditsHeroCard({
+  window: w,
+  t,
+}: {
+  readonly window: QuotaWindowView;
+  readonly t: ReturnType<typeof useT>;
+}) {
+  const remaining = clampPercent(w.remainingPercent);
+  const severity = w.severity ?? (remaining <= 10 ? 'critical' : remaining <= 30 ? 'warning' : 'normal');
+  const unit = w.unit?.trim() || t('usage.credits.unit');
+  const title = w.label.trim() ? poolName(w.label.trim(), t) : t('usage.credits.available');
+  const reset = resetLabel(w.resetsAt, t);
+  const barColor = severity === 'critical' ? 'text-red' : severity === 'warning' ? 'text-orange' : 'text-green';
+  const pillClass =
+    severity === 'critical'
+      ? 'bg-red-tint text-red'
+      : severity === 'warning'
+        ? 'bg-orange-tint text-orange'
+        : 'bg-green-tint text-green';
+  const iconTone = severity === 'critical' ? 'text-red' : 'text-orange';
+  const hasDecimals = w.remainingAmount !== undefined && !Number.isInteger(w.remainingAmount);
+
+  return (
+    <div
+      data-testid="usage-credits-hero"
+      className="flex flex-col gap-2 rounded-lg bg-field/65 px-2.5 py-2.5 ring-1 ring-inset ring-line/80"
+    >
+      <div className="flex items-center justify-between gap-2 text-[11px] leading-4">
+        <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-ink-2">
+          <CoinsIcon className={cn('size-3.5 shrink-0', iconTone)} />
+          <span className="truncate">{title}</span>
+        </span>
+        <AnimatedNumber
+          value={remaining}
+          className={cn('shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[10.5px] leading-none font-medium', pillClass)}
+        />
+      </div>
+
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="flex min-w-0 items-baseline gap-1">
+          {w.remainingAmount !== undefined ? (
+            <>
+              <AnimatedNumber
+                value={w.remainingAmount}
+                min={0}
+                max={Number.POSITIVE_INFINITY}
+                decimals={hasDecimals ? 1 : 0}
+                format={(n) => formatCreditNumber(n)}
+                className="font-mono text-[20px] font-semibold leading-6 tracking-tight text-ink"
+              />
+              <span className="truncate font-mono text-[11px] text-ink-3">
+                {w.totalAmount !== undefined
+                  ? `/ ${formatCreditNumber(w.totalAmount)} ${unit}`
+                  : unit}
+              </span>
+            </>
+          ) : (
+            <AnimatedNumber
+              value={remaining}
+              className="font-mono text-[20px] font-semibold leading-6 tracking-tight text-ink"
+            />
+          )}
+        </div>
+        {w.usedAmount !== undefined ? (
+          <span className="shrink-0 font-mono text-[10.5px] text-ink-3 tabular-nums">
+            {t('usage.credits.used', formatCreditNumber(w.usedAmount))}
+          </span>
+        ) : null}
+      </div>
+
+      <div className={cn('relative h-2 w-full overflow-hidden rounded-full bg-canvas/85 shadow-hairline transition-colors duration-300', barColor)}>
+        <div
+          className="h-full rounded-full bg-current opacity-85 transition-[width] duration-500 ease-[var(--ease-out-strong)]"
+          data-testid="usage-bar-fill"
+          style={{ width: `${remaining}%` }}
+        />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid grid-cols-5">
+          {[0, 1, 2, 3].map((idx) => (
+            <span key={idx} className="border-r border-canvas/60" />
+          ))}
+        </div>
+      </div>
+
+      {reset ? <div className="text-[10.5px] leading-3.5 text-ink-3">{t('usage.resets', reset)}</div> : null}
+    </div>
+  );
+}
+
+/** 积分模式附加资源包行（如 CodeBuddy 的 Pro / Starter / Bonus 包）。 */
+function CreditPackRow({
+  window: w,
+  t,
+}: {
+  readonly window: QuotaWindowView;
+  readonly t: ReturnType<typeof useT>;
+}) {
+  const remaining = clampPercent(w.remainingPercent);
+  const severity = w.severity ?? (remaining <= 10 ? 'critical' : remaining <= 30 ? 'warning' : 'normal');
+  const barColor = severity === 'critical' ? 'text-red' : severity === 'warning' ? 'text-orange' : 'text-green';
+  const unit = w.unit?.trim() || t('usage.credits.unit');
+  const title = w.label.trim() ? poolName(w.label.trim(), t) : windowTitle(w, t);
+  const reset = resetLabel(w.resetsAt, t);
+  const hasDecimals = w.remainingAmount !== undefined && !Number.isInteger(w.remainingAmount);
+
+  return (
+    <div className="flex flex-col gap-0.5" data-testid={`usage-credit-pack-${w.label || w.kind}`}>
+      <div className="flex items-baseline justify-between gap-2 text-[11.5px] leading-4">
+        <span className="min-w-0 truncate text-ink-2">{title}</span>
+        {w.remainingAmount !== undefined ? (
+          <span
+            className={cn(
+              'inline-flex shrink-0 items-baseline gap-0.5 font-mono transition-colors duration-300',
+              severity === 'critical' ? 'text-red' : severity === 'warning' ? 'text-orange' : 'text-ink',
+            )}
+          >
+            <AnimatedNumber
+              value={w.remainingAmount}
+              min={0}
+              max={Number.POSITIVE_INFINITY}
+              decimals={hasDecimals ? 1 : 0}
+              format={(n) => formatCreditNumber(n)}
+            />
+            <span className="text-[10.5px] text-ink-3">
+              {w.totalAmount !== undefined ? `/ ${formatCreditNumber(w.totalAmount)} ${unit}` : unit}
+            </span>
+          </span>
+        ) : (
+          <AnimatedNumber
+            value={remaining}
+            format={(n) => t('usage.remaining', n)}
+            className={cn(
+              'shrink-0 font-mono transition-colors duration-300',
+              severity === 'critical' ? 'text-red' : severity === 'warning' ? 'text-orange' : 'text-ink',
+            )}
+          />
+        )}
+      </div>
+      <div className={cn('h-1.5 w-full overflow-hidden rounded-full bg-field shadow-hairline transition-colors duration-300', barColor)}>
+        <div
+          className="h-full rounded-full bg-current opacity-80 transition-[width] duration-500 ease-[var(--ease-out-strong)]"
           data-testid="usage-bar-fill"
           style={{ width: `${remaining}%` }}
         />
@@ -311,10 +643,13 @@ export function UsageBadge() {
   const [open, setOpen] = useState(false);
   const quotaRef = useRef<QuotaView | undefined>(quota);
   const requestIdRef = useRef(0);
+  const requestKeepOnErrorRef = useRef(false);
   const handledIdRef = useRef(0);
   const fetchedForScope = useRef<string | undefined>(undefined);
   const probeSent = useRef(false);
   const lastScope = useRef<string>(quotaScopeOf(getState()));
+  const scopeChangedAtRef = useRef(0);
+  const needsReconnectRefreshRef = useRef(false);
   const prevConnectedRef = useRef(connected);
   const prevHasModelsRef = useRef(hasModels);
   const prevRunningRef = useRef(running);
@@ -325,14 +660,15 @@ export function UsageBadge() {
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const requestQuota = () => {
+  const requestQuota = (force = false, keepOnError = false) => {
     clearTimeout(retryTimerRef.current);
     retryTimerRef.current = undefined;
     const requestId = ++nextQuotaRequestId;
     requestIdRef.current = requestId;
+    requestKeepOnErrorRef.current = keepOnError;
     fetchedForScope.current = quotaScopeOf(getState());
     lastProbeAtRef.current = Date.now();
-    postToHost({ type: 'fetchQuota', payload: { requestId } });
+    postToHost({ type: 'fetchQuota', payload: force ? { requestId, force: true } : { requestId } });
   };
 
   useEffect(() => {
@@ -382,30 +718,40 @@ export function UsageBadge() {
     prevHasModelsRef.current = hasModels;
     prevRunningRef.current = running;
 
-    // 切换底层、切换官方账号/服务商渠道或登录态变化后先隐藏旧额度，再立即为新作用域重新探测。
+    // 切换底层、切换官方账号/服务商渠道或登录态变化后先清空旧额度，强制跳过宿主缓存重新探测。
     if (scopeChanged) {
       lastScope.current = quotaScope;
+      scopeChangedAtRef.current = Date.now();
+      needsReconnectRefreshRef.current = true;
       retriedForScopeRef.current = false;
       unavailableAtRef.current = 0;
-      const scopedQuota = activeAccountQuotaOf(getState());
-      quotaRef.current = scopedQuota;
-      setQuota(scopedQuota);
+      quotaRef.current = undefined;
+      setQuota(undefined);
       setUnavailable(false);
-      requestQuota();
+      requestQuota(true, false);
+      return;
+    }
+
+    // 每轮对话结束后强制刷新一次最新额度（跳过宿主 5 分钟缓存），让余额进度条和数字实时更新。
+    if (supportsQuota && finishedTurn) {
+      setUnavailable(false);
+      requestQuota(true, true);
       return;
     }
 
     // 切换账号或重启底层初期，旧 access_token 可能尚未被新进程刷新，首次探测会返回 unavailable；
-    // 待底层重新连上、拉回模型列表或完成一轮对话（CLI 自动续期落盘）后自动补查一次。
-    if (supportsQuota && !quotaRef.current && (becameConnected || loadedModels || finishedTurn)) {
+    // 待底层重新连上或拉回模型列表后强制补查一次，确保展示新账号续期后的实时额度。
+    if (supportsQuota && (becameConnected || loadedModels) && (!quotaRef.current || needsReconnectRefreshRef.current)) {
+      needsReconnectRefreshRef.current = false;
       setUnavailable(false);
-      requestQuota();
+      requestQuota(true, Boolean(quotaRef.current));
     }
   }, [quotaScope, active, connected, hasModels, running, supportsQuota]);
 
   // 若宿主已通过账号巡检 / 登录完成 / 其他视图刷新并广播了当前激活账号的额度，直接同步展示。
   useEffect(() => {
     if (!supportsQuota || !activeAccountQuota) return;
+    if (activeAccountQuota.queriedAt <= scopeChangedAtRef.current) return;
     const current = quotaRef.current;
     const shouldAdopt = current
       ? activeAccountQuota.queriedAt > current.queriedAt
@@ -430,6 +776,10 @@ export function UsageBadge() {
       setQuota(matched.quota);
       setUnavailable(false);
     } else {
+      // 回合结束后的静默刷新若遇临时失败，保留上一次有效额度避免闪烁消失；切换账号触发的刷新绝不保留旧账号额度
+      if (requestKeepOnErrorRef.current && quotaRef.current) {
+        return;
+      }
       quotaRef.current = undefined;
       unavailableAtRef.current = Date.now();
       setQuota(undefined);
@@ -450,22 +800,45 @@ export function UsageBadge() {
   // 宿主查不到额度、或查询期间用户切到了别的底层/账号：标识彻底消失。
   if (!quota || unavailable || (fetchedForScope.current !== undefined && fetchedForScope.current !== quotaScope)) return null;
 
-  // 外环展示周用量（无周/5h 窗口时回退计费周期），内环展示 5 小时用量；数字优先展示 5 小时剩余百分比。
+  const quotaMode = resolveQuotaMode(quota);
+  const isCreditsMode = quotaMode === 'credits';
+
+  // 百分比模式：外环展示周用量（无周/5h 窗口时回退计费周期），内环展示 5 小时用量；数字优先展示 5 小时剩余百分比。
   const { weeklyRemaining, sessionRemaining, fallbackRemaining } = resolveRingMetrics(quota.windows);
   const outerPercent = weeklyRemaining ?? (sessionRemaining === undefined ? fallbackRemaining : undefined);
   const innerPercent = sessionRemaining;
-  const primaryRemaining = sessionRemaining ?? weeklyRemaining ?? fallbackRemaining ?? 0;
-  const worstRemaining = Math.min(
-    outerPercent ?? 100,
-    innerPercent ?? 100,
-    primaryRemaining,
-  );
-  const level = worstRemaining <= 10 ? 'high' : worstRemaining <= 30 ? 'medium' : 'low';
-  const hasBothRings = weeklyRemaining !== undefined && sessionRemaining !== undefined;
-  const badgeAriaLabel = hasBothRings
-    ? t('usage.badgeLabelDual', Math.round(weeklyRemaining), Math.round(sessionRemaining))
-    : t('usage.badgeLabel', Math.round(primaryRemaining));
-  const sections = buildSections(quota.windows);
+  const percentPrimary = sessionRemaining ?? weeklyRemaining ?? fallbackRemaining ?? 0;
+
+  // 积分模式：主账户余额 + 附加资源包明细
+  const creditSummary = isCreditsMode ? resolveCreditSummary(quota.windows) : undefined;
+  const creditPrimary = creditSummary?.primary;
+  const creditRemainingPercent = creditPrimary ? clampPercent(creditPrimary.remainingPercent) : percentPrimary;
+  const creditUnit = creditPrimary?.unit?.trim() || t('usage.credits.unit');
+
+  const worstRemaining = isCreditsMode
+    ? creditRemainingPercent
+    : Math.min(outerPercent ?? 100, innerPercent ?? 100, percentPrimary);
+  const level: 'low' | 'medium' | 'high' = worstRemaining <= 10 ? 'high' : worstRemaining <= 30 ? 'medium' : 'low';
+  const hasBothRings = !isCreditsMode && weeklyRemaining !== undefined && sessionRemaining !== undefined;
+  const badgeAriaLabel = isCreditsMode
+    ? creditPrimary?.remainingAmount !== undefined
+      ? creditPrimary.totalAmount !== undefined
+        ? t(
+            'usage.credits.badgeLabelRatio',
+            formatCreditNumber(creditPrimary.remainingAmount),
+            formatCreditNumber(creditPrimary.totalAmount),
+            Math.round(creditRemainingPercent),
+          )
+        : t(
+            'usage.credits.badgeLabel',
+            formatCreditNumber(creditPrimary.remainingAmount),
+            Math.round(creditRemainingPercent),
+          )
+      : t('usage.credits.badgeLabelPercent', Math.round(creditRemainingPercent))
+    : hasBothRings
+      ? t('usage.badgeLabelDual', Math.round(weeklyRemaining), Math.round(sessionRemaining))
+      : t('usage.badgeLabel', Math.round(percentPrimary));
+  const sections = isCreditsMode ? [] : buildSections(quota.windows);
   const clearTimers = () => {
     clearTimeout(openTimer.current);
     clearTimeout(closeTimer.current);
@@ -490,90 +863,142 @@ export function UsageBadge() {
           size="xs"
           aria-label={badgeAriaLabel}
           title={badgeAriaLabel}
+          data-quota-mode={quotaMode}
           className={cn(
-            'usage-badge gap-1.5 font-medium tabular-nums hover:bg-hover',
-            level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink-2 hover:text-ink',
+            'usage-badge gap-1.5 font-medium tabular-nums',
+            isCreditsMode
+              ? cn(
+                  'rounded-full px-2 ring-1 ring-inset transition-colors',
+                  level === 'high'
+                    ? 'bg-red-tint/45 text-red ring-red/30 hover:bg-red-tint/70'
+                    : level === 'medium'
+                      ? 'bg-orange-tint/45 text-orange ring-orange/30 hover:bg-orange-tint/70'
+                      : 'bg-field/75 text-ink-2 ring-line-strong/50 hover:bg-hover hover:text-ink',
+                )
+              : cn(
+                  'hover:bg-hover',
+                  level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink-2 hover:text-ink',
+                ),
           )}
           data-testid="usage-badge"
           onPointerEnter={enter}
           onPointerLeave={leave}
         >
-          <DualUsageRing
-            {...(outerPercent !== undefined ? { outerPercent } : {})}
-            {...(innerPercent !== undefined ? { innerPercent } : {})}
-          />
-          <span>{Math.round(primaryRemaining)}%</span>
+          {isCreditsMode ? (
+            <>
+              <CoinsIcon
+                className={cn('size-3.5 shrink-0', level === 'high' ? 'text-red' : 'text-orange')}
+              />
+              {creditPrimary?.remainingAmount !== undefined ? (
+                <AnimatedNumber
+                  value={creditPrimary.remainingAmount}
+                  min={0}
+                  max={Number.POSITIVE_INFINITY}
+                  decimals={Number.isInteger(creditPrimary.remainingAmount) ? 0 : 1}
+                  format={(n) => `${formatCreditNumber(n, true)} ${creditUnit}`}
+                />
+              ) : (
+                <AnimatedNumber value={creditRemainingPercent} />
+              )}
+              <CreditEnergyGauge percent={creditRemainingPercent} level={level} className="max-md:hidden" />
+            </>
+          ) : (
+            <>
+              <DualUsageRing
+                {...(outerPercent !== undefined ? { outerPercent } : {})}
+                {...(innerPercent !== undefined ? { innerPercent } : {})}
+              />
+              <AnimatedNumber value={percentPrimary} />
+            </>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent
         side="top"
         align="end"
         sideOffset={6}
-        aria-label={t('usage.title')}
-        className="max-h-[calc(var(--radix-popover-content-available-height)-8px)] w-72 overflow-y-auto rounded-card p-0 shadow-raised"
+        aria-label={isCreditsMode ? t('usage.credits.title') : t('usage.title')}
+        className="w-72 overflow-hidden rounded-card p-0 shadow-raised"
         data-testid="usage-popover"
+        data-quota-mode={quotaMode}
         onOpenAutoFocus={(event) => event.preventDefault()}
         onPointerEnter={() => clearTimeout(closeTimer.current)}
         onPointerLeave={leave}
       >
-        <div className="flex flex-col gap-2 px-3 py-2.5">
-          <div className="flex flex-col gap-1">
-            <div className="text-[12px] font-semibold leading-4 text-ink">{t('usage.title')}</div>
-            {hasBothRings ? (
-              <div className="flex items-center gap-3 text-[10.5px] leading-3.5 text-ink-3" data-testid="usage-ring-legend">
-                <span className="inline-flex items-center gap-1">
-                  <span aria-hidden className="size-1.5 rounded-full bg-accent-ink" />
-                  <span>{t('usage.ringLegendOuter')}</span>
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span aria-hidden className="size-1.5 rounded-full bg-green" />
-                  <span>{t('usage.ringLegendInner')}</span>
-                </span>
-              </div>
-            ) : null}
-          </div>
-          {sections.map((section, index) => {
-            if (section.type === 'single') {
-              return (
-                <section key={section.key}>
-                  <WindowBar title={windowTitle(section.window, t)} window={section.window} t={t} />
+        <ScrollArea className="max-h-[calc(var(--radix-popover-content-available-height)-8px)]">
+          <div className="flex flex-col gap-2 px-3 py-2.5">
+          {isCreditsMode && creditPrimary ? (
+            <>
+              <div className="text-[12px] font-semibold leading-4 text-ink">{t('usage.credits.title')}</div>
+              <CreditsHeroCard window={creditPrimary} t={t} />
+              {creditSummary && creditSummary.packs.length > 0 ? (
+                <section className="flex flex-col gap-1.5 border-t border-line pt-2">
+                  <div className="text-[11px] font-medium leading-3.5 text-ink-3">{t('usage.credits.packs')}</div>
+                  {creditSummary.packs.map((pack, index) => (
+                    <CreditPackRow key={`${pack.kind}:${pack.label}:${index}`} window={pack} t={t} />
+                  ))}
                 </section>
-              );
-            }
-            return (
-              <section
-                key={section.key}
-                className={cn('flex flex-col gap-1', index > 0 && 'border-t border-line pt-1.5')}
-              >
-                <div className="flex flex-col gap-0.5">
-                  <div className="text-[11.5px] font-medium leading-4 text-ink">{poolName(section.label, t)}</div>
-                  {section.models?.length ? (
-                    <div className="text-[10.5px] leading-3.5 text-ink-3">{section.models.join(' · ')}</div>
-                  ) : null}
-                </div>
-                {section.windows.map((w) => (
-                  <WindowBar
-                    key={`${w.kind}:${w.label}`}
-                    title={w.kind === 'session' ? t('usage.session') : t('usage.weekly')}
-                    window={w}
-                    t={t}
-                  />
-                ))}
-              </section>
-            );
-          })}
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1">
+                <div className="text-[12px] font-semibold leading-4 text-ink">{t('usage.title')}</div>
+                {hasBothRings ? (
+                  <div className="flex items-center gap-3 text-[10.5px] leading-3.5 text-ink-3" data-testid="usage-ring-legend">
+                    <span className="inline-flex items-center gap-1">
+                      <span aria-hidden className="size-1.5 rounded-full bg-accent-ink" />
+                      <span>{t('usage.ringLegendOuter')}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span aria-hidden className="size-1.5 rounded-full bg-green" />
+                      <span>{t('usage.ringLegendInner')}</span>
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+              {sections.map((section, index) => {
+                if (section.type === 'single') {
+                  return (
+                    <section key={section.key}>
+                      <WindowBar title={windowTitle(section.window, t)} window={section.window} t={t} />
+                    </section>
+                  );
+                }
+                return (
+                  <section
+                    key={section.key}
+                    className={cn('flex flex-col gap-1', index > 0 && 'border-t border-line pt-1.5')}
+                  >
+                    <div className="text-[11.5px] font-medium leading-4 text-ink">{poolName(section.label, t)}</div>
+                    {section.windows.map((w) => (
+                      <WindowBar
+                        key={`${w.kind}:${w.label}`}
+                        title={w.kind === 'session' ? t('usage.session') : t('usage.weekly')}
+                        window={w}
+                        t={t}
+                      />
+                    ))}
+                  </section>
+                );
+              })}
+            </>
+          )}
           {quota.extraUsage ? (
             <div className="flex items-center justify-between border-t border-line pt-2 text-[11.5px] leading-4">
               <span className="text-ink-3">{t('usage.extra')}</span>
-              <span className="font-mono tabular-nums text-ink">
-                {t('usage.remaining', Math.round(quota.extraUsage.remainingPercent))}
-              </span>
+              <AnimatedNumber
+                value={quota.extraUsage.remainingPercent}
+                format={(n) => t('usage.remaining', n)}
+                className="font-mono text-ink"
+              />
             </div>
           ) : null}
           <div className="text-[11px] leading-4 text-ink-3">
             {t('usage.updated', new Date(quota.queriedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}
           </div>
-        </div>
+          </div>
+        </ScrollArea>
       </PopoverContent>
     </Popover>
   );

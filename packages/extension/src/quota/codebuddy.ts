@@ -31,12 +31,15 @@ export function clearCodebuddyQuotaCache(): void {
   cache.clear();
 }
 
-/** 环境变量优先，其次数据目录里的 cookie 文件；裸值自动补 `session=`。 */
+/** 环境变量优先，其次当前账号配置目录里的 cookie 文件（独立隔离账号绝不回退默认 `~/.codebuddy/usage-cookie` 以免串号）；裸值自动补 `session=`。 */
 async function readCookie(env: Readonly<Record<string, string | undefined>>): Promise<string | undefined> {
   let raw = env.CODEBUDDY_COOKIE?.trim();
   if (!raw) {
-    const home = env.HOME ?? env.USERPROFILE ?? homedir();
-    raw = await readFile(join(home, '.codebuddy', 'usage-cookie'), 'utf8')
+    const customDir = env.CODEBUDDY_CONFIG_DIR?.trim();
+    const cookiePath = customDir
+      ? join(customDir, 'usage-cookie')
+      : join(env.HOME ?? env.USERPROFILE ?? homedir(), '.codebuddy', 'usage-cookie');
+    raw = await readFile(cookiePath, 'utf8')
       .then((text) => text.trim())
       .catch(() => undefined);
   }
@@ -75,31 +78,141 @@ function pickEpoch(source: Rec | undefined, ...keys: readonly string[]): number 
   return undefined;
 }
 
-/** 一组用量里的已用百分比：优先直接给百分比，否则按 已用/总量 或 剩余/总量 换算。 */
-function readPercent(source: Rec): number | undefined {
+function roundAmount(value: number): number {
+  const clamped = Math.max(0, value);
+  return Math.round(clamped * 10) / 10;
+}
+
+interface ParsedCreditMetrics {
+  readonly usedPercent: number;
+  readonly remainingPercent: number;
+  readonly totalAmount?: number;
+  readonly usedAmount?: number;
+  readonly remainingAmount?: number;
+}
+
+/** 一组用量里的百分比与绝对积分数：优先保留精确的剩余/总量/已用积分，并换算已用/剩余百分比。 */
+function readMetrics(source: Rec): ParsedCreditMetrics | undefined {
   const direct = normalizeUtilization(
     source.usedPercent ?? source.used_percent ?? source.usagePercent ?? source.usage_percent ?? source.percent ?? source.utilization,
   );
-  if (direct !== undefined) return direct;
-  const total = pickNumber(source, ['total', 'totalCredits', 'total_credits', 'quota', 'limit', 'totalQuota', 'total_amount']);
-  if (total === undefined || total <= 0) return undefined;
-  const used = pickNumber(source, ['used', 'usedCredits', 'used_credits', 'usage', 'usedQuota', 'used_amount']);
-  if (used !== undefined) return roundPercent((used / total) * 100);
-  const remaining = pickNumber(source, ['remaining', 'remainingCredits', 'remaining_credits', 'left', 'available', 'remain']);
-  if (remaining !== undefined) return roundPercent((1 - remaining / total) * 100);
+  const total = pickNumber(source, [
+    'total',
+    'totalCredits',
+    'total_credits',
+    'quota',
+    'limit',
+    'totalQuota',
+    'total_amount',
+    'totalPoints',
+    'total_points',
+  ]);
+  const used = pickNumber(source, [
+    'used',
+    'usedCredits',
+    'used_credits',
+    'usage',
+    'usedQuota',
+    'used_amount',
+    'usedPoints',
+    'used_points',
+  ]);
+  const remaining = pickNumber(source, [
+    'remaining',
+    'remainingCredits',
+    'remaining_credits',
+    'left',
+    'available',
+    'remain',
+    'balance',
+    'credits',
+    'points',
+    'remainingPoints',
+    'remaining_points',
+  ]);
+
+  if (total !== undefined && total > 0) {
+    if (used !== undefined) {
+      const usedPercent = direct ?? roundPercent((used / total) * 100);
+      const computedRemaining = remaining ?? Math.max(0, total - used);
+      return {
+        usedPercent,
+        remainingPercent: roundPercent(100 - usedPercent),
+        totalAmount: roundAmount(total),
+        usedAmount: roundAmount(used),
+        remainingAmount: roundAmount(computedRemaining),
+      };
+    }
+    if (remaining !== undefined) {
+      const usedPercent = direct ?? roundPercent((1 - remaining / total) * 100);
+      const computedUsed = Math.max(0, total - remaining);
+      return {
+        usedPercent,
+        remainingPercent: roundPercent(100 - usedPercent),
+        totalAmount: roundAmount(total),
+        usedAmount: roundAmount(computedUsed),
+        remainingAmount: roundAmount(remaining),
+      };
+    }
+    if (direct !== undefined) {
+      const computedUsed = roundAmount((total * direct) / 100);
+      const computedRemaining = roundAmount(Math.max(0, total - computedUsed));
+      return {
+        usedPercent: direct,
+        remainingPercent: roundPercent(100 - direct),
+        totalAmount: roundAmount(total),
+        usedAmount: computedUsed,
+        remainingAmount: computedRemaining,
+      };
+    }
+    return undefined;
+  }
+
+  if (direct !== undefined) {
+    return {
+      usedPercent: direct,
+      remainingPercent: roundPercent(100 - direct),
+      ...(used !== undefined ? { usedAmount: roundAmount(used) } : {}),
+      ...(remaining !== undefined ? { remainingAmount: roundAmount(remaining) } : {}),
+    };
+  }
+
+  if (remaining !== undefined) {
+    if (used !== undefined && used + remaining > 0) {
+      const inferredTotal = used + remaining;
+      const usedPercent = roundPercent((used / inferredTotal) * 100);
+      return {
+        usedPercent,
+        remainingPercent: roundPercent(100 - usedPercent),
+        totalAmount: roundAmount(inferredTotal),
+        usedAmount: roundAmount(used),
+        remainingAmount: roundAmount(remaining),
+      };
+    }
+    const remainingPercent = remaining > 0 ? 100 : 0;
+    return {
+      usedPercent: 100 - remainingPercent,
+      remainingPercent,
+      remainingAmount: roundAmount(remaining),
+    };
+  }
+
   return undefined;
 }
 
 function windowFrom(source: Rec, label: string, now: number, skipExpired: boolean): QuotaWindowView | undefined {
-  const usedPercent = readPercent(source);
-  if (usedPercent === undefined) return undefined;
+  const metrics = readMetrics(source);
+  if (!metrics) return undefined;
   const resetsAt = pickEpoch(source, 'resetTime', 'reset_at', 'resetAt', 'expire', 'expiresAt', 'expire_time', 'expires_at', 'endTime', 'end_time');
   if (skipExpired && resetsAt !== undefined && resetsAt <= now) return undefined;
   return {
     kind: 'cycle',
     label,
-    usedPercent,
-    remainingPercent: roundPercent(100 - usedPercent),
+    usedPercent: metrics.usedPercent,
+    remainingPercent: metrics.remainingPercent,
+    ...(metrics.remainingAmount !== undefined ? { remainingAmount: metrics.remainingAmount } : {}),
+    ...(metrics.totalAmount !== undefined ? { totalAmount: metrics.totalAmount } : {}),
+    ...(metrics.usedAmount !== undefined ? { usedAmount: metrics.usedAmount } : {}),
     ...(resetsAt !== undefined ? { resetsAt } : {}),
   };
 }
@@ -202,7 +315,7 @@ async function queryBase(
     if (!json) return undefined;
     const windows = readWindows(json, now);
     if (windows.length === 0) return undefined;
-    return { windows, queriedAt: now };
+    return { mode: 'credits', windows, queriedAt: now };
   } catch {
     return undefined;
   }

@@ -170,6 +170,8 @@ export class ClaudeController implements ChatBackendController {
   private draftCounter = 0;
   private selectedModel: ClaudePreferredModel | undefined;
   private draftMode = 'default';
+  /** 回复进行中用户切换的权限模式，延后到下一轮发送前生效。 */
+  private readonly pendingModes = new Map<string, string>();
   private discoveredSlashCommands: string[] = [];
   private readonly editorContext: EditorContext;
   private readonly tabs: TabsModel;
@@ -716,6 +718,11 @@ export class ClaudeController implements ChatBackendController {
       this.queues.delete(oldKey);
       this.queues.set(realSessionId, queue);
     }
+    const pendingMode = this.pendingModes.get(oldKey);
+    if (pendingMode !== undefined) {
+      this.pendingModes.delete(oldKey);
+      this.pendingModes.set(realSessionId, pendingMode);
+    }
     this.interactions.rekeySession(oldKey, realSessionId);
     this.historyLoaded.add(realSessionId);
 
@@ -932,7 +939,16 @@ export class ClaudeController implements ChatBackendController {
         : text;
 
     try {
+      const pendingMode = this.pendingModes.get(sessionKey);
+      if (pendingMode !== undefined) {
+        this.pendingModes.delete(sessionKey);
+        projection.mode = pendingMode;
+      }
       const { key, link } = await this.ensureSessionLink(sessionKey, isResume, titleHint);
+      if (pendingMode !== undefined && link.running) {
+        const cliMode = pendingMode === 'bypassPermissions' ? 'default' : pendingMode;
+        await link.sendControlRequest({ subtype: 'set_permission_mode', mode: cliMode }, 8_000).catch(() => undefined);
+      }
       const sid = key.startsWith('pending:') ? '' : key;
       link.sendUserMessage(content, sid);
       if (!key.startsWith('pending:')) {
@@ -1087,7 +1103,10 @@ export class ClaudeController implements ChatBackendController {
   }
 
   private currentMode(): string {
-    return (this.activeId ? this.projections.get(this.activeId)?.mode : undefined) ?? this.draftMode;
+    return (
+      (this.activeId ? (this.pendingModes.get(this.activeId) ?? this.projections.get(this.activeId)?.mode) : undefined) ??
+      this.draftMode
+    );
   }
 
   private async setMode(mode: string, preConfirmed?: boolean): Promise<void> {
@@ -1108,10 +1127,19 @@ export class ClaudeController implements ChatBackendController {
     this.draftMode = mode;
     if (this.activeId) {
       const projection = this.projectionFor(this.activeId);
+      if (projection.running) {
+        // 正在回复中：记录待应用权限，延后到下一轮发送前再通知底层，不打断当前回合
+        this.pendingModes.set(this.activeId, mode);
+        this.toast('info', t('permission.nextTurn', displayName));
+        this.scheduleRender();
+        return;
+      }
+      this.pendingModes.delete(this.activeId);
       projection.mode = mode;
       const link = this.links.get(this.activeId);
-      if (link?.running && mode !== 'bypassPermissions') {
-        await link.sendControlRequest({ subtype: 'set_permission_mode', mode }, 8_000).catch(() => undefined);
+      if (link?.running) {
+        const cliMode = mode === 'bypassPermissions' ? 'default' : mode;
+        await link.sendControlRequest({ subtype: 'set_permission_mode', mode: cliMode }, 8_000).catch(() => undefined);
       }
     }
     this.scheduleRender();

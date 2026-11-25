@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ContextDetail, RequestPerformance, TokenBreakdown } from '@harness-deck/shared';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '../lib/utils.ts';
 import { useT } from '../i18n.ts';
 import { ChartPieIcon } from './icons.tsx';
@@ -324,13 +325,14 @@ export function ContextRing({
         align="end"
         sideOffset={6}
         aria-label={t('context.detail.title')}
-        className="max-h-[calc(var(--radix-popover-content-available-height)-8px)] w-72 overflow-y-auto rounded-card p-0 shadow-raised"
+        className="w-72 overflow-hidden rounded-card p-0 shadow-raised"
         data-testid="context-detail-popover"
         onOpenAutoFocus={(event) => event.preventDefault()}
         onPointerEnter={() => clearTimeout(closeTimer.current)}
         onPointerLeave={leave}
       >
-        <div className="flex flex-col gap-2 px-3 py-2.5" data-testid="context-detail">
+        <ScrollArea className="max-h-[calc(var(--radix-popover-content-available-height)-8px)]">
+          <div className="flex flex-col gap-2 px-3 py-2.5" data-testid="context-detail">
           <header className="flex flex-col gap-1">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[12px] font-semibold leading-4 text-ink">{t('context.detail.title')}</span>
@@ -367,7 +369,8 @@ export function ContextRing({
               </span>
             </div>
           ) : null}
-        </div>
+          </div>
+        </ScrollArea>
       </PopoverContent>
     </Popover>
   );

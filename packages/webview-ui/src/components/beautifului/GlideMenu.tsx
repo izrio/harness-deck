@@ -8,6 +8,29 @@ type GlideMenuProps = {
   rowSelector?: string;
 };
 
+function isFocusVisible(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  try {
+    return target.matches(':focus-visible');
+  } catch {
+    return false;
+  }
+}
+
+/** Popover 打开时优先将焦点移到当前激活菜单项，避免默认落到首项造成误聚焦。 */
+export function focusActiveMenuRow(event: Event): void {
+  const container = event.currentTarget;
+  if (!(container instanceof HTMLElement)) return;
+  const activeItem = container.querySelector<HTMLElement>(
+    '[data-menu-row][aria-current="true"], [data-menu-row][aria-checked="true"]',
+  );
+  if (activeItem) {
+    event.preventDefault();
+    activeItem.focus({ preventScroll: true });
+    activeItem.scrollIntoView?.({ block: 'nearest' });
+  }
+}
+
 /** Beautiful UI GlideMenu：单个悬停高亮层在菜单行之间平滑滑动。 */
 export function GlideMenu({
   children,
@@ -33,9 +56,12 @@ export function GlideMenu({
   return (
     <div
       ref={ref}
+      data-gliding={visible ? 'true' : undefined}
       onMouseOver={(event) => moveTo(event.target)}
       onMouseLeave={() => setVisible(false)}
-      onFocusCapture={(event) => moveTo(event.target)}
+      onFocusCapture={(event) => {
+        if (isFocusVisible(event.target)) moveTo(event.target);
+      }}
       onBlurCapture={(event) => {
         if (!ref.current?.contains(event.relatedTarget as Node | null)) setVisible(false);
       }}
@@ -43,6 +69,7 @@ export function GlideMenu({
     >
       <span
         aria-hidden
+        data-glide-highlight
         className={cn('pointer-events-none absolute', highlightClassName)}
         style={{
           top: box?.top ?? 0,
@@ -84,7 +111,7 @@ export function MenuItem({
       data-testid={testId}
       className={cn(
         'menu-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-[13px] transition-colors duration-100',
-        active ? 'menu-item--active bg-field font-medium text-ink group-hover/glide-menu:bg-transparent' : 'text-ink',
+        active ? 'menu-item--active bg-field font-medium text-ink group-data-[gliding=true]/glide-menu:bg-transparent' : 'text-ink',
         className,
       )}
       onClick={onSelect}

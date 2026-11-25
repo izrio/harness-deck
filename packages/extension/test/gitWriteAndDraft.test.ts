@@ -8,6 +8,7 @@ import { listLocalBranches, parseGhPrViewJson } from '../src/sourceControl/gitSt
 import {
   checkoutBranch,
   createBranch,
+  deleteBranch,
   discardFile,
   stageFile,
   unstageFile,
@@ -60,6 +61,36 @@ describe('Granular Git actions, PR parsing, and AI/heuristic draft generation (P
     expect((await createBranch(repo, 'feat/demo')).ok).toBe(true);
     expect(await listLocalBranches(repo)).toContain('feat/demo');
     expect((await checkoutBranch(repo, mainBranch)).ok).toBe(true);
+  });
+
+  it('deletes merged branches with -d, guards current branch, and supports force -D for unmerged branches', async () => {
+    const repo = await initRepo();
+    const mainBranch = (await listLocalBranches(repo))[0]!;
+
+    // 禁止删除当前检出的分支与非法分支名
+    expect(await deleteBranch(repo, mainBranch)).toEqual({ ok: false, message: 'cannot delete current branch' });
+    expect(await deleteBranch(repo, '-D')).toEqual({ ok: false, message: 'invalid branch name' });
+
+    // 已合并分支可通过默认 -d 删除
+    expect((await createBranch(repo, 'feat/merged')).ok).toBe(true);
+    expect((await checkoutBranch(repo, mainBranch)).ok).toBe(true);
+    expect((await deleteBranch(repo, 'feat/merged')).ok).toBe(true);
+    expect(await listLocalBranches(repo)).not.toContain('feat/merged');
+
+    // 未合并分支默认 -d 失败，显式 force: true 时通过 -D 删除
+    expect((await createBranch(repo, 'feat/unmerged')).ok).toBe(true);
+    await writeFile(join(repo, 'feature.ts'), 'export const f = 1;\n', 'utf8');
+    await execFileAsync('git', ['add', '-A'], { cwd: repo });
+    await execFileAsync('git', ['commit', '-m', 'feat commit'], { cwd: repo });
+    expect((await checkoutBranch(repo, mainBranch)).ok).toBe(true);
+
+    const safeResult = await deleteBranch(repo, 'feat/unmerged');
+    expect(safeResult.ok).toBe(false);
+    expect(await listLocalBranches(repo)).toContain('feat/unmerged');
+
+    const forceResult = await deleteBranch(repo, 'feat/unmerged', { force: true });
+    expect(forceResult.ok).toBe(true);
+    expect(await listLocalBranches(repo)).not.toContain('feat/unmerged');
   });
 
   it('parses gh pr view JSON with statusCheckRollup accurately', () => {

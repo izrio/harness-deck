@@ -6,11 +6,12 @@ import { backendCapabilities, isProviderReadyForBackend, type ModelOption } from
 import { openSettingsPage, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { GlideMenu } from './beautifului/index.ts';
+import { focusActiveMenuRow, GlideMenu } from './beautifului/index.ts';
 import { CheckIcon, ChevronDownIcon, KeyIcon, RouteIcon, SettingsIcon, SpinnerIcon, UsersIcon } from './icons.tsx';
 import { ModelVendorLogo } from './ModelVendorLogo.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useT } from '../i18n.ts';
 
 const keyOf = (o: { provider: string; model: string }) => `${o.provider}/${o.model}`;
@@ -162,6 +163,7 @@ export function ModelPicker({
           align="start"
           sideOffset={6}
           aria-label={t('model.select')}
+          onOpenAutoFocus={focusActiveMenuRow}
           className="model-menu flex max-h-96 w-auto min-w-[260px] max-w-[min(360px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-0 shadow-overlay"
         >
           {showChannelSwitcher && activeBackend ? (
@@ -312,11 +314,12 @@ export function ModelPicker({
               ) : null}
             </div>
           ) : null}
-          <div role="menu" className="model-menu__level max-h-60 overflow-y-auto p-1" data-testid="model-list">
-            <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
-              {groups.map((group) => (
-                <div key={group} className="model-menu__group">
-                  {groups.length > 1 ? <div className="menu-heading px-2 pt-1.5 pb-0.5 text-[11px] font-medium text-ink-3">{group}</div> : null}
+          <ScrollArea className="max-h-60">
+            <div role="menu" className="model-menu__level p-1" data-testid="model-list">
+              <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
+                {groups.map((group) => (
+                  <div key={group} className="model-menu__group">
+                    {groups.length > 1 ? <div className="menu-heading px-2 pt-1.5 pb-0.5 text-[11px] font-medium text-ink-3">{group}</div> : null}
                   {options
                     .filter((o) => o.group === group)
                     .map((o) => {
@@ -344,7 +347,8 @@ export function ModelPicker({
                 </div>
               ))}
             </GlideMenu>
-          </div>
+            </div>
+          </ScrollArea>
 
           {showEfforts && option ? (
             <EffortSlider
@@ -536,7 +540,7 @@ function ModelItem({
       aria-checked={active}
       className={cn(
         'menu-item model-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-[12.5px] transition-colors duration-100',
-        active ? 'menu-item--active bg-field font-medium text-ink group-hover/glide-menu:bg-transparent' : 'text-ink-2 hover:text-ink',
+        active ? 'menu-item--active bg-field font-medium text-ink group-data-[gliding=true]/glide-menu:bg-transparent' : 'text-ink-2 hover:text-ink',
       )}
       onClick={onSelect}
       title={title ?? children}

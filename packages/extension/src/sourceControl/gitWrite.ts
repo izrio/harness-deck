@@ -177,6 +177,26 @@ export async function createBranch(cwd: string, branch: string): Promise<GitActi
   }
 }
 
+/** 删除本地分支；禁止删除当前检出的分支。默认 `-d` 安全删除，显式传 `force: true` 时使用 `-D`。 */
+export async function deleteBranch(
+  cwd: string,
+  branch: string,
+  options?: { readonly force?: boolean },
+): Promise<GitActionResult> {
+  const name = branch.trim();
+  if (!name || name.startsWith('-')) return { ok: false, message: 'invalid branch name' };
+  try {
+    const current = (await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd).catch(() => '')).trim();
+    if (current && current === name) {
+      return { ok: false, message: 'cannot delete current branch' };
+    }
+    await runGit(['branch', options?.force ? '-D' : '-d', '--', name], cwd, 30_000);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: firstLine(error) };
+  }
+}
+
 /** 拉取远程更新（使用 `--ff-only`，不自动产生意外合并提交）。 */
 export async function pullCurrentBranch(cwd: string): Promise<GitActionResult> {
   try {

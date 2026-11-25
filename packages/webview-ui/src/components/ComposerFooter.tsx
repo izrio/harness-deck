@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useT } from '../i18n.ts';
 import { cn } from '../lib/utils.ts';
 import { getProjectOptions } from '../lib/workbenchOptions.ts';
@@ -20,7 +21,9 @@ import {
   GitForkIcon,
   PlusIcon,
   RefreshIcon,
+  TrashIcon,
 } from './icons.tsx';
+import { DeleteBranchDialog } from './DeleteBranchDialog.tsx';
 import { UsageBadge } from './UsageBadge.tsx';
 
 export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () => void } = {}) {
@@ -35,6 +38,7 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
   const [branchOpen, setBranchOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
   const [branchBusy, setBranchBusy] = useState(false);
+  const [deleteBranchTarget, setDeleteBranchTarget] = useState<string | null>(null);
   const lastActionAtRef = useRef<number | undefined>(undefined);
 
   const isMobileRemote = clientSurface === 'mobile-web';
@@ -105,6 +109,22 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
     postToHost({ type: 'sourceControlCreateBranch', payload: { branch: trimmed } });
   };
 
+  const requestDeleteBranch = (branch: string): void => {
+    if (branchBusy || remoteReadOnly || branch === currentBranch) return;
+    setBranchOpen(false);
+    setDeleteBranchTarget(branch);
+  };
+
+  const confirmDeleteBranch = (branch: string, force: boolean): void => {
+    if (branchBusy || remoteReadOnly || branch === currentBranch) return;
+    setDeleteBranchTarget(null);
+    setBranchBusy(true);
+    postToHost({
+      type: 'sourceControlDeleteBranch',
+      payload: { branch, force, confirmed: true },
+    });
+  };
+
   const showProject = Boolean(currentProjectName || projectOptions.length > 0);
   const showBranch = Boolean(currentBranch);
   const canSwitchBranch = Boolean(sourceControl?.available && !remoteReadOnly);
@@ -146,7 +166,7 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                 {t('composer.switchProject')}
               </div>
               {projectOptions.length > 0 ? (
-                <div className="max-h-48 overflow-y-auto">
+                <ScrollArea className="max-h-48">
                   {projectOptions.map(([path, name]) => {
                     const isCurrent = path === currentProjectPath;
                     return (
@@ -174,7 +194,7 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                       </button>
                     );
                   })}
-                </div>
+                </ScrollArea>
               ) : (
                 <div className="px-2 py-1.5 text-[11.5px] text-ink-3">{t('composer.noProjects')}</div>
               )}
@@ -247,27 +267,55 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                     </Button>
                   ) : null}
                 </div>
-                <div className="max-h-44 overflow-y-auto">
+                <ScrollArea className="max-h-44">
                   {branches.map((branch) => {
                     const isCurrent = branch === currentBranch;
+                    if (isCurrent) {
+                      return (
+                        <button
+                          key={branch}
+                          type="button"
+                          data-testid={`composer-branch-item-${branch}`}
+                          disabled={branchBusy}
+                          onClick={() => checkoutBranch(branch)}
+                          className="flex w-full items-center justify-between gap-2 rounded-control bg-field px-2 py-1 text-left text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                        >
+                          <span className="truncate font-mono text-[11.5px]">{branch}</span>
+                          <CheckIcon className="size-3.5 shrink-0 text-accent-ink" />
+                        </button>
+                      );
+                    }
                     return (
-                      <button
+                      <div
                         key={branch}
-                        type="button"
-                        data-testid={`composer-branch-item-${branch}`}
-                        disabled={branchBusy}
-                        onClick={() => checkoutBranch(branch)}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors hover:bg-hover',
-                          isCurrent ? 'bg-field font-medium text-ink' : 'text-ink-2',
-                        )}
+                        className="group/branch flex items-center gap-0.5 rounded-control transition-colors hover:bg-hover"
                       >
-                        <span className="truncate font-mono text-[11.5px]">{branch}</span>
-                        {isCurrent ? <CheckIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
-                      </button>
+                        <button
+                          type="button"
+                          data-testid={`composer-branch-item-${branch}`}
+                          disabled={branchBusy}
+                          onClick={() => checkoutBranch(branch)}
+                          className="flex min-w-0 flex-1 items-center rounded-control px-2 py-1 text-left text-[12px] text-ink-2 transition-colors hover:text-ink"
+                        >
+                          <span className="truncate font-mono text-[11.5px]">{branch}</span>
+                        </button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          data-testid={`composer-branch-delete-${branch}`}
+                          disabled={branchBusy}
+                          aria-label={t('wb.changes.deleteBranchNamed', branch)}
+                          title={t('wb.changes.deleteBranch')}
+                          onClick={() => requestDeleteBranch(branch)}
+                          className="shrink-0 text-ink-3/65 transition-colors hover:bg-red-tint hover:text-red group-hover/branch:text-ink-2"
+                        >
+                          <TrashIcon className="size-3" />
+                        </Button>
+                      </div>
                     );
                   })}
-                </div>
+                </ScrollArea>
                 <div className="mt-2 flex items-center gap-1 border-t border-line pt-2">
                   <Input
                     size="xs"
@@ -331,6 +379,14 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
       <div className="flex shrink-0 items-center">
         <UsageBadge />
       </div>
+
+      <DeleteBranchDialog
+        branch={deleteBranchTarget}
+        busy={branchBusy}
+        testIdPrefix="composer-delete-branch"
+        onOpenChange={(open) => !open && setDeleteBranchTarget(null)}
+        onConfirm={confirmDeleteBranch}
+      />
     </div>
   );
 }

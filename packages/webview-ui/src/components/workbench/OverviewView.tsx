@@ -21,6 +21,7 @@ import {
 } from '../icons.tsx';
 import { ValuePill } from '../beautifului/index.ts';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 function formatShortTime(ts: number, t: Translate): string {
   const diffMin = Math.round((ts - Date.now()) / 60_000);
@@ -54,8 +55,9 @@ export function OverviewView() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3.5 py-3" data-testid="workbench-overview">
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-3">
+    <ScrollArea className="min-h-0 flex-1" data-testid="workbench-overview">
+      <div className="flex flex-col px-3.5 py-3">
+        <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
           <div>
             <h2 className="m-0 text-[15px] font-semibold tracking-tight text-ink">{t('wb.overview.title')}</h2>
@@ -337,6 +339,7 @@ export function OverviewView() {
           </section>
         </div>
       </div>
-    </div>
+      </div>
+    </ScrollArea>
   );
 }

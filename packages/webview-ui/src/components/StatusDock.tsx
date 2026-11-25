@@ -3,6 +3,7 @@
  * 待办、本会话改动、未保存文件合在一张紧凑卡片里，待办/改动列表作为浮层向上展开。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useView } from '../store.ts';
 import { loadState, postToHost, saveState } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
@@ -75,39 +76,47 @@ export function StatusDock() {
       {panel === 'todos' && todos ? (
         <div
           id="dock-panel"
-          className="dock__panel dropdown-glass absolute inset-x-0 bottom-[calc(100%+6px)] z-15 max-h-[min(40vh,260px)] overflow-y-auto rounded-xl border p-1.5 text-ink"
+          className="dock__panel dropdown-glass absolute inset-x-0 bottom-[calc(100%+6px)] z-15 overflow-hidden rounded-xl border p-0 text-ink"
           style={{ animation: 'pop-in 170ms cubic-bezier(0.23,1,0.32,1) both', transformOrigin: 'bottom center' }}
         >
-          <TaskRows
-            items={todos}
-            active={running}
-            labels={{
-              completed: t('todo.completed'),
-              inProgress: t('todo.inProgress'),
-              pending: t('todo.pending'),
-            }}
-          />
+          <ScrollArea className="max-h-[min(40vh,260px)]">
+            <div className="p-1.5">
+              <TaskRows
+                items={todos}
+                active={running}
+                labels={{
+                  completed: t('todo.completed'),
+                  inProgress: t('todo.inProgress'),
+                  pending: t('todo.pending'),
+                }}
+              />
+            </div>
+          </ScrollArea>
         </div>
       ) : null}
 
       {panel === 'changes' && shownChanges ? (
         <div
           id="dock-panel"
-          className="dock__panel dropdown-glass absolute inset-x-0 bottom-[calc(100%+6px)] z-15 max-h-[min(40vh,260px)] overflow-y-auto rounded-xl border p-1 text-ink"
+          className="dock__panel dropdown-glass absolute inset-x-0 bottom-[calc(100%+6px)] z-15 overflow-hidden rounded-xl border p-0 text-ink"
           style={{ animation: 'pop-in 170ms cubic-bezier(0.23,1,0.32,1) both', transformOrigin: 'bottom center' }}
         >
-          <GlideMenu highlightClassName="inset-x-0 rounded-[6px] bg-hover">
-            <ul className="session-changes__list m-0 list-none p-0" aria-label={t('sessionChanges.label')}>
-              {shownChanges.files.map((file) => (
-                <li key={file.path}>
-                  <ChangedFileButton
-                    file={file}
-                    className="session-changes__file relative z-10 flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left transition-colors duration-100"
-                  />
-                </li>
-              ))}
-            </ul>
-          </GlideMenu>
+          <ScrollArea className="max-h-[min(40vh,260px)]">
+            <div className="p-1">
+              <GlideMenu highlightClassName="inset-x-0 rounded-[6px] bg-hover">
+                <ul className="session-changes__list m-0 list-none p-0" aria-label={t('sessionChanges.label')}>
+                  {shownChanges.files.map((file) => (
+                    <li key={file.path}>
+                      <ChangedFileButton
+                        file={file}
+                        className="session-changes__file relative z-10 flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left transition-colors duration-100"
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </GlideMenu>
+            </div>
+          </ScrollArea>
         </div>
       ) : null}
 

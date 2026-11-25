@@ -93,6 +93,19 @@ async function writeFileAtomicPrivate(targetPath: string, content: string): Prom
   await rename(tmpPath, targetPath);
 }
 
+/** 仅读取本机 Antigravity CLI 主凭据文件（不回退 IDE 备用凭据，用于多账号隔离读取与登录保存）。 */
+export async function readAntigravityPrimaryTokenRaw(
+  env?: Readonly<Record<string, string | undefined>>,
+): Promise<string | undefined> {
+  try {
+    const raw = await readFile(antigravityPrimaryTokenPath(env), 'utf8');
+    if (raw.trim()) return raw;
+  } catch {
+    // missing or unreadable
+  }
+  return undefined;
+}
+
 /** 读取本机当前 Antigravity OAuth 凭据文件内容（优先 CLI 凭据，其次 IDE 凭据）。 */
 export async function readAntigravityDiskTokenRaw(
   env?: Readonly<Record<string, string | undefined>>,
@@ -106,6 +119,13 @@ export async function readAntigravityDiskTokenRaw(
     }
   }
   return undefined;
+}
+
+/** 删除本机 Antigravity CLI 主凭据文件（不触碰 IDE 独立凭据文件）。 */
+export async function clearAntigravityPrimaryDiskToken(
+  env?: Readonly<Record<string, string | undefined>>,
+): Promise<void> {
+  await unlink(antigravityPrimaryTokenPath(env)).catch(() => undefined);
 }
 
 /** 将 Antigravity 凭据槽位原子写入本机 CLI 凭据文件（供 `agy acp` 直接使用）。 */
@@ -257,7 +277,7 @@ export async function switchCodebuddyCredentialSlot(params: {
     return { activated: ok, hasStoredSlot: ok };
   }
 
-  if (targetAccountId === sysId && currentDisk) {
+  if (targetAccountId === sysId && currentDisk && (!previousAccountId || previousAccountId === sysId)) {
     await secrets.store(accountSlotSecretKey(sysId), currentDisk);
     return { activated: true, hasStoredSlot: true };
   }
@@ -281,6 +301,7 @@ function decodeJwtEmailUnsafe(jwt: unknown): string | undefined {
 }
 
 function parseAntigravityTokenMeta(raw: string): {
+  readonly accessToken?: string;
   readonly refreshToken?: string;
   readonly email?: string;
   readonly expiryMs?: number;
@@ -288,6 +309,7 @@ function parseAntigravityTokenMeta(raw: string): {
   try {
     const json = rec(JSON.parse(raw));
     const token = rec(json?.token);
+    const accessToken = typeof token?.access_token === 'string' && token.access_token.trim() ? token.access_token.trim() : undefined;
     const refreshToken =
       (typeof token?.refresh_token === 'string' && token.refresh_token.trim()) ||
       (typeof token?.refreshToken === 'string' && token.refreshToken.trim()) ||
@@ -301,6 +323,7 @@ function parseAntigravityTokenMeta(raw: string): {
       undefined;
     const expiryMs = parseEpochMs(token?.expiry);
     return {
+      ...(accessToken ? { accessToken } : {}),
       ...(refreshToken ? { refreshToken } : {}),
       ...(email ? { email } : {}),
       ...(expiryMs !== undefined ? { expiryMs } : {}),
@@ -314,13 +337,20 @@ function parseAntigravityTokenMeta(raw: string): {
 export function antigravityTokensSameAccount(a: string, b: string): boolean {
   const fa = parseAntigravityTokenMeta(a);
   const fb = parseAntigravityTokenMeta(b);
-  if (fa.refreshToken && fb.refreshToken && fa.refreshToken !== fb.refreshToken) return false;
-  if (fa.email && fb.email && fa.email !== fb.email) return false;
-  return true;
+  if (fa.refreshToken && fb.refreshToken) {
+    if (fa.refreshToken !== fb.refreshToken) return false;
+  }
+  if (fa.email && fb.email) {
+    if (fa.email !== fb.email) return false;
+  }
+  if (fa.refreshToken && fb.refreshToken) return true;
+  if (fa.email && fb.email) return true;
+  if (fa.accessToken && fb.accessToken) return fa.accessToken === fb.accessToken;
+  return a.trim() === b.trim();
 }
 
 /** 判断 candidate 是否不比 existing 更旧（避免用已过期的旧快照倒灌覆盖磁盘上已被 CLI 续期的新 token）。 */
-function isNotOlderAntigravityToken(candidate: string, existing: string): boolean {
+export function isNotOlderAntigravityToken(candidate: string, existing: string): boolean {
   const candidateExp = parseAntigravityTokenMeta(candidate).expiryMs;
   const existingExp = parseAntigravityTokenMeta(existing).expiryMs;
   if (candidateExp !== undefined && existingExp !== undefined) {
@@ -400,8 +430,8 @@ export async function switchAntigravityCredentialSlot(params: {
     return { activated: true, hasStoredSlot: true };
   }
 
-  // 目标是系统默认账号且磁盘已有凭据时，视为已激活
-  if (targetAccountId === sysId && currentDisk?.trim()) {
+  // 目标是系统默认账号且此前磁盘就属于系统默认账号时，才将其视为已激活（切自其他自定义账号时绝不把对方的磁盘 token 错拷给系统默认账号）
+  if (targetAccountId === sysId && currentDisk?.trim() && (!previousAccountId || previousAccountId === sysId)) {
     await secrets.store(accountSlotSecretKey(sysId), currentDisk);
     return { activated: true, hasStoredSlot: true };
   }
@@ -497,6 +527,11 @@ export async function prepareAccountLaunchPatch(params: {
     const internetEnv = codebuddyInternetEnvForRegion(account?.region);
     if (internetEnv) {
       nextEnv.CODEBUDDY_INTERNET_ENVIRONMENT = internetEnv;
+    }
+    if (!isSystem) {
+      // 独立账号绝不继承宿主环境变量里其他账号的 CODEBUDDY_COOKIE / CODEBUDDY_API_KEY
+      delete nextEnv.CODEBUDDY_COOKIE;
+      delete nextEnv.CODEBUDDY_API_KEY;
     }
     const cookie = (await secrets.get(accountCookieSecretKey(accountId)))?.trim();
     if (cookie) {

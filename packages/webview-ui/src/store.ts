@@ -7,6 +7,7 @@ import { loadState, postToHost, saveState } from './vscode.ts';
 import type {
   AccountsState,
   AppearanceState,
+  BrowserDomElement,
   BrowserState,
   ClientSurface,
   CommandView,
@@ -61,9 +62,22 @@ export type RightPanelTab = 'files' | 'git' | 'terminal' | 'browser';
 
 export interface BrowserFrameEvent {
   readonly data: string;
+  readonly format?: 'png' | 'jpeg';
   readonly width: number;
   readonly height: number;
   readonly timestamp: number;
+}
+
+export interface BrowserInspectEvent {
+  readonly mode: 'hover' | 'select';
+  readonly element?: BrowserDomElement;
+}
+
+export interface BrowserNetworkBodyEvent {
+  readonly requestId: string;
+  readonly body?: string;
+  readonly base64Encoded?: boolean;
+  readonly error?: string;
 }
 
 export interface QuotaFetchResult {
@@ -327,6 +341,9 @@ export function getTerminalBuffer(id: string): string {
 
 const browserFrameListeners = new Set<(frame: BrowserFrameEvent) => void>();
 let lastBrowserFrame: BrowserFrameEvent | undefined;
+const browserInspectListeners = new Set<(event: BrowserInspectEvent) => void>();
+const browserNetworkBodyListeners = new Set<(event: BrowserNetworkBodyEvent) => void>();
+const browserClipboardListeners = new Set<(text: string) => void>();
 
 export function subscribeBrowserFrame(listener: (frame: BrowserFrameEvent) => void): () => void {
   browserFrameListeners.add(listener);
@@ -335,6 +352,21 @@ export function subscribeBrowserFrame(listener: (frame: BrowserFrameEvent) => vo
 
 export function getLastBrowserFrame(): BrowserFrameEvent | undefined {
   return lastBrowserFrame;
+}
+
+export function subscribeBrowserInspect(listener: (event: BrowserInspectEvent) => void): () => void {
+  browserInspectListeners.add(listener);
+  return () => browserInspectListeners.delete(listener);
+}
+
+export function subscribeBrowserNetworkBody(listener: (event: BrowserNetworkBodyEvent) => void): () => void {
+  browserNetworkBodyListeners.add(listener);
+  return () => browserNetworkBodyListeners.delete(listener);
+}
+
+export function subscribeBrowserClipboard(listener: (text: string) => void): () => void {
+  browserClipboardListeners.add(listener);
+  return () => browserClipboardListeners.delete(listener);
 }
 let toastId = 0;
 let nextPanelSearchId = 1_000_000;
@@ -866,6 +898,15 @@ export function applyHostMessage(message: HostToWebview): void {
     case 'browserFrame':
       lastBrowserFrame = message.payload;
       for (const listener of browserFrameListeners) listener(message.payload);
+      return;
+    case 'browserInspectResult':
+      for (const listener of browserInspectListeners) listener(message.payload);
+      return;
+    case 'browserNetworkBody':
+      for (const listener of browserNetworkBodyListeners) listener(message.payload);
+      return;
+    case 'browserClipboardData':
+      for (const listener of browserClipboardListeners) listener(message.payload.text);
       return;
     case 'sessionCheckpoints':
       if (state.session.id === message.payload.sessionId) {

@@ -656,7 +656,29 @@ function installMockHost(): void {
               }
             : backends.active === 'codebuddy'
               ? {
-                  windows: [{ kind: 'cycle', label: '', usedPercent: 63, remainingPercent: 37, resetsAt: now + 5 * 86_400_000 }],
+                  mode: 'credits',
+                  windows: [
+                    {
+                      kind: 'cycle',
+                      label: '',
+                      usedPercent: 63,
+                      remainingPercent: 37,
+                      remainingAmount: 1850,
+                      totalAmount: 5000,
+                      usedAmount: 3150,
+                      resetsAt: now + 5 * 86_400_000,
+                    },
+                    {
+                      kind: 'cycle',
+                      label: 'Pro',
+                      usedPercent: 58,
+                      remainingPercent: 42,
+                      remainingAmount: 420,
+                      totalAmount: 1000,
+                      usedAmount: 580,
+                      resetsAt: now + 12 * 86_400_000,
+                    },
+                  ],
                   queriedAt: now,
                 }
               : backends.active === 'antigravity'

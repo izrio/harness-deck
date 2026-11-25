@@ -24,7 +24,7 @@ export function encodeClaudeProjectDir(workspacePath: string): string {
 }
 
 export function resolveClaudeConfigDir(env?: Readonly<Record<string, string | undefined>>): string {
-  const custom = env?.CLAUDE_CONFIG_DIR?.trim() || process.env.CLAUDE_CONFIG_DIR?.trim();
+  const custom = (env ? env.CLAUDE_CONFIG_DIR : process.env.CLAUDE_CONFIG_DIR)?.trim();
   if (custom) return resolve(custom);
   const home = env?.HOME ?? env?.USERPROFILE ?? homedir();
   return join(home, '.claude');

@@ -122,6 +122,7 @@ export interface HostPlatform {
   openExternal(url: string): Promise<boolean>;
   resolveExternalOrigin(origin: string): Promise<string>;
   writeClipboard(text: string): Promise<void>;
+  readClipboard?(): Promise<string>;
 
   showMessage(
     level: 'info' | 'warning' | 'error',

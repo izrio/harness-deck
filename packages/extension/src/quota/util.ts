@@ -15,6 +15,10 @@ export interface QuotaServiceOptions {
   /** 注入 fetch 实现（测试用），默认按宿主代理配置创建。 */
   readonly fetchImpl?: FetchLike;
   readonly now?: () => number;
+  /** 直接传入该账号槽位的 OAuth 凭据 JSON（例如 Antigravity 多账号切换时避免误读磁盘或 IDE 备用凭据）。 */
+  readonly rawTokenJson?: string;
+  /** 读取 Antigravity 磁盘凭据时是否允许回退 IDE 独立凭据文件（多账号隔离时应为 false）。 */
+  readonly allowIdeFallback?: boolean;
 }
 
 export const rec = (value: unknown): Rec | undefined =>

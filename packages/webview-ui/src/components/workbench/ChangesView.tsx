@@ -31,11 +31,13 @@ import {
   RefreshIcon,
   SparklesIcon,
   SpinnerIcon,
+  TrashIcon,
   UndoIcon,
   UploadIcon,
   VscodeFolderIcon,
   VscodeFolderOpenIcon,
 } from '../icons.tsx';
+import { DeleteBranchDialog } from '../DeleteBranchDialog.tsx';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -49,6 +51,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 
 function post(message: Parameters<typeof postToHost>[0]): void {
@@ -113,6 +116,7 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
   const [generatingPr, setGeneratingPr] = useState(false);
   const [branchPopoverOpen, setBranchPopoverOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
+  const [deleteBranchTarget, setDeleteBranchTarget] = useState<string | null>(null);
   const [pushOpen, setPushOpen] = useState(false);
   const [prOpen, setPrOpen] = useState(false);
   const [prTitle, setPrTitle] = useState('');
@@ -290,6 +294,22 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
     post({ type: 'sourceControlCreateBranch', payload: { branch: trimmed } });
   };
 
+  const requestDeleteBranch = (branch: string): void => {
+    if (busy || remoteReadOnly || branch === state?.branch) return;
+    setBranchPopoverOpen(false);
+    setDeleteBranchTarget(branch);
+  };
+
+  const confirmDeleteBranch = (branch: string, force: boolean): void => {
+    if (busy || remoteReadOnly || branch === state?.branch) return;
+    setDeleteBranchTarget(null);
+    setBusy(true);
+    post({
+      type: 'sourceControlDeleteBranch',
+      payload: { branch, force, confirmed: true },
+    });
+  };
+
   const openDiff = (file: SourceControlFileView): void => {
     post({ type: 'openSourceControlDiff', payload: { path: file.path, staged: file.staged } });
     if (isMobile) setRightPanelOpen(false);
@@ -373,25 +393,55 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                     </Button>
                   ) : null}
                 </div>
-                <div className="max-h-44 overflow-y-auto">
+                <ScrollArea className="max-h-44">
                   {(state.branches ?? []).map((b) => {
                     const current = b === state.branch;
+                    if (current) {
+                      return (
+                        <button
+                          key={b}
+                          type="button"
+                          data-testid={`changes-branch-item-${b}`}
+                          disabled={busy}
+                          onClick={() => checkoutBranch(b)}
+                          className="flex w-full items-center justify-between gap-2 rounded-control bg-field px-2 py-1 text-left text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                        >
+                          <span className="truncate font-mono text-[11.5px]">{b}</span>
+                          <CheckIcon className="size-3.5 shrink-0 text-accent-ink" />
+                        </button>
+                      );
+                    }
                     return (
-                      <button
+                      <div
                         key={b}
-                        type="button"
-                        onClick={() => checkoutBranch(b)}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-control px-2 py-1 text-left text-[12px] transition-colors hover:bg-hover',
-                          current ? 'bg-field font-medium text-ink' : 'text-ink-2',
-                        )}
+                        className="group/branch flex items-center gap-0.5 rounded-control transition-colors hover:bg-hover"
                       >
-                        <span className="truncate font-mono text-[11.5px]">{b}</span>
-                        {current ? <CheckIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
-                      </button>
+                        <button
+                          type="button"
+                          data-testid={`changes-branch-item-${b}`}
+                          disabled={busy}
+                          onClick={() => checkoutBranch(b)}
+                          className="flex min-w-0 flex-1 items-center rounded-control px-2 py-1 text-left text-[12px] text-ink-2 transition-colors hover:text-ink"
+                        >
+                          <span className="truncate font-mono text-[11.5px]">{b}</span>
+                        </button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          data-testid={`changes-branch-delete-${b}`}
+                          disabled={busy}
+                          aria-label={t('wb.changes.deleteBranchNamed', b)}
+                          title={t('wb.changes.deleteBranch')}
+                          onClick={() => requestDeleteBranch(b)}
+                          className="shrink-0 text-ink-3/65 transition-colors hover:bg-red-tint hover:text-red group-hover/branch:text-ink-2"
+                        >
+                          <TrashIcon className="size-3" />
+                        </Button>
+                      </div>
                     );
                   })}
-                </div>
+                </ScrollArea>
                 <div className="mt-2 flex items-center gap-1 border-t border-line pt-2">
                   <Input
                     size="xs"
@@ -591,7 +641,8 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
         </div>
       ) : (
         <>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2">
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="flex flex-col px-2 py-2">
             {visibleFiles.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-3 py-10 text-center">
                 <span className="inline-flex size-8 items-center justify-center rounded-full bg-field text-ink-3">
@@ -670,7 +721,8 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
             {state.error ? (
               <p className="mt-2 mb-0 px-2 text-[11px] text-red">{t('wb.changes.error', state.error)}</p>
             ) : null}
-          </div>
+            </div>
+          </ScrollArea>
 
           {/* 底部固定 Commit 卡片（与对话 Composer 统一的悬浮卡片风格） */}
           <div className="shrink-0 border-t border-sidebar-border/80 bg-sidebar px-2.5 py-2.5">
@@ -868,6 +920,14 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DeleteBranchDialog
+        branch={deleteBranchTarget}
+        busy={busy}
+        testIdPrefix="changes-delete-branch"
+        onOpenChange={(open) => !open && setDeleteBranchTarget(null)}
+        onConfirm={confirmDeleteBranch}
+      />
     </div>
   );
 }

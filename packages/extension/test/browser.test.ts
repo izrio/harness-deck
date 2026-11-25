@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CdpClient, type CdpSocketLike } from '../src/browser/CdpClient.ts';
 import {
   EmbeddedBrowserManager,
+  type BrowserFramePayload,
   normalizeBrowserUrl,
   resolveChromiumUserDataDir,
 } from '../src/browser/EmbeddedBrowserManager.ts';
@@ -45,6 +46,8 @@ describe('EmbeddedBrowser & BrowserMcpServer', () => {
     expect(normalizeBrowserUrl('')).toBe('about:blank');
     expect(normalizeBrowserUrl('about:blank')).toBe('about:blank');
     expect(normalizeBrowserUrl('localhost:5173')).toBe('http://localhost:5173');
+    expect(normalizeBrowserUrl('localhost:5173?tab=1')).toBe('http://localhost:5173?tab=1');
+    expect(normalizeBrowserUrl('localhost:5173#section')).toBe('http://localhost:5173#section');
     expect(normalizeBrowserUrl('127.0.0.1:3000/app')).toBe('http://127.0.0.1:3000/app');
     expect(normalizeBrowserUrl('example.com/docs')).toBe('https://example.com/docs');
     expect(normalizeBrowserUrl('https://github.com')).toBe('https://github.com');
@@ -247,5 +250,186 @@ describe('EmbeddedBrowser & BrowserMcpServer', () => {
       child.stdin.end();
     });
     expect(JSON.parse(responseLine)).toEqual({ jsonrpc: '2.0', id: 99, result: {} });
+  });
+
+  it('EmbeddedBrowserManager 按真实 DPR 启动高清推流，并在切换地址与同文档哈希跳转时重启推流并推送无损 PNG 帧', async () => {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'hd-browser-nav-'));
+    cleanups.push(() => rm(tmpRoot, { recursive: true, force: true }));
+
+    let currentUrl = 'about:blank';
+    let currentTitle = '';
+    const calls: { method: string; params?: Record<string, unknown> }[] = [];
+    let socket!: FakeSocket;
+
+    const origConnect = CdpClient.connect.bind(CdpClient);
+    const spy = vi.spyOn(CdpClient, 'connect').mockImplementation(async (wsUrl) => {
+      return origConnect(wsUrl, {
+        socketFactory: () => {
+          socket = new FakeSocket();
+          const origSend = socket.send.bind(socket);
+          socket.send = (raw: string) => {
+            origSend(raw);
+            const msg = JSON.parse(raw) as { id: number; method: string; params?: Record<string, unknown> };
+            calls.push({ method: msg.method, ...(msg.params ? { params: msg.params } : {}) });
+            queueMicrotask(() => {
+              if (msg.method === 'Page.navigate') {
+                const targetUrl = String(msg.params?.url ?? '');
+                const sameDoc = targetUrl.includes('#') && targetUrl.split('#')[0] === currentUrl.split('#')[0];
+                currentUrl = targetUrl;
+                currentTitle = sameDoc ? 'Hash Page' : `Title for ${targetUrl}`;
+                socket.emit(
+                  'message',
+                  JSON.stringify({
+                    id: msg.id,
+                    result: sameDoc ? { frameId: 'f1' } : { frameId: 'f1', loaderId: 'l1' },
+                  }),
+                );
+                if (!sameDoc) {
+                  socket.emit('message', JSON.stringify({ method: 'Page.loadEventFired', params: {} }));
+                }
+                return;
+              }
+              if (msg.method === 'Page.getNavigationHistory') {
+                socket.emit(
+                  'message',
+                  JSON.stringify({
+                    id: msg.id,
+                    result: { currentIndex: 0, entries: [{ id: 1, url: currentUrl, title: currentTitle }] },
+                  }),
+                );
+                return;
+              }
+              if (msg.method === 'Page.captureScreenshot') {
+                socket.emit('message', JSON.stringify({ id: msg.id, result: { data: `frame:${currentUrl}` } }));
+                return;
+              }
+              socket.emit('message', JSON.stringify({ id: msg.id, result: {} }));
+            });
+          };
+          queueMicrotask(() => socket.emit('open'));
+          return socket;
+        },
+      });
+    });
+    cleanups.push(() => spy.mockRestore());
+
+    const frames: BrowserFramePayload[] = [];
+    const manager = new EmbeddedBrowserManager({
+      storageRoot: tmpRoot,
+      onStateChange: () => undefined,
+      onFrame: (f) => frames.push(f),
+    });
+    cleanups.push(() => manager.dispose());
+
+    // 1. 以 DPR=2 启动并打开第一个地址
+    const launched = await manager.launch({
+      cdpUrl: 'ws://127.0.0.1:9222/devtools/page/1',
+      url: 'http://localhost:5173',
+      width: 600,
+      height: 400,
+      deviceScaleFactor: 2,
+    });
+    expect(launched.status).toBe('running');
+    expect(launched.url).toBe('http://localhost:5173');
+
+    const metricsCall = calls.find((c) => c.method === 'Emulation.setDeviceMetricsOverride');
+    expect(metricsCall?.params).toMatchObject({ width: 600, height: 400, deviceScaleFactor: 2 });
+
+    const screencastCall = calls.find((c) => c.method === 'Page.startScreencast');
+    expect(screencastCall?.params).toMatchObject({
+      format: 'jpeg',
+      quality: 92,
+      maxWidth: 1200,
+      maxHeight: 800,
+    });
+
+    // 2. 切换到新地址（跨域）：应重启 screencast 并抓取新页面 PNG 帧
+    const screencastCountBefore = calls.filter((c) => c.method === 'Page.startScreencast').length;
+    const navRes = await manager.navigate('https://example.com/next');
+    expect(navRes.url).toBe('https://example.com/next');
+    expect(navRes.title).toBe('Title for https://example.com/next');
+    expect(calls.filter((c) => c.method === 'Page.startScreencast').length).toBeGreaterThan(screencastCountBefore);
+    expect(manager.getLastFrame()).toMatchObject({
+      data: 'frame:https://example.com/next',
+      format: 'png',
+    });
+
+    // 3. 同文档 #hash 跳转（无 loaderId）：立即完成不卡 15 秒，并刷新画面
+    const hashRes = await manager.navigate('https://example.com/next#details');
+    expect(hashRes.url).toBe('https://example.com/next#details');
+    expect(manager.getLastFrame()).toMatchObject({
+      data: 'frame:https://example.com/next#details',
+      format: 'png',
+    });
+
+    // 4. 网络事件捕获（requestWillBeSent / responseReceived / loadingFinished）与响应体读取
+    socket.emit(
+      'message',
+      JSON.stringify({
+        method: 'Network.requestWillBeSent',
+        params: {
+          requestId: 'req-1',
+          type: 'Fetch',
+          timestamp: 10.0,
+          wallTime: 1700000000,
+          request: {
+            url: 'https://example.com/api/items',
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            postData: '{"q":"halo"}',
+          },
+        },
+      }),
+    );
+    socket.emit(
+      'message',
+      JSON.stringify({
+        method: 'Network.responseReceived',
+        params: {
+          requestId: 'req-1',
+          type: 'Fetch',
+          response: {
+            status: 200,
+            statusText: 'OK',
+            mimeType: 'application/json',
+            headers: { 'content-type': 'application/json' },
+          },
+        },
+      }),
+    );
+    socket.emit(
+      'message',
+      JSON.stringify({
+        method: 'Network.loadingFinished',
+        params: { requestId: 'req-1', timestamp: 10.125, encodedDataLength: 512 },
+      }),
+    );
+
+    const netState = manager.getState().networkRequests ?? [];
+    expect(netState).toHaveLength(1);
+    expect(netState[0]).toMatchObject({
+      requestId: 'req-1',
+      method: 'POST',
+      url: 'https://example.com/api/items',
+      resourceType: 'Fetch',
+      status: 200,
+      encodedDataLength: 512,
+      durationMs: 125,
+      finished: true,
+      postData: '{"q":"halo"}',
+    });
+
+    manager.clearNetwork();
+    expect(manager.getState().networkRequests).toEqual([]);
+
+    // 5. 剪贴板粘贴与拖选鼠标 buttons 透传
+    await manager.pasteText('pasted text');
+    expect(calls).toContainEqual({ method: 'Input.insertText', params: { text: 'pasted text' } });
+
+    await manager.dispatchMouse({ action: 'move', x: 120, y: 80, buttons: 1 });
+    expect(calls).toContainEqual({
+      method: 'Input.dispatchMouseEvent',
+      params: { type: 'mouseMoved', x: 120, y: 80, button: 'left', buttons: 1, clickCount: 0, modifiers: 0 },
+    });
   });
 });

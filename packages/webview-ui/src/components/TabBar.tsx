@@ -3,11 +3,12 @@
  * 支持拖动排序与右键菜单（关闭当前 / 其他 / 左侧 / 右侧 / 全部）。
  */
 import { useEffect, useRef, useState } from 'react';
-import { useView } from '../store.ts';
+import { setActiveModule, useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
 import { BackendLogo } from './BackendLogo.tsx';
-import { CloseIcon, GitBranchIcon } from './icons.tsx';
+import { CloseIcon, GitBranchIcon, PlusIcon } from './icons.tsx';
+import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu.tsx';
 import { useT } from '../i18n.ts';
 
@@ -27,6 +28,9 @@ function dropIndexAt(clientX: number, strip: HTMLElement | null): number {
 export function TabBar() {
   const tabs = useView((s) => s.tabs);
   const backends = useView((s) => s.backends);
+  const clientSurface = useView((s) => s.clientSurface);
+  const clientScope = useView((s) => s.clientScope);
+  const remoteReadOnly = clientSurface === 'mobile-web' && clientScope === 'read-only';
   const strip = useRef<HTMLDivElement>(null);
   /** 正在拖动的标签 key 与当前落点（0..items.length）。 */
   const [drag, setDrag] = useState<{ key: string; at: number } | null>(null);
@@ -43,12 +47,13 @@ export function TabBar() {
   const endDrag = () => setDrag(null);
 
   return (
-    <div
-      className="tabs flex shrink-0 touch-pan-x items-center gap-0.5 overflow-x-auto border-b border-line bg-canvas px-2 py-1 max-md:px-1.5 max-md:py-0.5"
-      role="tablist"
-      aria-label={t('tabs.label')}
-      ref={strip}
-      data-testid="tabs"
+    <div className="flex shrink-0 items-center gap-1 border-b border-line bg-canvas px-2 py-1 max-md:px-1.5 max-md:py-0.5">
+      <div
+        className="tabs flex min-w-0 flex-1 touch-pan-x items-center gap-0.5 overflow-x-auto"
+        role="tablist"
+        aria-label={t('tabs.label')}
+        ref={strip}
+        data-testid="tabs"
       onDragOver={(event) => {
         if (!drag) return;
         event.preventDefault();
@@ -176,6 +181,23 @@ export function TabBar() {
           </ContextMenu>
         );
       })}
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        data-testid="tabbar-new-session-btn"
+        disabled={remoteReadOnly}
+        aria-label={t('header.new')}
+        title={t('header.newTab')}
+        className="shrink-0 text-ink-2 hover:bg-hover hover:text-ink"
+        onClick={() => {
+          setActiveModule('sessions');
+          postToHost({ type: 'newSession', payload: {} });
+        }}
+      >
+        <PlusIcon className="size-3.5" />
+      </Button>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { useView } from '../store.ts';
 import { postToHost } from '../vscode.ts';
 import { cn } from '../lib/utils.ts';
-import { GlideMenu } from './beautifului/index.ts';
+import { focusActiveMenuRow, GlideMenu } from './beautifului/index.ts';
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -16,6 +16,7 @@ import {
   ZapIcon,
 } from './icons.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -156,9 +157,11 @@ export function PermissionPicker({
           align="end"
           sideOffset={6}
           aria-label={t('permission.select')}
-          className="model-menu permission-menu max-h-80 w-[304px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl p-1 shadow-overlay"
+          onOpenAutoFocus={focusActiveMenuRow}
+          className="model-menu permission-menu w-[304px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl p-0 shadow-overlay"
         >
-          <div role="menu">
+          <ScrollArea className="max-h-80">
+            <div role="menu" className="p-1">
             <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[8px] bg-hover">
               {options.map((preset) => {
                 const active = preset === current;
@@ -176,7 +179,7 @@ export function PermissionPicker({
                     className={cn(
                       'menu-item permission-menu__item relative z-10 flex w-full items-start gap-2.5 rounded-[8px] px-2.5 py-2 text-left transition-colors duration-100',
                       active
-                        ? 'menu-item--active bg-field text-ink group-hover/glide-menu:bg-transparent'
+                        ? 'menu-item--active bg-field text-ink group-data-[gliding=true]/glide-menu:bg-transparent'
                         : 'text-ink',
                     )}
                     onClick={() => {
@@ -218,7 +221,8 @@ export function PermissionPicker({
                 );
               })}
             </GlideMenu>
-          </div>
+            </div>
+          </ScrollArea>
         </PopoverContent>
       </Popover>
       <Dialog open={confirmPreset !== undefined} onOpenChange={(next) => !next && setConfirmPreset(undefined)}>

@@ -133,6 +133,22 @@ describe('右侧面板拖动调宽与内置浏览器标签页（AI MCP 协同）
         cdpUrl: 'http://127.0.0.1:49999',
         lastAiAction: { tool: 'browser_click', summary: '点击 Submit', at: Date.now(), x: 200, y: 120 },
         consoleLogs: [{ id: 1, level: 'error', text: 'Uncaught ReferenceError: foo', timestamp: Date.now() }],
+        networkRequests: [
+          {
+            requestId: 'net-1',
+            url: 'http://localhost:5173/api/users',
+            method: 'GET',
+            resourceType: 'Fetch',
+            status: 200,
+            statusText: 'OK',
+            mimeType: 'application/json',
+            encodedDataLength: 256,
+            durationMs: 42,
+            startedAt: Date.now(),
+            finished: true,
+            responseHeaders: { 'content-type': 'application/json' },
+          },
+        ],
       },
     });
     host({
@@ -149,25 +165,133 @@ describe('右侧面板拖动调宽与内置浏览器标签页（AI MCP 协同）
     img.getBoundingClientRect = () =>
       ({ left: 0, top: 0, width: 500, height: 300, right: 500, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
 
-    // 鼠标点击按比例映射回 1000×600 视口坐标
+    // 鼠标点击按比例映射回 1000×600 视口坐标，支持 Ctrl+C/X/A 与原生粘贴事件
     fireEvent.mouseDown(img, { clientX: 100, clientY: 75, button: 0, detail: 1 });
     expect(posted).toContainEqual({
       type: 'browserMouse',
       payload: { action: 'down', x: 200, y: 150, button: 'left', clickCount: 1, modifiers: 0 },
     });
 
-    // 地址栏提交新网址
-    const urlInput = screen.getByTestId('browser-url-input');
+    const viewportForClipboard = screen.getByTestId('browser-viewport');
+    fireEvent.keyDown(viewportForClipboard, { key: 'c', ctrlKey: true });
+    expect(posted).toContainEqual({ type: 'browserClipboard', payload: { action: 'copy' } });
+    fireEvent.keyDown(viewportForClipboard, { key: 'x', ctrlKey: true });
+    expect(posted).toContainEqual({ type: 'browserClipboard', payload: { action: 'cut' } });
+    fireEvent.keyDown(viewportForClipboard, { key: 'a', ctrlKey: true });
+    expect(posted).toContainEqual({ type: 'browserClipboard', payload: { action: 'selectAll' } });
+    fireEvent.paste(viewportForClipboard, {
+      clipboardData: { getData: (type: string) => (type === 'text/plain' ? 'hello clipboard' : '') },
+    });
+    expect(posted).toContainEqual({
+      type: 'browserClipboard',
+      payload: { action: 'paste', text: 'hello clipboard' },
+    });
+
+    // 地址栏按 Enter 提交新网址（不依赖表单提交按钮），并自动失焦以便回显重定向后的 URL
+    const urlInput = screen.getByTestId('browser-url-input') as HTMLInputElement;
+    urlInput.focus();
+    fireEvent.focus(urlInput);
     fireEvent.change(urlInput, { target: { value: 'https://example.com' } });
-    fireEvent.submit(urlInput.closest('form')!);
+    fireEvent.keyDown(urlInput, { key: 'Enter' });
     expect(posted).toContainEqual({
       type: 'browserNavigate',
       payload: { url: 'https://example.com' },
     });
 
-    // 打开控制台抽屉可见错误日志
+    // 无损 PNG 帧正确切换为 image/png 渲染以保持高分屏文字锐利度
+    host({
+      type: 'browserFrame',
+      payload: { data: 'cG5nZGF0YQ==', format: 'png', width: 1000, height: 600, timestamp: Date.now() },
+    });
+    await waitFor(() => {
+      expect(img.src).toBe('data:image/png;base64,cG5nZGF0YQ==');
+    });
+
+    // 打开开发者工具抽屉可见错误日志，支持控制台 REPL 求值
     fireEvent.click(screen.getByTestId('browser-console-toggle'));
     expect(screen.getByTestId('browser-console-drawer').textContent).toContain('Uncaught ReferenceError: foo');
+
+    const consoleInput = screen.getByTestId('browser-console-input');
+    fireEvent.change(consoleInput, { target: { value: '1 + 1' } });
+    fireEvent.submit(consoleInput.closest('form')!);
+    expect(posted).toContainEqual({
+      type: 'browserEvalConsole',
+      payload: { expression: '1 + 1' },
+    });
+
+    // 停靠位置支持切换为左侧 / 右侧 / 底部（不卸载视口 DOM，通过 flex 方向无闪烁切换）
+    const devtoolsPanel = screen.getByTestId('browser-devtools-panel');
+    const browserBody = screen.getByTestId('browser-body');
+    expect(devtoolsPanel.getAttribute('data-dock')).toBe('bottom');
+    expect(browserBody.className).toContain('flex-col');
+
+    fireEvent.click(screen.getByTestId('devtools-dock-left'));
+    expect(devtoolsPanel.getAttribute('data-dock')).toBe('left');
+    expect(browserBody.className).toContain('flex-row-reverse');
+
+    fireEvent.click(screen.getByTestId('devtools-dock-right'));
+    expect(devtoolsPanel.getAttribute('data-dock')).toBe('right');
+    expect(browserBody.className).toContain('flex-row');
+    expect(browserBody.className).not.toContain('flex-row-reverse');
+
+    // 切换到网络面板，点击请求并查看响应体
+    fireEvent.mouseDown(screen.getByTestId('devtools-tab-network'));
+    fireEvent.click(screen.getByTestId('devtools-tab-network'));
+    const netRow = await screen.findByTestId('devtools-network-row-net-1');
+    expect(netRow.textContent).toContain('users');
+    fireEvent.click(netRow);
+    fireEvent.click(screen.getByTestId('devtools-network-detail-response'));
+    expect(posted).toContainEqual({
+      type: 'browserGetNetworkBody',
+      payload: { requestId: 'net-1' },
+    });
+    host({
+      type: 'browserNetworkBody',
+      payload: { requestId: 'net-1', body: '{"ok":true}', base64Encoded: false },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('devtools-network-response-body').textContent).toContain('"ok": true');
+    });
+
+    // 开启 DOM 拾取模式，点击页面元素后展示元素详情、高亮层并支持实时修改行内样式
+    fireEvent.click(screen.getByTestId('browser-inspect-btn'));
+    fireEvent.mouseDown(img, { clientX: 50, clientY: 50, button: 0, detail: 1 });
+    expect(posted).toContainEqual({
+      type: 'browserInspectAt',
+      payload: { x: 100, y: 100, select: true },
+    });
+    host({
+      type: 'browserInspectResult',
+      payload: {
+        mode: 'select',
+        element: {
+          tag: 'button',
+          id: 'submit-btn',
+          classes: ['primary'],
+          selector: '#submit-btn',
+          label: 'button#submit-btn.primary',
+          rect: { x: 80, y: 90, width: 120, height: 36 },
+          boxModel: { margin: [0, 0, 0, 0], border: [1, 1, 1, 1], padding: [6, 12, 6, 12] },
+          attributes: [{ name: 'id', value: 'submit-btn' }],
+          inlineStyle: '',
+          computedStyles: { display: 'inline-flex', color: 'rgb(255, 255, 255)' },
+          outerHtml: '<button id="submit-btn" class="primary">Submit</button>',
+          ancestors: [{ label: 'body', selector: 'body' }],
+          children: [],
+        },
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('devtools-elements-pane').textContent).toContain('button#submit-btn.primary');
+      expect(screen.getByTestId('browser-dom-highlight')).toBeTruthy();
+    });
+    fireEvent.change(screen.getByTestId('devtools-style-prop'), { target: { value: 'color' } });
+    fireEvent.change(screen.getByTestId('devtools-style-val'), { target: { value: 'red' } });
+    fireEvent.submit(screen.getByTestId('devtools-style-form'));
+    expect(posted).toContainEqual({
+      type: 'browserEditElementStyle',
+      payload: { selector: '#submit-btn', property: 'color', value: 'red' },
+    });
 
     // 打开 AI 连接 Popover 并切换开关
     fireEvent.click(screen.getByTestId('browser-ai-popover-trigger'));

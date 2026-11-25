@@ -215,6 +215,7 @@ export function activate(context: vscode.ExtensionContext): void {
     writeClipboard: async (text: string) => {
       await vscode.env.clipboard.writeText(text);
     },
+    readClipboard: async () => await vscode.env.clipboard.readText(),
     showMessage: async (level, message, actions = []) => {
       if (level === 'error') return await vscode.window.showErrorMessage(message, ...actions);
       if (level === 'warning') return await vscode.window.showWarningMessage(message, ...actions);

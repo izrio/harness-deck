@@ -38,6 +38,7 @@ import {
   commitAll,
   createBranch,
   createPullRequest,
+  deleteBranch,
   discardFile,
   discardHunk,
   fetchRemote,
@@ -796,6 +797,36 @@ export class WorkbenchHub {
           type: 'toast',
           payload: result.ok
             ? { level: 'info', text: t('sourceControl.branchCreated', message.payload.branch) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlDeleteBranch': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const confirmed =
+          message.payload.confirmed === true ||
+          (await this.host.confirm?.(
+            t('sourceControl.deleteBranchConfirm', message.payload.branch),
+            t('sourceControl.deleteBranchDetail'),
+            t('sourceControl.deleteBranchAction'),
+          )) !== false;
+        if (!confirmed) return true;
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await deleteBranch(root, message.payload.branch, { force: message.payload.force });
+        await this.refreshSourceControl({
+          kind: 'deleteBranch',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.branchDeleted', message.payload.branch) }
             : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
         });
         return true;
