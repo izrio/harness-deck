@@ -66,10 +66,10 @@
 
 ## 安装
 
-1. 在 [Releases](https://github.com/izrio/dsh-vscode-copilot/releases/latest) 下载 `harness-deck-<版本>.vsix`，在 VS Code 扩展视图「⋯ → 从 VSIX 安装…」，或执行：
+1. 在 [Releases](https://github.com/izrio/dsh-vscode-copilot/releases/latest) 下载 `Halo-<版本>-vscode.vsix`，在 VS Code 扩展视图「⋯ → 从 VSIX 安装…」，或执行：
 
    ```bash
-   code --install-extension harness-deck-<版本>.vsix
+   code --install-extension Halo-<版本>-vscode.vsix
    ```
 
 2. 不想开 IDE 的话，可以直接下载桌面端安装包：Windows `Halo-<版本>-win-x64.exe`、macOS `Halo-<版本>-mac-*.dmg`、Linux `Halo-<版本>-linux-*.AppImage`（安装包未签名）。
@@ -133,7 +133,7 @@ pnpm build
 pnpm package
 ```
 
-`pnpm package` 产出 `packages/extension/harness-deck-<版本>.vsix`。调试时先执行 `pnpm dev`（监听并重新构建），再用 VS Code 打开 `packages/extension` 按 F5 启动扩展开发宿主。
+`pnpm package` 产出 `packages/extension/Halo-<版本>-vscode.vsix`。调试时先执行 `pnpm dev`（监听并重新构建），再用 VS Code 打开 `packages/extension` 按 F5 启动扩展开发宿主。
 
 桌面端安装包（Windows / macOS / Linux）由 `packages/desktop` 单独打包，发布流程在三个平台分别产出安装包：
 
@@ -231,7 +231,7 @@ packages/
 
 **Halo** is a VS Code chat panel for coding agents with a switchable backend: [dsh (DeepSeek Harness)](https://github.com/deepseek-ai/deepseek-harness), [oh-my-pi](https://github.com/can1357/oh-my-pi), [CodeBuddy](https://www.codebuddy.ai/cli), [Claude Code](https://github.com/agentclientprotocol/claude-agent-acp), or any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com). It streams replies, shows compact tool rows, asks before actions that need approval, and opens every change in the VS Code diff editor.
 
-- **Install**: download `harness-deck-<version>.vsix` from [Releases](https://github.com/izrio/dsh-vscode-copilot/releases/latest) and run `code --install-extension harness-deck-<version>.vsix`, then install at least one backend (see the table above). The panel asks which backend to use on first open. Standalone desktop installers (`Halo-<version>-win-x64.exe`, `Halo-<version>-mac-*.dmg`, `Halo-<version>-linux-*.AppImage`) are attached to the same release (currently unsigned).
+- **Install**: download `Halo-<version>-vscode.vsix` from [Releases](https://github.com/izrio/dsh-vscode-copilot/releases/latest) and run `code --install-extension Halo-<version>-vscode.vsix`, then install at least one backend (see the table above). The panel asks which backend to use on first open. Standalone desktop installers (`Halo-<version>-win-x64.exe`, `Halo-<version>-mac-*.dmg`, `Halo-<version>-linux-*.AppImage`) are attached to the same release (currently unsigned).
 - **Usage, backend differences and settings**: [packages/extension/README.md](./packages/extension/README.md).
 - **Architecture**: the webview only knows a backend-neutral view model; each backend has a controller that projects its sessions into it. dsh is reached over HTTP and WebSocket, ACP agents over stdio JSON-RPC. The extension itself makes no model requests. See [docs/DESIGN.md](./docs/DESIGN.md), section 15.
 - **Development**: `pnpm install`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm package`. End-to-end tests run real agents against a local mock model (no keys needed): `pnpm --filter harness-deck e2e -- --dsh …` and `pnpm --filter harness-deck acp-e2e -- --omp … | --codebuddy … | --claude …`.

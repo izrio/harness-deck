@@ -67,23 +67,74 @@ jobs:
 
           let updated = 0;
           let skipped = 0;
+          let renamedAssets = 0;
           for (const rel of releases) {
             const expected = sections.get(rel.tag_name);
             if (!expected) {
               throw new Error(`Missing CHANGELOG entry for release tag ${rel.tag_name}`);
             }
             const expectedTitle = `Halo ${rel.tag_name}`;
-            if (normalize(rel.body) === normalize(expected) && (rel.name ?? '') === expectedTitle) {
+            if (normalize(rel.body) !== normalize(expected) || (rel.name ?? '') !== expectedTitle) {
+              const tmpFile = '/tmp/release-notes.md';
+              writeFileSync(tmpFile, expected, 'utf8');
+              execFileSync('gh', ['release', 'edit', rel.tag_name, '--title', expectedTitle, '--notes-file', tmpFile], {
+                stdio: 'inherit',
+              });
+              console.log(`Updated release for ${rel.tag_name} -> ${expectedTitle}`);
+              updated += 1;
+            } else {
               skipped += 1;
-              continue;
             }
-            const tmpFile = '/tmp/release-notes.md';
-            writeFileSync(tmpFile, expected, 'utf8');
-            execFileSync('gh', ['release', 'edit', rel.tag_name, '--title', expectedTitle, '--notes-file', tmpFile], {
-              stdio: 'inherit',
-            });
-            console.log(`Updated release for ${rel.tag_name} -> ${expectedTitle}`);
-            updated += 1;
+
+            const ver = rel.tag_name.replace(/^v/, '');
+            const binaryMap = new Map([
+              [`harness-deck-${ver}.vsix`, `Halo-${ver}-vscode.vsix`],
+              [`dsh-copilot-${ver}.vsix`, `Halo-${ver}-vscode.vsix`],
+              [`harness-deck-jetbrains-${ver}.zip`, `Halo-${ver}-jetbrains.zip`],
+            ]);
+            const shaMap = new Map([
+              [`harness-deck-${ver}.vsix.sha256`, { name: `Halo-${ver}-vscode.vsix.sha256`, target: `Halo-${ver}-vscode.vsix` }],
+              [`dsh-copilot-${ver}.vsix.sha256`, { name: `Halo-${ver}-vscode.vsix.sha256`, target: `Halo-${ver}-vscode.vsix` }],
+              [`harness-deck-jetbrains-${ver}.zip.sha256`, { name: `Halo-${ver}-jetbrains.zip.sha256`, target: `Halo-${ver}-jetbrains.zip` }],
+            ]);
+
+            const existingNames = new Set((rel.assets ?? []).map((a) => a.name));
+
+            for (const asset of rel.assets ?? []) {
+              const nextName = binaryMap.get(asset.name);
+              if (nextName) {
+                if (!existingNames.has(nextName)) {
+                  execFileSync(
+                    'gh',
+                    ['api', '-X', 'PATCH', `repos/${repo}/releases/assets/${asset.id}`, '-f', `name=${nextName}`],
+                    { stdio: 'inherit' },
+                  );
+                  existingNames.add(nextName);
+                  console.log(`Renamed asset ${rel.tag_name}: ${asset.name} -> ${nextName}`);
+                  renamedAssets += 1;
+                }
+                continue;
+              }
+              const shaSpec = shaMap.get(asset.name);
+              if (shaSpec) {
+                const rawSha = execFileSync(
+                  'gh',
+                  ['api', '-H', 'Accept: application/octet-stream', `repos/${repo}/releases/assets/${asset.id}`],
+                  { encoding: 'utf8' },
+                );
+                const hash = rawSha.trim().split(/\s+/)[0];
+                if (!/^[0-9a-f]{64}$/i.test(hash)) {
+                  throw new Error(`Invalid sha256 content in ${rel.tag_name}/${asset.name}: ${rawSha}`);
+                }
+                const tmpSha = `/tmp/${shaSpec.name}`;
+                writeFileSync(tmpSha, `${hash}  ${shaSpec.target}\n`, 'utf8');
+                execFileSync('gh', ['release', 'upload', rel.tag_name, tmpSha, '--clobber'], { stdio: 'inherit' });
+                execFileSync('gh', ['api', '-X', 'DELETE', `repos/${repo}/releases/assets/${asset.id}`], { stdio: 'inherit' });
+                existingNames.add(shaSpec.name);
+                console.log(`Replaced checksum ${rel.tag_name}: ${asset.name} -> ${shaSpec.name}`);
+                renamedAssets += 1;
+              }
+            }
           }
-          console.log(`Sync complete: updated=${updated}, unchanged=${skipped}`);
+          console.log(`Sync complete: updated=${updated}, unchanged=${skipped}, renamedAssets=${renamedAssets}`);
           EOF

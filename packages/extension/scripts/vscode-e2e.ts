@@ -3,7 +3,7 @@
  * 通过命令面板打开对话、发消息、看工具调用和代码高亮、切换模型，并截图。
  *
  * 前置条件：
- * - 已执行 `pnpm package`（产出 packages/extension/harness-deck-*.vsix）
+ * - 已执行 `pnpm package`（产出 packages/extension/Halo-*-vscode.vsix）
  * - 本机装有 code-server（`npm install code-server`，需要 Node 24）和 playwright + Chromium
  *
  * 用法：

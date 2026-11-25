@@ -60,11 +60,11 @@ jobs:
 
       - name: Prepare VS Code asset
         run: |
-          VSIX="packages/extension/harness-deck-${VERSION}.vsix"
+          VSIX="packages/extension/Halo-${VERSION}-vscode.vsix"
           test -f "$VSIX"
           mkdir -p release-vscode
           cp "$VSIX" release-vscode/
-          (cd release-vscode && sha256sum "harness-deck-${VERSION}.vsix" > "harness-deck-${VERSION}.vsix.sha256")
+          (cd release-vscode && sha256sum "Halo-${VERSION}-vscode.vsix" > "Halo-${VERSION}-vscode.vsix.sha256")
 
       - uses: actions/upload-artifact@v4
         with:
@@ -111,11 +111,11 @@ jobs:
 
       - name: Prepare JetBrains asset
         run: |
-          ZIP="packages/jetbrains/build/distributions/harness-deck-jetbrains-${JB_VERSION}.zip"
+          ZIP="packages/jetbrains/build/distributions/Halo-${JB_VERSION}-jetbrains.zip"
           test -f "$ZIP"
           mkdir -p release-jetbrains
           cp "$ZIP" release-jetbrains/
-          (cd release-jetbrains && sha256sum "harness-deck-jetbrains-${JB_VERSION}.zip" > "harness-deck-jetbrains-${JB_VERSION}.zip.sha256")
+          (cd release-jetbrains && sha256sum "Halo-${JB_VERSION}-jetbrains.zip" > "Halo-${JB_VERSION}-jetbrains.zip.sha256")
 
       - uses: actions/upload-artifact@v4
         with:

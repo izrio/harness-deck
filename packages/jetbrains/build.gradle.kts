@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.bundling.Zip
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
@@ -74,6 +75,10 @@ intellijPlatform {
             untilBuild = provider { null }
         }
     }
+}
+
+tasks.named<Zip>("buildPlugin") {
+    archiveFileName.set("Halo-${project.version}-jetbrains.zip")
 }
 
 tasks.test {

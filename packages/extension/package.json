@@ -766,7 +766,7 @@
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc -p tsconfig.json",
     "smoke": "tsx scripts/m0-smoke.ts",
-    "package": "vsce package --no-dependencies --skip-license",
+    "package": "node scripts/package.mjs",
     "e2e": "tsx scripts/ui-e2e.ts",
     "vscode-e2e": "tsx scripts/vscode-e2e.ts",
     "acp-e2e": "tsx scripts/acp-e2e.ts"
