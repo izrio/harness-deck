@@ -1,0 +1,88 @@
+name: Sync Release Notes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/extension/CHANGELOG.md
+      - .github/workflows/sync-release-notes.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-release-notes
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync GitHub Release notes from CHANGELOG
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sync existing GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module << 'EOF'
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          const changelog = readFileSync('packages/extension/CHANGELOG.md', 'utf8');
+          const sections = new Map();
+          let currentVersion = null;
+          let buffer = [];
+
+          const flush = () => {
+            if (!currentVersion) return;
+            sections.set(`v${currentVersion}`, `## 更新内容 / Changes\n\n${buffer.join('\n').trim()}\n`);
+          };
+
+          for (const line of changelog.split(/\r?\n/)) {
+            const match = /^## ([0-9]+\.[0-9]+\.[0-9]+(?:-[^\s]+)?)\s*$/.exec(line);
+            if (match) {
+              flush();
+              currentVersion = match[1];
+              buffer = [];
+            } else if (currentVersion) {
+              buffer.push(line);
+            }
+          }
+          flush();
+
+          const repo = process.env.GITHUB_REPOSITORY;
+          const rawReleases = execFileSync(
+            'gh',
+            ['api', '--paginate', '--slurp', `repos/${repo}/releases?per_page=100`],
+            { encoding: 'utf8' },
+          );
+          const pages = JSON.parse(rawReleases);
+          const releases = Array.isArray(pages[0]) ? pages.flat() : pages;
+          const normalize = (text) => (text ?? '').replace(/\r\n/g, '\n').trim();
+
+          let updated = 0;
+          let skipped = 0;
+          for (const rel of releases) {
+            const expected = sections.get(rel.tag_name);
+            if (!expected) {
+              throw new Error(`Missing CHANGELOG entry for release tag ${rel.tag_name}`);
+            }
+            if (normalize(rel.body) === normalize(expected)) {
+              skipped += 1;
+              continue;
+            }
+            const tmpFile = '/tmp/release-notes.md';
+            writeFileSync(tmpFile, expected, 'utf8');
+            execFileSync('gh', ['release', 'edit', rel.tag_name, '--notes-file', tmpFile], {
+              stdio: 'inherit',
+            });
+            console.log(`Updated release notes for ${rel.tag_name}`);
+            updated += 1;
+          }
+          console.log(`Sync complete: updated=${updated}, unchanged=${skipped}`);
+          EOF

@@ -16,553 +16,416 @@
 
 ## 0.17.0
 
-**内置浏览器开发者工具与高清剪贴板交互、双模式订阅余量（百分比双圆环 + 积分余额式）与每轮实时动画刷新、Git 本地分支删除（二次确认）、全局 `shadcn-ui` `ScrollArea` 升级、回复中权限下一轮生效及多账号切换额度隔离修复**：为内置浏览器补齐高清 DPR 画面渲染、跨源/哈希地址切换修复、完整复制/剪切/粘贴/全选与右键菜单，以及支持左/下/右停靠的 DevTools（DOM 元素选中调试、Console REPL 与 Network 抓包）；订阅余量扩展为百分比双圆环与积分余额（如 CodeBuddy 积分胶囊 + 5 格能量条 + 积分钱包浮层）双模式，每轮对话结束自动刷新并平滑播放数字与进度条动画；支持在底栏与 Git 面板删除非当前本地分支（带二次确认与强制 `-D` 选项）；将模型选择、分支/项目浮层、侧栏、设置页与工作台滚动容器统一升级为 `shadcn-ui` `ScrollArea`；新增会话按钮移至标签栏最右侧；修复回复中切换权限改为下一轮生效、权限下拉双背景高亮以及多账号切换后仍读取上一账号额度的串号问题。
+### 中文
 
-**Built-in Browser DevTools & HiDPI clipboard interaction, dual-mode quota display (percent rings + credits wallet) with per-turn animated refresh, local Git branch deletion with confirmation, `shadcn-ui` `ScrollArea` rollout, next-turn permission changes & multi-account quota isolation fixes**: Upgraded the built-in browser with HiDPI DPR rendering, cross-origin/hash navigation fixes, full copy/cut/paste/select-all and context menu support, and dockable left/bottom/right DevTools (DOM element inspection & live style editing, Console REPL, and Network inspector); added dual-mode quota visualization supporting both concentric percent rings and a credits balance mode (e.g., CodeBuddy coin pill, 5-cell energy gauge, and wallet popover) with automatic post-turn refresh and smooth number/progress animations; added local Git branch deletion with secondary confirmation and optional force `-D` across both composer footer and Git panel; adopted `shadcn-ui` `ScrollArea` across popovers, sidebars, settings, and workbench panes; moved the New Session `+` button to the far right of the tab bar; deferred mid-turn permission changes to the next turn, fixed `GlideMenu` double active backgrounds, and resolved multi-account switching quota cross-contamination across Antigravity, CodeBuddy, and Claude.
+- **内置浏览器高清渲染与 DevTools**：支持最高 2x DPR 高清画面、剪贴板快捷键与右键菜单，新增可停靠 DevTools（Elements、Console、Network）。
+- **双模式订阅余量与动画刷新**：新增积分余额模式（如 CodeBuddy 积分胶囊与能量条），每轮对话结束自动刷新并播放数字和进度动画。
+- **分支删除与全局 ScrollArea**：底栏与 Git 面板支持删除本地分支（含二次确认与 `-D`），全局滚动区统一升级为 `shadcn-ui` `ScrollArea`。
+- **权限与多账号隔离修复**：回复中切换权限改为下一轮生效，修复菜单双高亮背景及多账号切换额度串号问题。
 
-- **内置浏览器高清渲染、DevTools 与剪贴板支持**：
-  - 透传设备 DPR（最高 2x）、高质量帧与静止/导航后无损帧补帧，并修复跨源跳转、同页 `#hash` 导航与地址栏输入切换不生效的问题。
-  - 新增 `BrowserDevTools`：支持停靠在左侧 / 底部 / 右侧并拖动调整尺寸，内置 Elements（DOM 元素选中调试、面包屑、盒模型、实时行内样式编辑）、Console（分级筛选与 JS REPL）与 Network（请求捕获、Headers/Payload/Response 与复制 cURL）。
-  - 补齐内置浏览器的拖拽划词选中、复制/剪切/粘贴/全选快捷键与右键菜单支持。
-  **Built-in browser HiDPI rendering, DevTools & clipboard**: Added DPR passthrough (up to 2x), crisp lossless idle/post-navigation frames, and fixes for cross-origin / `#hash` / URL-bar navigation; introduced `BrowserDevTools` with left/bottom/right docking, DOM element inspection & live style editing, Console REPL, and Network capture with cURL export; added drag selection, copy/cut/paste/select-all shortcuts, and a viewport context menu.
-- **双模式订阅余量、每轮自动刷新与数字/进度动画**：
-  - 订阅余量支持「百分比双圆环」与「积分余额」两种模式：CodeBuddy 等积分制服务保留真实剩余/总计/已用积分数，底栏展示硬币图标、积分余额与 5 格竖向能量条，悬浮展示主积分卡与资源包明细。
-  - 每轮对话结束后自动跳过缓存刷新最新额度，移除浮层内冗长的模型清单小字，并为数字变动与进度条/圆环过渡添加平滑动画。
-  **Dual-mode quota display, post-turn refresh & animations**: Added a dedicated `credits` mode alongside dual concentric percent rings (preserving exact remaining/total/used credits for CodeBuddy with a coin pill, 5-cell energy gauge, and wallet/packs popover); automatically refreshes quota after every turn, removes cluttered model-list subtitles, and animates number and bar/ring transitions.
-- **Git 本地分支删除、标签栏与全局 `ScrollArea` 体验打磨**：
-  - 输入框底栏与 Git 面板的分支弹窗均支持删除非当前本地分支，弹出 `shadcn-ui` 二次确认框并支持勾选强制删除未合并提交（`git branch -D`）。
-  - 新增会话 `+` 图标按钮移至会话标签栏最右侧；模型/权限/分支/补全浮层、侧栏、设置页与工作台面板统一接入 `shadcn-ui` `ScrollArea` 替代系统原生滚动条。
-  **Local branch deletion, TabBar polish & `ScrollArea` rollout**: Added local branch deletion with a secondary confirmation dialog (and optional force `-D`) to both composer footer and Git panel branch popovers; moved the New Session `+` icon button to the far right of `TabBar`; replaced native scrollbars across pickers, popovers, sidebars, Settings, and workbench panes with `shadcn-ui` `ScrollArea`.
-- **权限下一轮生效、下拉双背景与多账号切换额度隔离修复**：
-  - 正在回复期间切换权限档位不再中断或立即改动当前回合，改为记录并在下一轮发送时生效，同时修复 `GlideMenu` 打开权限菜单时出现双高亮背景的问题。
-  - 修复多账号切换后仍读取上一账号额度的问题：Antigravity 额度查询严格按当前激活账号槽位 `rawTokenJson` 隔离且不误读 IDE 备用凭据，切换渠道时先停旧进程再换槽位并清空过期缓存，CodeBuddy / Claude 独立账号隔离宿主机 Cookie 与配置目录环境变量，前端切换账号强制刷新并在重连后自动补查。
-  **Next-turn permissions, menu highlight & multi-account quota fixes**: Deferred mid-turn permission changes to the next turn across all backends and fixed `GlideMenu` double active backgrounds; fixed multi-account quota leakage by isolating Antigravity slot queries via `rawTokenJson`, stopping old backend processes before swapping credential slots, clearing inherited CodeBuddy/Claude env cookies/config dirs for isolated accounts, and forcing fresh quota probes on account switch and reconnect.
+### English
+
+- **Browser HiDPI & DevTools**: Added up to 2x DPR rendering, clipboard shortcuts, context menu, and dockable DevTools (Elements, Console, Network).
+- **Dual-Mode Quota & Animations**: Added credits balance mode (e.g. CodeBuddy pill and energy gauge) with per-turn refresh and animated transitions.
+- **Branch Deletion & ScrollArea**: Added local branch deletion (with confirmation and `-D`) and rolled out `shadcn-ui` `ScrollArea` across panels.
+- **Permissions & Account Isolation**: Deferred mid-turn permission edits to next turn; fixed double menu highlights and multi-account quota leakage.
 
 ## 0.16.0
 
-**远程体验全面强化、设置模块去线留白重设计、在线 `skills.sh` / MCP 市场代理互通、无运行时初始化引导页与 WSL2 浏览器及权限稳定性修复**：全面补强移动端远程互通闭环（离线幂等暂存队列、扫码即配对、通知深链直达会话、跨入口 90 秒一次性 `#handoff=` 无感续签、一键 `cloudflared` 临时公网 HTTPS 隧道、飞书/企业微信/钉钉/Telegram/Slack/Discord 等 9 种 IM Webhook 预设、IDE 顶栏远程快捷弹窗、设备重命名与实时权限切换）；按「去线留白、布局自解释」重构整个设置模块，服务商新增/编辑改为弹窗并展示各厂商离线品牌图标；首页在无可用运行时时进入独立初始化引导页；修复 WSL2 下内置浏览器启动报错（`LockFileEx` 9P 崩溃与 NAT 下 CDP 桥接）、新建会话 `auto` 权限回退默认、在线市场未走代理及分支弹窗「拉取」按钮溢出问题。
+### 中文
 
-**Remote access overhaul, borderless Settings redesign, proxy-aware `skills.sh` & MCP online marketplaces, runtime setup page, and WSL2 browser / permission fixes**: Strengthened the end-to-end mobile remote experience with an idempotent offline outbox, one-scan auto-pairing, notification session deep-links, seamless cross-route `#handoff=` ticket renewal, one-click `cloudflared` Quick Tunnel (`*.trycloudflare.com`), 9 IM Webhook presets (Feishu, WeCom, DingTalk, Telegram, Slack, Discord, Bark, ntfy, custom), an IDE header remote quick-access popover, and live device scope switching & renaming; redesigned the entire Settings module around borderless whitespace and self-explanatory layout, moved Provider creation/editing into a modal dialog with brand vendor icons, added a dedicated Runtime Setup onboarding page when no runtime is available, and fixed WSL2 embedded browser launch (`LockFileEx` on 9P + NAT stdio CDP bridge), new-session `auto` permission reverting to default, proxy-aware online marketplaces, and branch popover Fetch button overflow.
+- **移动端远程体验强化**：新增断线暂存补发队列、扫码自动配对、通知直达会话、跨入口 `#handoff=` 续签、一键 `cloudflared` 隧道及 9 种 IM Webhook 预设。
+- **设置页重构与初始化引导**：设置页采用去线留白层级重构，服务商编辑改为带厂商图标的弹窗；无可用运行时展示独立初始化引导页。
+- **在线市场代理与稳定性修复**：技能与 MCP 市场支持代理并接入 `skills.sh` 与 MCP v0.1 注册表；修复 WSL2 浏览器启动崩溃与新建会话 `auto` 权限回退。
 
-- **远程体验全面强化**：
-  - **离线容错、扫码即配对与跨入口续签**：`ConnectionSupervisor` 在断网/切后台重连期间自动暂存幂等写操作并在重连后按序补发；扫码携带 `#code=` 自动换取设备 Cookie；推送通知携带完整 `externalUrl` 直达目标会话；新增 90 秒一次性 `#handoff=` 跨入口票据，在局域网 / 快速公网 / Tailscale / 自定义隧道间切换免重扫。
-  - **一键临时公网隧道与主流 IM Webhook**：新增 `QuickTunnelService` 支持探测与托管本机 `cloudflared` 临时公网 HTTPS 隧道（零账号解锁公网访问与 Web Push）；Webhook 扩展支持飞书（HMAC-SHA256 加签）、企业微信、钉钉（加签）、Telegram（Chat ID）、Slack、Discord、Bark、ntfy 与自定义。
-  - **IDE 顶栏快捷入口与设备管理**：顶部标题栏新增远程状态/开关/二维码快捷弹窗；已配对设备支持随时重命名与实时切换 `read-only` / `operate` 权限（立即对活跃 WebSocket 生效）。
-  **Remote access overhaul**: Added an idempotent offline outbox during WebSocket reconnects, one-scan `#code=` auto-pairing, clickable `externalUrl` session deep-links, and 90s single-use `#handoff=` tickets for seamless cross-route switching without re-scanning; added one-click `cloudflared` Quick Tunnel (`*.trycloudflare.com`) and 9 IM Webhook presets (Feishu/DingTalk HMAC signing, WeCom, Telegram, Slack, Discord, Bark, ntfy, custom); added an IDE header remote quick-access popover plus device renaming and live `read-only` ↔ `operate` scope switching.
-- **设置模块重设计、服务商厂商图标弹窗与无运行时初始化页**：
-  - 全量设置页采用「去线留白、减少辅助文案」的柔和色块层级布局；服务商新增/编辑改为 `shadcn-ui` 弹窗并展示火山方舟、智谱 GLM、阿里云百炼、Kimi、MiniMax、OpenAI、DeepSeek、Claude、Gemini 等离线品牌矢量图标。
-  - 新增 `RuntimeSetupView`：当本机尚未安装任何运行时或当前运行时缺失时展示独立初始化页，支持一键启用已检测到运行时或一键 npm 安装。
-  **Borderless Settings redesign, Provider modal with vendor icons & Runtime Setup page**: Redesigned all Settings panels with borderless surface hierarchy and minimal copy; moved Provider creation/editing into a `shadcn-ui` Dialog displaying offline brand vector logos across presets and saved providers; added `RuntimeSetupView` when no runtime is available, enabling one-click activation or npm installation.
-- **在线技能 / MCP 市场与 WSL2 / 权限 / 布局修复**：
-  - 技能市场与 MCP 市场统一接入 `createProxyAwareFetch`（遵循 IDE `http.proxy` 与 `HTTP(S)_PROXY`），技能市场新增 `skills.sh` 在线模糊搜索与安装热度展示，MCP 市场升级对接官方 `v0.1` 注册表并兼容回退 `v0`。
-  - 修复 WSL2 启动 Windows Chrome/Edge 因 `--user-data-dir` 指向 `\\wsl.localhost` 9P 路径触发 `LockFileEx (code=21)` 崩溃的问题，改落 Windows NTFS 盘符目录并内置 WSL2 NAT 下 PowerShell `.NET ClientWebSocket` 管道 CDP 桥接。
-  - 修复 ACP / CodeBuddy / Claude / ZCode 新建会话默认选中 `auto` 后在输入或发首条消息时被回退为默认权限的问题，以及分支弹窗内「拉取」按钮溢出右边界的问题。
-  **Online marketplaces & WSL2 / permission / layout fixes**: Routed both Skills and MCP marketplaces through `createProxyAwareFetch` (respecting IDE `http.proxy` and proxy env vars), integrated `skills.sh` live search and install counts, and upgraded MCP Registry to `v0.1` with `v0` fallback; fixed WSL2 Windows Chrome/Edge `LockFileEx (code=21)` crashes by placing `--user-data-dir` on Windows NTFS and bridging CDP over PowerShell `.NET ClientWebSocket` stdio in WSL2 NAT mode; fixed new-session `auto` permissions reverting to default across ACP/CodeBuddy/Claude/ZCode and fixed the Fetch button overflowing the branch switcher popover.
+### English
+
+- **Mobile Remote Access Overhaul**: Added offline outbox, QR auto-pairing, notification deep-links, `#handoff=` renewal, `cloudflared` tunnel, and 9 IM webhooks.
+- **Settings Redesign & Runtime Setup**: Rebuilt Settings with borderless layouts and vendor-logo provider dialogs; added a Runtime Setup onboarding page.
+- **Proxy Marketplaces & Fixes**: Routed `skills.sh` and MCP v0.1 marketplaces through host proxy; fixed WSL2 browser crashes and `auto` permission resets.
 
 ## 0.15.1
 
-**发布流程修复与桌面端安装包上线**：修复干净环境下 `pnpm typecheck` 失败（桌面端自动安装的 Electron 类型与轻量类型声明冲突），此前 0.14.0 与 0.15.0 因此未能成功发布；GitHub Release 现同时提供 Windows（NSIS）、macOS（dmg / zip，Intel 与 Apple Silicon）与 Linux（AppImage）桌面端安装包及 SHA-256 校验。本版本一并包含 0.15.0 与 0.14.0 的全部改动：Halo 品牌升级、右侧栏内置浏览器与 AI MCP 操控、在线 MCP / 技能市场与本地技能导入、CodeMirror 6 编辑与增强 Diff、右侧栏终端、跨底层 Git 检查点回滚与会话分叉、全局命令面板（`Ctrl/Cmd+K`）等。
+### 中文
 
-**Release pipeline fix & desktop installers available**: Fixed the clean-CI `pnpm typecheck` failure (auto-installed Electron types conflicting with the lightweight declaration) that had prevented 0.14.0 and 0.15.0 from ever publishing; GitHub Releases now attach Windows (NSIS), macOS (dmg/zip for Intel and Apple Silicon), and Linux (AppImage) desktop installers with SHA-256 checksums. This release also includes all changes from 0.15.0 and 0.14.0: Halo rebrand, built-in browser with AI MCP control, live MCP/skills marketplaces and local skill import, CodeMirror 6 editor with enhanced diff review, right-panel terminal, cross-backend Git checkpoints and session fork, and the global command palette (`Ctrl/Cmd+K`).
+- **发版流水线修复**：移除桌面端 `electron` peerDependency 引发的类型冲突，修复干净 CI 环境下 `pnpm typecheck` 失败问题。
+- **三平台桌面端安装包上线**：GitHub Release 同步发布 Windows（`.exe`）、macOS（`.dmg`/`.zip`）与 Linux（`.AppImage`）安装包，并包含 0.14.0/0.15.0 全部更新。
 
-- **发版流水线修复**：移除 `packages/desktop` 的 `electron` peerDependency（pnpm 会自动安装真实 Electron，导致类型检查与轻量声明冲突），CI 干净检出可正常通过类型检查；桌面端 `preload` 改为 `.cts` 编译为 CommonJS，并在打包态从 `resources` 解析 sidecar / Webview 资源。
-  **Release pipeline fix**: Removed the desktop package's `electron` peerDependency (pnpm auto-installed the real Electron and broke type-checking against the lightweight declaration); the sandboxed preload is now compiled to CommonJS from `.cts`, and packaged builds resolve sidecar/Webview assets from `resources`.
-- **三平台桌面端安装包**：`release.yml` 新增 Windows / macOS / Linux 打包任务，随 Release 上传 `.exe`、`.dmg`、Halo zip 与 `.AppImage` 并生成 SHA-256；macOS 未配置证书时会补 ad-hoc 签名。
-  **Desktop installers for three platforms**: The release workflow now builds on Windows/macOS/Linux and uploads `.exe`, `.dmg`, Halo zip, and `.AppImage` assets with SHA-256 checksums; macOS builds get an ad-hoc signature when no certificate is configured.
+### English
+
+- **Release Pipeline Fix**: Removed the desktop `electron` peerDependency type conflict that broke clean-CI `pnpm typecheck` in 0.14.0 and 0.15.0.
+- **Desktop Installers**: Added Windows (`.exe`), macOS (`.dmg`/`.zip`), and Linux (`.AppImage`) release builds alongside all 0.14.0 and 0.15.0 features.
 
 ## 0.15.0
 
-**品牌升级为 Halo、右侧栏内置浏览器与 AI 操控、在线实时 MCP / 技能市场、本地技能一键导入与全面设置系统打磨**：全系统产品名称统一更名为 **Halo**；右侧面板新增「浏览器」标签页（内置 CDP 实时画面交互与 MCP 工具联动，让智能体直接查看和操作页面）；扩展设置中的 **MCP 服务器** 与 **Agent 技能（SKILL.md）** 均重构为「已安装 / 市场」双标签与独立卡片布局，由宿主在线实时拉取官方 MCP Registry 与开源技能仓库并支持一键刷新与离线精选兜底，同时新增本地技能目录扫描与导入；全面精简设置页冗余说明文案、统一行间距与行间分割线，并在 MCP / 技能卡片及智能体下拉选择中全面接入运行时图标，进一步打磨首页空态、账号渠道切换对比度与移动端底部输入框间距。
+### 中文
 
-**Halo rebrand, built-in right-panel Browser with AI MCP control, live online MCP & Skills marketplaces, local SKILL.md import & comprehensive Settings polish**: Rebranded all user-facing surfaces to **Halo**; added a **Browser** tab to the right panel with live CDP viewport interaction and built-in MCP tooling so agents can inspect and drive web pages directly; rebuilt both **MCP Servers** and **Agent Skills (`SKILL.md`)** into two-tab (**Installed** / **Marketplace**) standalone-card views powered by live host-side fetching from the official MCP Registry API and open-source skill repositories (with one-click refresh and curated offline fallback), plus local `SKILL.md` scanning and import; decluttered Settings copy with clean divided row spacing, added runtime icons across MCP/Skill cards and agent dropdowns, and refined the home empty state, account channel contrast, and mobile composer spacing.
+- **品牌升级为 Halo**：全端产品名统一更名为 Halo（保留 JetBrains 旧凭据兼容读取）。
+- **右侧栏内置浏览器与 AI MCP 联动**：新增内置浏览器视图，支持 CDP 实时画面交互，并向智能体自动暴露浏览器 MCP 工具。
+- **在线 MCP / 技能市场与本地导入**：拆分为「已安装 / 市场」双标签卡片，在线拉取官方注册表并支持离线兜底与本地 `SKILL.md` 一键导入。
+- **设置页精简与图标统一**：精简冗余说明、统一行间分割线与运行时图标，修复多处界面对比度与移动端间距细节。
 
-- **全系统品牌升级为 Halo**：统一更新 VS Code、JetBrains、Electron 桌面端、Webview / PWA、文档与发版流程中的产品名称为 **Halo**（保留 JetBrains 旧凭据子系统兼容读取）。
-  **Halo product rebrand**: Unified all user-facing product names across VS Code, JetBrains, Electron desktop, Webview/PWA, docs, and release workflows to **Halo** (preserving legacy JetBrains credential lookup fallback).
-- **右侧栏内置浏览器与 AI MCP 联动**：新增 `BrowserView`、`EmbeddedBrowserManager` 与 `BrowserMcpServer`，在右侧面板支持实时画面预览、地址导航、点击/滚动/输入交互及终端日志，并自动注册内置浏览器 MCP 供智能体按需操作网页。
-  **Built-in right-panel Browser & AI MCP integration**: Added `BrowserView`, `EmbeddedBrowserManager`, and `BrowserMcpServer` for live CDP viewport rendering, navigation, pointer/keyboard interaction, console logs, and automatic MCP tool exposure to agents.
-- **在线实时 MCP 市场、技能市场与本地技能导入**：MCP 与技能设置统一拆分为「已安装 / 市场」双标签且每一项均为独立卡片；宿主新增 `marketService` 实时拉取官方 MCP Registry（支持关键词实时搜索、缓存与手动刷新）与官方开源技能仓库树及最新 `SKILL.md` Frontmatter，断网自动回退本地精选；支持从本机 Agent 目录或自定义本地文件夹扫描并一键导入 `SKILL.md`。
-  **Live online MCP & Skills marketplaces + local skill import**: Split MCP and Skills into two-tab (**Installed** / **Marketplace**) standalone-card views; added host-side `marketService` fetching live entries from the official MCP Registry API (with debounced online search, caching, and manual refresh) and official GitHub skill repos (`SKILL.md` frontmatter), with seamless offline curated fallback; added local `SKILL.md` scanning and one-click import.
-- **设置系统精简、行间分割线与运行时图标统一**：精简各设置页解释性文字，统一采用 `divide-y` 行间分割线与规范留白；MCP / 技能卡片、弹窗与智能体下拉选择器全面展示运行时图标（含 OpenAI Blossom 样式 Codex 图标），并修复官方/第三方渠道切换对比度、右侧栏标签溢出滚动条、AI 提交图标误旋转、总览角标对比度及移动端底部输入框安全间距。
-  **Settings declutter, divided rows & runtime icons**: Removed verbose explanatory prose across Settings and standardized `divide-y` row spacing; added runtime icons (`BackendLogo`, including the OpenAI Blossom Codex icon) to MCP/Skill cards, dialogs, and agent dropdowns; fixed official/third-party toggle contrast, right-panel tab scrollbar overflow, spinning AI commit icon, sidebar overview badge contrast, and mobile composer bottom safe-area spacing.
+### English
+
+- **Halo Rebrand**: Unified the product name to Halo across VS Code, JetBrains, desktop, Webview, and docs (keeping legacy JetBrains credential fallback).
+- **Built-in Browser & MCP**: Added a right-panel CDP browser with live viewport interaction and automatic MCP tools for coding agents.
+- **Live MCP / Skills Markets**: Split into Installed/Marketplace views with live registry fetching, offline fallback, and local `SKILL.md` import.
+- **Settings Polish & Icons**: Decluttered Settings copy, unified dividers and runtime icons, and fixed contrast and mobile spacing issues.
 
 ## 0.14.0
 
-**内置 CodeMirror 6 代码编辑与增强 Diff 审阅、右侧栏内置终端、跨底层 Git 检查点回滚与会话分叉、多 Worktree 并行标签、全局命令面板（`Ctrl/Cmd+K`）、OKLCH 配色预设、Electron 独立桌面外壳与 Oxlint 工程升级**：全面对齐并补齐独立 AI 编程客户端核心闭环——文件查看器升级为懒加载 CodeMirror 6（支持编辑保存/搜索/折叠），Diff 支持 Split 并排对比、Shiki 词法着色、词级差异、按 Hunk 暂存/撤销与行级批注回传智能体；右侧栏新增「终端」标签页（位于 Git 右侧，零原生编译跨平台 PTY + xterm.js）；Git 面板补齐单文件暂存/撤销、分支切换/新建、Pull/Fetch、AI 一键生成 Commit/PR 草稿与 PR 状态追踪/一键结单；宿主层新增跨所有底层的 Git 隐藏 ref 多回合检查点回滚、会话分叉与原地编辑重跑；并完成全项目 `shadcn-ui` Select 与尺寸统一、Antigravity 多账号隔离/5h 用量修复、Electron 桌面壳（`packages/desktop`）以及 ESLint → Oxlint（`--type-aware`）迁移。
+### 中文
 
-**Built-in CodeMirror 6 editor & enhanced Diff review, integrated right-panel Terminal, cross-backend Git checkpoints & session fork, parallel worktree tabs, global Command Palette (`Ctrl/Cmd+K`), OKLCH theme presets, Electron desktop shell & Oxlint migration**: Completes the end-to-end coding-agent review loop with lazy-loaded CodeMirror 6 editing/search/folding, Split/Unified Shiki-highlighted diffs with word-level highlights, per-hunk stage/discard and line-level review comments sent straight to the composer; adds a zero-native-build cross-platform Terminal tab to the right of Git in the right panel (PTY + xterm.js); expands Git with per-file stage/unstage/discard, branch switcher/creator, Pull/Fetch, AI/heuristic Commit & PR draft generation, and PR check tracking with one-click settlement; adds cross-backend multi-turn Git hidden-ref checkpoints, session fork and inline edit & re-run; unifies all selects/control sizes to `shadcn-ui`, fixes Antigravity multi-account slot isolation & 5h quota badge, adds the `packages/desktop` Electron shell, and migrates linting from ESLint to `oxlint --type-aware`.
+- **CodeMirror 6 编辑与增强 Diff**：支持按需分包的代码编辑/搜索/保存；Diff 新增 Split 并排、Shiki 高亮、词级差异、按 Hunk 暂存/撤销与行级批注。
+- **Git 细粒度操作与 AI 草稿**：支持单文件暂存/撤销、目录树折叠、分支切换、AI 一键生成 Commit/PR 草稿，以及 PR 状态追踪与一键结单。
+- **跨底层检查点与内置终端**：新增基于隐藏 Git ref 的多回合检查点回滚、会话分叉与原地重跑；右侧栏新增跨平台内置终端与全局 `Ctrl/Cmd+K` 命令面板。
+- **桌面壳、主题预设与工程升级**：新增 Electron 独立桌面壳、5 套 OKLCH 主题预设与移动端 Bottom Sheet，并从 ESLint 迁移至 `oxlint --type-aware`。
 
-- **CodeMirror 6 懒加载编辑与增强版 Diff 审阅（P0-1）**：文件预览升级为按需分包的 CodeMirror 6 编辑器，支持 `Ctrl/Cmd+F` 搜索、代码折叠、主题同步与 `Ctrl/Cmd+S` 保存（带工作区信任与符号链接越界保护）；Diff 查看器新增 Unified / Split 并排切换、CSP 安全的 Shiki 语法高亮、行内词级差异、按 Hunk 暂存/撤销（自动刷新 Diff）以及点击任意 Diff 行写批注直达输入框。
-  **Lazy CodeMirror 6 editor & enhanced Diff review (P0-1)**: Upgraded file viewing to code-split CodeMirror 6 with `Ctrl/Cmd+F` search, folding, theme sync and `Ctrl/Cmd+S` save (guarded by workspace trust and symlink escape checks); upgraded the Diff viewer with Unified/Split toggle, CSP-safe Shiki syntax tokens, word-level diff highlights, per-hunk stage/discard with auto-refresh, and line-level review comments routed directly to the composer.
-- **Git 细粒度操作、AI 草稿生成与 PR 追踪结单（P0-2 / P1-7）**：支持单文件暂存（`+`）、取消暂存（`-`）、撤销更改（`↩` 二次确认）、真实层级目录树（含 IDEA 风格单子目录折叠）、分支切换/新建与 Fetch/Pull；新增 AI 一键生成 Commit Message 与 PR 描述（优先直连已配置服务商，离线自动回退规则生成）；集成 `gh pr view` 展示 PR 状态与 CI 检查汇总，合并后支持一键结单（归档关联看板任务并可选清理 Worktree）。
-  **Granular Git actions, AI drafts & PR tracking/settlement (P0-2 / P1-7)**: Added per-file stage/unstage/discard (with confirmation), hierarchical Git directory tree with compact folders, branch switcher/creator and Pull/Fetch; added one-click AI Commit Message & PR draft generation (direct provider first with offline heuristic fallback); integrated `gh pr view` status/CI checks and one-click settlement for merged PRs.
-- **跨底层多回合 Git 检查点回滚、会话分叉与原地编辑重跑（P0-3）**：新增 `CheckpointManager`，通过临时 `GIT_INDEX_FILE` 将每回合快照写入隐藏 ref（不触碰用户暂存区，回滚前自动保留备份 ref），让所有底层统一支持多回合回滚；每轮底部支持「回滚到此轮」与「从此处分叉」，用户消息支持原地编辑并分叉重跑（可选同步回滚工作区文件）。
-  **Cross-backend multi-turn Git checkpoints, session fork & edit-resend (P0-3)**: Added `CheckpointManager` using isolated temporary indexes and hidden Git refs (never touching user staging, with automatic pre-rollback backups) across all backends; added per-turn rollback and fork actions plus inline edit & fork re-run on user bubbles.
-- **右侧栏内置终端、多 Worktree 并行与 `Ctrl/Cmd+K` 命令面板（P1-4 / P1-5 / P1-6）**：右侧面板扩展为「文件 | Git | 终端」三标签（`Ctrl/Cmd+J` 快捷切换），后端采用零原生编译的跨平台 PTY/Shell 引擎（内置 128KB 环形回滚缓冲），前端懒加载 `xterm.js`；新建 Worktree 会话独立开标签并展示分支徽章，切换标签不中断后台运行；新增基于官方 `shadcn` `CommandDialog` 的应用内全局命令面板（`Ctrl/Cmd+K`）。
-  **Right-panel Terminal, parallel worktrees & `Ctrl/Cmd+K` Command Palette (P1-4 / P1-5 / P1-6)**: Expanded the right panel to Files | Git | Terminal (`Ctrl/Cmd+J`) powered by a zero-native-compile PTY/shell manager with 128KB scrollback and lazy `xterm.js`; worktree sessions now open independent branch-badged tabs without interrupting background tabs; added an in-app `Cmd/Ctrl+K` Command Palette built on official `shadcn` `CommandDialog`.
-- **UI / 交互打磨、多账号修复、Electron 桌面壳与 Oxlint 迁移（P2 / P3）**：移动端 Dialog 自动转为贴底 Bottom Sheet；新增无闪烁主题切换（`.no-transitions`）、5 套精选 OKLCH 配色预设（Default / Grove / Ocean / Ember / Iris）、高对比度模式与离屏动画暂停（`IntersectionObserver`）；全项目原生 `<NativeSelect>` 统一迁移为 `shadcn` `Select`，修复输入框打字导致滚动条跳动、小屏 TabBar 过大、Antigravity 凭据槽位串号/隐藏 `3p` 额度池/自动拉取 Google 邮箱/支持编辑本机默认账号名及工具栏仅展示 5h 用量；新增 `packages/desktop` Electron 独立桌面外壳；修复 macOS CI `npmManager` 软链路径断言，并将项目 lint 工具链整体切换为 `oxlint --type-aware`（净减 81 个依赖包、提速 4–5 倍）。
-  **UI polish, account fixes, Electron desktop shell & Oxlint migration (P2 / P3)**: Converted mobile dialogs into safe-area bottom sheets; added zero-flash theme switching, 5 curated OKLCH presets, high-contrast mode and offscreen animation pause; migrated all selects to `shadcn` `Select` and fixed composer scroll jumps, mobile TabBar sizing, Antigravity multi-account slot isolation, Google email auto-detection, system-default account rename and 5h-only usage badge; added the `packages/desktop` Electron shell; fixed macOS symlink resolution in `npmManager` and migrated ESLint to `oxlint --type-aware` (-81 packages, 4–5× faster).
+### English
+
+- **CodeMirror 6 & Enhanced Diff**: Added lazy CodeMirror 6 editing/saving plus Split Shiki diffs, word highlights, per-hunk staging, and line comments.
+- **Git Actions & AI Drafts**: Added per-file stage/discard, compact trees, branch switching, AI Commit/PR drafts, and PR check tracking with settlement.
+- **Checkpoints, Terminal & Palette**: Added hidden-ref Git checkpoints, session fork/edit-resend, right-panel xterm terminal, and `Ctrl/Cmd+K` palette.
+- **Desktop Shell, Themes & Oxlint**: Added the Electron desktop shell, 5 OKLCH presets, mobile bottom sheets, and migrated linting to `oxlint --type-aware`.
 
 ## 0.13.0
 
-**内置文件/Diff 查看器与 IDEA 风格 Git 面板、任务 Worktree 隔离、上下文性能指标（缓存比例 / 速度 / 首字耗时）与多账号/默认深色主题优化**：右侧面板改为「文件 / Git」标签页切换，集成离线 VS Code 文件图标并内置查看文件与 Diff（不强依赖 VS Code 编辑器，为独立客户端奠基）；Git 区域重构为 IntelliJ IDEA 风格的紧凑图标工具栏、分组变更列表与底部提交坞；任务看板升级为四列扁平视图并整合定时执行与 Git Worktree 隔离；上下文弹窗新增缓存命中率、输出速度与首字耗时；修复 Antigravity / Claude 账号误报过期与 CodeBuddy 多账号接入问题，并将默认主题切换为深色。
+### 中文
 
-**Built-in file/diff viewer & IDEA-style Git panel, task worktree isolation, context performance metrics (cache ratio / speed / TTFT), account fixes & dark default theme**: The right panel now switches between Files and Git tabs with offline VS Code file icons and opens files and diffs in a built-in workspace viewer (decoupled from VS Code editors as a foundation for a standalone client). The Git panel is rebuilt in an IntelliJ IDEA style with a compact icon toolbar, collapsible changelists and a pinned bottom commit dock. The task board is flattened to four columns with integrated scheduling and Git worktree isolation; the context popover now shows cache hit ratio, output speed and TTFT; Antigravity/Claude false-expired status and CodeBuddy multi-account login are fixed, and the default theme is now dark.
+- **内置文件 / Diff 查看器与 IDEA 风格 Git**：右侧栏升级为文件/Git 双标签与离线 VS Code 文件图标，内置查看文件与 Diff，重构紧凑 Git 工具栏与提交坞。
+- **四列任务看板与 Worktree 隔离**：合并定时任务进四列看板，新建任务支持一键开启 Git Worktree 隔离与定时调度。
+- **上下文性能指标**：跨底层采集并展示缓存命中比例、首字耗时（TTFT）与生成速度（`tok/s`）。
+- **多账号修复与默认深色主题**：修复 Antigravity/Claude 误报过期与 CodeBuddy 多账号接入，ZCode 支持第三方服务商，默认主题改为深色。
 
-- **内置文件与 Diff 查看器、VS Code 文件图标与 IDEA 风格 Git**：右侧面板改为下划线 `Tabs` 切换「文件」与「Git」，文件树默认全部收起并引入离线 `@iconify-icons/vscode-icons` 按文件后缀/文件名展示对应图标；点击文件与 Git 改动统一在主工作区内置查看（支持 Markdown 源码/预览切换），不再跳转打开 VS Code 编辑器标签页；Git 面板重构为紧凑图标工具栏（分支、改动统计、刷新、按目录分组、仅看本会话、创建 PR）、可折叠变更列表（已暂存 / 更改 / 未跟踪，文件名按状态着色）及底部固定提交坞（支持 `Ctrl/Cmd+Enter`、提交与推送图标按钮）。
-  **Built-in file/diff viewer, VS Code file icons & IDEA-style Git**: Converted the right panel to underline `Tabs` for Files and Git, collapsed all folders by default, and bundled offline `@iconify-icons/vscode-icons` extension/filename icons; clicking files or Git changes opens a built-in viewer inside the main workspace (with Markdown Preview/Source toggle) instead of VS Code editors; rebuilt the Git panel with a compact icon toolbar (branch, diff stats, refresh, directory grouping, session-only filter, create PR), collapsible changelists (Staged / Changes / Untracked with status-colored filenames) and a pinned bottom commit dock (`Ctrl/Cmd+Enter`, commit and push icon actions).
-- **四列任务看板、Worktree 隔离与内置定时执行**：移除独立「定时」模块并合并入任务，任务看板收拢为四列单层卡片布局；新建任务弹窗采用更宽敞的对话式输入区，支持按底层实时拉取模型、权限预设、简洁开关启用 **Git Worktree 隔离**（自动创建并进入独立分支工作区、任务卡片展示分支并支持一键清理 Worktree）及**定时执行**。
-  **4-column task board, worktree isolation & integrated scheduling**: Merged the standalone Schedules view into Tasks and flattened the board to a 4-column single-card layout; rebuilt the New Task dialog with a taller chat-style composer, backend-aware model/permission pickers, and streamlined toggles for **Git Worktree isolation** (auto-creating a dedicated branch worktree with branch badge and one-click cleanup) and **scheduled execution**.
-- **上下文用量性能指标（缓存比例 / 速度 / 首字耗时）**：新增跨底层 `TurnTimingTracker` 与 `RequestPerformance`（`ttftMs` / `tokensPerSec` / `durationMs`），接入 ACP、Pi、ZCode、Claude、CodeBuddy、Codex 投影层；上下文浮层新增最近一次请求与会话累计的缓存命中比例、首字耗时（TTFT）与生成速度（`tok/s`）。
-  **Context usage performance metrics (cache ratio / speed / TTFT)**: Added cross-backend `TurnTimingTracker` and `RequestPerformance` (`ttftMs`, `tokensPerSec`, `durationMs`) across ACP, Pi, ZCode, Claude, CodeBuddy and Codex projections; the context popover now surfaces cache hit ratio (last request & session total), TTFT and output speed (`tok/s`).
-- **多账号修复、样式精简与 ZCode 第三方服务商支持**：修复 Antigravity 与 Claude 账号在持有有效 `refresh_token` 时仍显示「已过期」的问题，活跃 Antigravity 槽位自动同步磁盘刷新后的最新凭据；账号列表去除「当前使用」文字标签，改用前置绿点/灰点标识选中态；修复 CodeBuddy 多账号添加与环境映射（`cn`/`ai`/`internal`）、支持可选官方 `CODEBUDDY_API_KEY` 与 OAuth 槽位切换；为原生 ZCode 新增隔离 `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` 第三方服务商支持并完善账号变更时的额度缓存清理。
-  **Account fixes, cleaner status indicator & ZCode third-party providers**: Fixed Antigravity and Claude accounts showing "Expired" when a valid `refresh_token` is present and synced refreshed on-disk Antigravity tokens back to the active slot; replaced the "Active" text badge in account rows with a leading green/gray dot; fixed CodeBuddy multi-account sign-in (`CODEBUDDY_INTERNET_ENVIRONMENT` mapping, optional official `CODEBUDDY_API_KEY` and OAuth slot switching); added isolated `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` support for third-party providers in native ZCode and cleared stale quota cache on account changes.
-- **默认深色主题、侧栏与对话渲染细节打磨**：首次打开默认启用深色主题（`dark`）；左侧导航重排为「总览 / 任务 / 智能体 / 项目」并支持持久化折叠项目列表（默认收起）；Markdown 表格改用 `shadcn-ui` `Table` 组件，优化虚拟列表滚动稳定性、弹窗布局与思考/执行/审批图标语义。
-  **Default dark theme, sidebar & chat rendering polish**: Switched the default theme to `dark`; reordered the sidebar to Overview / Tasks / Agents / Projects with a persisted collapsible Projects group (collapsed by default); upgraded Markdown tables to `shadcn-ui` `Table`, improved virtualized thread scroll stability, refined dialog layouts and clarified thinking/executing/approval icons.
+### English
+
+- **Built-in Viewer & IDEA-Style Git**: Added right-panel Files/Git tabs with offline file icons, built-in file/diff viewer, and a compact Git dock.
+- **4-Column Kanban & Worktrees**: Merged schedules into a 4-column task board with integrated Git worktree isolation and scheduled runs.
+- **Context Performance Metrics**: Surfaced cache hit ratio, TTFT, and output speed (`tok/s`) across backends in the context popover.
+- **Account Fixes & Dark Default**: Fixed Antigravity/Claude false-expired status and CodeBuddy multi-account login, added ZCode providers, and defaulted to dark mode.
 
 ## 0.12.0
 
-**界面视觉体系重构与官方登录授权码回填**：全面重做面板视觉语言，引入 Quiet Zinc 浅色 / Cool Slate 深色配色、玻璃质感浮层与抽屉式滑入动效，统一品牌色、阴影与排版层级；「设置 → Agent」中的后端安装 / 切换版本改为弹窗式管理；官方账号登录支持在浏览器授权后回填授权码（如 Antigravity 的 `agy acp --login`）。
+### 中文
 
-**Visual system refresh & authorization-code paste for official sign-in**: The panel adopts a rebuilt visual language — Quiet Zinc light / Cool Slate dark palettes, glass-surface overlays and drawer-style slide-in motion, with a unified brand color, shadows and typographic hierarchy. Backend install / version switching in Settings → Agent now runs through dialogs, and official sign-in can accept a pasted authorization code after browser authorization (e.g. Antigravity `agy acp --login`).
+- **视觉体系重构**：全新 Quiet Zinc 浅色 / Cool Slate 深色配色、玻璃质感浮层与抽屉滑入动效，统一阴影与排版层级。
+- **后端版本管理弹窗**：设置页底层安装与版本切换改为独立弹窗，展示当前版本、可选版本列表及复制安装指引。
+- **官方登录授权码回填**：支持在浏览器授权后于登录弹窗直接回填授权码或回调网址（如 Antigravity `agy acp --login`）。
 
-- **设计令牌与玻璃质感**：浅色主题改为 Quiet Zinc 中性灰阶、深色主题改为 Cool Slate 冷色调并收紧描边；新增玻璃模糊 / 饱和度 / 滚动条与浮层阴影令牌，统一 shadcn 语义变量到主色，重做状态坞、模型选择器与各类下拉浮层的玻璃外观，并细化代码块的层级样式。
-  **Design tokens & glass surfaces**: The light theme moves to a Quiet Zinc neutral scale and the dark theme to a Cool Slate palette with tighter hairlines; added glass blur/saturation, scrollbar and overlay-shadow tokens, bridged shadcn semantic variables to the brand color, restyled the status dock, model picker and dropdown overlays with glass surfaces, and refined code-block layering.
-- **抽屉滑入动效与细节交互**：新增 `usePanelPresence` 让浮层在进出动画结束后再卸载；统一更多操作菜单、后端卡片与设置页的交互细节，并修复登录进度残留时无法关闭弹窗的问题。
-  **Drawer motion & interaction polish**: Added `usePanelPresence` so overlays unmount only after enter/exit animations finish; unified more-actions menus, backend cards and settings-page interactions, and fixed login dialogs that could not be dismissed when stale progress remained.
-- **后端版本管理弹窗**：「设置 → Agent → 底层」的安装与切换版本操作改为独立弹窗，展示当前版本并支持选择版本安装；非 npm 托管与未安装底层分别给出复制安装命令 / 安装提示，中英文案同步更新。
-  **Backend version dialogs**: Install and version-switch actions under Settings → Agent → Backends now open dedicated dialogs showing the current version and a version picker; non-npm-managed and missing backends show copyable install commands or hints, with Chinese/English strings updated in sync.
-- **授权码回填登录**：官方 CLI 在浏览器授权后要求粘贴授权码 / 回调网址时（如 `agy acp --login`），登录弹窗会提示输入并把内容写入登录子进程；新增 `submitAccountLoginCode` 与 `cancelAccountLogin.dismiss` 契约、`needsAuthCode` 进度字段及取消 / 提交分支的单测覆盖，浏览器授权流程与仅在成功后同步账号状态的行为保持不变。
-  **Authorization-code paste**: When an official CLI asks for a pasted authorization code / callback URL after browser authorization (e.g. `agy acp --login`), the sign-in dialog now prompts for it and forwards it to the login subprocess; added the `submitAccountLoginCode` and `cancelAccountLogin.dismiss` contract messages, a `needsAuthCode` progress field and unit tests for the cancel/submit branches. Browser authorization flows and syncing account state only on success are unchanged.
+### English
+
+- **Visual System Refresh**: Introduced Quiet Zinc light and Cool Slate dark palettes, glass overlays, drawer motion, and unified typography.
+- **Backend Version Dialogs**: Moved backend install and version switching into dedicated dialogs with version pickers and copyable fallback commands.
+- **Auth-Code Sign-In Paste**: Added authorization-code/callback-URL input in sign-in dialogs for CLIs requiring paste-back (e.g. `agy acp --login`).
 
 ## 0.11.0
 
-**官方账号与渠道管理**：在「设置 → Agent → 账号」中可为 Claude Code、Codex、CodeBuddy、Antigravity、Pi、OpenCode、DeepSeek 等智能体登录并管理多个官方账号，支持配置目录隔离、凭据槽位快照与官方 API Key，可选独立会话历史与按账号查询订阅额度；并可在设置页、模型选择器顶部或命令面板随时将智能体在「官方渠道（指定账号）」与「第三方服务商」之间一键切换，无需重启或手动改配置。
+### 中文
 
-**Official accounts & channel switching**: Added Settings → Agent → Accounts to sign in and manage multiple official accounts for Claude Code, Codex, CodeBuddy, Antigravity, Pi, OpenCode, DeepSeek and other agents, with config-directory isolation, credential-slot snapshots and official API keys, optional isolated session history and per-account subscription quota. Any agent can now be switched between an official channel (a chosen account) and third-party providers from Settings, the Model Picker header or the Command Palette, without restarting or editing config manually.
+- **官方多账号管理**：新增「设置 → Agent → 账号」，支持为 Claude、Codex、CodeBuddy、Antigravity、Pi、OpenCode、DeepSeek 等登录和管理多个官方账号。
+- **凭据与会话隔离**：按底层能力提供配置目录、凭据槽位或 API Key 隔离，支持独立会话历史与按账号查询订阅额度。
+- **渠道一键切换**：支持在设置页、模型选择器顶部或命令面板随时在官方账号与第三方服务商之间切换。
 
-- **多账号存储与登录流程**：新增 `AccountStore`、`AccountAuthFlow`、`AccountInspector` 与 `AccountIsolation` 宿主模块，持久化账号列表与渠道选择（`harnessDeck.accounts` / `harnessDeck.backendChannels`），按底层提供终端登录、OAuth CLI、API Key 与 ACP 授权等多种登录方式，凭据以机级作用域存储并支持安全编辑与复制。
-  **Multi-account storage & auth flows**: Added host modules `AccountStore`, `AccountAuthFlow`, `AccountInspector` and `AccountIsolation` to persist the account list and channel selection (`harnessDeck.accounts` / `harnessDeck.backendChannels`), with terminal sign-in, OAuth CLI, API Key and ACP authorization per backend; credentials are stored at machine scope and support safe editing and copying.
-- **凭据与会话隔离**：按底层能力选择配置目录、凭据槽位或 API Key 隔离方式，支持为账号单独开启独立会话历史，并在有额度能力的底层上按账号查询订阅额度；能力通过 `capabilities.ts` 的 `account` 描述符声明，界面不按 `kind` 判断功能。
-  **Credential & session isolation**: Isolate accounts via config directories, credential slots or API keys according to backend capability, optionally keep a dedicated session history per account, and query subscription quota per account on quota-capable backends; capabilities are declared through the `account` descriptor in `capabilities.ts` so the UI never branches on `kind`.
-- **渠道切换入口与账号设置页**：新增「设置 → Agent → 账号」页面与模型选择器顶部渠道切换条，补充 `Switch Model Channel / Official Account`、`Login Official Account` 命令面板入口；中英文案与设置契约同步更新，并补充账号模块的单测覆盖。
-  **Channel-switch entry & Accounts settings page**: Added the Settings → Agent → Accounts page and a channel switcher at the top of the Model Picker, plus `Switch Model Channel / Official Account` and `Login Official Account` command-palette entries; Chinese/English strings and the settings contract were updated in sync, with unit tests covering the new account modules.
+### English
+
+- **Official Multi-Account Management**: Added Settings → Agent → Accounts to sign in and manage multiple official accounts across supported backends.
+- **Credential & Session Isolation**: Isolated accounts via config dirs, credential slots, or API keys with optional isolated history and per-account quota.
+- **One-Click Channel Switching**: Switch any backend between official accounts and third-party providers from Settings, Model Picker, or Command Palette.
 
 ## 0.10.0
 
-**工作台界面重构与 ZCode Protocol v1 适配**：工作台从「顶栏六大模块导航 + 独立会话列表」重构为「左侧项目/会话侧边栏 + 右侧工作区文件与 Git 面板 + 精简顶栏工具条」的三栏布局；会话模块更名为「项目」，历史会话整合进左侧栏并支持按运行中 / 等待处理 / 未读筛选；「改动」入口改为直接展开右侧 Git 面板。底层同步适配 ZCode Protocol v1 的会话创建、订阅、流式事件与交互响应 schema，确保 ZCode 后端的推理流、工具状态、模型切换与审批/提问卡片在新协议下正常渲染。
+### 中文
 
-**Workbench UI overhaul & ZCode Protocol v1 compatibility**: The workbench has been restructured from a "top-bar six-module navigation with a separate session list" into a three-pane layout — a left project/session sidebar, a right workspace Files & Git panel, and a slim top toolbar. The Sessions module is renamed to "Projects", history is consolidated into the left sidebar with running / needs-attention / unread filters, and the "Changes" entry now opens the right Git panel directly. On the backend, ZCode is updated to the Protocol v1 session-create, subscribe, streaming-event and interaction-response schemas so reasoning streams, tool statuses, model switching, and approval/question cards render correctly under the new protocol.
+- **三栏工作台重构**：重构为「左侧项目/会话侧边栏 + 中央对话区 + 右侧文件与 Git 面板」布局，会话模块更名为「项目」并支持状态筛选。
+- **ZCode Protocol v1 适配**：全面兼容 ZCode Protocol v1 的会话创建、订阅、流式推理/正文、工具状态、模型推理等级及 V4 审批与提问响应。
 
-- **三栏工作台与左侧项目侧边栏**：新增 `WorkbenchSidebar`（按项目分组的会话列表、状态徽标、运行中 / 等待处理 / 未读筛选、worktree 会话入口）与 `WorkbenchRightPanel`（工作区文件树浏览与搜索、Git 改动审阅 / 提交 / 推送 / PR），顶栏精简为「侧边栏开关 + 当前页标题 + 快捷操作」；侧栏、右侧面板的展开状态与会话模块持久化到本地，移动端以抽屉形式呈现侧栏。
-  **Three-pane workbench & left project sidebar**: Added `WorkbenchSidebar` (project-grouped session list, status badges, running / needs-attention / unread filters, worktree session entry) and `WorkbenchRightPanel` (workspace file-tree browsing and search, Git change review / commit / push / PR); the top bar is reduced to a "sidebar toggle + current page title + quick actions" toolbar. Sidebar and right-panel expansion plus the active module persist locally, with the sidebar shown as a drawer on mobile.
-- **历史会话整合与「会话 → 项目」更名**：移除独立的 `SessionHistoryPage`，历史会话并入左侧栏；中英文案同步更新，新增右侧面板、会话筛选与状态相关的 i18n key。
-  **History consolidation & "Sessions → Projects" rename**: Removed the standalone `SessionHistoryPage` and merged history into the left sidebar; Chinese/English strings updated in sync, with new i18n keys for the right panel, session filters and statuses.
-- **ZCode Protocol v1 协议适配**：`session/create` 兼容嵌套快照结构提取会话 ID，`session/subscribe` 携带 `deliveryKind`，附件图片改用 `attachments` 字段，模型选择改用 `model.options.reasoningLevel`；投影层支持字符串 delta 流式帧（`reasoning_delta` / `text_delta`）、`tool.updated` 的 `kind` 状态与嵌套状态/用量/模式快照；审批与提问响应严格遵循 V4 schema（`permissionUpdates`、`action: 'accept'`），运行时偏好返回合法 `preflight-v1` 策略。
-  **ZCode Protocol v1 compatibility**: `session/create` now extracts IDs from nested snapshot structures, `session/subscribe` carries `deliveryKind`, image attachments use the `attachments` field, and model selection uses `model.options.reasoningLevel`; the projection layer supports string-delta streaming frames (`reasoning_delta` / `text_delta`), `tool.updated` `kind` statuses, and nested status/usage/mode snapshots; approval and question responses follow the V4 schema (`permissionUpdates`, `action: 'accept'`) and runtime preferences return a valid `preflight-v1` strategy.
+### English
+
+- **Three-Pane Workbench Overhaul**: Rebuilt layout into left project/session sidebar, center chat, and right Files & Git panel with status filters.
+- **ZCode Protocol v1 Support**: Updated ZCode session creation, streaming deltas, tool statuses, reasoning levels, and V4 approval/question schemas.
 
 ## 0.9.2
 
-**WSL 环境下自动识别 Windows 宿主机局域网地址与 WSL2 NAT 端口转发引导**：在 WSL 中运行 VS Code 时，远程互通不再默认暴露手机无法直连的 WSL 内部虚拟 NAT IP（`172.x.x.x`），而是自动探测并优先使用 Windows 宿主机的物理局域网网卡 IP，放行对应 `Host / Origin` 校验，并在 WSL2 NAT 模式下自动检测 Windows `netsh portproxy` 规则及提供一键复制的 PowerShell 转发命令。
+### 中文
 
-**Windows host LAN IP auto-detection & WSL2 NAT port-forwarding guidance in WSL**: When running VS Code inside WSL, Mobile Remote Access now probes and prefers the Windows host's physical LAN IP instead of WSL's unreachable virtual NAT IP (`172.x.x.x`), allows that IP in `Host / Origin` checks, checks Windows `netsh portproxy` rules in WSL2 NAT mode, and provides a one-click copyable Administrator PowerShell forwarding command.
+- **WSL 宿主机局域网 IP 识别**：WSL 下自动过滤虚拟网卡并优先使用 Windows 物理局域网 IP 生成配对地址，兼容镜像网络模式。
+- **WSL2 NAT 转发检测与引导**：自动检查 Windows `portproxy` 转发状态，并在设置页提供一键复制的 PowerShell 转发与防火墙命令。
 
-- **Windows 宿主机物理网卡优先识别**：WSL 环境下通过只读调用 `ipconfig.exe`（兼容 UTF-8 / GB18030 及多语言输出）过滤 `vEthernet (WSL)`、Docker、VPN 等虚拟网卡，优先选择带默认网关的 Windows 物理局域网 IP 作为配对地址，并自动兼容 WSL2 镜像网络（`networkingMode=mirrored`）。
-  **Windows host physical NIC priority**: Probes `ipconfig.exe` read-only from WSL (supporting UTF-8 / GB18030 and localized Windows outputs), filters out `vEthernet (WSL)`, Docker, and VPN virtual adapters, prefers gateway-backed Windows LAN IPs for pairing URLs, and handles WSL2 mirrored networking (`networkingMode=mirrored`) seamlessly.
-- **WSL2 NAT 转发状态检测与一键命令**：在设置页「网络入口与默认权限」新增「刷新网卡」入口；处于 WSL2 NAT 模式时只读检查 `netsh interface portproxy show v4tov4` 并展示转发状态与可直接复制的 PowerShell 端口转发及防火墙放行命令。
-  **WSL2 NAT forwarding status & setup command**: Added a Refresh button in Settings -> Remote Access; in WSL2 NAT mode, checks `netsh interface portproxy show v4tov4` read-only and displays forwarding readiness along with a copyable PowerShell command for portproxy and Windows Firewall setup.
+### English
+
+- **WSL Host LAN IP Detection**: Automatically detects and prefers the Windows physical LAN IP over unreachable WSL virtual IPs for QR pairing.
+- **WSL2 NAT Port-Forwarding Guide**: Checks Windows `netsh portproxy` rules and provides a copyable PowerShell command for forwarding and firewall setup.
 
 ## 0.9.1
 
-**修复 VS Code 插件面板空白（重复调用 `acquireVsCodeApi()`）**：修复 0.9.0 在启动 Webview 宿主通信桥接时清空 `acquireVsCodeApi()` 缓存导致同一页面二次获取 VS Code API 抛错、进而引发界面空白的严重回归，并同步加固单测与 E2E 的 `acquireVsCodeApi` 单次调用约束。
+### 中文
 
-**Fix blank VS Code webview panel (duplicate `acquireVsCodeApi()` call)**: Fixed a 0.9.0 regression where starting the webview host bridge cleared the cached `acquireVsCodeApi()` instance and called it a second time, throwing an uncaught error and rendering a blank panel; hardened unit tests and E2E harnesses to enforce VS Code's single-acquisition invariant.
+- **修复 VS Code 面板空白回归**：修复 0.9.0 重复调用 `acquireVsCodeApi()` 导致页面抛错空白的问题，确保单页面严格仅获取一次实例。
+- **回归测试加固**：在单测与 E2E 的 `acquireVsCodeApi` 模拟中强制校验单次调用约束并补充重挂载回归用例。
 
-- **Webview 宿主桥接修复**：移除 `startHostBridge()` 中重置 `cachedVsCodeApi` 的逻辑，改为按 `globalThis.acquireVsCodeApi` 函数引用缓存实例，确保同一 Webview 页面严格仅调用一次 `acquireVsCodeApi()`，并在 IDE 模式下初始化时跳过 `localStorage` 读取。
-  **Webview host bridge fix**: Removed the `cachedVsCodeApi` reset inside `startHostBridge()` and keyed the cache by `globalThis.acquireVsCodeApi` function identity so `acquireVsCodeApi()` is strictly called at most once per webview session, while avoiding unnecessary `localStorage` access in IDE mode.
-- **单测与 E2E 回归防护**：在 `packages/webview-ui/test/setup.ts`、`ui-e2e.ts` 与 `acp-e2e.ts` 的 `acquireVsCodeApi` 模拟实现中强制执行单次调用校验，并补充首屏前调用 `loadState()` 与重复挂载 `<App />` 的回归用例。
-  **Unit test & E2E regression guard**: Enforced single-acquisition checks in the `acquireVsCodeApi` mocks across `packages/webview-ui/test/setup.ts`, `ui-e2e.ts`, and `acp-e2e.ts`, and added a regression test covering pre-mount `loadState()` calls and `<App />` remounts.
+### English
+
+- **Fix Blank VS Code Panel**: Fixed a 0.9.0 regression calling `acquireVsCodeApi()` twice and crashing the webview; enforced strict single acquisition.
+- **Regression Guards**: Hardened unit and E2E mocks to assert single `acquireVsCodeApi()` invocation with remount regression tests.
 
 ## 0.9.0
 
-**手机端远程互通（M5 全量落地）、多客户端会话总线、QR 配对与权限作用域、PWA 响应式界面与内嵌 Diff、Tailscale / 自带隧道、Web Push 与 Webhook 推送、脱离 IDE 的独立守护进程**：新增宿主内嵌 HTTP/WS 远程桥接（默认关闭），用一次性二维码在局域网手机浏览器或 PWA 上接入同一会话；引入 `ClientHub` 统一本地 Webview 与远程客户端，按 `read-only` / `operate` 作用域鉴权并屏蔽高危操作；移动端补齐响应式面板、软键盘安全区、PWA 安装、内嵌 Diff 审阅与推送跳转深链；支持 `tailscale serve` 自动反代与自带 HTTPS 隧道，并提供本地 VAPID Web Push、Bark / ntfy / 自定义 Webhook 兜底推送；新增 `--headless-server` 常驻守护模式与配套启停命令。
+### 中文
 
-**Mobile remote access (full M5), multi-client session bus, QR pairing with scoped permissions, PWA responsive UI with inline Diff review, Tailscale / BYO tunnels, Web Push & Webhook notifications, and a standalone headless daemon**: Added a host-embedded HTTP/WS remote bridge (disabled by default) so a phone browser or installed PWA can join the same sessions via a single-use QR code; introduced `ClientHub` to multiplex the local Webview and remote clients with `read-only` / `operate` scope enforcement and high-risk action blocking; mobile UI now has responsive panels, keyboard-safe layout, PWA installation, inline Diff review, and push deep links; added `tailscale serve` auto-proxying and custom HTTPS tunnels, plus local VAPID Web Push with Bark / ntfy / custom Webhook fallback; added a persistent `--headless-server` daemon with start/status/stop commands.
+- **局域网远程互通与权限作用域**：新增宿主内嵌 HTTP/WS 远程桥接（默认关闭）、一次性 QR 配对及 `read-only` / `operate` 权限守卫。
+- **移动端 PWA 与内嵌 Diff**：移动端适配 Sheet、软键盘安全区、PWA 主屏安装、推送深链直达会话及手机端内嵌 Diff 审阅。
+- **跨网隧道、推送通知与无头守护**：支持 `tailscale serve` 与自带 HTTPS 隧道、本地 VAPID Web Push / Webhook 推送及 `--headless-server` 独立常驻模式。
 
-- **多客户端会话总线与 Webview 传输抽象（HD-22）**：新增 `ClientHub` 区分单播响应（文件候选、Markdown 预览、Diff 内容、额度、模型列表等）与广播快照，本地 IDE 与远程客户端各自维护可见性与作用域；Webview 侧新增 `transport.ts` 统一抽象 IDE `postMessage` 与远程 HTTP/WS 通道，断线自动重连并同步 `ready` 握手。
-  **Multi-client session bus & transport abstraction (HD-22)**: Added `ClientHub` splitting unicast responses (file candidates, Markdown preview, Diff content, quota, model lists) from broadcast snapshots, with per-client visibility and scope for the local IDE and remote clients; the Webview now has `transport.ts` abstracting IDE `postMessage` and remote HTTP/WS channels with automatic reconnect and a synchronized `ready` handshake.
-- **宿主 HTTP/WS 桥接与局域网 QR 配对（HD-23）**：远程桥接默认关闭，可在设置页或命令面板（开启/关闭、生成配对码、查看设备）启用；配对码 5 分钟有效、经 URL `#fragment` 传递、换取 `HttpOnly; SameSite=Strict` 设备 Cookie 后立即作废；严格校验 `Host` / `Origin` 防 DNS Rebinding，`ScopeGuard` 按 `read-only` / `operate` 拦截安装底层、改服务商/MCP/技能等高风险操作；支持选择局域网网卡、单设备吊销与全部断开。
-  **Host HTTP/WS bridge & LAN QR pairing (HD-23)**: The bridge is off by default and can be toggled from Settings or the command palette (toggle, generate pairing, show devices); pairing codes live 5 minutes, travel in the URL `#fragment`, and are burned after exchanging for an `HttpOnly; SameSite=Strict` device cookie; strict `Host` / `Origin` validation blocks DNS rebinding while `ScopeGuard` enforces `read-only` / `operate` scopes and blocks backend installs, provider/MCP/skill edits, and other high-risk actions; added LAN interface selection, per-device revocation, and disconnect-all.
-- **移动端响应式界面与 PWA 适配（HD-24）**：移动端将弹窗 / 侧栏降级为 Sheet，适配 `visualViewport` 软键盘与安全区高度，补齐 PWA 清单、图标与 Service Worker、主屏安装，并支持从推送通知经 `/?session=<id>` 深链直达对应会话（跨项目、跨底层）。
-  **Responsive mobile UI & PWA (HD-24)**: Mobile layouts degrade dialogs/sidebars into Sheets, adapt to `visualViewport` keyboard and safe-area insets, and ship a PWA manifest, icons, Service Worker, and home-screen install; push notifications deep-link to the target session via `/?session=<id>` across projects and backends.
-- **移动端内嵌 Diff 审阅与无 IDE 动作降级（HD-25）**：新增 `DiffViewerModal` 与宿主侧 `mobileDiff` 生成器，手机端可直接审阅改动；只读设备隐藏发送、审批、Git 提交 / 推送 / PR 等写操作，并在设置页展示被屏蔽的操作提示。
-  **Inline Diff review & IDE-free action degradation (HD-25)**: Added `DiffViewerModal` with a host-side `mobileDiff` generator for reviewing changes on the phone; read-only devices hide send, approval, and Git commit/push/PR actions and surface the blocked-action hint in Settings.
-- **跨网访问（HD-26）**：只读探测本机 `tailscale status --json` 并可选自动配置 `tailscale serve` 获取 MagicDNS HTTPS 入口，或填写自带 HTTPS 隧道（`cloudflared` / `frp` / 反向代理），统一校验隧道 URL 并支持回声探测。
-  **Cross-network access (HD-26)**: Read-only `tailscale status --json` probing with optional `tailscale serve` auto-configuration for a MagicDNS HTTPS entry, or a BYO HTTPS tunnel (`cloudflared` / `frp` / reverse proxy) with normalized URL validation and reachability probing.
-- **移动端推送通知（HD-27）**：本地生成并持久化 VAPID P-256 密钥（免自建云中继），实现 RFC 8291 `aes128gcm` 负载加密与 RFC 8292 VAPID ES256 JWT 鉴权；提供 Bark / ntfy / 自定义 JSON Webhook 兜底，桌面 IDE 聚焦时静默抑制，并在设置页支持测试推送与订阅管理。
-  **Mobile push notifications (HD-27)**: Locally generated and persisted VAPID P-256 keys (no self-hosted relay) with RFC 8291 `aes128gcm` payload encryption and RFC 8292 VAPID ES256 JWT auth; Bark / ntfy / custom JSON Webhook fallbacks, silent suppression while the desktop IDE is focused, and test-push plus subscription management in Settings.
-- **脱离 IDE 的独立守护进程（HD-28）**：新增 `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]`，以单实例锁与 `headless-server.json` 状态文件常驻运行远程桥接，配套 `--headless-status` / `--headless-stop` 启停与状态查询。
-  **Standalone headless daemon (HD-28)**: Added `node dist/sidecar.cjs --headless-server <configRoot> <projectPath> [port]` to run the remote bridge persistently with a single-instance lock and `headless-server.json` status file, plus `--headless-status` / `--headless-stop` controls.
+### English
+
+- **LAN Remote Bridge & Scopes**: Added opt-in host HTTP/WS bridge, single-use QR pairing, `ClientHub` multiplexing, and `read-only` / `operate` guards.
+- **Mobile PWA & Inline Diff**: Added responsive mobile Sheets, keyboard-safe layout, PWA install, notification deep-links, and inline Diff review.
+- **Tunnels, Push & Headless Daemon**: Added `tailscale serve` and BYO HTTPS tunnels, local VAPID Web Push/Webhooks, and `--headless-server` daemon mode.
 
 ## 0.8.0
 
-**原生接入 OpenAI Codex 与腾讯 CodeBuddy（多会话并发）、上下文用量标识与浮层视觉统一**：新增原生 OpenAI Codex（`codex app-server`）底层，支持模型与多档推理、运行中 `turn/steer` 插队、审批与提问卡片、子代理及无人值守定时任务；将 CodeBuddy 从单会话 ACP 升级为原生 `codebuddy -p` 双向流式底层，彻底解除单会话限制并支持多标签并发、思考档位与 `~/.codebuddy/projects` 本地历史秒开回放；重构上下文用量标识（`ContextRing`）与订阅额度浮层（`UsageBadge`），统一图标 + 百分比视觉语言并优化首轮明细去重与视口高度自适应。
+### 中文
 
-**Native OpenAI Codex & concurrent Tencent CodeBuddy backends, plus unified context & quota popovers**: Added native OpenAI Codex (`codex app-server`) with model/reasoning selection, live `turn/steer` steering, approval & question cards, subagents, and unattended schedules; upgraded CodeBuddy from single-session ACP to native bidirectional `codebuddy -p` stream-json with concurrent multi-tab sessions, thinking effort levels, and local `~/.codebuddy/projects` history replay; refreshed `ContextRing` and `UsageBadge` to share a unified icon + percentage design with first-turn deduplication and viewport-aware popover sizing.
+- **原生 OpenAI Codex 底层**：基于 `codex app-server` 原生接入，支持模型/推理档位、运行中 `turn/steer` 插队、审批、子代理、第三方服务商与 MCP 注入。
+- **原生多会话 CodeBuddy 底层**：从单会话 ACP 升级为原生 `codebuddy -p` 双向流式协议，支持多标签并发、思考档位与本地历史秒开回放。
+- **用量与额度标识统一**：重构 `ContextRing` 与 `UsageBadge` 为统一的图标 + 百分比样式，优化首轮明细去重与浮层高度自适应。
 
-- **OpenAI Codex 原生底层（`codex app-server`）**：通过 `codex app-server --listen stdio://` NDJSON JSON-RPC 原生接入，支持模型与多档推理切换、逐字流式推理/正文、只读命令归类（`explore`）与 Shell 输出、unified diff 改动统计、命令/文件/权限提升审批（含未保存脏文件拦截）、提问卡片、子代理卡片、运行中 `turn/steer` 插队、OpenAI Responses/Chat 第三方服务商 `-c` 覆盖、MCP 服务器参数注入及定时无人值守运行；新增 `harnessDeck.codex.path` 设置与设置页一键安装（`@openai/codex`）。
-  **Native OpenAI Codex backend (`codex app-server`)**: Integrated `codex app-server --listen stdio://` over NDJSON JSON-RPC with model & reasoning effort switching, streaming reasoning/text, read-only `explore` grouping and shell output, unified diff stats, command/file/permission approvals (with unsaved-file guard), question & subagent cards, live `turn/steer`, third-party OpenAI Responses/Chat provider overrides via `-c`, MCP `-c` injection, and unattended schedule runs; added `harnessDeck.codex.path` and one-click `@openai/codex` installation.
-- **腾讯 CodeBuddy 原生多会话底层（`codebuddy -p`）**：从旧版单会话 ACP 迁移至 `codebuddy -p --input-format stream-json --output-format stream-json` 原生协议，按活跃会话独立运行子进程，支持多标签并发回复、在线模型与斜杠命令发现、`--effort` 思考档位、子代理卡片、未保存文件拦截与 Diff 预览、OpenAI Chat 服务商代理环境变量、`--mcp-config` / `--add-dir` 挂载、定时无人值守执行，以及直接扫描 `~/.codebuddy/projects` 回放历史会话并兼容旧版 ACP 状态键；新增 `harnessDeck.codebuddy.path` 设置。
-  **Native concurrent CodeBuddy backend (`codebuddy -p`)**: Migrated CodeBuddy from single-session ACP to native `codebuddy -p` bidirectional `stream-json` with isolated per-session child processes for true multi-tab concurrency, dynamic model/command discovery, `--effort` levels, subagent cards, unsaved-file guard and diff previews, OpenAI Chat provider proxy env, `--mcp-config` / `--add-dir` staging, unattended schedule runs, and direct `~/.codebuddy/projects` history replay with legacy ACP state compatibility; added `harnessDeck.codebuddy.path`.
-- **上下文用量与订阅额度标识统一**：`ContextRing` 改用 `ChartPieIcon` + 百分比样式与 `UsageBadge` 保持一致，浮层补充顶部进度条、首轮请求与会话累计自动去重、紧凑两列累计网格及 `--radix-popover-content-available-height` 自适应最大高度；同步清理未使用的 i18n key 并更新能力矩阵与文档。
-  **Unified context & subscription usage indicators**: Redesigned `ContextRing` with `ChartPieIcon` + percentage to match `UsageBadge`, adding a header progress bar, automatic first-turn deduplication, a compact two-column session summary grid, and viewport-aware popover max height (`--radix-popover-content-available-height`); cleaned up unused i18n keys and updated the capability matrix and docs.
+### English
+
+- **Native OpenAI Codex Backend**: Integrated `codex app-server` with reasoning levels, live `turn/steer`, approvals, subagents, providers, and MCP.
+- **Concurrent CodeBuddy Backend**: Upgraded CodeBuddy to native bidirectional `codebuddy -p` with multi-tab concurrency, effort levels, and history replay.
+- **Unified Context & Quota UI**: Unified `ContextRing` and `UsageBadge` visuals with first-turn deduplication and viewport-aware popovers.
 
 ## 0.7.0
 
-**底层能力模型、回合工作流与文件回滚、串行 Worktree 会话、工作台源码控制闭环与质量门禁**：统一底层能力描述符与 npm 安装归属检查；新增回合模型、DeepSeek 回合级文件恢复、串行 Worktree 会话与清理入口；工作台新增「改动」模块，支持只读状态、Diff 查看与受信任工作区内的提交 / 推送 / 创建 PR；补充 ACP 注册表导入、幂等命令回执、JetBrains Sidecar 退避自动重启、无头后台定时调度及多套质量门禁。
+### 中文
 
-**Backend capability model, turn workflow & file rollback, serial worktree sessions, Workbench source control, and quality gates**: Unified backend capability descriptors and npm install ownership checks; added the first-class turn model, DeepSeek turn-level file restore, and serial worktree session creation/cleanup; introduced the Workbench Changes module with read-only Git status, Diff preview, and explicit trusted-workspace commit / push / PR actions; added HTTPS ACP registry discovery, idempotent command receipts, JetBrains sidecar backoff auto-restart, background headless scheduling, and quality/eval gates.
+- **统一能力模型与安装归属保护**：新增共享能力描述符驱动界面渲染；npm 安装/升级前校验归属防止覆盖外部安装，支持只读 HTTPS ACP 注册表发现。
+- **回合模型、文件回滚与 Worktree**：统一输出回合编号，DeepSeek 支持恢复最后一轮改动文件，新增串行 Worktree 会话与清理入口。
+- **工作台「改动」模块**：新增只读 Git 状态与 Diff 预览，受信任工作区支持提交、二次确认推送与基于 `gh` CLI 创建 PR。
+- **可靠性与质量门禁**：新增幂等命令回执、JetBrains Sidecar 退避自启、无头后台定时调度，以及 i18n、性能基线与 `evals/` 门禁。
 
-- **底层能力模型、归属保护与多实例配置**：新增共享能力描述符（`packages/shared/src/capabilities.ts`），界面统一按能力渲染；安装 / 升级 / 卸载前校验当前可执行文件的真实安装归属（兼容 Windows `.cmd`/`.ps1` shim），对 Homebrew / mise / Volta 等外部安装拒绝覆盖并提供复制命令；底层配置支持 `driver` / `instanceId` 拆分并保持历史会话兼容；设置页新增只读 HTTPS ACP 注册表发现（`harnessDeck.acpRegistryUrl`）。
-  **Backend capabilities, ownership guard & multi-instance profiles**: Added shared capability descriptors (`packages/shared/src/capabilities.ts`) so the UI adapts without branching on backend kind; added npm ownership verification (including Windows `.cmd`/`.ps1` shims) that refuses to overwrite external Homebrew / mise / Volta installs and offers a copy-command fallback; split `driver` and `instanceId` while preserving session compatibility; added read-only HTTPS ACP registry discovery (`harnessDeck.acpRegistryUrl`) in Settings.
-- **回合模型、文件回滚与串行 Worktree 会话**：五个控制器在快照与增量推送中统一输出 `session.turns`，对话流展示回合编号；DeepSeek（dsh）最后一轮实际改过文件时支持「恢复本轮文件」（确认写盘、自动删除本轮新建文件、失败时尽力回滚、不回退对话）；会话侧栏支持新建串行 Worktree 会话，设置页配套提供安全的 `git worktree remove` 清理入口。
-  **Turn model, file rollback & serial worktree sessions**: All five controllers now emit `session.turns` in snapshots and incremental updates with turn numbers shown in the thread; DeepSeek (dsh) adds turn-level file restore for the latest turn with edits (confirmation dialog, deletes newly created files, best-effort rollback on mid-write failure, conversation unchanged); added serial worktree session creation in the sessions sidebar with safe `git worktree remove` cleanup in Project Settings.
-- **工作台「改动」模块与源码控制闭环**：工作台扩展至六大模块，新增「改动」视图展示分支、远程、暂存/未暂存文件（支持 `-c core.quotepath=false` 与 `-z` 中文/重命名解析）、按本会话 `authoredPaths` 过滤与点击打开 Diff；受信任工作区内支持显式提交（可选仅提交已暂存或全部改动）、二次确认推送（禁止 force）与基于 `gh` CLI 的 PR 创建（展示 `gh` 登录状态，失败保留草稿，不保存 token）。
-  **Workbench Changes module & source control workflow**: Expanded the Workbench to six modules with a new Changes view showing branch, remote, staged/unstaged files (with `-c core.quotepath=false` and `-z` Unicode/rename parsing), filtering by session `authoredPaths`, and clicking to open Diffs; added explicit commit (staged-only or all), confirmation-gated push (never force), and `gh`-backed PR creation in trusted workspaces (with `gh` status indicator, draft preservation on failure, and zero token storage).
-- **稳定性、JetBrains Sidecar 与后台调度**：Webview 对发送、审批、提问与手动定时触发附带 `commandId`（审批与提问采用确定性 ID），宿主 `CommandReceipts` 5 分钟内幂等去重；JetBrains Sidecar 异常退出后按指数退避自动重启，重新采集编辑器状态并同步恢复所有已打开 JCEF 面板；Sidecar 支持以单实例原子锁拉起无头后台定时调度，并与 IDE 端通过磁盘监听双向同步规则和运行结果；修复 ZCode `session/create` 的 `workspacePath` / `workspaceKey` 载荷字段。
-  **Reliability, JetBrains Sidecar & background scheduler**: Attached `commandId` to send/approval/question/manual-schedule messages (deterministic IDs for approvals and questions) with 5-minute host deduplication via `CommandReceipts`; added JetBrains sidecar exponential-backoff auto-restart with fresh editor state and automatic JCEF panel re-sync; added atomic-locked headless background schedule runner with two-way disk sync between IDE and daemon; fixed ZCode `session/create` payload fields (`workspacePath` / `workspaceKey`).
-- **订阅额度展示与 Antigravity 分组增强**：Antigravity 额度查询透传本机 CLI 版本构造合规 `User-Agent` 并返回完整模型分组列表，未消耗额度时不展示占位倒计时；`UsageBadge` 改为展示剩余百分比并呈现分组模型清单。
-  **Subscription quota & Antigravity pool improvements**: Antigravity quota requests now pass the detected CLI version in `User-Agent` and surface full model pool lists while omitting placeholder reset countdowns when unused; `UsageBadge` displays remaining percentages along with per-group model lists.
-- **质量门禁、评测与文档体系**：新增测试纪律 ESLint 插件、`pnpm check:i18n` 校验门禁（清理 37 个死 key）、`pnpm check:changed` 增量检查、`pnpm perf:check` 性能基线与直接导入真实提示词的 `evals/` 评测框架，并接入 CI；完善 `ROADMAP.md`、`docs/README.md`、`AGENTS.md` 术语表与改动自检清单、以及 5 组底层 / 17 项能力对比矩阵与测试。
-  **Quality gates, evals & docs**: Added custom test-discipline ESLint rules, `pnpm check:i18n` gate (removing 37 dead keys), `pnpm check:changed` incremental runner, `pnpm perf:check` baseline, and prompt-backed `evals/` wired into CI; updated `ROADMAP.md`, `docs/README.md`, `AGENTS.md` glossary & surface checklist, and the 5-group / 17-capability backend matrix with automated matrix tests.
+### English
+
+- **Capabilities & Install Guards**: Added shared capability descriptors, npm ownership checks against external installs, and HTTPS ACP registry discovery.
+- **Turns, Rollback & Worktrees**: Unified turn numbering, added DeepSeek turn file restore, and introduced serial Worktree sessions with cleanup.
+- **Workbench Changes Module**: Added Git status and Diff preview plus trusted-workspace commit, confirmed push, and `gh`-backed PR creation.
+- **Reliability & Quality Gates**: Added idempotent command receipts, JetBrains sidecar auto-restart, background scheduling, and i18n/perf/eval CI gates.
 
 ## 0.6.1
 
-**重新发布 0.6.0 功能**：本版与 0.6.0 代码一致，仅提升版本号以重新走发布流程——订阅额度标识、上下文用量明细与会话模型标签。
+### 中文
 
-**Re-release of 0.6.0 features**: This release ships the same code as 0.6.0 with only a version bump to re-run the release pipeline—subscription quota badge, context usage details, and per-session model labels.
+- **重新发布 0.6.0 功能**：代码与 0.6.0 一致，仅提升版本号以重新执行发版流程，包含订阅额度标识、上下文用量明细与会话模型标签。
 
-- **订阅用量标识**：输入框旁的 `UsageBadge` 支持 Claude、Antigravity 与 CodeBuddy 官方订阅额度，展示 5 小时 / 每周 / 每周按模型窗口的已用、剩余与重置时间；查不到额度或绑定第三方服务商时自动隐藏，成功结果缓存 5 分钟并经宿主代理请求，凭据只读不刷新。
-  **Subscription quota badge**: `UsageBadge` next to the composer shows official Claude, Antigravity, and CodeBuddy subscription windows (5-hour / weekly / per-model weekly) with used, remaining, and reset time; it hides itself when no quota is available or a third-party provider is bound, caches successful results for 5 minutes through the host proxy, and never refreshes or logs credentials.
-- **上下文用量明细**：上下文圆环悬停 / 点击展开浮层，展示最近一次请求与会话累计的输入、缓存读写、输出占比条，以及推理部分、合计与费用；Claude、Pi、ACP 均已接入统一用量采集。
-  **Context usage details**: The context ring opens a Popover on hover or click with input / cache read / cache write / output bars for the last request and the session total, plus reasoning, totals, and cost; Claude, Pi, and ACP all feed the shared usage tracker.
-- **会话模型标签**：会话历史列表逐条展示该会话最近使用的模型，模型切换后立即同步。
-  **Per-session model labels**: Session history rows show each session's last-used model and update as soon as the model changes.
+### English
+
+- **Re-release of 0.6.0**: Identical code to 0.6.0 with a version bump to re-run the release pipeline (subscription quota, context breakdown, model labels).
 
 ## 0.6.0
 
-**订阅额度标识、上下文用量明细与会话模型标签**：输入框旁新增官方订阅用量标识，可展开查看 5 小时 / 每周 / 每周按模型窗口的已用、剩余与重置时间，支持 Claude、Antigravity 与 CodeBuddy；上下文圆环悬停展开用量明细（最近一次请求、会话累计、缓存读写、推理与费用）；会话列表逐条展示该会话最近使用的模型。
+### 中文
 
-**Subscription quota badge, context usage details, and per-session model labels**: Added an official subscription usage badge next to the composer showing 5-hour / weekly / per-model weekly windows with used, remaining, and reset time for Claude, Antigravity, and CodeBuddy; hovering the context ring now expands a usage breakdown (last request, session total, cache read/write, reasoning, and cost); session history rows show the last model used by each session.
+- **官方订阅额度标识**：输入框旁新增 `UsageBadge`，支持查看 Claude、Antigravity 与 CodeBuddy 的 5 小时/每周窗口额度与重置时间。
+- **上下文用量明细**：悬停或点击上下文圆环可展开查看最近请求与会话累计的输入、缓存读写、输出占比条及费用。
+- **会话模型标签**：会话历史列表逐条展示最近使用的模型，并在切换模型后实时同步。
 
-- **订阅用量标识**：新增 `UsageBadge` 与 `fetchQuota` / `quotaFetched` 协议，宿主按激活后端分发到 `quota/` 提供方——Claude 读取本机 OAuth 凭据调用 `/api/oauth/usage`，Antigravity 读取 CLI / IDE 落盘凭据调用 `retrieveUserQuotaSummary`，CodeBuddy 使用 `CODEBUDDY_COOKIE` 或 `~/.codebuddy/usage-cookie` 调用计费接口；成功结果按 token 缓存 5 分钟并走宿主代理，凭据只读不刷新、不进日志与视图模型；绑定第三方服务商或查不到额度时隐藏标识。
-  **Subscription quota badge**: Added `UsageBadge` plus `fetchQuota` / `quotaFetched` messages that dispatch to `quota/` providers by active backend—Claude reads local OAuth credentials and calls `/api/oauth/usage`, Antigravity reads CLI/IDE credential files and calls `retrieveUserQuotaSummary`, and CodeBuddy uses `CODEBUDDY_COOKIE` or `~/.codebuddy/usage-cookie` against its billing API; successful results are cached for 5 minutes per token through the host proxy, credentials are read-only, never refreshed, logged, or sent to the webview; the badge hides itself when a third-party provider is bound or no quota is available.
-- **上下文用量明细**：`ContextRing` 悬停 / 点击弹出 Popover，展示最近一次请求与本会话累计的四段占比条（输入、缓存读取、缓存写入、输出）、推理部分、合计与费用；新增 `TokenBreakdown` / `ContextDetail` 视图模型与共享 `UsageTracker`，Claude 按消息 id 合并流式重复上报的用量并按 `total_cost_usd` 增量累计费用，Pi 与 ACP 分别从助手消息和 `session/prompt` 结果 / `usage_update.cost` 采集。
-  **Context usage details**: The `ContextRing` now opens a Popover on hover or click with four-segment bars (input, cache read, cache write, output) for the last request and the session total, plus reasoning, totals, and cost; added the `TokenBreakdown` / `ContextDetail` view models and a shared `UsageTracker`, with Claude merging streamed duplicate reports by message id and accumulating cost from `total_cost_usd` deltas, Pi reading assistant messages, and ACP reading `session/prompt` results and `usage_update.cost`.
-- **会话模型标签**：`WorkbenchHub` 注册表记录每个会话最近使用的模型显示名并随模型切换同步推送，会话历史列表在智能体图标旁逐条展示，当前会话在注册表同步前先用实时模型兜底。
-  **Per-session model labels**: The `WorkbenchHub` registry now stores each session's last-used model name and pushes updates when the model changes, session history rows display it next to the backend icon, and the current session falls back to the live model until the registry syncs.
+### English
+
+- **Subscription Quota Badge**: Added `UsageBadge` beside the composer showing 5-hour/weekly windows and reset times for Claude, Antigravity, and CodeBuddy.
+- **Context Usage Breakdown**: Hovering or clicking `ContextRing` opens a popover with input/cache/output bars, reasoning tokens, totals, and cost.
+- **Per-Session Model Labels**: Displayed each session's last-used model in history rows with live updates on model switch.
 
 ## 0.5.5
 
-**npm 版本探测与代理环境修复、JetBrains Sidecar 环境同步及 macOS CI 修复**：修复 npm 版本列表拉取超时或错误不透明的问题，同步 JetBrains IDE 登录 shell 环境，并修复 macOS 下的 WSL 单元测试。
+### 中文
 
-**npm version lookup & proxy fixes, JetBrains Sidecar environment sync, and macOS CI fixes**: Improved npm version fetching reliability and error reporting, synced login shell environment for JetBrains sidecar, and fixed WSL unit tests on macOS.
+- **npm 版本探测与代理修复**：跳过 `socks://` 代理防 npm 挂起，统一在主目录执行并缩短超时，展示详细版本拉取错误，同步 JetBrains 登录 shell 环境。
+- **跨平台测试与 CI 修复**：修复 macOS `/var` 软链路径与 Windows 路径分隔符导致的单元测试失败。
 
-- **npm 与代理环境修复**：`processEnvWithProxy` 跳过 `socks://` 代理避免 npm 挂起至超时；`npmManager` 统一在用户主目录执行 npm 命令以免受工作区 `.npmrc` 干扰，`fetchNpmVersions` 增加 `--fetch-retries=0 --fetch-timeout=8000` 并返回更可读的错误详情；设置页智能体卡片直接展示 `versionsError` 具体原因，JetBrains `SidecarProcessManager` 通过 `EnvironmentUtil.getEnvironmentMap()` 注入完整 shell 环境。
-  **npm & proxy fixes**: Skipped `socks://` proxies in `processEnvWithProxy` to prevent npm hangs; ran npm commands in `homedir()` to avoid project `.npmrc` interference; added `--fetch-retries=0 --fetch-timeout=8000` and clearer error messages in `fetchNpmVersions`; displayed `versionsError` details in `BackendCard`; synced shell environment in JetBrains `SidecarProcessManager` via `EnvironmentUtil.getEnvironmentMap()`.
-- **跨平台测试与 CI 修复**：`RuntimeManager` 支持可选 `platform` 配置以在非 Linux 主机测试 WSL 缓存逻辑；`wslLocate` 与 `runtimeManager` 测试通过 `realpath` 规范化 macOS `/var` 软链接临时目录；`browserBridge` 测试改用 `path.delimiter` 适配 Windows 分隔符。
-  **Cross-platform test & CI fixes**: Added optional `platform` override on `RuntimeManager` for WSL cache tests; canonicalized macOS `/var` symlinked temp dirs with `realpath` in `wslLocate` and `runtimeManager` tests; used `path.delimiter` in `browserBridge` tests.
+### English
+
+- **npm Lookup & Proxy Fixes**: Skipped `socks://` proxies, ran npm in homedir with tighter timeouts, surfaced fetch errors, and synced JetBrains shell env.
+- **Cross-Platform CI Fixes**: Fixed unit tests for macOS `/var` symlinked temp dirs, WSL cache overrides, and Windows path delimiters.
 
 ## 0.5.4
 
-**跨智能体统一标签栏、共享加载态组件与智能体图标更新**：顶部标签栏不再按底层隔离，DeepSeek、Claude、Pi、ZCode、ACP 的会话可以并排打开并各自显示智能体图标；新增 Beautiful UI `LoadingState`（Drive / Dots / Orbit），运行状态改用 Orbit 轨道动效；底层图标改用 SVG，设置页直接展示 dsh 网页地址。
+### 中文
 
-**Unified cross-agent tab bar, shared loading state, and backend icon refresh**: The tab bar is no longer isolated per backend—DeepSeek, Claude, Pi, ZCode, and ACP sessions can stay open side by side with their own agent icons; added the Beautiful UI `LoadingState` (Drive / Dots / Orbit) with Orbit used for the run status; backend logos moved to SVG and the settings card now shows the dsh web address.
+- **跨智能体统一标签栏**：不同底层的会话可并排打开在顶部标签栏并支持持久化恢复，切换底层不再清空已有标签。
+- **共享加载动效与图标升级**：抽出 `LoadingState` 网格动效并在运行状态采用 Orbit 动效；底层图标切换为 SVG，设置页直接提供 dsh 网页入口。
 
-- **跨智能体统一标签栏**：新增 `UnifiedTabs` 模型，标签归属到具体智能体并支持持久化与冷启动恢复，切换或新建会话切换智能体不再清空已有标签；冷启动恢复时按需启动非激活智能体，旧会话临时 key 换成真实 id 后标签同步更新且不丢失；标签栏与会话历史列表展示智能体图标，并补充 `unifiedTabs`、`tabBar` 与运行时集成测试。
-  **Unified cross-agent tabs**: Added the `UnifiedTabs` model so each tab belongs to a backend with persistence and cold-start restore; switching backends or creating sessions no longer clears existing tabs; inactive backends start on demand when restoring, pending session keys are rekeyed to real ids without losing tabs, and tabs plus session history show backend icons, covered by `unifiedTabs`, `tabBar`, and runtime integration tests.
-- **加载态与思考轨迹**：抽出共享 `LoadingState` 组件（Drive / Dots / Orbit 三种 3×3 网格动效），`RunStatus` 改用 Orbit 轨道动效并单独处理等待审批状态；思考轨迹在当前轮次运行期间保持展开，整轮操作结束后统一收起。
-  **Loading state & thinking trace**: Extracted a shared `LoadingState` component (Drive / Dots / Orbit 3×3 grid animations); `RunStatus` now uses the Orbit animation with a separate waiting-for-approval state, and thinking traces stay expanded while the current turn runs, collapsing only after the whole turn finishes.
-- **图标与 dsh 入口**：CodeBuddy、oh-my-pi 图标改用 SVG，Antigravity 图标补充底板并更新 OpenCode 图标；`BackendView.webUrl` 让设置页直接展示 dsh 网页地址作为打开入口。
-  **Icons & dsh entry**: Switched CodeBuddy and oh-my-pi logos to SVG, added a tile background to the Antigravity logo, refreshed the OpenCode icon, and exposed `BackendView.webUrl` so the settings card shows the dsh web address as a direct entry point.
+### English
+
+- **Unified Cross-Agent Tabs**: Kept sessions from different backends open side by side with persistence and cold-start restore.
+- **Shared Loaders & SVG Logos**: Extracted `LoadingState` (using Orbit for run status), migrated backend logos to SVG, and exposed the dsh web link.
 
 ## 0.5.3
 
-**Google Antigravity 原生支持、思考轨迹与状态栏精简、Claude 服务商运行时与代理增强**：新增 Google Antigravity（`agy acp`）内置智能体及协议适配；精简 `ThinkingTrace`、`RunStatus` 与活动行视觉状态，消除重复加载动效；增强 Claude 服务商 `--settings` 环境变量注入、`NO_PROXY` 处理与服务商代理稳定性。
+### 中文
 
-**Google Antigravity support, ThinkingTrace & RunStatus polish, and Claude provider runtime & proxy enhancements**: Added built-in Google Antigravity (`agy acp`) backend support and ACP projection compatibility; streamlined `ThinkingTrace`, `RunStatus`, and activity row visuals by removing duplicate loaders; enhanced Claude provider `--settings` overrides, `NO_PROXY` handling, and provider proxy stability.
+- **Google Antigravity 原生支持**：内置 `antigravity`（`agy acp`）配置、图标与登录引导，适配其工具参数、Diff 格式与模型更新保护。
+- **对话流视觉精简**：移除 `ThinkingTrace` 重复加载器，由底部 `RunStatus` 统一呈现运行态与计时。
+- **服务商代理与运行时修复**：增强 Claude `--settings` 代理覆盖，修复 `NO_PROXY` 大小写去重、小模型误判及无人值守调度问题。
 
-- **Google Antigravity 底层接入**：内置 `antigravity`（`agy acp`）配置、图标与安装/登录引导，标记为账号认证模式；兼容 Antigravity 工具参数与 Diff 字段（`Path` / `Content` / `CommandLine` / `Target` / `Replacement`）及 `current_model_update` 保护，并补充 `acpAntigravity` 单测。
-  **Google Antigravity backend**: Added built-in `antigravity` (`agy acp`) profile, icon, install/sign-in hints, and account-only provider capability; added ACP projection support for Antigravity tool inputs/diffs (`Path` / `Content` / `CommandLine` / `Target` / `Replacement`) and `current_model_update` guard, backed by `acpAntigravity` tests.
-- **对话流视觉精简**：`ThinkingTrace` 改用静态星芒图标，移除重复加载指示器与独立计时，由底部 `RunStatus` 统一承担运行态与计时；精简 `RunStatus` 外层胶囊样式，运行中活动行统一使用 `text-accent-ink` 高亮。
-  **Thread visual polish**: Switched `ThinkingTrace` to a static sparkle icon and removed its duplicate loader/timer so `RunStatus` serves as the single running indicator; removed `RunStatus` pill/card chrome and highlighted running activity rows with `text-accent-ink`.
-- **服务商代理与运行时修复**：为原生 `claude -p` 补充 `--settings` 最高优先级环境变量覆盖以防止宿主配置回退覆盖本地代理；修复 `NO_PROXY` 大小写重复键与已知模型误判小模型的问题；完善运行时可执行文件定位、MCP 导入及无人值守调度逻辑。
-  **Provider proxy & runtime fixes**: Added `--settings` overrides for native `claude -p` to prevent host settings from overriding the local proxy; fixed case-insensitive `NO_PROXY` deduplication and known-model routing in `OpenaiToAnthropicConverter`; improved runtime discovery, MCP importer/service, and unattended runner handling.
+### English
+
+- **Google Antigravity Support**: Added built-in `antigravity` (`agy acp`) backend, logo, login guide, and ACP tool/diff projection support.
+- **Streamlined Thread Status**: Removed duplicate loaders from `ThinkingTrace` and unified running indicators and timers in `RunStatus`.
+- **Provider Proxy & Runtime Fixes**: Added Claude `--settings` proxy overrides and fixed `NO_PROXY` deduplication, model routing, and runner stability.
 
 ## 0.5.2
 
-**思考轨迹折叠、首页智能体快捷切换、设置页视觉与布局打磨**：将连续工具操作与推理折叠为「思考轨迹」行，支持首页下拉直接切换已安装智能体，统一设置页分区标题样式与控件尺寸，优化状态栏与侧边栏会话列表布局。
+### 中文
 
-**Collapsible thinking trace, quick home agent switcher, and settings UI polish**: Grouped consecutive tool activities and reasoning into collapsible thinking trace rows, added a Home dropdown switcher for installed agents, unified settings section headings and control sizing, and refined StatusDock and session list layouts.
+- **可折叠思考轨迹**：将连续工具操作与推理折叠为 `ThinkingTrace` 行，运行中自动展开计时、完成后自动收起并适配虚拟滚动。
+- **首页快捷切换与布局打磨**：首页智能体芯片支持下拉直接切换；优化状态栏窄屏堆叠、侧栏排版与设置页分区样式。
 
-- **对话流思考轨迹（`ThinkingTrace` / `threadRows`）**：将连续的工具调用、只读探索与推理合并为可折叠的思考轨迹行，运行中自动展开并显示流光与计时、完成后自动收起，同时适配虚拟滚动高度估算、缓存失效与会话切换重置。
-  **Thinking trace in threads (`ThinkingTrace` / `threadRows`)**: Grouped consecutive tool calls, explore summaries, and reasoning into collapsible trace rows that auto-expand with shimmer and timer while running and auto-collapse when done, integrated with virtual scroll layout estimation, stale height invalidation, and session-switch resets.
-- **首页与工作台交互优化**：首页智能体芯片改为下拉菜单直接切换已安装的智能体；精简侧边栏项目会话分组与单条会话排版；状态栏（`StatusDock`）改为纵向堆叠行以改善窄面板可读性。
-  **Home & workbench UX refinements**: Replaced the Home backend chip click with a dropdown switcher for installed agents, simplified project session groups and session row chrome, and stacked `StatusDock` segments vertically for better narrow-panel readability.
-- **设置页重构与细节修复**：抽离统一的 `SettingsSection` 分区布局，统一设置页控件尺寸（含 `NumberStepper` 与模型表格列宽对齐），简化智能体默认标记；更新 E2E 脚手架与单元测试并清理已完成规划文档。
-  **Settings polish & fixes**: Extracted a shared `SettingsSection` layout, aligned settings control sizing (including `NumberStepper` and provider model table columns), streamlined default agent badges, updated E2E scripts and unit tests, and removed completed plan docs.
+### English
+
+- **Collapsible Thinking Trace**: Grouped consecutive tool calls and reasoning into `ThinkingTrace` rows that auto-expand while running and collapse on finish.
+- **Home Switcher & UI Polish**: Added a Home backend dropdown switcher, vertical narrow-width `StatusDock`, and unified Settings section layouts.
 
 ## 0.5.1
 
-**对话虚拟列表、统一控件尺寸与离线图标规范、WSL 与服务商代理增强**：优化长对话渲染性能，统一表单控件高度体系与离线图标打包，增强 WSL 环境运行时发现、浏览器桥接及 OpenAI 转 Anthropic 代理兼容性。
+### 中文
 
-**Virtualized thread, unified control sizes & offline icons, WSL and provider proxy enhancements**: Improved long-thread rendering performance, unified control sizing and offline Iconify icon bundling, and enhanced WSL runtime discovery, browser bridge, and OpenAI-to-Anthropic proxy compatibility.
+- **对话虚拟滚动与 UI 规范**：长对话引入虚拟滚动提升性能；统一控件 4 档高度体系并全面迁移至离线按需打包 Iconify 图标。
+- **WSL 与服务商代理增强**：新增 WSL 运行时发现与浏览器桥接，优化 OpenAI 转 Anthropic 代理稳定性与路径探测。
 
-- **对话性能与界面规范**：引入对话消息虚拟滚动（`useVirtualThread`）；统一 `Input`、`NativeSelect`、`SelectTrigger`、`NumberStepper` 等控件的 `size` 高度体系；全面迁移至 `@iconify/react/offline` 静态按需打包图标，并补充控件尺寸、离线图标与虚拟列表测试。
-  **Thread performance & UI standards**: Added virtualized thread rendering (`useVirtualThread`); unified the `size` height system across `Input`, `NativeSelect`, `SelectTrigger`, and `NumberStepper`; migrated UI icons to statically bundled `@iconify/react/offline` with new tests for control sizes, offline icons, and virtual scrolling.
-- **运行时与服务商代理**：新增 WSL 环境定位与浏览器桥接支持，优化环境缓存与各底层（ACP / Claude / Pi / ZCode）路径发现；增强 `OpenaiToAnthropicConverter`、`ProviderProxy` 与 `proxyFetch` 的协议转换与稳定性。
-  **Runtime & provider proxy**: Added WSL runtime discovery and browser bridge support, improved environment caching and backend path detection (ACP / Claude / Pi / ZCode), and enhanced `OpenaiToAnthropicConverter`, `ProviderProxy`, and `proxyFetch` compatibility and stability.
+### English
+
+- **Virtualized Thread & UI Standards**: Added virtualized chat scrolling, unified control height tiers, and migrated to offline bundled Iconify icons.
+- **WSL & Provider Proxy**: Added WSL runtime discovery and browser bridging, and improved OpenAI-to-Anthropic converter stability.
 
 ## 0.5.0
 
-**JetBrains IDE 插件与独立 Sidecar、原生多底层扩展、工作台与界面重构**：新增 JetBrains IDE 插件（IntelliJ IDEA、WebStorm、PyCharm、GoLand、Rider 等）与独立 Node.js Sidecar；新增 Claude Code、Pi、ZCode 原生底层；上线工作台（总览、定时任务、智能体、看板任务、跨项目会话）、服务商代理与绑定、MCP / Skill 管理；前端组件体系重构为 `shadcn-ui` + `beautifului` 并补齐组件级测试与无障碍改进。
+### 中文
 
-**JetBrains IDE plugin & standalone Sidecar, native backends, Workbench, and UI overhaul**: Added the JetBrains IDE plugin (IntelliJ IDEA, WebStorm, PyCharm, GoLand, Rider, etc.) powered by a standalone Node.js sidecar; added native Claude Code, Pi, and ZCode backends; introduced the Workbench (Overview, Schedules, Agents, Kanban Tasks, Cross-project Sessions), Provider Proxy & bindings, and MCP / Skill management; refactored the frontend UI onto `shadcn-ui` + `beautifului` with component test coverage and accessibility fixes.
+- **JetBrains IDE 插件与独立 Sidecar**：新增 JetBrains 插件（IDEA/WebStorm/PyCharm 等）及共享核心的 Node.js `sidecar.cjs` 进程。
+- **原生多底层扩展**：新增 Claude Code、Pi 与 ZCode 原生适配器，支持自动定位可执行文件与默认底层配置。
+- **工作台与生态管理**：上线工作台（总览、定时、智能体、看板、会话）、服务商代理与预设、MCP 及 Skill 管理。
+- **前端组件体系重构**：全面基于 `shadcn-ui` 与 `beautifului` 重构界面，修复深色对比度与键盘导航并建立前端单测基线。
 
-- **JetBrains IDE 插件（`packages/jetbrains`）**：基于 `JBCefBrowser`（支持降级处理）、本地静态资源服务与 `JBCefJSQuery` 通信桥接，集成 `PasswordSafe` 密钥存储、编辑器上下文同步、终端与 Diff 视图；通过 `sidecar.cjs` 守护进程与 VS Code 扩展共享主机核心与 `~/.harness-deck/` 配置状态。
-  **JetBrains IDE plugin (`packages/jetbrains`)**: Built on `JBCefBrowser` (with fallback handling), an embedded static asset server and `JBCefJSQuery` bridge, `PasswordSafe` secret storage, editor context sync, terminal and diff integration; shares host runtime and `~/.harness-deck/` state with VS Code via `sidecar.cjs`.
-- **原生多底层扩展**：新增 Claude Code（`claude -p`）、Pi（`pi --mode rpc`）和 ZCode（`zcode app-server --stdio`）原生适配器，支持自动定位安装与默认底层配置（`harnessDeck.defaultBackend`）。
-  **New native backends**: Added native adapters for Claude Code (`claude -p`), Pi (`pi --mode rpc`), and ZCode (`zcode app-server --stdio`), with executable discovery and `harnessDeck.defaultBackend` configuration.
-- **工作台与生态管理**：新增工作台面板（总览、定时调度与无人值守执行、智能体配置、看板任务、跨项目会话），以及服务商管理（含 OpenAI 转 Anthropic 本地代理与模型预设）、MCP 导入与管理、Skill 管理。
-  **Workbench & ecosystem management**: Added the Workbench (Overview, Schedules & unattended runner, Agents, Kanban Tasks, Cross-project Sessions), Provider management (including local OpenAI-to-Anthropic proxy and presets), MCP importer/service, and Skill management.
-- **界面重构与稳定性**：基于 `shadcn-ui` 与 `beautifului` 规范重构设置页与工作台视图，拆分大模块并消除重复逻辑；修复定时任务手风琴状态、深色模式对比度、键盘导航与 `Esc` 处理、流式输出记忆化渲染和错误提示稳定性，新增 jsdom + Testing Library 测试基线。
-  **UI refactor & stability**: Refactored settings and workbench views onto `shadcn-ui` and `beautifului`, splitting oversized modules and deduplicating shared logic; fixed schedule accordion state, dark-mode contrast, keyboard navigation and `Esc` handling, streaming memoization, and toast stability, backed by a new jsdom + Testing Library test suite.
+### English
+
+- **JetBrains Plugin & Sidecar**: Launched the JetBrains IDE plugin (`JBCefBrowser` + `PasswordSafe`) sharing core host logic via `sidecar.cjs`.
+- **New Native Backends**: Added native adapters for Claude Code, Pi, and ZCode with executable discovery and default-backend settings.
+- **Workbench & Ecosystem**: Introduced the Workbench (Overview, Schedules, Agents, Tasks, Sessions), Provider Proxy, MCP, and Skill management.
+- **UI Refactor & Testing**: Rebuilt views on `shadcn-ui` and `beautifului`, improved accessibility/contrast, and added a jsdom + Testing Library suite.
 
 ## 0.4.0
 
-**全面审查后的修复**：底层的启动和切换、ACP 底层的安全保护、发送失败不再丢输入；输入框上方的状态栏合并成一行；对比度、点击区域和读屏支持。
+### 中文
 
-**Fixes from a full review**: backend start-up and switching, safety parity on ACP backends, no more lost input when sending fails; the bars above the input are merged into one; contrast, hit targets and screen-reader support.
+- **启动与切换稳定性修复**：串行化快速底层切换，面板重新显示时自动启动缺失底层，修复退出残留与 Windows `.cmd` 路径空格问题。
+- **ACP 安全对齐与输入防丢**：为 ACP 补齐未保存文件拦截、高权限确认与日志脱敏；发送失败自动保留草稿与队列消息。
+- **状态栏整合与无障碍改进**：合并待办/未保存/改动为单行状态栏，新增代码路径点击跳转、回复复制按钮、4.5:1 对比度与读屏优化。
 
-- 修复：面板隐藏时切换底层（或在设置里删掉当前底层），再打开面板一直停在「正在查找…」。现在面板每次显示都会确保当前底层已经启动。
-  Fixed: switching backends while the panel was hidden (or removing the current backend in settings) left the panel stuck on "Looking for…". The active backend is now started whenever the panel is shown.
-- 修复：连续快速切换底层时，先启动的那个底层进程没有被结束。切换现在按顺序执行。
-  Fixed: switching backends twice in quick succession left the first backend's process running. Switches are now serialized.
-- 修复：ACP 代理关闭输入或提前退出时出现未捕获异常、请求一直等待；设置里的命令不是 ACP 代理时一直停在「启动中」（现在 30 秒后提示）。
-  Fixed: an uncaught error and a request that never finished when an ACP agent closed its input or exited early; a command that is not an ACP agent no longer stays on "Starting" forever (it fails after 30 s with a hint).
-- 修复：dsh 还在启动时关闭窗口、重启或切换底层要等启动跑完（最长一分多钟），窗口关闭后 dsh 可能残留。现在立即结束还没就绪的进程，扩展宿主退出时也会带走自己启动的子进程。
-  Fixed: closing the window, restarting or switching while dsh was still starting waited for the launch to finish (over a minute in the worst case) and could leave dsh behind. The launch is now aborted, and child processes are terminated when the extension host exits.
-- 修复（Windows，未在真机验证）：命令是 `.cmd` / `.bat`（npm 全局安装的都是）且路径带空格时启动失败；参数里的 `&`、`|` 不再被当成命令分隔符。dsh 的 profile 名只接受字母、数字和 `. _ -`。
-  Fixed (Windows, not verified on a real machine): launching a `.cmd` / `.bat` command (every npm global install) from a path with spaces; `&` and `|` in arguments are no longer treated as command separators. The dsh profile name only accepts letters, digits and `. _ -`.
-- ACP 底层补上和 DeepSeek 一样的保护：审批要修改的文件有未保存内容时先让你保存；切换到不再逐项询问的模式（Bypass Permissions、YOLO、Full Access 等）前先确认；代理的输出和排查日志写进输出面板前先脱敏。
-  ACP backends get the same protections as DeepSeek: an approval is blocked while its target file has unsaved changes; switching to a mode that stops asking (Bypass Permissions, YOLO, Full Access…) asks for confirmation; agent output and trace logs are redacted before they reach the output panel.
-- ACP 审批卡片：代理提供「始终允许」时多一个按钮。等着审批的会话在会话列表里有提醒点（它的标签可能已经关了）。
-  ACP approval cards show the agent's "always allow" option when it offers one. Sessions waiting for approval are flagged in the session list, even after their tab was closed.
-- 消息没能发出去（没连上、建不了会话、单会话代理正忙）时，文字会回到输入框。ACP 代理中途退出时，排队的消息保留在队列里；固定的上下文在消息真正发出后才清空。新对话里连发两条消息不再建两个会话。
-  When a message cannot be handed over (not connected, session could not be created, a single-session agent is busy) its text returns to the input. Queued messages survive an ACP agent exiting; pinned context is cleared only once the message is accepted. Two quick sends in a new chat no longer create two sessions.
-- 输入框上方的待办、未保存提示和改动栏合并成一行状态栏，各占一段，点「待办」或「改动」在上方展开列表。窄侧边栏里底部不再占掉三四成高度。
-  The to-do, unsaved-files and changes bars above the input are merged into one status row; click To-dos or the file count to expand the list above it. The bottom of a narrow side bar no longer takes a third of the height.
-- 运行中输入了文字时，停止按钮仍然在（和发送并排）；输入框里按 Esc 停止生成。
-  The Stop button stays while you type during a run (next to Send); Esc in the input stops generation.
-- 标签不再被挤成一个字：放不下时横向滚动。面板拖得很宽时，正文保持在适合阅读的行宽内并居中。
-  Tabs scroll instead of shrinking to one character. On a wide panel the conversation keeps a readable line width, centered.
-- 修改行里文件名在前、目录在后（太长时省略的是目录）；失败的命令写明「运行失败」；回复里的文件路径（`src/a.ts:12`）和浏览行里读过的文件可以点开；回复右上角有复制按钮。
-  Edit rows show the file name first and the directory after it (the directory is what gets truncated); failed commands say "Failed"; file paths in replies (`src/a.ts:12`) and files in a browse row open on click; replies have a copy button.
-- 错误提示不再自动消失，有关闭按钮；启动失败的横幅先显示一行，点开看完整信息；首页放不下时可以滚动，不再被裁掉上半截。
-  Error toasts stay until dismissed and have a close button; the start-up failure banner shows one line with the rest behind "Show full message"; the home screen scrolls when it does not fit instead of clipping its top.
-- 无障碍：链接、警告和错误文字、次要文字的对比度到 4.5:1 以上；按钮的点击区域至少 24px；弹出菜单支持 ↑↓ / Home / End，关闭后焦点回到打开它的按钮；流式输出不再逐段播报，读屏只在开始回复、回复完成、需要你处理时播报一次；页面语言跟随界面语言。
-  Accessibility: link, warning, error and secondary text reach 4.5:1; controls are at least 24px; popup menus support ↑↓ / Home / End and return focus to their button; streaming text is no longer announced piece by piece — screen readers hear one message when a reply starts, finishes, or needs you; the page language follows the UI language.
-- 面板隐藏时不再按流式输出的节奏计算和推送；长回复流式输出时界面更跟手。
-  The extension no longer recomputes and posts at streaming rate while the panel is hidden; long streaming replies stay responsive.
+### English
+
+- **Startup & Switching Fixes**: Serialized rapid backend switches, ensured launch on panel reveal, fixed exit leaks, and fixed Windows `.cmd` paths.
+- **ACP Safety & Draft Guard**: Added unsaved-file blocking, dangerous-mode confirmation, and log redaction on ACP; preserved input/queues on failed sends.
+- **Unified Status Bar & A11y**: Merged status strips into one row, added clickable file paths, reply copy, 4.5:1 contrast, and screen-reader polish.
 
 ## 0.3.2
 
-**ACP 底层（Claude、oh-my-pi、CodeBuddy）也有多开标签和会话改动栏**；新对话沿用上次选的模型；dsh 底层改叫 DeepSeek；护眼配色、滚动到底部、skill 补全和一轮界面打磨。
+### 中文
 
-**Tabs and the session changes bar on ACP backends (Claude, oh-my-pi, CodeBuddy)**; new chats keep the last chosen model; the dsh backend is shown as DeepSeek; soft colors, scroll to bottom, skill completion and a round of UI polish.
+- **ACP 多标签与会话改动栏**：Claude、oh-my-pi、CodeBuddy 等 ACP 底层支持多开标签、累计改动 Diff 与沿用上次模型/思考等级。
+- **斜杠补全、护眼配色与细节打磨**：修复 dsh `/` 技能补全与模糊匹配，默认启用护眼文字配色，新增回底按钮与 `backendTrace` 排查日志。
+- **底层命名与清理**：内置 dsh 界面改称 DeepSeek，并提示一键卸载旧版 DSH Copilot 扩展。
 
-- ACP 底层（Claude、oh-my-pi、CodeBuddy 等）也支持多开标签：新对话开在新标签里，从会话列表打开已在标签里的会话时切过去，后台标签显示运行中和等待审批；打开的标签按底层记住。
-  Tabs for ACP backends (Claude, oh-my-pi, CodeBuddy…): a new chat opens a new tab, opening a session that already has a tab switches to it, background tabs show running and waiting-for-approval, and open tabs are remembered per backend.
-- 界面细节打磨：流式回复的光标跟在文字末尾（不再单独占一行）；消息下面的「复制 / 编辑后重发」和排队消息的「编辑 / 插队 / 删除 / 现在发送」改成悬停变亮的灰色小图标（窄宽度下不再一个字一行地折行）；未保存文件的提示改成卡片；配置 API Key 页和首页风格一致；输入框的占位文字只占一行；上下文用量过半才显示百分比，平时只显示圆环；改动栏和输入框之间留出间距。
-  UI polish: the streaming cursor follows the text instead of taking its own line; message and queue actions are compact gray icons that light up on hover (no more one-character-per-line wrapping when narrow); the unsaved-files notice is a card; the API key page matches the home; the placeholder stays on one line; the context ring shows a percentage only past 50%; the changes bar has a gap above the composer.
-- ACP 底层（Claude、oh-my-pi、CodeBuddy 等）也有会话改动栏：输入框上方列出本会话用文件工具改过的文件和增删行数，点文件打开累计 Diff（从当前内容倒着撤回本会话的修改，还原出会话开始前的内容）。命令造成的改动 ACP 代理不上报，不在其中。
-  The session changes bar now works on ACP backends (Claude, oh-my-pi, CodeBuddy…): files edited by file tools in this session with line counts; clicking one opens the cumulative diff, rebuilt by undoing this session's edits from the current file. Changes made by commands are not reported by ACP agents and are not included.
-- 修复：DeepSeek（dsh）底层输入 `/` 看不到 skill。dsh 的 skill 不在命令列表里，现在另外读取 skill 目录（工作区 `.dsh/skills`、`.agents/skills` 和全局的），补全里带「skill」标签；每次打开会话都重新读取，新装的 skill 也能出现。
-  Fixed: skills did not show up after typing `/` on the DeepSeek (dsh) backend. dsh lists skills separately from commands; they are now read on every session open and shown with a "skill" tag.
-- 斜杠补全更好找：不区分大小写，名字中间的一段也能搜到（输入 `review` 能找到 `code-review`），名字可以带冒号（`/engineering:code-review`）。
-  Slash completion is easier to search: case-insensitive, matches inside names (`review` finds `code-review`), and names may contain colons (`/engineering:code-review`).
-- 护眼配色（默认）：对话里的文字不再用接近纯白的主题前景色，正文、标题、次要信息分层柔和，长时间看不累；「字体与字号」里可以关掉改用主题原色（设置 `harnessDeck.ui.palette`），高对比度主题始终用原色。
-  Soft colors (default): chat text no longer uses the near-white theme foreground; body, headings and secondary text are toned down for long reading. Turn it off under Font & Size (setting `harnessDeck.ui.palette`); high-contrast themes always use theme colors.
-- 「滚动到底部」按钮：往上翻看历史时出现在右下角，翻上去时有新内容会带提示点，点一下回到底部并继续跟随新内容。
-  Scroll-to-bottom button: appears while you read earlier messages, shows a dot when new content arrives, and returns to following the conversation.
-- 内置底层 dsh 在界面上改叫 **DeepSeek**（命令、网页等指 dsh 程序本身的地方仍写 dsh）；原来的会话和设置不受影响。
-  The built-in dsh backend is now shown as **DeepSeek** (places that mean the dsh program itself still say dsh); sessions and settings are unchanged.
-- 旧版扩展 DSH Copilot 还装着时（编辑器右键菜单里会多一个「DSH」），启动时提示并可以一键卸载。
-  If the old DSH Copilot extension is still installed (it adds the "DSH" editor context menu), Halo offers to uninstall it.
-- ACP 底层的新对话沿用上次选的模型和思考等级（按底层记住）。之前 Claude 等代理的模型是按会话设置的，新开的会话总是回到默认模型，和刚才选的不一样；已有的会话仍保持自己的模型。
-  New chats on ACP backends use the model and thought level you picked last (remembered per backend). Before, agents such as Claude set the model per session, so a new chat went back to the default model; existing sessions keep their own.
-- 修复：回复后面开始调用工具时，前面那段文字末尾一直留着蓝色光标。
-  Fixed: the blue cursor stayed after a reply's text once tool calls started.
-- 修复：模型网关每次回复都用同一个消息 id 时，工具调用之后的文字被拼到前面的段落里，看起来像中间没有文字；现在按时间顺序另起一段。
-  Fixed: with model gateways that reuse one message id, text after tool calls was merged into an earlier paragraph and looked missing; it now starts a new paragraph in order.
-- 新设置 `harnessDeck.backendTrace`：把和 ACP 底层收发的消息原文写到「Halo: Backend」输出面板，用来排查代理实际发了什么。
-  New setting `harnessDeck.backendTrace`: writes the raw ACP messages to the "Halo: Backend" output channel for troubleshooting.
+### English
+
+- **ACP Tabs & Changes Bar**: Added multi-tab sessions, cumulative session diffs, and remembered model/thought defaults for ACP backends.
+- **Slash Skills, Soft Palette & Polish**: Fixed dsh `/` skill discovery, enabled soft reading colors by default, and added scroll-to-bottom and `backendTrace`.
+- **Naming & Cleanup**: Displayed dsh as DeepSeek in the UI and offered one-click uninstall of the legacy DSH Copilot extension.
 
 ## 0.3.1
 
-**新的内置底层 Claude**；ACP 代理需要登录时的提示；内部包名改为 `@harness-deck/*`，README 重写。
+### 中文
 
-**New built-in backend: Claude**; clearer sign-in handling for ACP agents; internal packages renamed to `@harness-deck/*` and a rewritten README.
+- **新增内置 Claude 底层**：通过官方 ACP 适配器接入 Claude Code，共享本地登录与配置并展示官方图标。
+- **ACP 登录引导与包名整理**：发消息遇需登录时自动触发登录或给出指引；内部包更名为 `@harness-deck/*` 并重写文档。
 
-- 新的内置底层 **Claude**：通过 Claude Code 的官方 ACP 适配器（`npm install -g @agentclientprotocol/claude-agent-acp`）接入，登录和设置与 Claude Code 共用；选择卡片、首页和菜单里显示 Claude 的图标。
-  New built-in backend **Claude**, through Claude Code's official ACP adapter (`npm install -g @agentclientprotocol/claude-agent-acp`); sign-in and settings are shared with Claude Code. The chooser, home and menu show the Claude icon.
-- ACP 底层发消息时才发现需要登录（Claude 没登录或登录过期）：代理有登录方式时先登录再重发这一轮，没有时在对话里说明怎么登录，而不是只显示「Authentication required」。
-  When an ACP backend reports that sign-in is needed while sending (Claude signed out or expired), the panel signs in and resends if the agent offers a sign-in method, or explains how to sign in instead of showing "Authentication required".
-- 工作区里的内部包改名为 `@harness-deck/shared`、`@harness-deck/webview-ui`；仓库 README 按 Halo 重写（底层对照表、新截图、架构图、各底层的测试方法）。
-  Workspace packages renamed to `@harness-deck/shared` and `@harness-deck/webview-ui`; the repository README is rewritten for Halo (backend table, new screenshots, architecture, tests for every backend).
+### English
+
+- **Built-in Claude Backend**: Added Claude via its official ACP adapter, sharing local sign-in/settings with official branding.
+- **ACP Sign-In & Package Rename**: Handled mid-chat auth prompts gracefully, renamed workspace packages to `@harness-deck/*`, and rewrote README.
 
 ## 0.3.0
 
-**改名为 Halo，支持多个底层：dsh、oh-my-pi、CodeBuddy，以及任何 ACP 代理。** 第一次打开面板时选底层；新首页和新标志；子代理显示。dsh 底层支持 `0.2.1-rc.5` 及以上。
+### 中文
 
-**Renamed to Halo, with switchable backends: dsh, oh-my-pi, CodeBuddy and any ACP agent.** Pick a backend on first open; new home and logo; subagents shown. The dsh backend requires dsh `0.2.1-rc.5` or later.
+- **多底层架构与品牌升级**：更名为 Halo（扩展 ID 与设置迁移为 `harnessDeck.*`），支持切换 dsh、oh-my-pi、CodeBuddy 及任意自定义 ACP 代理。
+- **新首页、标志与子代理卡片**：全新品牌标志、首次启动底层选择卡片与首页设计；dsh 子代理支持卡片展示与只读查看对话。
+- **ACP 完整协议支持**：覆盖流式推理、工具行、Diff、审批、待办、用量、图片与 CodeBuddy 多种浏览器登录方式。
 
-- 底层可以切换：dsh，以及内置的 ACP（Agent Client Protocol）代理 oh-my-pi（`omp acp`）和 CodeBuddy（`codebuddy --acp`），也可以在设置 `harnessDeck.backends` 里加别的 ACP 代理。「…」→「底层」或命令「切换底层」里切换；每个底层的会话分开保存。
-  Switchable backends: dsh, the built-in ACP (Agent Client Protocol) agents oh-my-pi (`omp acp`) and CodeBuddy (`codebuddy --acp`), and any ACP agent added in `harnessDeck.backends`. Switch from "…" → Backend or the Switch Backend command; sessions are kept per backend.
-- 第一次打开面板时显示底层选择卡片：每个底层的说明、本机是否已安装，没装的给出可以复制的安装命令；选好或「稍后再说」后不再出现。首页重新设计：渐变标识、当前底层和工作区标签（点击切换底层）、带说明的示例任务、输入提示。选择卡片、首页和菜单里的底层显示官方图标（DeepSeek、oh-my-pi、CodeBuddy）。插件有了自己的标志：两张卡片组成 H，中间的挽带和节点把它们连起来（插件图标、侧边栏图标、首页）。
-  On first open the panel asks which backend to use, with a description of each, whether it is installed on this machine and a copyable install command otherwise; it does not ask again once chosen or skipped. Redesigned home: gradient logo, current backend and workspace chips (click to switch backend), example tasks with descriptions, input tips. Backends show their official icons (DeepSeek, oh-my-pi, CodeBuddy) in the chooser, home and menu. New Halo logo: two cards forming an H, joined by a strap and a node (extension icon, sidebar icon, home).
-- CodeBuddy：需要登录时选择登录方式（iOA、Google/GitHub、微信、企业域名），在浏览器里完成；也可以用 `CODEBUDDY_API_KEY`。待办（TaskCreate / TaskUpdate）进入输入框上方的状态条，命令输出去掉包装格式，Edit 的 Diff 显示整个文件。CodeBuddy 的一个进程只给一个会话推送回复，切回别的会话发消息时插件会重启 CodeBuddy 并重新加载那个会话（约 2 秒）。
-  CodeBuddy: pick a sign-in method (iOA, Google/GitHub, WeChat, enterprise domain) and finish in the browser, or use `CODEBUDDY_API_KEY`. To-dos (TaskCreate / TaskUpdate) go to the status strip, command output is unwrapped, Edit diffs show the whole file. A CodeBuddy process streams to one session only, so sending in another session restarts CodeBuddy and reloads that session (about 2 s).
-- ACP 底层支持流式回复和推理、工具行（读文件和搜索合并、命令输出、修改的增删行数和 Diff）、审批、待办、用量、斜杠命令、模型和思考等级、模式（计划模式）、会话列表和重新打开、停止、图片；用真实的 oh-my-pi 和 CodeBuddy 做端到端测试，并每天在 CI 里对它们的固定版本和最新版本各跑一次。
-  ACP backends cover streaming replies and reasoning, tool rows (grouped reads/searches, command output, edit line counts and diffs), approvals, to-dos, usage, slash commands, model and thought level, modes (plan), session list and reload, stop and images; tested end to end against real oh-my-pi and CodeBuddy, nightly in CI.
-- 插件改名为 Halo：命令、视图和设置从 `dsh.*` 改为 `harnessDeck.*`（原来的设置第一次启动时自动迁移），安装包改名为 `harness-deck-<版本>.vsix`。这是新的扩展 id，升级后可以卸载 DSH Copilot。
-  Renamed to Halo: commands, views and settings moved from `dsh.*` to `harnessDeck.*` (old settings are migrated on first start); the package is `harness-deck-<version>.vsix`. It is a new extension id, so DSH Copilot can be uninstalled afterwards.
-- 子代理：dsh 派出的子代理显示成一张卡片（任务描述、状态、用时，点开看任务和回答），可以打开子代理自己的对话（只读）。
-  Subagents show as a card (task, state, elapsed time; expand for the task and answer) and their conversation can be opened read-only.
+### English
+
+- **Multi-Backend & Rebrand**: Renamed to Halo (`harnessDeck.*` settings migration) with switchable dsh, oh-my-pi, CodeBuddy, and custom ACP agents.
+- **New Home, Logo & Subagents**: Added the new logo, first-run backend chooser, redesigned Home, and expandable read-only subagent cards.
+- **Full ACP Support**: Added streaming, tool rows, diffs, approvals, to-dos, usage, images, and CodeBuddy browser/API-key sign-in.
 
 ## 0.2.3
 
-行内代码不再是醒目的橙色；系统减少动画时加载转圈照常播放。支持 dsh `0.2.1-rc.5` 及以上。
+### 中文
 
-Inline code no longer shows in orange; loading indicators keep animating under reduced motion. Requires dsh `0.2.1-rc.5` or later.
+- **减少动画兼容**：系统开启「减少动画」时仍保留加载转圈与运行脉冲提示，仅停用骨架屏流光与光标闪烁。
+- **行内代码配色修复**：行内代码不再沿用主题醒目橙色，改用正文色配柔和中性底色与边框。
 
-- 加载中的转圈、运行中的圆点和「思考中」在系统「减少动画」时也照常播放（之前全部停住；Windows 关了动画效果或在远程桌面里就是这种情况）。只停掉骨架屏的流光和光标闪烁。
-  Spinners, running dots and the "thinking" pulse keep animating when the OS asks for reduced motion (Windows with animation effects off, Remote Desktop); only the skeleton shimmer and cursor blink stop.
+### English
 
-- 行内代码不再是醒目的橙色：改用正文颜色，配淡淡的中性底色和描边（之前没设颜色，沿用了 VS Code 默认样式里主题的 textPreformat 色，很多深色主题是橙色）。跨行时每段都有完整描边。
-  Inline code no longer shows in the theme's orange preformatted color: it uses the text color on a soft neutral background with a faint outline, and wraps cleanly.
+- **Reduced-Motion Support**: Kept spinners and running pulses active under OS reduced-motion settings while pausing shimmer and cursor blink.
+- **Inline Code Styling**: Replaced harsh orange theme preformat text with neutral-tinted background and body-color inline code chips.
 
 ## 0.2.2
 
-粘贴图片、面板内调整字体与字号，修复从插件打开 dsh 网页时登录失败。支持 dsh `0.2.1-rc.5` 及以上。
+### 中文
 
-Paste images, adjust font and size inside the panel, and fix logging in when opening dsh in the browser. Requires dsh `0.2.1-rc.5` or later.
+- **图片粘贴与预览**：支持粘贴或 Shift 拖入图片发送给 dsh，对话中展示已发图片并支持点击放大查看。
+- **面板内字体设置与网页登录修复**：支持在面板直接调整字号与字体并即时生效；修复「在浏览器中打开 dsh」因 `?token=` 转义导致的 401 失败。
 
-- 「…」→「字体与字号」改为面板里直接调整：字号加减、界面字体、代码字体、恢复默认，立即生效并写入设置 `dsh.ui.*`（之前是跳到 VS Code 设置页，可能找不到对应设置）。
-  "…" → "Font and size" now opens an in-panel editor (size stepper, UI and code fonts, reset) that applies immediately and writes `dsh.ui.*`, instead of jumping to the Settings page.
+### English
 
-- 支持图片：在输入框里粘贴截图或复制的图片（也可以按住 Shift 拖进来），显示成缩略图，可以移除，随消息发给 dsh，可以只发图片。消息里显示发送过的图片（从 dsh 读取），点击放大。图片被 dsh 拒绝时提示原因。
-  Images: paste a screenshot or copied image into the input box (or Shift-drag one in); it shows as a removable thumbnail and is sent with the message, text optional. Sent images appear in the conversation (read back from dsh) and open larger on click.
-
-- 修复「在浏览器中打开 dsh」认证失败：VS Code 的 Uri 会把地址里的 `?token=` 编码成 `?token%3D`，dsh 认不出令牌，返回 401。现在打开的地址和 `dsh web` 打印的完全一样（远程开发时只转发端口）。回复里带参数的链接也不再被改写。
-  Fix "Open dsh in browser" failing to log in: vscode.Uri encoded `?token=` as `?token%3D`, so dsh returned 401. The browser now gets exactly the URL `dsh web` prints (only the port is forwarded in remote setups). Links with query strings are no longer rewritten either.
+- **Image Paste & Preview**: Added screenshot/image paste and Shift-drag uploads with removable thumbnails and click-to-zoom preview.
+- **In-Panel Fonts & Browser Auth Fix**: Added instant in-panel font/size controls and fixed `?token=` URL encoding causing 401 on Open in Browser.
 
 ## 0.2.1
 
-运行状态与用时、逐题回答的提问卡片、级联的模型选择、更醒目的强调色、识别带前缀的工具，以及若干界面修正。支持 dsh `0.2.1-rc.5` 及以上。
+### 中文
 
-Run status with elapsed time, step-by-step questions, a cascading model picker, a reliable accent color, prefixed tool names, and UI fixes. Requires dsh `0.2.1-rc.5` or later.
+- **运行状态计时与工具别名**：对话末尾实时展示当前动作与已用时长；识别 `ops_*` / `mcp__*` 等带前缀工具并归类渲染。
+- **交互体验升级**：提问卡片改为逐题向导、模型选择器支持级联思考等级、待办升级为时间线卡片，并动态挑选主题强调色。
 
-- 识别带前缀或别名的工具：`ops_grep`、`ops_read_files`、`mcp__fs__read_file`、`run_command`、`str_replace_editor` 等按对应的内置工具渲染——连续的读文件和搜索合并成一行「已浏览」，命令显示「已运行」，修改显示文件；一次读多个文件时显示第一个文件和其余数量。
-  Prefixed or aliased tools (`ops_grep`, `ops_read_files`, `mcp__fs__read_file`, `run_command`, `str_replace_editor`, …) render like the built-in ones: reads and searches merge into one row, commands show "Ran", edits show the file; multi-file reads show the first file and a count.
+### English
 
-- 运行状态：dsh 处理时对话末尾显示正在做什么（思考 / 回复 / 运行命令 / 编辑某文件 / 调用某工具 / 等你处理）和已用时间，每秒刷新；一轮结束后显示「已完成 · 用时 …」（超过 1 秒的轮次）。用时取 dsh 记录的开始和结束时间。
-  Run status: while dsh works, the end of the conversation shows what it is doing and the elapsed time, updated every second; finished turns longer than a second show "Done · took …", using dsh's own start and end times.
-
-- 强调色改为运行时从主题里挑第一个有颜色的（主按钮 → 焦点边框 → 链接 → 进度条 → 图表蓝），并配好文字色。按钮、输入框边框和焦点、链接、进度、选中项都用它，按钮和焦点色是灰色的主题下也不会再"没有颜色"。
-  The accent color is picked at runtime from the first colorful theme color (button → focus border → link → progress bar → chart blue) with a matching text color, and used for buttons, the input border and focus, links, progress and selections, so themes with gray button or focus colors still look colored.
-
-- 提问卡片逐题回答：多个问题时一次显示一道，顶部显示「第 1 / 3 题」和可点击的进度条，单选后自动进入下一题，可以返回上一题，最后一题才提交。选项改成带单选圈 / 多选框的卡片。
-  Questions are answered one at a time: a "1 of 3" counter and clickable progress steps, single-choice answers advance automatically, Back/Next, and Submit on the last question. Options show radio or checkbox marks.
-
-- 回复结尾不再显示改动文件卡片（输入框上方的会话改动栏已经列出）；需要时用设置 `dsh.ui.showTurnChanges` 打开。
-  The changed-files card at the end of each reply is hidden by default (the session changes bar lists them); turn it back on with `dsh.ui.showTurnChanges`.
-- 代码块和行内代码跟随对话文字的字号（之前代码块用编辑器字号，显得偏大）。
-  Code blocks and inline code follow the chat font size instead of the editor's.
-
-- 「在浏览器中打开 dsh」：通过 VS Code 转发端口打开（远程开发时 dsh 的 127.0.0.1 在远端机器上，之前直接打开连不上）；打开后提示当前会话的标题，并可以复制链接。dsh 网页目前没有指向某个会话的地址，只能在它的会话列表里选。
-  "Open dsh in browser" goes through VS Code's port forwarding (dsh's 127.0.0.1 is on the remote machine in remote development), then shows the current session's title and a "Copy link" button. dsh's web UI has no per-session URL yet.
-- 待办改成卡片：进度条和计数徽标，完成项绿色勾、进行中的项高亮并标「进行中」、待做项空心圈，状态标记连成时间线。
-  To-dos are a card with a progress bar and count badge; done items get a green check, the current one is highlighted, pending ones show a hollow circle.
-- 模型选择：当前项带勾和强调色底色；有多个思考等级的模型改为级联——先选模型，再在第二级选思考等级（标出当前和默认等级）。
-  Model picker: the current item has a check and accent background; models with several reasoning levels open a second level to pick the level.
+- **Run Status Timer & Tool Aliases**: Added live action/elapsed timer at thread bottom and normalized prefixed tools (`ops_*`, `mcp__*`) into standard rows.
+- **Interaction Upgrades**: Added step-by-step question cards, cascading model/reasoning picker, timeline to-do cards, and reliable theme accent selection.
 
 ## 0.2.0
 
-多开会话、会话改动栏、更快的 Diff、字体设置。支持 dsh `0.2.1-rc.5` 及以上。
+### 中文
 
-Tabs for multiple sessions, a session changes bar, faster diffs and font settings. Requires dsh `0.2.1-rc.5` or later.
+- **多开标签会话与改动栏**：支持多标签并行会话与独立草稿，输入框上方新增会话改动栏展示累计 Diff。
+- **更快的 Diff 与字号定制**：优先本地还原 Diff 提速并修复历史轮次对比目标；新增字号/字体设置与输入框高度拖拽调整。
 
-- 多开会话：「+」在新标签里开始新对话，不再覆盖当前会话；从会话列表打开的会话也放进标签。后台标签的会话继续运行，最近的 4 个后台标签一直跟随，切回时内容立即可见；标签上显示运行中和等待审批。关闭标签不会删除会话。每个标签有自己的输入草稿。
-  Multiple sessions as tabs: "+" opens a new tab instead of replacing the current session, and sessions picked from the list open in tabs. Background sessions keep running; the four most recent stay followed so switching back is instant. Tabs show running and needs-attention state; closing a tab keeps the session. Each tab keeps its own draft.
-- 图标颜色：强调色改用主题的链接色（不少主题的 focusBorder 是灰色或透明，图标会没有颜色）；空状态的示例任务各有一种颜色。
-  Icons use the theme's link color as accent instead of focusBorder (gray or transparent in many themes); the empty-state suggestions each get their own color.
+### English
 
-- 会话改动栏：输入框上方列出本会话改过的文件和增删行数，可以展开、收起、隐藏；点击文件打开本会话修改前 ↔ 当前的累计 Diff。
-  Session changes bar above the input box: files changed in this session with line counts, collapsible and dismissible; click a file for its cumulative diff.
-- 打开 Diff 更快：本轮改动能用会话日志里的工具片段还原时直接在本地还原，不再请求 dsh；只有命令造成的改动才读取 dsh 的记录（超时缩短到 15 秒，结果缓存）。改动汇总同时最多读两个，打开长会话时不再把 dsh 堵住。点击后对应的行显示加载中，重复点击不重复请求。
-  Faster diffs: turn diffs are rebuilt locally from the session log when the tool edits explain the turn, and only fall back to dsh for changes made by commands (15 s timeout, cached). Change summaries load at most two at a time. Rows show a spinner while the diff opens; repeated clicks are ignored.
-- 打开较早一轮的 Diff 时，右侧是那一轮结束时的内容（之前是当前文件，常常还原失败）。
-  Diffs of earlier turns now compare against the content at the end of that turn.
-- 字号默认比 VS Code 工作台大 1px；新增设置 `dsh.ui.fontSize`、`dsh.ui.fontFamily`、`dsh.ui.codeFontFamily`，「…」菜单里有「字体与字号」入口。
-  Default font size is 1px larger than the workbench; new settings `dsh.ui.fontSize`, `dsh.ui.fontFamily`, `dsh.ui.codeFontFamily`, reachable from "…" → "Font and size".
-- 工具活动行之间的间距加大；输入框顶边可以拖动调整高度（双击恢复）。
-  More spacing between tool rows; drag the top edge of the input box to resize it (double-click to reset).
+- **Multi-Tab Sessions & Changes Bar**: Added multi-tab chat sessions with per-tab drafts and a collapsible session changes bar for cumulative diffs.
+- **Faster Diffs & Font Settings**: Rebuilt turn diffs locally for speed, fixed earlier-turn diff targets, and added font settings and resizable composer.
 
 ## 0.1.0
 
-第一个可用版本。支持 dsh `0.2.1-rc.5` 及以上（已测试到 `0.2.2-alpha.3`）。
+### 中文
 
-First usable release. Requires dsh `0.2.1-rc.5` or later (tested up to `0.2.2-alpha.3`).
+- **首个可用版本（dsh 侧边栏对话）**：支持流式回复、代码高亮、推理折叠、会话管理、消息排队/插队、待办与计划模式标记。
+- **工具改动与编辑器集成**：支持工具归类、VS Code Diff 审阅、审批与提问卡片、选区附带、`@` 文件引用、`/` 命令及多根工作区。
+- **运行时守护与双语界面**：自动发现并守护 dsh 进程、引导配置 API Key、展示上下文环形用量并支持中英文界面。
 
-### 对话 / Chat
+### English
 
-- 侧边栏对话：逐字流式回复、Markdown 和代码高亮、推理过程折叠、停止生成；新建、切换、重命名、按标题搜索会话；加载更早的历史。
-  Sidebar chat with streaming replies, Markdown and syntax highlighting, collapsible reasoning and stop; create, switch, rename and search sessions; load earlier history.
-- dsh 的队列：回复时继续发送的消息排队，可以编辑、删除、插队；停止后可以「现在发送」。
-  Queued messages from dsh's inbox: edit, delete, steer, and send now after a stop.
-- 待办和目标状态条、计划模式标记。
-  To-do and goal strip, plan-mode badge.
-
-### 工具与改动 / Tools and changes
-
-- 按工具类型显示：连续的读文件和搜索合并成一行，命令显示输出，文件修改显示增删行数。
-  Tool rows by type: consecutive reads and searches merge into one row, commands show their output, edits show line counts.
-- 用 VS Code 的 Diff 编辑器查看每次修改和每轮改动；dsh 重启后历史 Diff 仍能打开。
-  Diffs for every edit and every turn in the VS Code diff editor, still available after dsh restarts.
-- 审批卡片（预览将要写入的内容、未保存文件保护）、提问卡片、计划审阅卡片；权限预设切换。
-  Approval cards (with a preview of proposed edits and an unsaved-file guard), question cards, plan review; permission presets.
-
-### 编辑器集成 / Editor integration
-
-- 自动附带当前选区或文件（可逐条关闭）、`@` 引用文件、`/` 斜杠命令（插件模板和 dsh 原生命令）、编辑器右键「DSH」菜单。
-  Attach the current selection or file (per-message opt-out), `@` file references, `/` commands (templates and dsh's own), editor context menu.
-- 多根工作区选择文件夹。
-  Folder selection for multi-root workspaces.
-
-### 界面细节 / UI details
-
-- 按钮、菜单项、链接配上图标；点击后要等 dsh 回应的按钮显示加载中。
-  Icons on buttons, menu items and links; buttons that wait for dsh show a spinner after you click.
-- 上下文用量改成环形进度，随用量变色，悬停显示 token 数。
-  Context usage as a ring that changes color with usage; hover for token counts.
-- 加载状态：启动、打开会话（骨架屏）、会话列表、模型列表、`@` 搜索、发送中、加载更早的消息、断线重连。
-  Loading states for startup, opening a session (skeleton), the session list, models, `@` search, sending, earlier history and reconnecting.
-- 空状态加上示例任务；用户消息悬停可以复制、编辑后重发。
-  Suggested tasks on the empty state; copy and edit-and-resend on sent messages.
-
-### 运行时 / Runtime
-
-- 自动查找、启动和监控 dsh，意外退出后自动重启并恢复对话；首次使用时引导配置 API Key。
-  Finds, starts and supervises dsh, restarts it after a crash and restores the chat; guides you through setting the API key.
-- 中英文界面，跟随 VS Code 的显示语言（设置 `dsh.ui.language` 可以覆盖）。
-  Chinese and English UI following the VS Code display language (`dsh.ui.language` overrides it).
+- **First Usable Release (dsh Chat)**: Added streaming Markdown chat, collapsible reasoning, session management, message queues, to-dos, and plan mode.
+- **Tools, Diffs & Editor Integration**: Added grouped tool rows, VS Code diffs, approval/question cards, selection attach, `@` files, `/` commands, and multi-root support.
+- **Runtime Supervision & Bilingual UI**: Added automatic dsh supervision, API-key onboarding, context ring usage, and Chinese/English localization.
