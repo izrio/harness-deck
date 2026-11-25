@@ -22,14 +22,23 @@ const DEFAULT_CLI_VERSION = '1.5.13';
 const GROUP_MODELS_PREFIX = /^Models within this group:\s*/iu;
 /** 与其它提供方一致：成功结果缓存 5 分钟。 */
 export const ANTIGRAVITY_CACHE_MS = 300_000;
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 20_000;
 const CREDENTIAL_FILES = ['antigravity-cli/antigravity-oauth-token', 'jetski-standalone-oauth-token'] as const;
 
-/** 成功结果按 token+UA 缓存（token 只作内存 key）。 */
+interface InFlightQuotaResult {
+  readonly view?: QuotaView;
+  readonly reasons: readonly string[];
+}
+
+/** 成功结果按 token+UA 缓存（token 只作内存 key）；并发同 key 请求共享同一在途 Promise。 */
 const cache = new Map<string, { readonly at: number; readonly value: QuotaView }>();
+const inFlight = new Map<string, Promise<InFlightQuotaResult>>();
+let cacheGeneration = 0;
 
 export function clearAntigravityQuotaCache(): void {
+  cacheGeneration += 1;
   cache.clear();
+  inFlight.clear();
 }
 
 function userAgent(clientVersion?: string): string {
@@ -41,11 +50,13 @@ function geminiDir(env: Readonly<Record<string, string | undefined>>): string {
   return join(env.HOME ?? env.USERPROFILE ?? homedir(), '.gemini');
 }
 
-/** 从单份 Antigravity OAuth 凭据 JSON 提取未过期的 access_token；返回状态以区分「有效/过期/无结构」。 */
-function parseAccessTokenFromRaw(
-  raw: string,
-  now: number,
-): { readonly kind: 'valid'; readonly accessToken: string } | { readonly kind: 'present-unusable' } | { readonly kind: 'invalid' } {
+type TokenParseResult =
+  | { readonly kind: 'valid'; readonly accessToken: string }
+  | { readonly kind: 'present-unusable'; readonly reason: 'expired' | 'missing-access' }
+  | { readonly kind: 'invalid' };
+
+/** 从单份 Antigravity OAuth 凭据 JSON 提取未过期的 access_token；返回状态以区分「有效/过期/缺少access_token/无结构」。 */
+function parseAccessTokenFromRaw(raw: string, now: number): TokenParseResult {
   let json: Rec | undefined;
   try {
     json = rec(JSON.parse(raw));
@@ -62,11 +73,11 @@ function parseAccessTokenFromRaw(
     (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
     '';
   if (typeof accessToken !== 'string' || !accessToken.trim()) {
-    return refreshToken ? { kind: 'present-unusable' } : { kind: 'invalid' };
+    return refreshToken ? { kind: 'present-unusable', reason: 'missing-access' } : { kind: 'invalid' };
   }
   const expiry = parseEpochMs(token.expiry);
   if (expiry !== undefined && expiry <= now) {
-    return { kind: 'present-unusable' };
+    return { kind: 'present-unusable', reason: 'expired' };
   }
   return { kind: 'valid', accessToken: accessToken.trim() };
 }
@@ -76,6 +87,7 @@ async function readAccessToken(
   env: Readonly<Record<string, string | undefined>>,
   now: number,
   allowIdeFallback = true,
+  onDebug?: (detail: string) => void,
 ): Promise<string | undefined> {
   const files = allowIdeFallback ? CREDENTIAL_FILES : [CREDENTIAL_FILES[0]];
   for (let i = 0; i < files.length; i += 1) {
@@ -88,16 +100,21 @@ async function readAccessToken(
     }
     const parsed = parseAccessTokenFromRaw(raw, now);
     if (parsed.kind === 'valid') return parsed.accessToken;
-    if (i === 0 && parsed.kind === 'present-unusable') return undefined;
+    if (i === 0 && parsed.kind === 'present-unusable') {
+      onDebug?.(parsed.reason === 'expired' ? 'disk-primary-expired' : 'disk-primary-missing-access');
+      return undefined;
+    }
   }
+  onDebug?.('disk-token-missing');
   return undefined;
 }
 
-/** 主域失败时重试备用域；任何失败都返回 undefined。 */
+/** 主域失败时重试备用域；任何失败都返回 undefined 并记录非敏感诊断原因。 */
 async function requestQuota(
   fetchFn: ReturnType<typeof createProxyAwareFetch>,
   token: string,
   ua: string,
+  onDebug?: (detail: string) => void,
 ): Promise<Rec | undefined> {
   for (const host of [PRIMARY_HOST, FALLBACK_HOST]) {
     try {
@@ -113,13 +130,16 @@ async function requestQuota(
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       if (!response.ok) {
+        onDebug?.(`${host} http-${response.status}`);
         await response.body?.cancel().catch(() => undefined);
         continue;
       }
       const json = rec(await response.json());
       if (json) return json;
-    } catch {
-      // 换下一个域重试
+      onDebug?.(`${host} invalid-json`);
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      onDebug?.(`${host} ${msg}`);
     }
   }
   return undefined;
@@ -197,9 +217,15 @@ export async function queryAntigravityQuota(options: QuotaServiceOptions = {}): 
   let token: string | undefined;
   if (options.rawTokenJson !== undefined) {
     const parsed = parseAccessTokenFromRaw(options.rawTokenJson, now());
-    token = parsed.kind === 'valid' ? parsed.accessToken : undefined;
+    if (parsed.kind === 'valid') {
+      token = parsed.accessToken;
+    } else if (parsed.kind === 'present-unusable') {
+      options.onDebug?.(`raw-token-${parsed.reason}`);
+    } else {
+      options.onDebug?.('raw-token-invalid');
+    }
   } else {
-    token = await readAccessToken(options.env ?? process.env, now(), options.allowIdeFallback !== false);
+    token = await readAccessToken(options.env ?? process.env, now(), options.allowIdeFallback !== false, options.onDebug);
   }
   if (!token) return undefined;
 
@@ -208,13 +234,38 @@ export async function queryAntigravityQuota(options: QuotaServiceOptions = {}): 
   const cached = cache.get(cacheKey);
   if (cached && now() - cached.at < ANTIGRAVITY_CACHE_MS) return cached.value;
 
-  const fetchFn = options.fetchImpl ?? createProxyAwareFetch(options.getHttpProxy);
-  const json = await requestQuota(fetchFn, token, ua);
-  if (!json) return undefined;
-  const windows = readWindows(json);
-  if (windows.length === 0) return undefined;
+  let pending = inFlight.get(cacheKey);
+  if (!pending) {
+    const fetchFn = options.fetchImpl ?? createProxyAwareFetch(options.getHttpProxy);
+    const generation = cacheGeneration;
+    let created: Promise<InFlightQuotaResult>;
+    const run = async (): Promise<InFlightQuotaResult> => {
+      const reasons: string[] = [];
+      const json = await requestQuota(fetchFn, token, ua, (detail) => reasons.push(detail));
+      if (!json) return { reasons };
+      const windows = readWindows(json);
+      if (windows.length === 0) {
+        reasons.push('empty-windows');
+        return { reasons };
+      }
+      const view: QuotaView = { windows, queriedAt: now() };
+      if (generation === cacheGeneration) {
+        cache.set(cacheKey, { at: now(), value: view });
+      }
+      return { view, reasons };
+    };
+    created = run().finally(() => {
+      if (inFlight.get(cacheKey) === created) {
+        inFlight.delete(cacheKey);
+      }
+    });
+    inFlight.set(cacheKey, created);
+    pending = created;
+  }
 
-  const view: QuotaView = { windows, queriedAt: now() };
-  cache.set(cacheKey, { at: now(), value: view });
-  return view;
+  const result = await pending;
+  if (!result.view && options.onDebug) {
+    for (const reason of result.reasons) options.onDebug(reason);
+  }
+  return result.view;
 }

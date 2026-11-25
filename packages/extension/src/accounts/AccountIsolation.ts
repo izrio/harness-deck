@@ -333,20 +333,25 @@ function parseAntigravityTokenMeta(raw: string): {
   }
 }
 
-/** 判断两份 Antigravity OAuth 凭据是否属于同一账号（避免把其他账号的磁盘凭据串写到当前槽位）。 */
+/** 判断两份 Antigravity OAuth 凭据是否属于同一账号（同邮箱优先认定为同账号，避免重登刷新 refresh_token 后错判；避免不同账号串槽）。 */
 export function antigravityTokensSameAccount(a: string, b: string): boolean {
   const fa = parseAntigravityTokenMeta(a);
   const fb = parseAntigravityTokenMeta(b);
-  if (fa.refreshToken && fb.refreshToken) {
-    if (fa.refreshToken !== fb.refreshToken) return false;
-  }
   if (fa.email && fb.email) {
-    if (fa.email !== fb.email) return false;
+    return fa.email === fb.email;
   }
-  if (fa.refreshToken && fb.refreshToken) return true;
-  if (fa.email && fb.email) return true;
+  if (fa.refreshToken && fb.refreshToken) {
+    return fa.refreshToken === fb.refreshToken;
+  }
   if (fa.accessToken && fb.accessToken) return fa.accessToken === fb.accessToken;
   return a.trim() === b.trim();
+}
+
+/** 判断 Antigravity OAuth 凭据 JSON 是否包含未过期的 access_token。 */
+export function isAntigravityTokenUsable(raw: string | undefined, now = Date.now()): boolean {
+  if (!raw?.trim()) return false;
+  const meta = parseAntigravityTokenMeta(raw);
+  return Boolean(meta.accessToken) && (meta.expiryMs === undefined || meta.expiryMs > now);
 }
 
 /** 判断 candidate 是否不比 existing 更旧（避免用已过期的旧快照倒灌覆盖磁盘上已被 CLI 续期的新 token）。 */

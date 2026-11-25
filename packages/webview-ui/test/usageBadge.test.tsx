@@ -640,4 +640,137 @@ describe('订阅用量标识', () => {
     expect(screen.getByTestId('usage-badge').textContent).toContain('1,750 积分');
     expect(screen.getByTestId('usage-credits-hero').textContent).toContain('1,750');
   });
+
+  it('冷启动在途慢请求期间收到 connected/models 与首次 pushAccounts(unknown->authenticated) 时，不作废请求也不清空额度', () => {
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          connection: 'connecting',
+          models: { options: [] },
+          backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+          accounts: {
+            items: [
+              { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'unknown' },
+            ],
+            channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+          },
+        }),
+      }),
+    );
+    render(createElement(UsageBadge));
+    const initialReqs = vscode.posted.filter((m) => m.type === 'fetchQuota');
+    expect(initialReqs).toHaveLength(1);
+    const reqId = initialReqs[0]!.type === 'fetchQuota' ? initialReqs[0]!.payload.requestId : -1;
+
+    // 冷启动在途慢请求尚未回包前，底层连上并拉回模型列表，不应覆盖掉在途 requestId
+    vscode.reset();
+    act(() => {
+      store.applyHostMessage({ type: 'connection', payload: 'connected' });
+      store.applyHostMessage({
+        type: 'models',
+        payload: {
+          options: [{ provider: 'antigravity', model: 'gemini-4-neon', name: 'Gemini 4 Neon', group: 'Gemini', efforts: [] }],
+        },
+      });
+    });
+    expect(vscode.posted.filter((m) => m.type === 'fetchQuota')).toHaveLength(0);
+
+    // 首次请求回包，紧接着宿主广播 accounts 将 status 从 unknown 更新为 authenticated
+    const coldQuota: QuotaView = {
+      windows: [
+        { kind: 'weekly', label: 'gemini', usedPercent: 1, remainingPercent: 99 },
+        { kind: 'session', label: 'gemini', usedPercent: 4, remainingPercent: 96 },
+      ],
+      queriedAt: Date.now(),
+    };
+    act(() => {
+      store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: reqId, quota: coldQuota } });
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            {
+              id: 'system:antigravity',
+              backendId: 'antigravity',
+              label: '本机默认账号',
+              isSystemDefault: true,
+              status: 'authenticated',
+              quota: coldQuota,
+            },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+        },
+      });
+    });
+
+    // 徽标保持展示 96%，且没有因为 unknown -> authenticated 自我清空或重复发 fetchQuota
+    expect(screen.getByTestId('usage-badge').textContent).toContain('96%');
+    expect(vscode.posted.filter((m) => m.type === 'fetchQuota')).toHaveLength(0);
+  });
+
+  it('账号状态在 unauthenticated 与 authenticated 间切换时正确隐藏标识与重查额度', () => {
+    act(() =>
+      store.applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          connection: 'connected',
+          backends: { items: [{ id: 'antigravity', name: 'Antigravity', kind: 'acp' }], active: 'antigravity' },
+          accounts: {
+            items: [
+              { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'unauthenticated' },
+            ],
+            channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+          },
+        }),
+      }),
+    );
+    render(createElement(UsageBadge));
+    const req1 = vscode.posted.find((m) => m.type === 'fetchQuota');
+    const id1 = req1 && req1.type === 'fetchQuota' ? req1.payload.requestId : -1;
+    act(() => store.applyHostMessage({ type: 'quotaFetched', payload: { requestId: id1, error: 'unavailable' } }));
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+
+    // 登录成功后 status 变为 authenticated：自动触发 force fetchQuota 并展示额度
+    vscode.reset();
+    act(() =>
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'authenticated' },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+        },
+      }),
+    );
+    const req2 = vscode.posted.find((m) => m.type === 'fetchQuota');
+    expect(req2).toBeTruthy();
+    expect(req2 && req2.type === 'fetchQuota' ? req2.payload.force : undefined).toBe(true);
+    const id2 = req2 && req2.type === 'fetchQuota' ? req2.payload.requestId : -1;
+    act(() =>
+      store.applyHostMessage({
+        type: 'quotaFetched',
+        payload: {
+          requestId: id2,
+          quota: { windows: [{ kind: 'session', label: 'gemini', usedPercent: 10, remainingPercent: 90 }], queriedAt: Date.now() },
+        },
+      }),
+    );
+    expect(screen.getByTestId('usage-badge').textContent).toContain('90%');
+
+    // 退出登录后 status 变为 unauthenticated：立即隐藏标识
+    act(() =>
+      store.applyHostMessage({
+        type: 'accounts',
+        payload: {
+          items: [
+            { id: 'system:antigravity', backendId: 'antigravity', label: '本机默认账号', isSystemDefault: true, status: 'unauthenticated' },
+          ],
+          channels: { antigravity: { mode: 'official', accountId: 'system:antigravity' } },
+        },
+      }),
+    );
+    expect(screen.queryByTestId('usage-badge')).toBeNull();
+  });
 });

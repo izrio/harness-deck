@@ -12,6 +12,15 @@ import {
   resolveChromiumUserDataDir,
 } from '../src/browser/EmbeddedBrowserManager.ts';
 import {
+  cdpPropertyDescriptorsToProperties,
+  cdpRemoteObjectToArg,
+  extractCompletionTarget,
+  extractConsoleTable,
+  extractStackFrames,
+  formatConsoleArgs,
+  sanitizeConsoleCss,
+} from '../src/browser/consoleFormat.ts';
+import {
   BrowserMcpServer,
   BUILTIN_BROWSER_MCP_ID,
   BUILTIN_BROWSER_MCP_NAME,
@@ -431,5 +440,261 @@ describe('EmbeddedBrowser & BrowserMcpServer', () => {
       method: 'Input.dispatchMouseEvent',
       params: { type: 'mouseMoved', x: 120, y: 80, button: 'left', buttons: 1, clickCount: 0, modifiers: 0 },
     });
+  });
+
+  it('consoleFormat 正确处理 %s/%d/%c 占位符、安全样式消毒、表格、堆栈与补全目标提取', () => {
+    expect(
+      sanitizeConsoleCss('color: red; font-weight: bold; background-image: url(https://evil.test); position: fixed; padding: 2px 6px'),
+    ).toEqual({
+      color: 'red',
+      fontWeight: 'bold',
+      padding: '2px 6px',
+    });
+    expect(sanitizeConsoleCss('color: expression(alert(1))')).toBeUndefined();
+
+    const formatted = formatConsoleArgs([
+      { type: 'string', value: '%cHello %s #%d' },
+      { type: 'string', value: 'color: #0ea5e9; font-weight: 600' },
+      { type: 'string', value: 'Halo' },
+      { type: 'number', value: 42.9, description: '42.9' },
+    ]);
+    expect(formatted.text).toBe('Hello Halo #42');
+    expect(formatted.formatted).toEqual([
+      { text: 'Hello ', style: { color: '#0ea5e9', fontWeight: '600' } },
+      { text: 'Halo', style: { color: '#0ea5e9', fontWeight: '600' } },
+      { text: ' #', style: { color: '#0ea5e9', fontWeight: '600' } },
+      { text: '42', style: { color: '#0ea5e9', fontWeight: '600' } },
+    ]);
+
+    const tableArg = cdpRemoteObjectToArg({
+      type: 'object',
+      subtype: 'array',
+      description: 'Array(2)',
+      preview: {
+        type: 'object',
+        subtype: 'array',
+        description: 'Array(2)',
+        properties: [
+          {
+            name: '0',
+            type: 'object',
+            valuePreview: {
+              type: 'object',
+              properties: [
+                { name: 'id', type: 'number', value: '1' },
+                { name: 'name', type: 'string', value: 'alpha' },
+              ],
+            },
+          },
+          {
+            name: '1',
+            type: 'object',
+            valuePreview: {
+              type: 'object',
+              properties: [
+                { name: 'id', type: 'number', value: '2' },
+                { name: 'name', type: 'string', value: 'beta' },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(extractConsoleTable(tableArg)).toEqual({
+      columns: ['(index)', 'id', 'name'],
+      rows: [
+        { '(index)': '0', id: '1', name: 'alpha' },
+        { '(index)': '1', id: '2', name: 'beta' },
+      ],
+    });
+
+    expect(
+      extractStackFrames({
+        callFrames: [{ functionName: 'onClick', url: 'https://example.com/app.js', lineNumber: 9, columnNumber: 4 }],
+      }),
+    ).toEqual([{ functionName: 'onClick', url: 'https://example.com/app.js', lineNumber: 10, columnNumber: 5 }]);
+
+    const props = cdpPropertyDescriptorsToProperties(
+      [{ name: 'count', value: { type: 'number', value: 3, description: '3' }, isOwn: true }],
+      [{ name: '[[Prototype]]', value: { type: 'object', className: 'Object', description: 'Object', objectId: 'proto-1' } }],
+    );
+    expect(props).toEqual([
+      { name: 'count', value: { type: 'number', value: 3, description: '3' }, isOwn: true },
+      {
+        name: '[[Prototype]]',
+        value: { type: 'object', className: 'Object', description: 'Object', objectId: 'proto-1' },
+        internal: true,
+      },
+    ]);
+
+    expect(extractCompletionTarget('document.qu')).toEqual({ receiver: 'document', prefix: 'qu' });
+    expect(extractCompletionTarget('$0.sty')).toEqual({ receiver: '$0', prefix: 'sty' });
+    expect(extractCompletionTarget('doc')).toEqual({ prefix: 'doc' });
+    expect(extractCompletionTarget('foo().bar')).toBeUndefined();
+    expect(extractCompletionTarget('1.toFixed')).toBeUndefined();
+  });
+
+  it('EmbeddedBrowserManager 支持结构化控制台日志、分组/表格/Log.entryAdded、REPL $0 与属性懒加载及 preserveLog', async () => {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'hd-browser-console-'));
+    cleanups.push(() => rm(tmpRoot, { recursive: true, force: true }));
+
+    const calls: { method: string; params?: Record<string, unknown> }[] = [];
+    let socket!: FakeSocket;
+
+    const origConnect = CdpClient.connect.bind(CdpClient);
+    const spy = vi.spyOn(CdpClient, 'connect').mockImplementation(async (wsUrl) => {
+      return origConnect(wsUrl, {
+        socketFactory: () => {
+          socket = new FakeSocket();
+          const origSend = socket.send.bind(socket);
+          socket.send = (raw: string) => {
+            origSend(raw);
+            const msg = JSON.parse(raw) as { id: number; method: string; params?: Record<string, unknown> };
+            calls.push({ method: msg.method, ...(msg.params ? { params: msg.params } : {}) });
+            queueMicrotask(() => {
+              if (msg.method === 'Runtime.evaluate') {
+                const expr = String(msg.params?.expression ?? '');
+                if (msg.params?.throwOnSideEffect === true) {
+                  socket.emit('message', JSON.stringify({ id: msg.id, result: { result: { type: 'object', value: ['querySelector', 'querySelectorAll'] } } }));
+                  return;
+                }
+                socket.emit(
+                  'message',
+                  JSON.stringify({
+                    id: msg.id,
+                    result: {
+                      result: {
+                        type: 'object',
+                        className: 'Object',
+                        description: 'Object',
+                        objectId: 'eval-obj-1',
+                        preview: {
+                          type: 'object',
+                          properties: [{ name: 'ok', type: 'boolean', value: 'true' }],
+                        },
+                      },
+                    },
+                  }),
+                );
+                expect(expr).toContain('document.querySelector("#hero")');
+                return;
+              }
+              if (msg.method === 'Runtime.getProperties') {
+                socket.emit(
+                  'message',
+                  JSON.stringify({
+                    id: msg.id,
+                    result: {
+                      result: [{ name: 'ok', value: { type: 'boolean', value: true, description: 'true' }, isOwn: true }],
+                      internalProperties: [
+                        { name: '[[Prototype]]', value: { type: 'object', description: 'Object', objectId: 'proto-1' } },
+                      ],
+                    },
+                  }),
+                );
+                return;
+              }
+              if (msg.method === 'Page.captureScreenshot') {
+                socket.emit('message', JSON.stringify({ id: msg.id, result: { data: 'ok' } }));
+                return;
+              }
+              socket.emit('message', JSON.stringify({ id: msg.id, result: {} }));
+            });
+          };
+          queueMicrotask(() => socket.emit('open'));
+          return socket;
+        },
+      });
+    });
+    cleanups.push(() => spy.mockRestore());
+
+    const manager = new EmbeddedBrowserManager({
+      storageRoot: tmpRoot,
+      onStateChange: () => undefined,
+      onFrame: () => undefined,
+    });
+    cleanups.push(() => manager.dispose());
+
+    await manager.launch({ cdpUrl: 'ws://127.0.0.1:9222/devtools/page/1' });
+    expect(calls.some((c) => c.method === 'Log.enable')).toBe(true);
+
+    // 1. 分组日志、debug、table 与 Log.entryAdded
+    socket.emit(
+      'message',
+      JSON.stringify({
+        method: 'Runtime.consoleAPICalled',
+        params: {
+          type: 'startGroupCollapsed',
+          args: [{ type: 'string', value: 'Init Group' }],
+          stackTrace: { callFrames: [{ functionName: 'boot', url: 'https://app.test/main.js', lineNumber: 4, columnNumber: 1 }] },
+        },
+      }),
+    );
+    socket.emit(
+      'message',
+      JSON.stringify({
+        method: 'Runtime.consoleAPICalled',
+        params: { type: 'debug', args: [{ type: 'string', value: 'trace detail' }] },
+      }),
+    );
+    socket.emit(
+      'message',
+      JSON.stringify({
+        method: 'Runtime.consoleAPICalled',
+        params: { type: 'endGroup', args: [] },
+      }),
+    );
+    socket.emit(
+      'message',
+      JSON.stringify({
+        method: 'Log.entryAdded',
+        params: { entry: { level: 'error', text: 'Failed to load resource: 404', url: 'https://app.test/missing.png', lineNumber: 0 } },
+      }),
+    );
+
+    const logs = manager.getState().consoleLogs;
+    expect(logs).toHaveLength(3);
+    expect(logs[0]).toMatchObject({ kind: 'groupCollapsed', text: 'Init Group', source: { url: 'https://app.test/main.js', lineNumber: 5 } });
+    expect(logs[1]).toMatchObject({ level: 'debug', text: 'trace detail', groupDepth: 1, parentGroupId: logs[0]!.groupId });
+    expect(logs[2]).toMatchObject({ kind: 'browser', level: 'error', text: 'Failed to load resource: 404' });
+
+    // 2. REPL 求值带 $0 与 Command Line API，并返回结构化 objectId
+    await manager.evalConsole('({ ok: $0 !== null })', '#hero');
+    const evalCall = calls.find((c) => c.method === 'Runtime.evaluate' && c.params?.includeCommandLineAPI === true);
+    expect(evalCall?.params).toMatchObject({
+      returnByValue: false,
+      generatePreview: true,
+      includeCommandLineAPI: true,
+      replMode: true,
+      objectGroup: 'halo-console',
+    });
+    const afterEval = manager.getState().consoleLogs;
+    expect(afterEval.at(-2)).toMatchObject({ kind: 'command', text: '({ ok: $0 !== null })' });
+    expect(afterEval.at(-1)).toMatchObject({
+      kind: 'result',
+      args: [expect.objectContaining({ objectId: 'eval-obj-1' })],
+    });
+
+    // 3. 懒加载对象属性 & 无副作用补全
+    const objRes = await manager.getConsoleObject('eval-obj-1');
+    expect(objRes.properties).toHaveLength(2);
+    expect(objRes.properties?.[0]).toMatchObject({ name: 'ok', isOwn: true });
+
+    const cmpRes = await manager.completeConsole('document.qu');
+    expect(cmpRes).toEqual({ prefix: 'qu', items: ['querySelector', 'querySelectorAll'] });
+
+    // 4. preserveLog = false 时导航自动清空；preserveLog = true 时保留并插入分隔消息
+    socket.emit('message', JSON.stringify({ method: 'Page.frameNavigated', params: { frame: { url: 'https://app.test/page-a' } } }));
+    expect(manager.getState().consoleLogs).toEqual([]);
+
+    manager.setConsoleOptions({ preserveLog: true });
+    expect(manager.getState().preserveConsoleLog).toBe(true);
+    socket.emit(
+      'message',
+      JSON.stringify({ method: 'Runtime.consoleAPICalled', params: { type: 'log', args: [{ type: 'string', value: 'keep me' }] } }),
+    );
+    socket.emit('message', JSON.stringify({ method: 'Page.frameNavigated', params: { frame: { url: 'https://app.test/page-b' } } }));
+    const preserved = manager.getState().consoleLogs;
+    expect(preserved.map((l) => l.text)).toEqual(['keep me', 'Navigated to https://app.test/page-b']);
   });
 });

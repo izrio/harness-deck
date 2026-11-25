@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## 0.18.0
+
+### 中文
+
+- **内置浏览器 Chrome 风格控制台**：升级对象懒加载展开树、`console.table`、分组与调用栈、正则/负向词/级别筛选、设置与右键菜单，以及支持多行输入、实时补全和 `$0` 联动的 REPL。
+- **CodeBuddy 模型倍率与用量校准**：模型选择器新增计费倍率显示（如 `0.29x`），并修复 CodeBuddy 缓存输入重复计入及多阶段 `turnUsage` 上下文占用偏差。
+- **Antigravity 订阅额度修复**：修复默认账号未展示额度问题，补齐本地凭据回退、Refresh Token 刷新与备用端点容错，确保状态栏稳定展示额度。
+
+### English
+
+- **Chrome-Style Browser Console**: Added lazy expandable object trees, `console.table`, groups, stack traces, regex/negative/level filters, and a multiline REPL with live completion and `$0`.
+- **CodeBuddy Multipliers & Usage**: Displayed model billing multipliers (e.g. `0.29x`) in the model picker, and fixed cached-input double counting and multi-stage context usage.
+- **Antigravity Quota Fix**: Fixed missing quota display for default accounts with credential fallback, refresh-token renewal, and fallback endpoint resilience.
+
 ## 0.17.0
 
 **内置浏览器开发者工具与高清剪贴板交互、双模式订阅余量（百分比双圆环 + 积分余额式）与每轮实时动画刷新、Git 本地分支删除（二次确认）、全局 `shadcn-ui` `ScrollArea` 升级、回复中权限下一轮生效及多账号切换额度隔离修复**：为内置浏览器补齐高清 DPR 画面渲染、跨源/哈希地址切换修复、完整复制/剪切/粘贴/全选与右键菜单，以及支持左/下/右停靠的 DevTools（DOM 元素选中调试、Console REPL 与 Network 抓包）；订阅余量扩展为百分比双圆环与积分余额（如 CodeBuddy 积分胶囊 + 5 格能量条 + 积分钱包浮层）双模式，每轮对话结束自动刷新并平滑播放数字与进度条动画；支持在底栏与 Git 面板删除非当前本地分支（带二次确认与强制 `-D` 选项）；将模型选择、分支/项目浮层、侧栏、设置页与工作台滚动容器统一升级为 `shadcn-ui` `ScrollArea`；新增会话按钮移至标签栏最右侧；修复回复中切换权限改为下一轮生效、权限下拉双背景高亮以及多账号切换后仍读取上一账号额度的串号问题。

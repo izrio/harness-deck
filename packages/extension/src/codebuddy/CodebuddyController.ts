@@ -83,6 +83,26 @@ export interface CodebuddyInitMetadata {
   readonly commands?: readonly { readonly name: string; readonly description?: string }[];
 }
 
+export interface CodebuddyAvailableModel {
+  readonly id: string;
+  readonly name?: string;
+  /** 计费倍率，形如 `x0.29 credits` / `0.29x`；解析取首个数字。 */
+  readonly credits?: string;
+}
+
+export interface CodebuddyAvailableModelsMetadata {
+  readonly rawModels?: readonly CodebuddyAvailableModel[];
+}
+
+/** 从 CodeBuddy 的 `credits` 字段解析计费倍率；缺失或无法解析时返回 undefined。 */
+export function parseCreditsMultiplier(credits: unknown): number | undefined {
+  if (typeof credits !== 'string') return undefined;
+  const match = /-?\d+(?:\.\d+)?/u.exec(credits);
+  if (!match) return undefined;
+  const value = Number(match[0]);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 export interface CodebuddySpawnSessionParams {
   readonly resumeSessionId?: string;
   readonly model?: string;
@@ -200,6 +220,7 @@ export class CodebuddyController implements ChatBackendController {
   private readonly pendingModes = new Map<string, string>();
   private discoveredModels: ModelOption[] = [];
   private discoveredDefaultModelId: string | undefined;
+  private readonly modelMultipliers = new Map<string, number>();
   private discoveredCommands: { readonly name: string; readonly description: string }[] = [];
   private readonly editorContext: EditorContext;
   private readonly tabs: TabsModel;
@@ -251,14 +272,19 @@ export class CodebuddyController implements ChatBackendController {
     if (Array.isArray(meta.models) && meta.models.length > 0) {
       this.discoveredModels = meta.models
         .filter((m) => typeof m?.id === 'string' && m.id.trim().length > 0)
-        .map((m) => ({
-          provider: 'codebuddy',
-          model: m.id.trim(),
-          name: (typeof m.name === 'string' && m.name.trim()) || m.id.trim(),
-          group: 'CodeBuddy',
-          efforts: CODEBUDDY_EFFORTS,
-          defaultEffort: 'medium',
-        }));
+        .map((m) => {
+          const id = m.id.trim();
+          const multiplier = this.modelMultipliers.get(id);
+          return {
+            provider: 'codebuddy',
+            model: id,
+            name: (typeof m.name === 'string' && m.name.trim()) || id,
+            group: 'CodeBuddy',
+            ...(multiplier !== undefined ? { multiplier } : {}),
+            efforts: CODEBUDDY_EFFORTS,
+            defaultEffort: 'medium',
+          };
+        });
       changed = true;
     }
     if (typeof meta.currentModelId === 'string' && meta.currentModelId.trim()) {
@@ -276,6 +302,26 @@ export class CodebuddyController implements ChatBackendController {
       changed = true;
     }
     if (changed) this.scheduleRender();
+  }
+
+  /** 应用 `get_available_models` 的完整模型配置，补充模型列表里缺失的计费倍率。 */
+  applyAvailableModels(meta: CodebuddyAvailableModelsMetadata): void {
+    let changed = false;
+    for (const raw of meta.rawModels ?? []) {
+      if (typeof raw?.id !== 'string') continue;
+      const id = raw.id.trim();
+      if (!id) continue;
+      const multiplier = parseCreditsMultiplier(raw.credits);
+      if (multiplier === undefined || this.modelMultipliers.get(id) === multiplier) continue;
+      this.modelMultipliers.set(id, multiplier);
+      changed = true;
+    }
+    if (!changed) return;
+    this.discoveredModels = this.discoveredModels.map((model) => {
+      const multiplier = this.modelMultipliers.get(model.model);
+      return multiplier === undefined ? model : { ...model, multiplier };
+    });
+    this.scheduleRender();
   }
 
   setSpawner(spawner: CodebuddySessionSpawner | undefined): void {
@@ -915,6 +961,13 @@ export class CodebuddyController implements ChatBackendController {
       .sendControlRequest<CodebuddyInitMetadata>({ subtype: 'initialize' }, 10_000)
       .catch(() => undefined);
     if (initResp) this.applyInitMetadata(initResp);
+    // 计费倍率是补充信息，异步补齐即可，不阻塞首条消息发送
+    void link
+      .sendControlRequest<CodebuddyAvailableModelsMetadata>({ subtype: 'get_available_models' }, 5_000)
+      .then((available) => {
+        if (available) this.applyAvailableModels(available);
+      })
+      .catch(() => undefined);
     if (!link.running) {
       this.links.delete(currentKey);
     }

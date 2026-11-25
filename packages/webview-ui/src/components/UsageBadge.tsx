@@ -600,8 +600,17 @@ function quotaScopeOf(state: ReturnType<typeof getState>): string {
     return `${active}|provider:${channel.providerId}`;
   }
   const accountId = channel?.accountId ?? (active ? `system:${active}` : '');
-  const accountStatus = accountId ? (state.accounts.items.find((a) => a.id === accountId)?.status ?? '') : '';
-  return `${active}|official:${accountId}|${accountStatus}`;
+  return `${active}|official:${accountId}`;
+}
+
+function accountStatusOf(state: ReturnType<typeof getState>): string {
+  const active = state.backends.active ?? '';
+  if (!active) return '';
+  const activeBackend = state.backends.items.find((b) => b.id === active);
+  const channel = state.accounts.channels[active] ?? activeBackend?.activeChannel;
+  if (channel?.mode === 'provider') return '';
+  const accountId = channel?.accountId ?? `system:${active}`;
+  return state.accounts.items.find((a) => a.id === accountId)?.status ?? '';
 }
 
 function supportsQuotaOf(state: ReturnType<typeof getState>): boolean {
@@ -632,6 +641,7 @@ export function UsageBadge() {
   const t = useT();
   const active = useView((s) => s.backends.active);
   const quotaScope = useView(quotaScopeOf);
+  const accountStatus = useView(accountStatusOf);
   const supportsQuota = useView(supportsQuotaOf);
   const activeAccountQuota = useView(activeAccountQuotaOf);
   const connected = useView((s) => s.connection === 'connected');
@@ -648,8 +658,10 @@ export function UsageBadge() {
   const fetchedForScope = useRef<string | undefined>(undefined);
   const probeSent = useRef(false);
   const lastScope = useRef<string>(quotaScopeOf(getState()));
+  const prevAccountStatusRef = useRef<string>(accountStatusOf(getState()));
   const scopeChangedAtRef = useRef(0);
   const needsReconnectRefreshRef = useRef(false);
+  const inFlightRef = useRef(false);
   const prevConnectedRef = useRef(connected);
   const prevHasModelsRef = useRef(hasModels);
   const prevRunningRef = useRef(running);
@@ -668,13 +680,16 @@ export function UsageBadge() {
     requestKeepOnErrorRef.current = keepOnError;
     fetchedForScope.current = quotaScopeOf(getState());
     lastProbeAtRef.current = Date.now();
+    inFlightRef.current = true;
     postToHost({ type: 'fetchQuota', payload: force ? { requestId, force: true } : { requestId } });
   };
 
   useEffect(() => {
     if (!probeSent.current) {
       probeSent.current = true;
-      requestQuota();
+      if (supportsQuotaOf(getState())) {
+        requestQuota();
+      }
     }
     const maybeRefreshOnFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
@@ -710,26 +725,57 @@ export function UsageBadge() {
   }, []);
 
   useEffect(() => {
-    const scopeChanged = lastScope.current !== quotaScope;
+    const prevScope = lastScope.current;
+    const scopeChanged = prevScope !== quotaScope;
+    const prevStatus = prevAccountStatusRef.current;
+    const statusChanged = prevStatus !== accountStatus;
     const becameConnected = !prevConnectedRef.current && connected;
     const loadedModels = !prevHasModelsRef.current && hasModels;
     const finishedTurn = prevRunningRef.current && !running;
     prevConnectedRef.current = connected;
     prevHasModelsRef.current = hasModels;
     prevRunningRef.current = running;
+    prevAccountStatusRef.current = accountStatus;
 
-    // 切换底层、切换官方账号/服务商渠道或登录态变化后先清空旧额度，强制跳过宿主缓存重新探测。
+    // 切换底层、切换官方账号/服务商渠道后先清空旧额度，强制跳过宿主缓存重新探测。
     if (scopeChanged) {
+      const wasEmptyScope = prevScope === '' || prevScope === '|official:';
       lastScope.current = quotaScope;
       scopeChangedAtRef.current = Date.now();
-      needsReconnectRefreshRef.current = true;
+      needsReconnectRefreshRef.current = !wasEmptyScope;
       retriedForScopeRef.current = false;
       unavailableAtRef.current = 0;
+      inFlightRef.current = false;
       quotaRef.current = undefined;
       setQuota(undefined);
       setUnavailable(false);
-      requestQuota(true, false);
+      if (supportsQuota) {
+        requestQuota(!wasEmptyScope, false);
+      } else {
+        requestIdRef.current = 0;
+      }
       return;
+    }
+
+    // 同一底层同一账号仅状态变化：仅在明确退出/过期或从无效状态完成登录时联动，
+    // 绝不因冷启动首次查到额度后的 unknown -> authenticated 广播清空当前额度或打断在途请求。
+    if (statusChanged) {
+      if (accountStatus === 'unauthenticated' || accountStatus === 'expired') {
+        inFlightRef.current = false;
+        quotaRef.current = undefined;
+        setQuota(undefined);
+        setUnavailable(true);
+        return;
+      }
+      if (
+        supportsQuota &&
+        accountStatus === 'authenticated' &&
+        (prevStatus === 'unauthenticated' || prevStatus === 'expired' || prevStatus === 'logging-in')
+      ) {
+        setUnavailable(false);
+        requestQuota(true, false);
+        return;
+      }
     }
 
     // 每轮对话结束后强制刷新一次最新额度（跳过宿主 5 分钟缓存），让余额进度条和数字实时更新。
@@ -740,13 +786,19 @@ export function UsageBadge() {
     }
 
     // 切换账号或重启底层初期，旧 access_token 可能尚未被新进程刷新，首次探测会返回 unavailable；
-    // 待底层重新连上或拉回模型列表后强制补查一次，确保展示新账号续期后的实时额度。
-    if (supportsQuota && (becameConnected || loadedModels) && (!quotaRef.current || needsReconnectRefreshRef.current)) {
-      needsReconnectRefreshRef.current = false;
-      setUnavailable(false);
-      requestQuota(true, Boolean(quotaRef.current));
+    // 待底层重新连上或拉回模型列表后强制补查一次，确保展示新账号续期后的实时额度；
+    // 冷启动首次探测仍在途时（inFlightRef.current === true）不作废在途请求。
+    if (supportsQuota && (becameConnected || loadedModels)) {
+      if (needsReconnectRefreshRef.current) {
+        needsReconnectRefreshRef.current = false;
+        setUnavailable(false);
+        requestQuota(true, Boolean(quotaRef.current));
+      } else if (!quotaRef.current && !inFlightRef.current) {
+        setUnavailable(false);
+        requestQuota(true, false);
+      }
     }
-  }, [quotaScope, active, connected, hasModels, running, supportsQuota]);
+  }, [quotaScope, accountStatus, active, connected, hasModels, running, supportsQuota]);
 
   // 若宿主已通过账号巡检 / 登录完成 / 其他视图刷新并广播了当前激活账号的额度，直接同步展示。
   useEffect(() => {
@@ -759,6 +811,7 @@ export function UsageBadge() {
     if (!shouldAdopt) return;
     clearTimeout(retryTimerRef.current);
     retryTimerRef.current = undefined;
+    inFlightRef.current = false;
     quotaRef.current = activeAccountQuota;
     fetchedForScope.current = quotaScope;
     setQuota(activeAccountQuota);
@@ -769,6 +822,7 @@ export function UsageBadge() {
     const matched = fetchResults[requestIdRef.current];
     if (!matched || matched.requestId <= handledIdRef.current) return;
     handledIdRef.current = matched.requestId;
+    inFlightRef.current = false;
     if (matched.quota && matched.quota.windows.length > 0) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = undefined;
@@ -790,7 +844,7 @@ export function UsageBadge() {
           retryTimerRef.current = undefined;
           if (!quotaRef.current && supportsQuotaOf(getState()) && getState().connection === 'connected') {
             setUnavailable(false);
-            requestQuota();
+            requestQuota(true, false);
           }
         }, TRANSIENT_RETRY_MS);
       }

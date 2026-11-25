@@ -33,10 +33,12 @@ import { cn } from '../../lib/utils.ts';
 import {
   getLastBrowserFrame,
   subscribeBrowserClipboard,
+  subscribeBrowserConsoleObject,
   subscribeBrowserFrame,
   subscribeBrowserInspect,
   subscribeBrowserNetworkBody,
   useView,
+  type BrowserConsoleObjectEvent,
   type BrowserFrameEvent,
   type BrowserNetworkBodyEvent,
 } from '../../store.ts';
@@ -110,6 +112,9 @@ export default function BrowserView() {
   const [selectedElement, setSelectedElement] = useState<BrowserDomElement | undefined>();
   const [highlightSelected, setHighlightSelected] = useState(true);
   const [networkBodies, setNetworkBodies] = useState<Record<string, BrowserNetworkBodyEvent>>({});
+  const [consoleObjects, setConsoleObjects] = useState<Record<string, BrowserConsoleObjectEvent>>({});
+  const consoleObjectReqSeqRef = useRef(0);
+  const requestedConsoleObjectsRef = useRef<Set<string>>(new Set());
   const [aiPopoverOpen, setAiPopoverOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(() => !browser.detectedExecutable);
   const [customExec, setCustomExec] = useState('');
@@ -155,6 +160,9 @@ export default function BrowserView() {
     const unsubNetBody = subscribeBrowserNetworkBody((event) => {
       setNetworkBodies((prev) => ({ ...prev, [event.requestId]: event }));
     });
+    const unsubConsoleObj = subscribeBrowserConsoleObject((event) => {
+      setConsoleObjects((prev) => ({ ...prev, [event.objectId]: event }));
+    });
     const unsubClipboard = subscribeBrowserClipboard((text) => {
       if (text) {
         void navigator.clipboard?.writeText(text).catch(() => undefined);
@@ -164,17 +172,34 @@ export default function BrowserView() {
       unsubFrame();
       unsubInspect();
       unsubNetBody();
+      unsubConsoleObj();
       unsubClipboard();
     };
   }, []);
 
-  // 浏览器停止或切换地址时清理过期的高亮元素状态
+  // 浏览器停止或清空控制台时重置对象展开缓存
   useEffect(() => {
     if (browser.status !== 'running') {
       setInspectMode(false);
       setHoveredElement(undefined);
+      setConsoleObjects({});
+      requestedConsoleObjectsRef.current.clear();
     }
   }, [browser.status]);
+
+  useEffect(() => {
+    if (browser.consoleLogs.length === 0) {
+      setConsoleObjects({});
+      requestedConsoleObjectsRef.current.clear();
+    }
+  }, [browser.consoleLogs.length]);
+
+  const requestConsoleObject = (objectId: string) => {
+    if (consoleObjects[objectId] || requestedConsoleObjectsRef.current.has(objectId)) return;
+    requestedConsoleObjectsRef.current.add(objectId);
+    const requestId = `obj-${++consoleObjectReqSeqRef.current}`;
+    postToHost({ type: 'browserGetConsoleObject', payload: { requestId, objectId } });
+  };
 
   // 拾取模式下按 Escape 立即退出拾取
   useEffect(() => {
@@ -931,6 +956,9 @@ export default function BrowserView() {
             highlightVisible={highlightSelected}
             onToggleHighlight={() => setHighlightSelected((v) => !v)}
             consoleLogs={browser.consoleLogs}
+            preserveConsoleLog={browser.preserveConsoleLog === true}
+            consoleObjects={consoleObjects}
+            onRequestConsoleObject={requestConsoleObject}
             networkRequests={browser.networkRequests ?? []}
             networkBodies={networkBodies}
           />

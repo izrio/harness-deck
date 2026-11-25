@@ -15,6 +15,9 @@ import { join } from 'node:path';
 import type {
   BrowserAiActionView,
   BrowserConsoleEntry,
+  BrowserConsoleFormattedSegment,
+  BrowserConsoleLevel,
+  BrowserConsoleProperty,
   BrowserDomElement,
   BrowserNetworkEntry,
   BrowserState,
@@ -22,8 +25,34 @@ import type {
   BrowserViewportPreset,
 } from '@harness-deck/shared';
 import { CdpClient, type CdpSocketLike } from './CdpClient.ts';
+import {
+  cdpPropertyDescriptorsToProperties,
+  cdpRemoteObjectToArg,
+  extractCompletionTarget,
+  extractConsoleTable,
+  extractStackFrames,
+  formatArgText,
+  formatConsoleArgs,
+} from './consoleFormat.ts';
 
-const MAX_CONSOLE_LOGS = 80;
+const MAX_CONSOLE_LOGS = 500;
+const CONSOLE_OBJECT_GROUP = 'halo-console';
+const COMMAND_LINE_COMPLETIONS = [
+  '$',
+  '$$',
+  '$x',
+  '$0',
+  '$_',
+  'clear',
+  'copy',
+  'dir',
+  'dirxml',
+  'keys',
+  'values',
+  'table',
+  'inspect',
+  'getEventListeners',
+] as const;
 const MAX_NETWORK_REQUESTS = 120;
 const MAX_NETWORK_BODY_CHARS = 200_000;
 const NETWORK_EMIT_DEBOUNCE_MS = 80;
@@ -885,6 +914,10 @@ export class EmbeddedBrowserManager {
   private lastAiAction?: BrowserAiActionView;
   private consoleLogs: BrowserConsoleEntry[] = [];
   private consoleSeq = 0;
+  private consoleGroupStack: number[] = [];
+  private preserveConsoleLog = false;
+  private lastSelectedSelector?: string;
+  private lastCommittedFrameUrl = 'about:blank';
   private networkMap = new Map<string, MutableNetworkEntry>();
   private networkOrder: string[] = [];
   private networkEmitTimer?: ReturnType<typeof setTimeout>;
@@ -926,6 +959,7 @@ export class EmbeddedBrowserManager {
       ...(this.detectedExecutable ? { detectedExecutable: this.detectedExecutable } : {}),
       ...(this.lastAiAction ? { lastAiAction: this.lastAiAction } : {}),
       consoleLogs: [...this.consoleLogs],
+      preserveConsoleLog: this.preserveConsoleLog,
       networkRequests: this.networkOrder
         .map((id) => this.networkMap.get(id))
         .filter((entry): entry is MutableNetworkEntry => Boolean(entry))
@@ -955,8 +989,18 @@ export class EmbeddedBrowserManager {
     this.emitState();
   }
 
+  setConsoleOptions(options: { readonly preserveLog: boolean }): void {
+    if (this.preserveConsoleLog === options.preserveLog) return;
+    this.preserveConsoleLog = options.preserveLog;
+    this.emitState();
+  }
+
   clearConsole(): void {
     this.consoleLogs = [];
+    this.consoleGroupStack = [];
+    void this.client
+      ?.send('Runtime.releaseObjectGroup', { objectGroup: CONSOLE_OBJECT_GROUP })
+      .catch(() => undefined);
     this.emitState();
   }
 
@@ -1054,7 +1098,11 @@ export class EmbeddedBrowserManager {
       if (scrollIntoView) {
         void this.captureQuickFrame('png');
       }
-      return res.result?.value ?? undefined;
+      const el = res.result?.value ?? undefined;
+      if (el?.selector) {
+        this.lastSelectedSelector = el.selector;
+      }
+      return el;
     } catch {
       return undefined;
     }
@@ -1089,48 +1137,215 @@ export class EmbeddedBrowserManager {
     }
   }
 
-  async evalConsole(expression: string): Promise<void> {
+  async evalConsole(expression: string, selectedSelector?: string): Promise<void> {
     const trimmed = expression.trim();
     if (!trimmed) return;
-    this.pushConsole('info', `> ${trimmed.slice(0, 480)}`);
+    this.pushConsole('info', trimmed, { kind: 'command' });
     const client = this.client;
     if (!client?.connected) {
-      this.pushConsole('error', 'Browser is not running');
+      this.pushConsole('error', 'Browser is not running', { kind: 'exception' });
       return;
     }
+
+    const selector = selectedSelector?.trim() || this.lastSelectedSelector;
+    const usesDollarZero = /(?:^|[^.\w$])\$0(?![\w$])/u.test(trimmed);
+    const isBareObjectLiteral =
+      trimmed.startsWith('{') &&
+      trimmed.endsWith('}') &&
+      !trimmed.includes(';') &&
+      !/\b(?:return|const|let|var|if|for|while|function|class|try|throw)\b/u.test(trimmed);
+    const bodyExpr = isBareObjectLiteral ? `(${trimmed})` : trimmed;
+    const evalExpr =
+      usesDollarZero && selector ? `var $0 = document.querySelector(${JSON.stringify(selector)});\n${bodyExpr}` : bodyExpr;
+
     try {
       const res = await client.send<{
-        result?: { value?: unknown; description?: string; type?: string; subtype?: string };
-        exceptionDetails?: { text?: string; exception?: { description?: string } };
+        result?: Record<string, unknown>;
+        exceptionDetails?: {
+          text?: unknown;
+          url?: unknown;
+          lineNumber?: unknown;
+          columnNumber?: unknown;
+          exception?: unknown;
+          stackTrace?: unknown;
+        };
       }>(
         'Runtime.evaluate',
         {
-          expression: trimmed,
+          expression: evalExpr,
           awaitPromise: true,
-          returnByValue: true,
+          returnByValue: false,
+          generatePreview: true,
+          includeCommandLineAPI: true,
           replMode: true,
+          objectGroup: CONSOLE_OBJECT_GROUP,
         },
         8_000,
       );
       if (res.exceptionDetails) {
-        const errText = res.exceptionDetails.exception?.description || res.exceptionDetails.text || 'Evaluation error';
-        this.pushConsole('error', errText.slice(0, 500));
+        const exceptionArg = res.exceptionDetails.exception
+          ? cdpRemoteObjectToArg(res.exceptionDetails.exception)
+          : undefined;
+        const stackTrace = extractStackFrames(res.exceptionDetails.stackTrace, {
+          url: res.exceptionDetails.url,
+          lineNumber: res.exceptionDetails.lineNumber,
+          columnNumber: res.exceptionDetails.columnNumber,
+        });
+        const errText = (
+          exceptionArg?.description ||
+          (typeof res.exceptionDetails.text === 'string' ? res.exceptionDetails.text : '') ||
+          'Evaluation error'
+        ).slice(0, 2_000);
+        this.pushConsole('error', errText, {
+          kind: 'exception',
+          ...(exceptionArg ? { args: [exceptionArg] } : {}),
+          ...(stackTrace[0] ? { source: stackTrace[0] } : {}),
+          ...(stackTrace.length > 0 ? { stackTrace } : {}),
+        });
         return;
       }
-      const r = res.result;
-      let formatted: string;
-      if (!r) {
-        formatted = 'undefined';
-      } else if (r.value !== undefined) {
-        formatted = typeof r.value === 'string' ? JSON.stringify(r.value) : JSON.stringify(r.value, null, 2);
-      } else if (r.description !== undefined) {
-        formatted = r.description;
-      } else {
-        formatted = String(r.type ?? 'undefined');
-      }
-      this.pushConsole('log', `← ${formatted.slice(0, 500)}`);
+      const arg = cdpRemoteObjectToArg(res.result);
+      const formattedText = arg.type === 'string' ? JSON.stringify(arg.value ?? '') : formatArgText(arg, true);
+      this.pushConsole('log', formattedText.slice(0, 2_000), {
+        kind: 'result',
+        args: [arg],
+      });
+      this.scheduleCrispFrame(120);
     } catch (error) {
-      this.pushConsole('error', (error instanceof Error ? error.message : String(error)).slice(0, 500));
+      this.pushConsole('error', (error instanceof Error ? error.message : String(error)).slice(0, 2_000), {
+        kind: 'exception',
+      });
+    }
+  }
+
+  async getConsoleObject(objectId: string): Promise<{
+    readonly objectId: string;
+    readonly properties?: readonly BrowserConsoleProperty[];
+    readonly error?: string;
+  }> {
+    const client = this.client;
+    if (!client?.connected) {
+      return { objectId, error: 'Browser is not running' };
+    }
+    try {
+      const res = await client.send<{
+        result?: unknown;
+        internalProperties?: unknown;
+      }>(
+        'Runtime.getProperties',
+        {
+          objectId,
+          ownProperties: true,
+          accessorPropertiesOnly: false,
+          generatePreview: true,
+        },
+        5_000,
+      );
+      const properties = cdpPropertyDescriptorsToProperties(res.result, res.internalProperties);
+      const entriesIdx = properties.findIndex((p) => p.internal && p.name === '[[Entries]]' && p.value.objectId);
+      if (entriesIdx >= 0) {
+        const entriesProp = properties[entriesIdx]!;
+        const entriesRes = await client
+          .send<{ result?: unknown }>(
+            'Runtime.getProperties',
+            {
+              objectId: entriesProp.value.objectId!,
+              ownProperties: true,
+              generatePreview: true,
+            },
+            3_000,
+          )
+          .catch(() => undefined);
+        if (entriesRes?.result) {
+          const entryItems = cdpPropertyDescriptorsToProperties(entriesRes.result).filter((p) => /^\d+$/u.test(p.name));
+          if (entryItems.length > 0) {
+            properties[entriesIdx] = {
+              ...entriesProp,
+              value: {
+                ...entriesProp.value,
+                preview: entryItems,
+              },
+            };
+          }
+        }
+      }
+      return { objectId, properties };
+    } catch (error) {
+      return {
+        objectId,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async completeConsole(
+    expression: string,
+    selectedSelector?: string,
+  ): Promise<{ readonly prefix: string; readonly items: readonly string[] }> {
+    const target = extractCompletionTarget(expression);
+    if (!target) return { prefix: '', items: [] };
+    if (!target.receiver && !target.prefix) return { prefix: '', items: [] };
+
+    const client = this.client;
+    if (!client?.connected) {
+      return { prefix: target.prefix, items: [] };
+    }
+
+    const selector = selectedSelector?.trim() || this.lastSelectedSelector;
+    let targetExpr = 'globalThis';
+    let needsDollarZero = false;
+    if (target.receiver) {
+      if (target.receiver === '$0' || target.receiver.startsWith('$0.')) {
+        if (!selector) return { prefix: target.prefix, items: [] };
+        needsDollarZero = true;
+      }
+      targetExpr = target.receiver;
+    }
+
+    const helperExpr = `(() => {
+      ${needsDollarZero ? `var $0 = document.querySelector(${JSON.stringify(selector)});` : ''}
+      var target = ${targetExpr};
+      if (target === null || target === undefined) return [];
+      var obj = typeof target === 'object' || typeof target === 'function' ? target : Object(target);
+      var prefix = ${JSON.stringify(target.prefix)};
+      var seen = new Set();
+      var cur = obj;
+      for (var depth = 0; cur && depth < 4; depth += 1) {
+        var names = Object.getOwnPropertyNames(cur);
+        for (var i = 0; i < names.length; i += 1) {
+          var key = names[i];
+          if (key === '__proto__') continue;
+          if (!prefix || key.startsWith(prefix)) seen.add(key);
+        }
+        cur = Object.getPrototypeOf(cur);
+      }
+      return Array.from(seen).slice(0, 60);
+    })()`;
+
+    try {
+      const res = await client.send<{ result?: { value?: unknown } }>(
+        'Runtime.evaluate',
+        {
+          expression: helperExpr,
+          returnByValue: true,
+          awaitPromise: false,
+          throwOnSideEffect: true,
+        },
+        1_500,
+      );
+      const rawItems = Array.isArray(res.result?.value)
+        ? res.result.value.filter((v): v is string => typeof v === 'string')
+        : [];
+      const merged = new Set<string>(rawItems);
+      if (!target.receiver) {
+        for (const cmd of COMMAND_LINE_COMPLETIONS) {
+          if (cmd.startsWith(target.prefix)) merged.add(cmd);
+        }
+      }
+      const items = [...merged].sort((a, b) => a.localeCompare(b)).slice(0, 30);
+      return { prefix: target.prefix, items };
+    } catch {
+      return { prefix: target.prefix, items: [] };
     }
   }
 
@@ -1250,6 +1465,7 @@ export class EmbeddedBrowserManager {
       await Promise.all([
         client.send('Page.enable'),
         client.send('Runtime.enable'),
+        client.send('Log.enable').catch(() => undefined),
         client.send('Network.enable').catch(() => undefined),
         this.applyViewportMetrics(client),
       ]);
@@ -2127,6 +2343,20 @@ export class EmbeddedBrowserManager {
       const frame = params.frame as { parentId?: string; url?: string } | undefined;
       if (frame && !frame.parentId && frame.url) {
         this.url = frame.url;
+        if (frame.url !== 'about:blank') {
+          if (this.preserveConsoleLog) {
+            if (this.lastCommittedFrameUrl !== 'about:blank' || this.consoleLogs.length > 0) {
+              this.pushConsole('info', `Navigated to ${frame.url}`, { kind: 'browser' });
+            }
+          } else if (this.consoleLogs.length > 0 || this.consoleGroupStack.length > 0) {
+            this.consoleLogs = [];
+            this.consoleGroupStack = [];
+            void client
+              .send('Runtime.releaseObjectGroup', { objectGroup: CONSOLE_OBJECT_GROUP })
+              .catch(() => undefined);
+          }
+        }
+        this.lastCommittedFrameUrl = frame.url;
         this.emitState();
         void this.syncNavigationState();
       }
@@ -2160,27 +2390,200 @@ export class EmbeddedBrowserManager {
 
     client.on('Runtime.consoleAPICalled', (params) => {
       const rawType = typeof params.type === 'string' ? params.type : 'log';
-      const level: BrowserConsoleEntry['level'] =
+      if (rawType === 'clear') {
+        if (!this.preserveConsoleLog) {
+          this.consoleLogs = [];
+          this.consoleGroupStack = [];
+          void client
+            .send('Runtime.releaseObjectGroup', { objectGroup: CONSOLE_OBJECT_GROUP })
+            .catch(() => undefined);
+          this.pushConsole('info', 'Console was cleared', { kind: 'browser' });
+        }
+        return;
+      }
+      if (rawType === 'endGroup') {
+        this.consoleGroupStack.pop();
+        return;
+      }
+
+      const level: BrowserConsoleLevel =
         rawType === 'error' || rawType === 'assert'
           ? 'error'
           : rawType === 'warning'
             ? 'warn'
             : rawType === 'info'
               ? 'info'
-              : 'log';
-      const args = Array.isArray(params.args) ? (params.args as { value?: unknown; description?: string }[]) : [];
-      const text = args
-        .map((a) => (a.value !== undefined ? (typeof a.value === 'string' ? a.value : JSON.stringify(a.value)) : a.description ?? ''))
-        .filter(Boolean)
-        .join(' ')
-        .slice(0, 500);
-      if (text) this.pushConsole(level, text);
+              : rawType === 'debug'
+                ? 'debug'
+                : 'log';
+
+      const rawArgs = Array.isArray(params.args) ? params.args : [];
+      const args = rawArgs.map((item) => cdpRemoteObjectToArg(item));
+      const stackFrames = extractStackFrames(params.stackTrace);
+      const source = stackFrames[0];
+      const groupDepth = this.consoleGroupStack.length;
+      const parentGroupId = this.consoleGroupStack.at(-1);
+      const timestamp =
+        typeof params.timestamp === 'number' && Number.isFinite(params.timestamp) && params.timestamp > 1e12
+          ? Math.round(params.timestamp)
+          : Date.now();
+
+      if (rawType === 'startGroup' || rawType === 'startGroupCollapsed') {
+        const kind = rawType === 'startGroupCollapsed' ? 'groupCollapsed' : 'group';
+        const { text, formatted } = formatConsoleArgs(args);
+        const nextGroupId = this.consoleSeq + 1;
+        const entry = this.pushConsole(
+          level,
+          text || 'console.group',
+          {
+            kind,
+            ...(args.length > 0 ? { args } : {}),
+            ...(formatted ? { formatted } : {}),
+            ...(source ? { source } : {}),
+            ...(groupDepth > 0 ? { groupDepth } : {}),
+            groupId: nextGroupId,
+            ...(parentGroupId !== undefined ? { parentGroupId } : {}),
+          },
+          timestamp,
+        );
+        this.consoleGroupStack.push(entry.id);
+        return;
+      }
+
+      const { text: baseText, formatted: baseFormatted } = formatConsoleArgs(args);
+      if (rawType === 'table') {
+        const table = extractConsoleTable(args[0]);
+        this.pushConsole(
+          level,
+          baseText || 'console.table',
+          {
+            kind: 'table',
+            ...(table ? { table } : {}),
+            ...(args.length > 0 ? { args } : {}),
+            ...(baseFormatted ? { formatted: baseFormatted } : {}),
+            ...(source ? { source } : {}),
+            ...(groupDepth > 0 ? { groupDepth } : {}),
+            ...(parentGroupId !== undefined ? { parentGroupId } : {}),
+          },
+          timestamp,
+        );
+        return;
+      }
+
+      const needsPrefix = rawType === 'assert' && !baseText.startsWith('Assertion failed');
+      const text = needsPrefix
+        ? (baseText ? `Assertion failed: ${baseText}` : 'Assertion failed')
+        : rawType === 'trace' && !baseText
+          ? 'console.trace'
+          : baseText;
+      if (!text && args.length === 0) return;
+
+      const formatted =
+        needsPrefix && baseFormatted
+          ? ([{ text: 'Assertion failed: ' }, ...baseFormatted] as readonly BrowserConsoleFormattedSegment[])
+          : baseFormatted;
+      const includeStack =
+        (rawType === 'error' || rawType === 'assert' || rawType === 'warning' || rawType === 'trace') &&
+        stackFrames.length > 0;
+
+      this.pushConsole(
+        level,
+        text,
+        {
+          kind: 'console',
+          ...(args.length > 0 ? { args } : {}),
+          ...(formatted ? { formatted } : {}),
+          ...(source ? { source } : {}),
+          ...(includeStack ? { stackTrace: stackFrames } : {}),
+          ...(groupDepth > 0 ? { groupDepth } : {}),
+          ...(parentGroupId !== undefined ? { parentGroupId } : {}),
+        },
+        timestamp,
+      );
     });
 
     client.on('Runtime.exceptionThrown', (params) => {
-      const details = params.exceptionDetails as { text?: string; exception?: { description?: string } } | undefined;
-      const text = (details?.exception?.description || details?.text || 'Uncaught exception').slice(0, 500);
-      this.pushConsole('error', text);
+      const details = params.exceptionDetails as
+        | {
+            text?: unknown;
+            url?: unknown;
+            lineNumber?: unknown;
+            columnNumber?: unknown;
+            exception?: unknown;
+            stackTrace?: unknown;
+          }
+        | undefined;
+      const exceptionArg = details?.exception ? cdpRemoteObjectToArg(details.exception) : undefined;
+      const stackFrames = extractStackFrames(details?.stackTrace, {
+        url: details?.url,
+        lineNumber: details?.lineNumber,
+        columnNumber: details?.columnNumber,
+      });
+      const source = stackFrames[0];
+      const groupDepth = this.consoleGroupStack.length;
+      const parentGroupId = this.consoleGroupStack.at(-1);
+      const text = (
+        exceptionArg?.description ||
+        (typeof details?.text === 'string' ? details.text : '') ||
+        'Uncaught exception'
+      ).slice(0, 2_000);
+      this.pushConsole('error', text, {
+        kind: 'exception',
+        ...(exceptionArg ? { args: [exceptionArg] } : {}),
+        ...(source ? { source } : {}),
+        ...(stackFrames.length > 0 ? { stackTrace: stackFrames } : {}),
+        ...(groupDepth > 0 ? { groupDepth } : {}),
+        ...(parentGroupId !== undefined ? { parentGroupId } : {}),
+      });
+    });
+
+    client.on('Log.entryAdded', (params) => {
+      const entry = params.entry as
+        | {
+            level?: unknown;
+            text?: unknown;
+            url?: unknown;
+            lineNumber?: unknown;
+            stackTrace?: unknown;
+            timestamp?: unknown;
+          }
+        | undefined;
+      if (!entry) return;
+      const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, 2_000) : '';
+      if (!text) return;
+      const level: BrowserConsoleLevel =
+        entry.level === 'error'
+          ? 'error'
+          : entry.level === 'warning'
+            ? 'warn'
+            : entry.level === 'info'
+              ? 'info'
+              : entry.level === 'verbose'
+                ? 'debug'
+                : 'log';
+      const stackFrames = extractStackFrames(entry.stackTrace, {
+        url: entry.url,
+        lineNumber: entry.lineNumber,
+      });
+      const source = stackFrames[0];
+      const groupDepth = this.consoleGroupStack.length;
+      const parentGroupId = this.consoleGroupStack.at(-1);
+      const timestamp =
+        typeof entry.timestamp === 'number' && Number.isFinite(entry.timestamp) && entry.timestamp > 1e12
+          ? Math.round(entry.timestamp)
+          : Date.now();
+      this.pushConsole(
+        level,
+        text,
+        {
+          kind: 'browser',
+          ...(source ? { source } : {}),
+          ...(stackFrames.length > 0 ? { stackTrace: stackFrames } : {}),
+          ...(groupDepth > 0 ? { groupDepth } : {}),
+          ...(parentGroupId !== undefined ? { parentGroupId } : {}),
+        },
+        timestamp,
+      );
     });
 
     client.on('Network.requestWillBeSent', (params) => {
@@ -2418,12 +2821,22 @@ export class EmbeddedBrowserManager {
     }, NETWORK_EMIT_DEBOUNCE_MS);
   }
 
-  private pushConsole(level: BrowserConsoleEntry['level'], text: string): void {
-    this.consoleLogs = [
-      ...this.consoleLogs.slice(-(MAX_CONSOLE_LOGS - 1)),
-      { id: ++this.consoleSeq, level, text, timestamp: Date.now() },
-    ];
+  private pushConsole(
+    level: BrowserConsoleLevel,
+    text: string,
+    extra?: Omit<BrowserConsoleEntry, 'id' | 'level' | 'text' | 'timestamp'>,
+    timestamp = Date.now(),
+  ): BrowserConsoleEntry {
+    const entry: BrowserConsoleEntry = {
+      id: ++this.consoleSeq,
+      level,
+      text,
+      timestamp,
+      ...extra,
+    };
+    this.consoleLogs = [...this.consoleLogs.slice(-(MAX_CONSOLE_LOGS - 1)), entry];
     this.emitState();
+    return entry;
   }
 
   private sleep(ms: number): Promise<void> {

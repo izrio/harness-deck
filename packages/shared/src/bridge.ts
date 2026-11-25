@@ -5,6 +5,7 @@ import type {
   AccountLoginProgress,
   AccountsState,
   AppearanceState,
+  BrowserConsoleProperty,
   BrowserDomElement,
   BrowserState,
   ClientSurface,
@@ -332,6 +333,28 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('browserEvalConsole'),
     payload: z.object({
       expression: z.string().min(1).max(8_192),
+      selectedSelector: z.string().min(1).max(2_048).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserGetConsoleObject'),
+    payload: z.object({
+      requestId: z.string().min(1).max(128),
+      objectId: z.string().min(1).max(512),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserConsoleComplete'),
+    payload: z.object({
+      requestId: z.string().min(1).max(128),
+      expression: z.string().max(4_096),
+      selectedSelector: z.string().min(1).max(2_048).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('browserSetConsoleOptions'),
+    payload: z.object({
+      preserveLog: z.boolean(),
     }),
   }),
   z.object({ type: z.literal('browserClearNetwork'), payload: empty }),
@@ -1103,6 +1126,23 @@ export type HostToWebview =
       readonly type: 'browserClipboardData';
       readonly payload: {
         readonly text: string;
+      };
+    }
+  | {
+      readonly type: 'browserConsoleObject';
+      readonly payload: {
+        readonly requestId: string;
+        readonly objectId: string;
+        readonly properties?: readonly BrowserConsoleProperty[];
+        readonly error?: string;
+      };
+    }
+  | {
+      readonly type: 'browserConsoleCompletions';
+      readonly payload: {
+        readonly requestId: string;
+        readonly prefix: string;
+        readonly items: readonly string[];
       };
     }
   | { readonly type: 'sessionCheckpoints'; readonly payload: { readonly sessionId: string; readonly turns: readonly number[] } };

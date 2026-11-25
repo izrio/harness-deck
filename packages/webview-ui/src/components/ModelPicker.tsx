@@ -16,6 +16,10 @@ import { useT } from '../i18n.ts';
 
 const keyOf = (o: { provider: string; model: string }) => `${o.provider}/${o.model}`;
 
+/** 计费倍率统一显示为两位小数，与 CodeBuddy `/model` 面板一致。 */
+const formatMultiplier = (multiplier?: number): string | undefined =>
+  multiplier === undefined ? undefined : `${multiplier.toFixed(2)}x`;
+
 export interface ModelPickerSelection {
   readonly provider?: string;
   readonly model: string;
@@ -73,6 +77,7 @@ export function ModelPicker({
     : loading
       ? t('model.loading')
       : (current?.model ?? placeholder ?? t('model.default'));
+  const rate = formatMultiplier(option?.multiplier);
 
   const activeBackend = useMemo(
     () => backends.items.find((b) => b.id === backends.active),
@@ -155,6 +160,15 @@ export function ModelPicker({
               />
             )}
             <span className="toolbar-button__text min-w-0 truncate">{label}</span>
+            {rate ? (
+              <span
+                className="toolbar-button__rate shrink-0 font-mono text-[10.5px] font-normal text-ink-3"
+                title={t('model.rate')}
+                data-testid="model-picker-rate"
+              >
+                {rate}
+              </span>
+            ) : null}
             <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
           </button>
         </PopoverTrigger>
@@ -331,12 +345,14 @@ export function ModelPicker({
                           : undefined) ??
                         o.defaultEffort ??
                         o.efforts[0]?.id;
+                      const rate = formatMultiplier(o.multiplier);
                       return (
                         <ModelItem
                           key={keyOf(o)}
                           active={active}
                           icon={<ModelVendorLogo provider={o.provider} model={o.model} name={o.name} group={o.group} className="size-3.5 shrink-0" />}
                           {...(o.description ? { title: o.description } : {})}
+                          {...(rate ? { rate } : {})}
                           {...(active && o.efforts.length > 1 && currentEffort ? { hint: currentEffort.name } : {})}
                           onSelect={() => select(o, nextEffort, o.efforts.length <= 1)}
                         >
@@ -520,6 +536,7 @@ function EffortSlider({
 function ModelItem({
   active,
   icon,
+  rate,
   hint,
   title,
   onSelect,
@@ -527,11 +544,13 @@ function ModelItem({
 }: {
   active: boolean;
   icon?: ReactNode;
+  rate?: string;
   hint?: string;
   title?: string;
   onSelect: () => void;
   children: string;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -548,6 +567,15 @@ function ModelItem({
       <span className="model-item__check inline-flex w-3.5 shrink-0 text-ink">{active ? <CheckIcon className="size-3.5" strokeWidth={2.2} /> : null}</span>
       {icon ? <span className="model-item__vendor inline-flex shrink-0 items-center">{icon}</span> : null}
       <span className="menu-item__label min-w-0 flex-1 truncate">{children}</span>
+      {rate ? (
+        <span
+          className={cn('menu-item__rate shrink-0 font-mono text-[11px]', active ? 'text-ink-2' : 'text-ink-3')}
+          title={t('model.rate')}
+          data-testid="model-rate"
+        >
+          {rate}
+        </span>
+      ) : null}
       {hint ? <span className={cn('menu-item__hint shrink-0 font-mono text-[11px]', active ? 'text-ink-2' : 'text-ink-3')}>{hint}</span> : null}
     </button>
   );

@@ -32,7 +32,7 @@ function setModels() {
     type: 'models',
     payload: {
       options: [
-        { provider: 'p', model: 'flash', name: 'V4.1-Flash', group: 'custom', efforts, defaultEffort: 'high' },
+        { provider: 'p', model: 'flash', name: 'V4.1-Flash', group: 'custom', multiplier: 0.11, efforts, defaultEffort: 'high' },
         { provider: 'p', model: 'old', name: 'V4-Flash-0731', group: 'custom', efforts: [] },
       ],
       current: { provider: 'p', model: 'flash', reasoningEffort: 'medium' },
@@ -52,6 +52,9 @@ describe('模型选择', () => {
     expect(active?.textContent).toContain('V4.1-Flash');
     expect(active?.querySelector('.model-item__check svg')).not.toBeNull();
     expect(active?.querySelector('.menu-item__hint')?.textContent).toBe('Medium');
+    expect(active?.querySelector('[data-testid="model-rate"]')?.textContent).toBe('0.11x');
+    expect(items[1]?.querySelector('[data-testid="model-rate"]')).toBeNull();
+    expect(screen.getByTestId('model-picker-rate').textContent).toBe('0.11x');
 
     const level = screen.getByTestId('effort-menu');
     expect(screen.getByTestId('effort-active-label').textContent).toBe('Medium');

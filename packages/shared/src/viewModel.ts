@@ -287,6 +287,8 @@ export interface ModelOption {
   readonly name: string;
   readonly group: string;
   readonly description?: string;
+  /** 计费倍率（CodeBuddy 的 credits，如 0.29 表示 0.29 倍）；底层未提供时省略。 */
+  readonly multiplier?: number;
   readonly efforts: readonly { readonly id: string; readonly name: string }[];
   readonly defaultEffort?: string;
 }
@@ -1493,11 +1495,68 @@ export type BrowserStatus = 'stopped' | 'starting' | 'running' | 'error';
 
 export type BrowserViewportPreset = 'responsive' | 'desktop' | 'mobile';
 
+export type BrowserConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+
+export type BrowserConsoleEntryKind =
+  | 'console'
+  | 'exception'
+  | 'browser'
+  | 'command'
+  | 'result'
+  | 'group'
+  | 'groupCollapsed'
+  | 'table';
+
+export interface BrowserConsoleStackFrame {
+  readonly functionName: string;
+  readonly url: string;
+  readonly lineNumber: number;
+  readonly columnNumber: number;
+}
+
+export interface BrowserConsoleProperty {
+  readonly name: string;
+  readonly value: BrowserConsoleArg;
+  readonly isOwn?: boolean;
+  readonly internal?: boolean;
+}
+
+export interface BrowserConsoleArg {
+  readonly type: 'string' | 'number' | 'boolean' | 'undefined' | 'symbol' | 'bigint' | 'object' | 'function';
+  readonly subtype?: string;
+  readonly className?: string;
+  readonly value?: string | number | boolean | null;
+  readonly description?: string;
+  readonly objectId?: string;
+  readonly preview?: readonly BrowserConsoleProperty[];
+  readonly overflow?: boolean;
+}
+
+export interface BrowserConsoleFormattedSegment {
+  readonly text?: string;
+  readonly style?: Readonly<Record<string, string>>;
+  readonly arg?: BrowserConsoleArg;
+}
+
+export interface BrowserConsoleTableData {
+  readonly columns: readonly string[];
+  readonly rows: readonly Readonly<Record<string, string>>[];
+}
+
 export interface BrowserConsoleEntry {
   readonly id: number;
-  readonly level: 'log' | 'info' | 'warn' | 'error';
+  readonly level: BrowserConsoleLevel;
   readonly text: string;
   readonly timestamp: number;
+  readonly kind?: BrowserConsoleEntryKind;
+  readonly args?: readonly BrowserConsoleArg[];
+  readonly formatted?: readonly BrowserConsoleFormattedSegment[];
+  readonly source?: BrowserConsoleStackFrame;
+  readonly stackTrace?: readonly BrowserConsoleStackFrame[];
+  readonly groupDepth?: number;
+  readonly groupId?: number;
+  readonly parentGroupId?: number;
+  readonly table?: BrowserConsoleTableData;
 }
 
 export interface BrowserAiActionView {
@@ -1593,6 +1652,8 @@ export interface BrowserState {
   readonly lastAiAction?: BrowserAiActionView;
   /** 最近控制台日志与未捕获异常（环形缓冲）。 */
   readonly consoleLogs: readonly BrowserConsoleEntry[];
+  /** 导航或刷新页面时是否保留已有控制台日志。 */
+  readonly preserveConsoleLog?: boolean;
   /** 最近网络请求记录（环形缓冲，供 DevTools Network 面板调试）。 */
   readonly networkRequests?: readonly BrowserNetworkEntry[];
   readonly error?: string;

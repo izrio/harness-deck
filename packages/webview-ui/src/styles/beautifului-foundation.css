@@ -64,6 +64,14 @@
   --red: oklch(0.621 0.192 23.042);
   --red-tint: oklch(0.956 0.017 17.462);
 
+  /* Browser Console syntax tokens (Light) */
+  --console-string: oklch(0.51 0.16 25);
+  --console-number: oklch(0.47 0.18 265);
+  --console-key: oklch(0.45 0.16 312);
+  --console-keyword: oklch(0.5 0.19 325);
+  --console-null: oklch(0.56 0.01 260);
+  --console-node: oklch(0.48 0.16 205);
+
   /* Layered shadows */
   --shadow-hairline: 0 0 0 1px var(--line);
   --shadow-btn: 0 0 0 1px var(--line-strong), var(--shadow-xs);
@@ -142,6 +150,14 @@
   --orange-tint: oklch(0.746 0.156 55.642 / 0.14);
   --red: oklch(0.666 0.18 21.433);
   --red-tint: oklch(0.666 0.18 21.433 / 0.14);
+
+  /* Browser Console syntax tokens (Dark) */
+  --console-string: oklch(0.76 0.14 35);
+  --console-number: oklch(0.76 0.14 252);
+  --console-key: oklch(0.77 0.13 305);
+  --console-keyword: oklch(0.78 0.14 330);
+  --console-null: oklch(0.62 0.012 260);
+  --console-node: oklch(0.76 0.12 200);
 
   --shadow-hairline: 0 0 0 1px var(--line);
   --shadow-btn: 0 0 0 1px var(--line-strong), 0 1px 2px oklch(0 0 0 / 0.3);

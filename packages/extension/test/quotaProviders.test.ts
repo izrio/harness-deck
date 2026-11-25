@@ -280,6 +280,56 @@ describe('Antigravity 订阅额度查询', () => {
     expect(expiredQuota).toBeUndefined();
     expect(seenAuth).toEqual(['Bearer slot-account-b-token']);
   });
+
+  it('同 token 并发查询合并为单次网络请求，并在失败时通过 onDebug 上报非敏感原因', async () => {
+    const env = await writeToken(agyToken(AGY_EXPIRY, 'secret-concurrent-token'));
+    let calls = 0;
+    let releaseFetch: (() => void) | undefined;
+    const fetchGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const fetchImpl: FetchLike = async () => {
+      calls += 1;
+      await fetchGate;
+      return jsonResponse(agyQuota);
+    };
+
+    const p1 = queryAntigravityQuota({ env, fetchImpl, now: () => NOW });
+    const p2 = queryAntigravityQuota({ env, fetchImpl, now: () => NOW });
+    releaseFetch?.();
+    const [q1, q2] = await Promise.all([p1, p2]);
+    expect(calls).toBe(1);
+    expect(q1?.windows).toHaveLength(4);
+    expect(q2?.windows).toHaveLength(4);
+
+    // onDebug 上报过期与 HTTP 失败原因，且绝不泄露 access_token
+    const expiredReasons: string[] = [];
+    const expiredRes = await queryAntigravityQuota({
+      env,
+      rawTokenJson: JSON.stringify(agyToken('2026-11-19T11:59:59.000Z', 'secret-expired-token')),
+      fetchImpl,
+      now: () => NOW,
+      onDebug: (detail) => expiredReasons.push(detail),
+    });
+    expect(expiredRes).toBeUndefined();
+    expect(expiredReasons).toEqual(['raw-token-expired']);
+    expect(expiredReasons.join(';')).not.toContain('secret-expired-token');
+
+    const httpReasons: string[] = [];
+    const failEnv = await writeToken(agyToken(AGY_EXPIRY, 'secret-http-fail-token'));
+    const failRes = await queryAntigravityQuota({
+      env: failEnv,
+      fetchImpl: async () => new Response('unauthorized', { status: 401 }),
+      now: () => NOW,
+      onDebug: (detail) => httpReasons.push(detail),
+    });
+    expect(failRes).toBeUndefined();
+    expect(httpReasons).toEqual([
+      'https://daily-cloudcode-pa.googleapis.com http-401',
+      'https://cloudcode-pa.googleapis.com http-401',
+    ]);
+    expect(httpReasons.join(';')).not.toContain('secret-http-fail-token');
+  });
 });
 
 describe('CodeBuddy 订阅额度查询', () => {

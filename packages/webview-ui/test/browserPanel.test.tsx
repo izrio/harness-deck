@@ -307,4 +307,221 @@ describe('右侧面板拖动调宽与内置浏览器标签页（AI MCP 协同）
     fireEvent.click(screen.getByTestId('browser-advanced-toggle'));
     expect(screen.getByTestId('browser-advanced-panel')).toBeTruthy();
   });
+
+  it('控制台对标 Chrome：过滤（负向与正则）、级别/计数快捷筛选、重复合并、对象懒展开、表格/堆栈/分组、设置与多行 REPL 补全', async () => {
+    const now = Date.now();
+    const snap = baseSnapshot();
+    host({
+      type: 'snapshot',
+      payload: {
+        ...snap,
+        browser: {
+          ...snap.browser!,
+          status: 'running',
+          url: 'http://localhost:5173',
+          title: 'Console Demo',
+          preserveConsoleLog: false,
+          consoleLogs: [
+            {
+              id: 1,
+              level: 'debug',
+              kind: 'console',
+              text: 'verbose debug noise',
+              timestamp: now,
+            },
+            {
+              id: 2,
+              level: 'info',
+              kind: 'console',
+              text: 'booted app',
+              formatted: [{ text: 'booted app', style: { color: 'rgb(14, 165, 233)', fontWeight: 'bold' } }],
+              source: { functionName: 'init', url: 'http://localhost:5173/src/main.ts', lineNumber: 12, columnNumber: 3 },
+              timestamp: now + 1,
+            },
+            {
+              id: 3,
+              level: 'warn',
+              kind: 'console',
+              text: 'repeated warning',
+              timestamp: now + 2,
+            },
+            {
+              id: 4,
+              level: 'warn',
+              kind: 'console',
+              text: 'repeated warning',
+              timestamp: now + 3,
+            },
+            {
+              id: 5,
+              level: 'error',
+              kind: 'exception',
+              text: 'TypeError: boom',
+              source: { functionName: 'handleClick', url: 'http://localhost:5173/src/app.ts', lineNumber: 42, columnNumber: 9 },
+              stackTrace: [
+                { functionName: 'handleClick', url: 'http://localhost:5173/src/app.ts', lineNumber: 42, columnNumber: 9 },
+                { functionName: 'dispatch', url: 'http://localhost:5173/src/router.ts', lineNumber: 8, columnNumber: 1 },
+              ],
+              timestamp: now + 4,
+            },
+            {
+              id: 6,
+              level: 'log',
+              kind: 'result',
+              text: '{ id: 7 }',
+              args: [
+                {
+                  type: 'object',
+                  className: 'Object',
+                  description: 'Object',
+                  objectId: 'obj-7',
+                  preview: [{ name: 'id', value: { type: 'number', value: 7, description: '7' }, isOwn: true }],
+                },
+              ],
+              timestamp: now + 5,
+            },
+            {
+              id: 7,
+              level: 'log',
+              kind: 'table',
+              text: 'Array(1)',
+              table: {
+                columns: ['(index)', 'name'],
+                rows: [{ '(index)': '0', name: 'Halo' }],
+              },
+              timestamp: now + 6,
+            },
+            {
+              id: 8,
+              level: 'log',
+              kind: 'groupCollapsed',
+              groupId: 8,
+              text: 'Collapsed Section',
+              timestamp: now + 7,
+            },
+            {
+              id: 9,
+              level: 'log',
+              kind: 'console',
+              parentGroupId: 8,
+              groupDepth: 1,
+              text: 'Hidden inside collapsed group',
+              timestamp: now + 8,
+            },
+          ],
+        },
+      },
+    });
+
+    render(createElement(App));
+    fireEvent.click(screen.getByTestId('toggle-right-panel'));
+    fireEvent.click(await screen.findByTestId('right-panel-tab-browser'));
+    fireEvent.click(await screen.findByTestId('browser-console-toggle'));
+
+    const drawer = await screen.findByTestId('browser-console-drawer');
+
+    // 1. 默认级别隐藏 Verbose (debug)，合并连续重复日志显示计数徽标，collapsed group 子行默认隐藏
+    expect(drawer.textContent).not.toContain('verbose debug noise');
+    expect(drawer.textContent).toContain('booted app');
+    expect(screen.getByTestId('console-repeat-badge').textContent).toBe('2');
+    expect(drawer.textContent).not.toContain('Hidden inside collapsed group');
+    expect(screen.getByTestId('console-table-7').textContent).toContain('Halo');
+
+    // 2. 展开 collapsed group 显示子行；展开错误堆栈；点击对象树触发懒加载并展示子属性
+    fireEvent.click(screen.getByTestId('console-group-toggle-8'));
+    expect(drawer.textContent).toContain('Hidden inside collapsed group');
+
+    fireEvent.click(screen.getByTestId('console-stack-toggle-5'));
+    expect(screen.getByTestId('console-stack-5').textContent).toContain('dispatch');
+
+    fireEvent.click(screen.getByTestId('console-object-toggle'));
+    expect(posted).toContainEqual(
+      expect.objectContaining({
+        type: 'browserGetConsoleObject',
+        payload: expect.objectContaining({ objectId: 'obj-7' }),
+      }),
+    );
+    host({
+      type: 'browserConsoleObject',
+      payload: {
+        requestId: 'obj-1',
+        objectId: 'obj-7',
+        properties: [
+          { name: 'id', value: { type: 'number', value: 7, description: '7' }, isOwn: true },
+          { name: 'secret', value: { type: 'string', value: 'loaded' }, isOwn: true },
+        ],
+      },
+    });
+    await waitFor(() => {
+      expect(drawer.textContent).toContain('loaded');
+    });
+
+    // 3. 文本过滤（含 -排除 与 正则）及错误/警告计数快捷过滤
+    const filterInput = screen.getByTestId('console-filter-input');
+    fireEvent.change(filterInput, { target: { value: 'booted -Hidden' } });
+    expect(drawer.textContent).toContain('booted app');
+    expect(drawer.textContent).not.toContain('TypeError: boom');
+
+    fireEvent.change(filterInput, { target: { value: 'localhost -app.ts' } });
+    expect(drawer.textContent).toContain('booted app');
+    expect(drawer.textContent).not.toContain('TypeError: boom');
+
+    fireEvent.click(screen.getByTestId('console-regex-toggle'));
+    fireEvent.change(filterInput, { target: { value: '^TypeError:.*boom$' } });
+    expect(drawer.textContent).toContain('TypeError: boom');
+    expect(drawer.textContent).not.toContain('booted app');
+    fireEvent.change(filterInput, { target: { value: '' } });
+
+    fireEvent.click(screen.getByTestId('console-error-count'));
+    expect(drawer.textContent).toContain('TypeError: boom');
+    expect(drawer.textContent).not.toContain('booted app');
+    fireEvent.click(screen.getByTestId('console-error-count'));
+    expect(drawer.textContent).toContain('booted app');
+
+    // 4. 设置弹窗：Preserve log 下发宿主，时间戳立即渲染，关闭合并重复拆开计数
+    fireEvent.click(screen.getByTestId('console-settings-trigger'));
+    fireEvent.click(await screen.findByTestId('console-setting-preserve'));
+    expect(posted).toContainEqual({ type: 'browserSetConsoleOptions', payload: { preserveLog: true } });
+
+    fireEvent.click(screen.getByTestId('console-setting-timestamps'));
+    expect(screen.getAllByTestId('console-timestamp').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByTestId('console-setting-group-similar'));
+    expect(screen.queryByTestId('console-repeat-badge')).toBeNull();
+
+    // 5. 多行 REPL：Shift+Enter 不提交、Enter 提交、补全弹窗 Tab 采纳、Ctrl+L 清空
+    const consoleInput = screen.getByTestId('browser-console-input') as HTMLTextAreaElement;
+    fireEvent.change(consoleInput, { target: { value: 'document.qu' } });
+    const completeCall = await waitFor(() => {
+      const hit = posted.find(
+        (m): m is { type: string; payload: { requestId: string; expression: string } } =>
+          typeof m === 'object' && m !== null && (m as { type?: string }).type === 'browserConsoleComplete',
+      );
+      expect(hit).toBeTruthy();
+      return hit!;
+    });
+    host({
+      type: 'browserConsoleCompletions',
+      payload: {
+        requestId: completeCall.payload.requestId,
+        prefix: 'qu',
+        items: ['querySelector', 'querySelectorAll'],
+      },
+    });
+    expect(await screen.findByTestId('console-completions')).toBeTruthy();
+    fireEvent.keyDown(consoleInput, { key: 'Tab' });
+    expect(consoleInput.value).toBe('document.querySelector');
+
+    fireEvent.keyDown(consoleInput, { key: 'Enter', shiftKey: true });
+    expect(posted.some((m) => (m as { type?: string }).type === 'browserEvalConsole')).toBe(false);
+
+    fireEvent.keyDown(consoleInput, { key: 'Enter' });
+    expect(posted).toContainEqual({
+      type: 'browserEvalConsole',
+      payload: { expression: 'document.querySelector' },
+    });
+
+    fireEvent.keyDown(consoleInput, { key: 'l', ctrlKey: true });
+    expect(posted).toContainEqual({ type: 'browserClearConsole', payload: {} });
+  });
 });

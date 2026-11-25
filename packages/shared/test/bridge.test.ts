@@ -311,6 +311,47 @@ describe('parseWebviewMessage', () => {
     ]);
   });
 
+  it('解析浏览器控制台新消息并校验字段', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'browserEvalConsole',
+        payload: { expression: '$0.textContent', selectedSelector: '#app > button' },
+      }),
+    ).toEqual({
+      type: 'browserEvalConsole',
+      payload: { expression: '$0.textContent', selectedSelector: '#app > button' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'browserGetConsoleObject',
+        payload: { requestId: 'obj-1', objectId: 'remote-123' },
+      }),
+    ).toEqual({
+      type: 'browserGetConsoleObject',
+      payload: { requestId: 'obj-1', objectId: 'remote-123' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'browserConsoleComplete',
+        payload: { requestId: 'cmp-1', expression: 'document.qu', selectedSelector: '#app' },
+      }),
+    ).toEqual({
+      type: 'browserConsoleComplete',
+      payload: { requestId: 'cmp-1', expression: 'document.qu', selectedSelector: '#app' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'browserSetConsoleOptions',
+        payload: { preserveLog: true },
+      }),
+    ).toEqual({
+      type: 'browserSetConsoleOptions',
+      payload: { preserveLog: true },
+    });
+    expect(parseWebviewMessage({ type: 'browserGetConsoleObject', payload: { requestId: '', objectId: '1' } })).toBeUndefined();
+    expect(parseWebviewMessage({ type: 'browserSetConsoleOptions', payload: { preserveLog: 'yes' } })).toBeUndefined();
+  });
+
   it('拒绝未知类型和缺少 payload 的消息', () => {
     expect(parseWebviewMessage({ type: 'runCommand', payload: { command: 'rm -rf /' } })).toBeUndefined();
     expect(parseWebviewMessage({ type: 'setPreferences', payload: { chatCommands: [{ name: '', prompt: 'hi' }] } })).toBeUndefined();

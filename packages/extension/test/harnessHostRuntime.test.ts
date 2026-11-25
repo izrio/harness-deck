@@ -844,4 +844,92 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
 
     unregisterPanel?.();
   });
+
+  it('系统默认账号槽位过期且本机磁盘凭据有效（且不属于其他自定义账号）时自动恢复并回写槽位；若属于自定义账号则绝不串用', async () => {
+    clearAntigravityQuotaCache();
+    const home = await emptyTempHome();
+    vi.stubEnv('HOME', home);
+    const pastExpiry = new Date(Date.now() - 3600_000).toISOString();
+    const futureExpiry = new Date(Date.now() + 3600_000).toISOString();
+    const staleSysToken = JSON.stringify({
+      id_token_email: 'old-sys@gmail.com',
+      token: { access_token: 'stale-sys-access', refresh_token: 'stale-sys-refresh', expiry: pastExpiry },
+    });
+    const freshDiskSysToken = JSON.stringify({
+      id_token_email: 'new-sys@gmail.com',
+      token: { access_token: 'fresh-disk-sys-access', refresh_token: 'new-sys-refresh', expiry: futureExpiry },
+    });
+    const customAccountToken = JSON.stringify({
+      id_token_email: 'custom@gmail.com',
+      token: { access_token: 'custom-access', refresh_token: 'custom-refresh', expiry: futureExpiry },
+    });
+
+    await mkdir(join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    await writeFile(antigravityPrimaryTokenPath({ HOME: home }), freshDiskSysToken, 'utf8');
+
+    const env = createFakePlatform({
+      initialSettings: {
+        defaultBackend: 'antigravity',
+        accounts: [{ id: 'agy-custom', backendId: 'antigravity', label: 'custom@gmail.com', createdAt: 1 }],
+        backendChannels: { antigravity: { mode: 'official', accountId: systemAccountId('antigravity') } },
+      },
+    });
+    await env.platform.secrets.store(accountSlotSecretKey(systemAccountId('antigravity')), staleSysToken);
+    await env.platform.secrets.store(accountSlotSecretKey('agy-custom'), customAccountToken);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const auth = (init?.headers as Record<string, string> | undefined)?.authorization;
+      if (auth === 'Bearer fresh-disk-sys-access') {
+        return new Response(
+          JSON.stringify({
+            groups: [
+              {
+                displayName: 'Gemini Models',
+                buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.91 }],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('{}', { status: 401 });
+    });
+
+    const factory = createFakeBackendFactory();
+    const runtime = createHarnessHostRuntime(env.platform, { createBackend: factory.createBackend });
+    runtimes.push(runtime);
+    await flushAsync();
+
+    // 1. 磁盘主凭据有效且不属于任何自定义账号：自动自愈查询并回写系统默认槽位
+    env.posted.length = 0;
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 101 } });
+    await flushAsync();
+
+    const recovered = env.posted.find((m) => m.type === 'quotaFetched' && m.payload.requestId === 101);
+    expect(recovered).toBeTruthy();
+    if (recovered?.type === 'quotaFetched') {
+      expect(recovered.payload.quota?.windows[0]?.remainingPercent).toBe(91);
+    }
+    expect(await env.platform.secrets.get(accountSlotSecretKey(systemAccountId('antigravity')))).toBe(freshDiskSysToken);
+
+    // 2. 若系统槽位再次过期且磁盘上残留的是自定义账号凭据，绝不串用
+    clearAntigravityQuotaCache();
+    await env.platform.secrets.store(accountSlotSecretKey(systemAccountId('antigravity')), staleSysToken);
+    await writeFile(antigravityPrimaryTokenPath({ HOME: home }), customAccountToken, 'utf8');
+    env.posted.length = 0;
+    fetchSpy.mockClear();
+    runtime.handleWebviewMessage({ type: 'fetchQuota', payload: { requestId: 102, force: true } });
+    await flushAsync();
+
+    const blocked = env.posted.find((m) => m.type === 'quotaFetched' && m.payload.requestId === 102);
+    expect(blocked).toBeTruthy();
+    if (blocked?.type === 'quotaFetched') {
+      expect(blocked.payload.quota).toBeUndefined();
+      expect(blocked.payload.error).toBeTruthy();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    clearAntigravityQuotaCache();
+    await rm(home, { recursive: true, force: true });
+  });
 });

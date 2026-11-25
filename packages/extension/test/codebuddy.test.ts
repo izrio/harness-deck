@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HostToWebview } from '@harness-deck/shared';
 import { CodebuddyController, type CodebuddySpawnSessionParams } from '../src/codebuddy/CodebuddyController.ts';
 import { buildCodebuddyArgs, type CodebuddyLink } from '../src/codebuddy/connection.ts';
@@ -46,6 +46,14 @@ class FakeCodebuddyLink implements CodebuddyLink {
         commands: [{ name: '/compact', description: 'Compact context' }],
       } as T;
     }
+    if (request.subtype === 'get_available_models') {
+      return {
+        rawModels: [
+          { id: 'default-model', name: 'Auto', credits: 'x0.29 credits' },
+          { id: 'fast-model', name: 'Fast', credits: '0.00x' },
+        ],
+      } as T;
+    }
     return {} as T;
   }
 
@@ -62,6 +70,41 @@ class FakeCodebuddyLink implements CodebuddyLink {
     this.disposed = true;
   }
 }
+
+describe('CodeBuddy 模型计费倍率', () => {
+  it('从 get_available_models 的 credits 解析倍率并合并到模型列表', async () => {
+    const spawned: FakeCodebuddyLink[] = [];
+    const controller = new CodebuddyController({
+      workspacePath: '/ws',
+      post: () => undefined,
+      log: () => undefined,
+      openExternal: () => undefined,
+      showLogs: () => undefined,
+      restartRuntime: () => undefined,
+      loadActiveSessionId: () => undefined,
+      saveActiveSessionId: () => undefined,
+      loadSessions: () => [],
+      saveSessions: () => undefined,
+      codebuddyConfigDir: () => '/nonexistent-codebuddy-dir',
+      renderDelayMs: 0,
+    });
+    controller.setSpawner(async (params) => {
+      const link = new FakeCodebuddyLink(params);
+      spawned.push(link);
+      return link;
+    });
+
+    expect(await controller.send('检查倍率')).toBe(true);
+    await vi.waitFor(() => {
+      const options = controller.snapshot().models.options;
+      expect(options.find((o) => o.model === 'default-model')?.multiplier).toBe(0.29);
+      expect(options.find((o) => o.model === 'fast-model')?.multiplier).toBe(0);
+    });
+    expect(spawned[0]!.controlRequests).toContainEqual({ subtype: 'get_available_models' });
+
+    controller.dispose();
+  });
+});
 
 describe('CodeBuddy 原生参数与命令输出清洗', () => {
   it('buildCodebuddyArgs 构造流式 JSON 参数且不传不支持的 --permission-prompt-tool', () => {
@@ -246,7 +289,7 @@ describe('CodebuddySessionProjection（实时流 + JSONL 历史回放）', () =>
     ]);
   });
 
-  it('通过 system usage_update 与 result.usage 兜底采集 contextDetail，确保上下文明细浮窗可用', () => {
+  it('通过 system usage_update 采集 contextDetail，并忽略 result.usage 的会话累计值', () => {
     const proj = new CodebuddySessionProjection('/ws');
     proj.startTurn(1_000);
     proj.applyEvent({
@@ -272,18 +315,83 @@ describe('CodebuddySessionProjection（实时流 + JSONL 历史回放）', () =>
       requests: 1,
     });
 
-    // 第二轮仅在 result.usage 给出用量时同样记录明细
+    // CodeBuddy 的 result.usage 是会话累计（续聊时含历史轮次），不能覆盖当前上下文占用
     proj.startTurn(2_000);
     proj.applyEvent({
       type: 'result',
       subtype: 'success',
       is_error: false,
-      usage: { input_tokens: 5_000, cache_read_input_tokens: 20_000, output_tokens: 1_000 },
+      usage: { input_tokens: 60_000, cache_read_input_tokens: 0, output_tokens: 1_000 },
     });
+    expect(proj.usage).toEqual({ used: 46_080, size: 128_000 });
+    expect(proj.contextDetail()).toEqual({
+      lastRequest: { input: 10_000, cacheRead: 30_000, cacheWrite: 0, output: 6_080, reasoning: 1_200 },
+      session: { input: 10_000, cacheRead: 30_000, cacheWrite: 0, output: 6_080, reasoning: 1_200 },
+      requests: 1,
+    });
+  });
+
+  it('新协议按最近一次 stage 计算上下文，缓存输入不重复计入，并支持 result.modelUsage 兜底', () => {
+    const proj = new CodebuddySessionProjection('/ws');
+    proj.startTurn(1_000);
+    proj.applyEvent({
+      type: 'system',
+      subtype: 'usage_update',
+      _meta: {
+        'codebuddy.ai/turnUsage': {
+          version: 1,
+          scope: 'turn',
+          kind: 'snapshot',
+          stages: [
+            {
+              id: 'model:1',
+              source: 'model',
+              messageId: 'm1',
+              usage: { input_tokens: 100_000, output_tokens: 500, cache_read_input_tokens: 80_000, cache_creation_input_tokens: 0 },
+            },
+            {
+              id: 'model:2',
+              source: 'model',
+              messageId: 'm2',
+              usage: { input_tokens: 120_000, output_tokens: 200, cache_read_input_tokens: 100_000, cache_creation_input_tokens: 0 },
+            },
+          ],
+          total: {
+            usage: { input_tokens: 220_000, output_tokens: 700, cache_read_input_tokens: 180_000, cache_creation_input_tokens: 0 },
+            creditStatus: 'known',
+          },
+        },
+      },
+    });
+    // 最近一次请求（stage 2）：未命中缓存的 20k + 缓存读取 100k + 输出 200
+    expect(proj.usage).toEqual({ used: 120_200, size: 200_000 });
+    expect(proj.contextDetail()).toEqual({
+      lastRequest: { input: 20_000, cacheRead: 100_000, cacheWrite: 0, output: 200 },
+      session: { input: 40_000, cacheRead: 180_000, cacheWrite: 0, output: 700 },
+      requests: 2,
+    });
+
+    // 没有逐请求 usage 时，用 result.modelUsage 兜底；其 inputTokens 本身不含缓存，不再扣减
+    proj.startTurn(2_000);
+    proj.applyEvent({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      usage: { input_tokens: 400_000, cache_read_input_tokens: 300_000, output_tokens: 900 },
+      modelUsage: {
+        'deepseek-v4.1-flash': {
+          inputTokens: 5_000,
+          cacheReadInputTokens: 20_000,
+          outputTokens: 1_000,
+          contextWindow: 960_000,
+        },
+      },
+    });
+    expect(proj.usage).toEqual({ used: 26_000, size: 960_000 });
     expect(proj.contextDetail()).toEqual({
       lastRequest: { input: 5_000, cacheRead: 20_000, cacheWrite: 0, output: 1_000 },
-      session: { input: 15_000, cacheRead: 50_000, cacheWrite: 0, output: 7_080, reasoning: 1_200 },
-      requests: 2,
+      session: { input: 45_000, cacheRead: 200_000, cacheWrite: 0, output: 1_700 },
+      requests: 3,
     });
   });
 

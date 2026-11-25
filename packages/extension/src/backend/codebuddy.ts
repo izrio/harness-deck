@@ -9,6 +9,7 @@ import type { StoredSession } from '../acp/AcpController.ts';
 import { CodebuddyConnection } from '../codebuddy/connection.ts';
 import {
   CodebuddyController,
+  type CodebuddyAvailableModelsMetadata,
   type CodebuddyInitMetadata,
   type CodebuddyPreferredModel,
 } from '../codebuddy/CodebuddyController.ts';
@@ -87,9 +88,11 @@ export function createCodebuddyBackend(
     try {
       await probe.start();
       const meta = await probe.sendControlRequest<CodebuddyInitMetadata>({ subtype: 'initialize' }, 10_000);
-      if (currentGen === generation && meta) {
-        controller.applyInitMetadata(meta);
-      }
+      if (currentGen === generation && meta) controller.applyInitMetadata(meta);
+      const available = await probe
+        .sendControlRequest<CodebuddyAvailableModelsMetadata>({ subtype: 'get_available_models' }, 5_000)
+        .catch(() => undefined);
+      if (currentGen === generation && available) controller.applyAvailableModels(available);
     } catch {
       // 探测失败不影响使用，降级为内置默认模型列表并在首次发消息时再获取
     } finally {

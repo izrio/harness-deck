@@ -137,7 +137,7 @@ const BROWSER_MCP_TOOLS: readonly McpToolDefinition[] = [
       type: 'object',
       properties: {
         limit: { type: 'number', description: 'Maximum log entries (default 30).' },
-        level: { type: 'string', enum: ['log', 'info', 'warn', 'error'], description: 'Filter by console level.' },
+        level: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'], description: 'Filter by console level.' },
       },
     },
   },

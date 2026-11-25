@@ -69,6 +69,7 @@ import { inspectOfficialAccount, type AccountInspectionResult } from '../account
 import {
   antigravityTokensSameAccount,
   clearAccountCredentials,
+  isAntigravityTokenUsable,
   isNotOlderAntigravityToken,
   prepareAccountLaunchPatch,
   readAntigravityPrimaryTokenRaw,
@@ -1075,6 +1076,7 @@ export function createHarnessHostRuntime(
 
   let lastActiveAntigravityAccountId: string | undefined;
   let lastActiveCodebuddyAccountId: string | undefined;
+  const lastQuotaFailureLog = new Map<string, string>();
 
   const currentSlotOwner = (backendId: string): string | undefined => {
     const lower = backendId.toLowerCase();
@@ -3451,6 +3453,7 @@ export function createHarnessHostRuntime(
           // 绝不误读其他账号的磁盘凭据或 IDE 备用凭据（jetski-standalone-oauth-token）导致切换账号后串号。
           let antigravityRawToken: string | undefined;
           let antigravityDiskMatchedSlot = false;
+          let staleSystemSlotReplaced = false;
           if (providerId === 'antigravity') {
             const storedSlot = (await platform.secrets.get(accountSlotSecretKey(activeAccId)))?.trim();
             const diskPrimary = (await readAntigravityPrimaryTokenRaw(processEnv()))?.trim();
@@ -3462,6 +3465,30 @@ export function createHarnessHostRuntime(
               ) {
                 antigravityRawToken = diskPrimary;
                 antigravityDiskMatchedSlot = true;
+              } else if (
+                isSystemAccountId(activeAccId) &&
+                !isAntigravityTokenUsable(storedSlot) &&
+                diskPrimary &&
+                isAntigravityTokenUsable(diskPrimary) &&
+                (!lastActiveAntigravityAccountId || lastActiveAntigravityAccountId === activeAccId)
+              ) {
+                // 系统默认槽位已过期且本机 CLI 主凭据有效时，确认磁盘凭据不属于其他自定义账号后再自愈恢复，严防串号
+                const otherAccounts = readAccounts().filter((a) => a.backendId === backendId);
+                let belongsToCustomAccount = false;
+                for (const other of otherAccounts) {
+                  const otherSlot = (await platform.secrets.get(accountSlotSecretKey(other.id)))?.trim();
+                  if (otherSlot && antigravityTokensSameAccount(otherSlot, diskPrimary)) {
+                    belongsToCustomAccount = true;
+                    break;
+                  }
+                }
+                if (!belongsToCustomAccount) {
+                  antigravityRawToken = diskPrimary;
+                  antigravityDiskMatchedSlot = true;
+                  staleSystemSlotReplaced = true;
+                } else {
+                  antigravityRawToken = storedSlot;
+                }
               } else {
                 antigravityRawToken = storedSlot;
               }
@@ -3489,11 +3516,15 @@ export function createHarnessHostRuntime(
                 ? queryAntigravityQuota
                 : queryCodebuddyQuota;
           const clientVersion = installedVersions.get(backendId);
+          const debugReasons: string[] = [];
           const quota = await query({
             env: accPatch.env,
             getHttpProxy: () => platform.settings.getHttpProxy(),
             ...(clientVersion ? { clientVersion } : {}),
             ...(antigravityRawToken !== undefined ? { rawTokenJson: antigravityRawToken } : {}),
+            onDebug: (detail) => {
+              debugReasons.push(detail);
+            },
           });
           // 先回传单播结果给请求方，再广播 accounts：避免 pushAccounts 变更账号 status 导致前端提前作废当前 requestId。
           post(
@@ -3501,16 +3532,19 @@ export function createHarnessHostRuntime(
               ? { type: 'quotaFetched', payload: { requestId, quota } }
               : { type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } },
           );
+          const failureKey = `${backendId}:${activeAccId}`;
           if (quota) {
-            if (
-              providerId === 'antigravity' &&
-              (antigravityDiskMatchedSlot || (isSystemAccountId(activeAccId) && !antigravityRawToken))
-            ) {
-              await syncActiveAntigravitySlotFromDisk({
-                accountId: activeAccId,
-                secrets: platform.secrets,
-                env: accPatch.env,
-              }).catch(() => undefined);
+            lastQuotaFailureLog.delete(failureKey);
+            if (providerId === 'antigravity') {
+              if (staleSystemSlotReplaced && antigravityRawToken) {
+                await platform.secrets.store(accountSlotSecretKey(activeAccId), antigravityRawToken).catch(() => undefined);
+              } else if (antigravityDiskMatchedSlot || (isSystemAccountId(activeAccId) && !antigravityRawToken)) {
+                await syncActiveAntigravitySlotFromDisk({
+                  accountId: activeAccId,
+                  secrets: platform.secrets,
+                  env: accPatch.env,
+                }).catch(() => undefined);
+              }
             }
             const prev = accountInspections.get(activeAccId);
             accountInspections.set(activeAccId, {
@@ -3526,8 +3560,16 @@ export function createHarnessHostRuntime(
             if (prev?.quota?.queriedAt !== quota.queriedAt) {
               pushAccounts();
             }
-          } else if (platform.settings.get<boolean>('backendTrace', false)) {
-            log(`订阅额度暂不可用（backend=${backendId}，provider=${providerId}，account=${activeAccId}）`);
+          } else {
+            const reasonText = debugReasons.length > 0 ? debugReasons.join('; ') : 'unavailable';
+            const traceEnabled = platform.settings.get<boolean>('backendTrace', false);
+            const hasRuntimeFailure = debugReasons.some((r) => r !== 'disk-token-missing');
+            if (traceEnabled || (hasRuntimeFailure && lastQuotaFailureLog.get(failureKey) !== reasonText)) {
+              if (hasRuntimeFailure) {
+                lastQuotaFailureLog.set(failureKey, reasonText);
+              }
+              log(`订阅额度暂不可用（backend=${backendId}，provider=${providerId}，account=${activeAccId}，reason=${reasonText}）`);
+            }
           }
         } catch (error) {
           if (platform.settings.get<boolean>('backendTrace', false)) {
@@ -4787,7 +4829,39 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'browserEvalConsole') {
       if (!platform.isWorkspaceTrusted()) return;
-      void browserManager.evalConsole(message.payload.expression);
+      void browserManager.evalConsole(message.payload.expression, message.payload.selectedSelector);
+      return;
+    }
+    if (message.type === 'browserGetConsoleObject') {
+      void (async () => {
+        const res = await browserManager.getConsoleObject(message.payload.objectId);
+        post({
+          type: 'browserConsoleObject',
+          payload: {
+            requestId: message.payload.requestId,
+            ...res,
+          },
+        });
+      })();
+      return;
+    }
+    if (message.type === 'browserConsoleComplete') {
+      if (!platform.isWorkspaceTrusted()) return;
+      void (async () => {
+        const res = await browserManager.completeConsole(message.payload.expression, message.payload.selectedSelector);
+        post({
+          type: 'browserConsoleCompletions',
+          payload: {
+            requestId: message.payload.requestId,
+            ...res,
+          },
+        });
+      })();
+      return;
+    }
+    if (message.type === 'browserSetConsoleOptions') {
+      if (!platform.isWorkspaceTrusted()) return;
+      browserManager.setConsoleOptions({ preserveLog: message.payload.preserveLog });
       return;
     }
     if (message.type === 'browserClipboard') {

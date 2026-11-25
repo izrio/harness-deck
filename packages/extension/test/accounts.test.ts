@@ -20,6 +20,7 @@ import {
 } from '../src/accounts/AccountStore.ts';
 import {
   antigravityPrimaryTokenPath,
+  antigravityTokensSameAccount,
   clearAccountCredentials,
   codebuddyAuthDir,
   codebuddyInternetEnvForRegion,
@@ -732,6 +733,38 @@ describe('AccountIsolation & AccountInspector', () => {
       });
       assert.equal(cbPatch.env.CODEBUDDY_COOKIE, undefined);
       assert.equal(cbPatch.env.CODEBUDDY_API_KEY, undefined);
+
+      // 7. 同邮箱用户重新登录后即使 refresh_token 改变仍应判为同账号；不同邮箱严格隔离返回 false
+      const reauthedSameEmail = JSON.stringify({
+        id_token_email: 'a@gmail.com',
+        token: {
+          access_token: 'reauthed-access-a',
+          refresh_token: 'refresh-a-v2',
+          expiry: new Date(nowMs + 9000_000).toISOString(),
+        },
+      });
+      const otherEmail = JSON.stringify({
+        id_token_email: 'b@gmail.com',
+        token: {
+          access_token: 'access-b',
+          refresh_token: 'refresh-a',
+          expiry: new Date(nowMs + 9000_000).toISOString(),
+        },
+      });
+      assert.equal(antigravityTokensSameAccount(staleSlot, reauthedSameEmail), true);
+      assert.equal(antigravityTokensSameAccount(staleSlot, otherEmail), false);
+
+      await secrets.store(accountSlotSecretKey(systemAccountId('antigravity')), staleSlot);
+      await writeFile(tokenPath, reauthedSameEmail, 'utf8');
+      const reauthSw = await switchAntigravityCredentialSlot({
+        targetAccountId: systemAccountId('antigravity'),
+        previousAccountId: systemAccountId('antigravity'),
+        secrets,
+        env,
+      });
+      assert.equal(reauthSw.activated, true);
+      assert.equal(await readFile(tokenPath, 'utf8'), reauthedSameEmail);
+      assert.equal(secrets.map.get(accountSlotSecretKey(systemAccountId('antigravity'))), reauthedSameEmail);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -1063,6 +1063,71 @@ function installMockHost(): void {
         postToWebview({ type: 'browserState', payload: browserState });
         return;
 
+      case 'browserSetConsoleOptions':
+        browserState = { ...browserState, preserveConsoleLog: message.payload.preserveLog };
+        postToWebview({ type: 'browserState', payload: browserState });
+        return;
+
+      case 'browserEvalConsole': {
+        const expr = message.payload.expression.trim();
+        const now = Date.now();
+        browserState = {
+          ...browserState,
+          consoleLogs: [
+            ...browserState.consoleLogs,
+            { id: now, level: 'info', kind: 'command', text: expr, timestamp: now },
+            {
+              id: now + 1,
+              level: 'log',
+              kind: 'result',
+              text: '{ ok: true, mode: "preview" }',
+              timestamp: now + 1,
+              args: [
+                {
+                  type: 'object',
+                  className: 'Object',
+                  description: 'Object',
+                  objectId: 'mock-obj-1',
+                  preview: [
+                    { name: 'ok', value: { type: 'boolean', value: true, description: 'true' }, isOwn: true },
+                    { name: 'mode', value: { type: 'string', value: 'preview' }, isOwn: true },
+                  ],
+                },
+              ],
+            },
+          ],
+        };
+        postToWebview({ type: 'browserState', payload: browserState });
+        return;
+      }
+
+      case 'browserGetConsoleObject':
+        postToWebview({
+          type: 'browserConsoleObject',
+          payload: {
+            requestId: message.payload.requestId,
+            objectId: message.payload.objectId,
+            properties: [
+              { name: 'ok', value: { type: 'boolean', value: true, description: 'true' }, isOwn: true },
+              { name: 'mode', value: { type: 'string', value: 'preview' }, isOwn: true },
+            ],
+          },
+        });
+        return;
+
+      case 'browserConsoleComplete':
+        postToWebview({
+          type: 'browserConsoleCompletions',
+          payload: {
+            requestId: message.payload.requestId,
+            prefix: message.payload.expression.split('.').pop() ?? '',
+            items: ['document', 'location', 'navigator', 'window', 'console'].filter((item) =>
+              item.startsWith(message.payload.expression.trim()),
+            ),
+          },
+        });
+        return;
+
       case 'browserResize':
         browserState = {
           ...browserState,

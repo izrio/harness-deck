@@ -19,6 +19,8 @@ export interface QuotaServiceOptions {
   readonly rawTokenJson?: string;
   /** 读取 Antigravity 磁盘凭据时是否允许回退 IDE 独立凭据文件（多账号隔离时应为 false）。 */
   readonly allowIdeFallback?: boolean;
+  /** 非敏感失败原因诊断回调（严禁包含任何 token / cookie / 认证头原文）。 */
+  readonly onDebug?: (detail: string) => void;
 }
 
 export const rec = (value: unknown): Rec | undefined =>

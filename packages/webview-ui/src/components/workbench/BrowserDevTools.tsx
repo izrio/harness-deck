@@ -5,7 +5,7 @@
  * - Console：分级日志过滤、清空与实时 JS 表达式求值 REPL（支持上下键历史）；
  * - Network：实时网络请求捕获、类型/关键字筛选、Headers / Payload / Response（按需拉取并格式化 JSON）与复制 cURL。
  */
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { BrowserConsoleEntry, BrowserDomElement, BrowserNetworkEntry } from '@harness-deck/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,8 +13,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useT } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
-import type { BrowserNetworkBodyEvent } from '../../store.ts';
+import type { BrowserConsoleObjectEvent, BrowserNetworkBodyEvent } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
+import { BrowserConsole } from './BrowserConsole.tsx';
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -28,7 +29,6 @@ import {
   PanelBottomIcon,
   PanelRightIcon,
   SearchIcon,
-  SendIcon,
   SidebarIcon,
   TargetIcon,
   TerminalIcon,
@@ -38,7 +38,6 @@ import {
 export type BrowserDevToolsTab = 'elements' | 'console' | 'network';
 export type BrowserDevToolsDock = 'bottom' | 'left' | 'right';
 
-type ConsoleFilter = 'all' | 'error' | 'warn' | 'info';
 type NetworkTypeFilter = 'all' | 'fetch' | 'doc' | 'js' | 'css' | 'img';
 type NetworkDetailTab = 'headers' | 'payload' | 'response';
 
@@ -120,6 +119,9 @@ export interface BrowserDevToolsProps {
   readonly highlightVisible: boolean;
   readonly onToggleHighlight: () => void;
   readonly consoleLogs: readonly BrowserConsoleEntry[];
+  readonly preserveConsoleLog?: boolean;
+  readonly consoleObjects?: Readonly<Record<string, BrowserConsoleObjectEvent>>;
+  readonly onRequestConsoleObject?: (objectId: string) => void;
   readonly networkRequests: readonly BrowserNetworkEntry[];
   readonly networkBodies: Readonly<Record<string, BrowserNetworkBodyEvent>>;
 }
@@ -139,11 +141,15 @@ export function BrowserDevTools({
   highlightVisible,
   onToggleHighlight,
   consoleLogs,
+  preserveConsoleLog = false,
+  consoleObjects = EMPTY_CONSOLE_OBJECTS,
+  onRequestConsoleObject = NOOP_REQUEST_CONSOLE_OBJECT,
   networkRequests,
   networkBodies,
 }: BrowserDevToolsProps) {
   const t = useT();
   const errorCount = consoleLogs.filter((entry) => entry.level === 'error').length;
+  const warnCount = consoleLogs.filter((entry) => entry.level === 'warn').length;
   const isSide = dock === 'left' || dock === 'right';
 
   const borderClass =
@@ -205,6 +211,10 @@ export function BrowserDevTools({
                 {errorCount > 0 ? (
                   <span className="rounded-full bg-red-tint px-1 font-mono text-[10px] font-medium text-red tabular-nums">
                     {errorCount}
+                  </span>
+                ) : warnCount > 0 ? (
+                  <span className="rounded-full bg-orange-tint px-1 font-mono text-[10px] font-medium text-orange tabular-nums">
+                    {warnCount}
                   </span>
                 ) : null}
               </TabsTrigger>
@@ -301,7 +311,15 @@ export function BrowserDevTools({
         </TabsContent>
 
         <TabsContent value="console" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-          <ConsolePane logs={consoleLogs} running={running} readOnly={readOnly} />
+          <BrowserConsole
+            logs={consoleLogs}
+            preserveLog={preserveConsoleLog}
+            running={running}
+            readOnly={readOnly}
+            {...(selectedElement ? { selectedElement } : {})}
+            consoleObjects={consoleObjects}
+            onRequestConsoleObject={onRequestConsoleObject}
+          />
         </TabsContent>
 
         <TabsContent value="network" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
@@ -614,152 +632,8 @@ function ElementsPane({
   );
 }
 
-function ConsolePane({
-  logs,
-  running,
-  readOnly,
-}: {
-  readonly logs: readonly BrowserConsoleEntry[];
-  readonly running: boolean;
-  readonly readOnly: boolean;
-}) {
-  const t = useT();
-  const [levelFilter, setLevelFilter] = useState<ConsoleFilter>('all');
-  const [expr, setExpr] = useState('');
-  const historyRef = useRef<string[]>([]);
-  const historyIdxRef = useRef(-1);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  const filtered = useMemo(() => {
-    if (levelFilter === 'all') return logs;
-    return logs.filter((entry) => entry.level === levelFilter);
-  }, [logs, levelFilter]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView?.({ block: 'end' });
-  }, [filtered.length]);
-
-  const submitExpr = (event?: FormEvent) => {
-    event?.preventDefault();
-    if (!running || readOnly) return;
-    const trimmed = expr.trim();
-    if (!trimmed) return;
-    historyRef.current = [...historyRef.current.slice(-49), trimmed];
-    historyIdxRef.current = -1;
-    setExpr('');
-    postToHost({ type: 'browserEvalConsole', payload: { expression: trimmed } });
-  };
-
-  const handleExprKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'ArrowUp' && historyRef.current.length > 0) {
-      event.preventDefault();
-      const nextIdx = historyIdxRef.current < 0 ? historyRef.current.length - 1 : Math.max(0, historyIdxRef.current - 1);
-      historyIdxRef.current = nextIdx;
-      setExpr(historyRef.current[nextIdx] ?? '');
-    } else if (event.key === 'ArrowDown' && historyIdxRef.current >= 0) {
-      event.preventDefault();
-      const nextIdx = historyIdxRef.current + 1;
-      if (nextIdx >= historyRef.current.length) {
-        historyIdxRef.current = -1;
-        setExpr('');
-      } else {
-        historyIdxRef.current = nextIdx;
-        setExpr(historyRef.current[nextIdx] ?? '');
-      }
-    }
-  };
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="browser-console-drawer">
-      <div className="flex shrink-0 items-center justify-between gap-1 border-b border-line/50 px-2 py-1">
-        <div className="flex items-center gap-0.5">
-          {(['all', 'error', 'warn', 'info'] as const).map((lvl) => (
-            <Button
-              key={lvl}
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => setLevelFilter(lvl)}
-              className={cn(
-                'px-1.5 text-[10.5px]',
-                levelFilter === lvl ? 'bg-hover font-medium text-ink' : 'text-ink-3 hover:text-ink',
-              )}
-            >
-              {lvl === 'all' ? t('wb.browser.consoleAll') : lvl.toUpperCase()}
-            </Button>
-          ))}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={t('wb.browser.consoleClear')}
-          title={t('wb.browser.consoleClear')}
-          onClick={() => postToHost({ type: 'browserClearConsole', payload: {} })}
-          className="text-ink-3 hover:bg-hover hover:text-ink"
-        >
-          <TrashIcon className="size-3" />
-        </Button>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="px-2 py-1 font-mono text-[11px]">
-          {filtered.length === 0 ? (
-            <div className="py-5 text-center font-sans text-[11.5px] text-ink-3">{t('wb.browser.consoleEmpty')}</div>
-          ) : (
-            filtered.map((entry) => (
-              <div
-                key={entry.id}
-                className={cn(
-                  'flex items-start gap-1.5 border-b border-line/40 py-0.5 break-all whitespace-pre-wrap',
-                  entry.level === 'error'
-                    ? 'text-red'
-                    : entry.level === 'warn'
-                      ? 'text-orange'
-                      : entry.level === 'info'
-                        ? 'text-accent-ink'
-                        : 'text-ink-2',
-                )}
-              >
-                <span className="shrink-0 text-[10px] uppercase opacity-70">{entry.level}</span>
-                <span className="min-w-0 flex-1">{entry.text}</span>
-              </div>
-            ))
-          )}
-          <div ref={bottomRef} />
-        </div>
-      </ScrollArea>
-
-      {/* 控制台 REPL 表达式输入框 */}
-      <form
-        onSubmit={submitExpr}
-        className="flex shrink-0 items-center gap-1 border-t border-line/70 bg-surface/60 px-2 py-1"
-      >
-        <span className="shrink-0 font-mono text-[11px] font-semibold text-accent-ink">&gt;</span>
-        <Input
-          size="xs"
-          data-testid="browser-console-input"
-          value={expr}
-          onChange={(e) => setExpr(e.target.value)}
-          onKeyDown={handleExprKeyDown}
-          placeholder={t('wb.browser.consoleInputPlaceholder')}
-          disabled={!running || readOnly}
-          className="min-w-0 flex-1 border-0 bg-transparent px-1 font-mono text-[11px] shadow-none focus-visible:ring-0"
-        />
-        <Button
-          type="submit"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={t('wb.browser.consoleInputPlaceholder')}
-          disabled={!running || readOnly || !expr.trim()}
-          className="text-ink-3 hover:text-ink"
-        >
-          <SendIcon className="size-3" />
-        </Button>
-      </form>
-    </div>
-  );
-}
+const EMPTY_CONSOLE_OBJECTS: Readonly<Record<string, BrowserConsoleObjectEvent>> = {};
+const NOOP_REQUEST_CONSOLE_OBJECT = (): void => undefined;
 
 function NetworkPane({
   requests,

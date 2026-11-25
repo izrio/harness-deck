@@ -31,6 +31,9 @@ export const UNICAST_HOST_MESSAGE_TYPES: ReadonlySet<HostToWebview['type']> = ne
   'restoreDraft',
   'fileSaved',
   'sourceControlDraftGenerated',
+  'browserNetworkBody',
+  'browserConsoleObject',
+  'browserConsoleCompletions',
 ]);
 
 export class ClientHub {

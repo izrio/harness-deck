@@ -7,6 +7,7 @@ import { loadState, postToHost, saveState } from './vscode.ts';
 import type {
   AccountsState,
   AppearanceState,
+  BrowserConsoleProperty,
   BrowserDomElement,
   BrowserState,
   ClientSurface,
@@ -78,6 +79,19 @@ export interface BrowserNetworkBodyEvent {
   readonly body?: string;
   readonly base64Encoded?: boolean;
   readonly error?: string;
+}
+
+export interface BrowserConsoleObjectEvent {
+  readonly requestId: string;
+  readonly objectId: string;
+  readonly properties?: readonly BrowserConsoleProperty[];
+  readonly error?: string;
+}
+
+export interface BrowserConsoleCompletionsEvent {
+  readonly requestId: string;
+  readonly prefix: string;
+  readonly items: readonly string[];
 }
 
 export interface QuotaFetchResult {
@@ -344,6 +358,8 @@ let lastBrowserFrame: BrowserFrameEvent | undefined;
 const browserInspectListeners = new Set<(event: BrowserInspectEvent) => void>();
 const browserNetworkBodyListeners = new Set<(event: BrowserNetworkBodyEvent) => void>();
 const browserClipboardListeners = new Set<(text: string) => void>();
+const browserConsoleObjectListeners = new Set<(event: BrowserConsoleObjectEvent) => void>();
+const browserConsoleCompletionsListeners = new Set<(event: BrowserConsoleCompletionsEvent) => void>();
 
 export function subscribeBrowserFrame(listener: (frame: BrowserFrameEvent) => void): () => void {
   browserFrameListeners.add(listener);
@@ -367,6 +383,18 @@ export function subscribeBrowserNetworkBody(listener: (event: BrowserNetworkBody
 export function subscribeBrowserClipboard(listener: (text: string) => void): () => void {
   browserClipboardListeners.add(listener);
   return () => browserClipboardListeners.delete(listener);
+}
+
+export function subscribeBrowserConsoleObject(listener: (event: BrowserConsoleObjectEvent) => void): () => void {
+  browserConsoleObjectListeners.add(listener);
+  return () => browserConsoleObjectListeners.delete(listener);
+}
+
+export function subscribeBrowserConsoleCompletions(
+  listener: (event: BrowserConsoleCompletionsEvent) => void,
+): () => void {
+  browserConsoleCompletionsListeners.add(listener);
+  return () => browserConsoleCompletionsListeners.delete(listener);
 }
 let toastId = 0;
 let nextPanelSearchId = 1_000_000;
@@ -907,6 +935,12 @@ export function applyHostMessage(message: HostToWebview): void {
       return;
     case 'browserClipboardData':
       for (const listener of browserClipboardListeners) listener(message.payload.text);
+      return;
+    case 'browserConsoleObject':
+      for (const listener of browserConsoleObjectListeners) listener(message.payload);
+      return;
+    case 'browserConsoleCompletions':
+      for (const listener of browserConsoleCompletionsListeners) listener(message.payload);
       return;
     case 'sessionCheckpoints':
       if (state.session.id === message.payload.sessionId) {

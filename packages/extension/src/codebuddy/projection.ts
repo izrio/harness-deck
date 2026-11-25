@@ -3,7 +3,15 @@
  * - 实时流式事件：`system`（`init` / `usage_update`）、`stream_event`、`assistant`、`user`（`tool_result`）、`result`、`error`；
  * - 本地 `~/.codebuddy/projects/<project>/<id>.jsonl` 历史会话回放（`message`、`function_call`、`function_call_result`）。
  */
-import { joinLabel, type ContextDetail, type ImageView, type Item, type LineStats, type SessionHeader } from '@harness-deck/shared';
+import {
+  joinLabel,
+  type ContextDetail,
+  type ImageView,
+  type Item,
+  type LineStats,
+  type SessionHeader,
+  type TokenBreakdown,
+} from '@harness-deck/shared';
 import { inputFilePath, type AcpDiff, type FileChange } from '../acp/projection.ts';
 import { t } from '../i18n.ts';
 import { splitContext } from '../vm/context.ts';
@@ -15,6 +23,25 @@ import { addUsage, normalizeUsage, totalOf, TurnTimingTracker } from '../vm/usag
 
 const OUTPUT_LIMIT = 4_000;
 const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+const usageNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+/**
+ * CodeBuddy 流式 usage 的 `input_tokens` 是含缓存的总输入（`total_tokens = input + output`），
+ * 与 `normalizeUsage` 约定的「input 只算未命中缓存」不一致，需要扣掉缓存再展示。
+ * `result.modelUsage` 使用 camelCase 的 `inputTokens`，本身就是未缓存输入，不扣减。
+ */
+function normalizeCodebuddyUsage(raw: unknown): TokenBreakdown | undefined {
+  const normalized = normalizeUsage(raw);
+  if (!normalized || !raw || typeof raw !== 'object' || Array.isArray(raw)) return normalized;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.input_tokens !== 'number' && typeof o.prompt_tokens !== 'number') return normalized;
+  const cacheRead = usageNumber(o.cache_read_input_tokens) ?? usageNumber(o.cacheReadInputTokens);
+  const cacheWrite = usageNumber(o.cache_creation_input_tokens) ?? usageNumber(o.cacheCreationInputTokens);
+  if (cacheRead === undefined && cacheWrite === undefined) return normalized;
+  return { ...normalized, input: Math.max(0, normalized.input - (cacheRead ?? 0) - (cacheWrite ?? 0)) };
+}
 
 export type CodebuddyDiff = AcpDiff;
 export type CodebuddyFileChange = FileChange;
@@ -136,10 +163,10 @@ export class CodebuddySessionProjection {
   contextDetail(): ContextDetail | undefined {
     let session;
     for (const raw of this.messageUsage.values()) {
-      const b = normalizeUsage(raw);
+      const b = normalizeCodebuddyUsage(raw);
       if (b) session = addUsage(session, b);
     }
-    const last = this.lastMessageId ? normalizeUsage(this.messageUsage.get(this.lastMessageId)) : undefined;
+    const last = this.lastMessageId ? normalizeCodebuddyUsage(this.messageUsage.get(this.lastMessageId)) : undefined;
     const perf = this.timing.performance();
     if (!session && this.sessionCost === undefined && !perf) return undefined;
     return {
@@ -162,7 +189,7 @@ export class CodebuddySessionProjection {
     this.messageUsage.set(key, merged);
     this.lastMessageId = key;
     this.turnRecordedUsage = true;
-    const b = normalizeUsage(merged);
+    const b = normalizeCodebuddyUsage(merged);
     if (b && b.output > 0) this.timing.attachOutputTokens(b.output);
   }
 
@@ -193,7 +220,7 @@ export class CodebuddySessionProjection {
     const startedAt = this.runningSince;
     this.runningSince = undefined;
     const last =
-      this.turnRecordedUsage && this.lastMessageId ? normalizeUsage(this.messageUsage.get(this.lastMessageId)) : undefined;
+      this.turnRecordedUsage && this.lastMessageId ? normalizeCodebuddyUsage(this.messageUsage.get(this.lastMessageId)) : undefined;
     this.timing.finish(last?.output, now);
     this.streamedText = false;
     this.streamedThinking = false;
@@ -402,16 +429,27 @@ export class CodebuddySessionProjection {
               : undefined;
           const win = typeof turnUsage?.contextWindow === 'number' && turnUsage.contextWindow > 0 ? turnUsage.contextWindow : undefined;
           if (win) this.contextWindow = win;
-          const usagePayload = turnUsage?.usage ?? raw.usage;
+          // 新协议把最近一次模型请求放在 stage（或 stages 末项）；total 是整轮累计，不能拿来算上下文占用。
+          const stageRecords = this.turnUsageStages(turnUsage);
+          const latestStage = stageRecords[stageRecords.length - 1];
+          const usagePayload = latestStage?.usage ?? turnUsage?.usage ?? raw.usage;
           if (usagePayload) {
             this.applyUsageObject(usagePayload);
-            const usageKey =
-              typeof turnUsage?.messageId === 'string' && turnUsage.messageId
-                ? turnUsage.messageId
-                : typeof turnUsage?.turnId === 'string' && turnUsage.turnId
-                  ? `turn:${turnUsage.turnId}`
-                  : (this.currentMessageId ?? `turn:${this.turnSeq}`);
-            this.recordMessageUsage(usageKey, usagePayload);
+            if (stageRecords.length > 0) {
+              // 快照里会带整轮所有 stage；按 messageId 记录，重复到达时 recordMessageUsage 会取最大值，不会重复累计。
+              for (const stage of stageRecords) {
+                if (stage.usage === undefined) continue;
+                this.recordMessageUsage(stage.messageId ?? stage.id ?? `turn:${this.turnSeq}`, stage.usage);
+              }
+            } else {
+              const usageKey =
+                typeof turnUsage?.messageId === 'string' && turnUsage.messageId
+                  ? turnUsage.messageId
+                  : typeof turnUsage?.turnId === 'string' && turnUsage.turnId
+                    ? `turn:${turnUsage.turnId}`
+                    : (this.currentMessageId ?? `turn:${this.turnSeq}`);
+              this.recordMessageUsage(usageKey, usagePayload);
+            }
             this.changed();
           }
         }
@@ -604,17 +642,22 @@ export class CodebuddySessionProjection {
 
       case 'result': {
         this.applyModelUsageWindow(raw.modelUsage);
-        if (raw.usage) {
-          this.applyUsageObject(raw.usage);
-          if (!this.turnRecordedUsage) {
-            this.recordMessageUsage(`turn:${this.turnSeq}`, raw.usage);
-          }
-        } else if (!this.turnRecordedUsage && raw.modelUsage && typeof raw.modelUsage === 'object' && !Array.isArray(raw.modelUsage)) {
-          for (const [modelKey, entry] of Object.entries(raw.modelUsage as Record<string, unknown>)) {
-            if (normalizeUsage(entry)) {
-              this.applyUsageObject(entry);
-              this.recordMessageUsage(`turn:${this.turnSeq}:${modelKey}`, entry);
+        // `result.usage` 是会话累计（续聊时会包含历史轮次），不能当作当前上下文占用；
+        // 优先用本轮 modelUsage，最后一次兜底才用它（且仅限会话里还没有任何用量时）。
+        if (!this.turnRecordedUsage) {
+          let applied = false;
+          if (raw.modelUsage && typeof raw.modelUsage === 'object' && !Array.isArray(raw.modelUsage)) {
+            for (const [modelKey, entry] of Object.entries(raw.modelUsage as Record<string, unknown>)) {
+              if (normalizeCodebuddyUsage(entry)) {
+                this.applyUsageObject(entry);
+                this.recordMessageUsage(`turn:${this.turnSeq}:${modelKey}`, entry);
+                applied = true;
+              }
             }
+          }
+          if (!applied && raw.usage && this.messageUsage.size === 0) {
+            this.applyUsageObject(raw.usage);
+            this.recordMessageUsage(`turn:${this.turnSeq}`, raw.usage);
           }
         }
         if (!isReplay && typeof raw.total_cost_usd === 'number' && Number.isFinite(raw.total_cost_usd) && raw.total_cost_usd >= 0) {
@@ -658,6 +701,28 @@ export class CodebuddySessionProjection {
     }
   }
 
+  /** 把 `codebuddy.ai/turnUsage` 里的 stage / stages[] 归一成按时间顺序的请求记录（旧协议没有）。 */
+  private turnUsageStages(
+    turnUsage: Record<string, unknown> | undefined,
+  ): readonly { readonly usage?: unknown; readonly messageId?: string; readonly id?: string }[] {
+    if (!turnUsage) return [];
+    const records: { usage?: unknown; messageId?: string; id?: string }[] = [];
+    const readStage = (value: unknown): void => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      const stage = value as Record<string, unknown>;
+      records.push({
+        ...(stage.usage !== undefined ? { usage: stage.usage } : {}),
+        ...(typeof stage.messageId === 'string' && stage.messageId ? { messageId: stage.messageId } : {}),
+        ...(typeof stage.id === 'string' && stage.id ? { id: stage.id } : {}),
+      });
+    };
+    readStage(turnUsage.stage);
+    if (Array.isArray(turnUsage.stages)) {
+      for (const stage of turnUsage.stages) readStage(stage);
+    }
+    return records;
+  }
+
   private applyModelUsageWindow(modelUsage: unknown): void {
     if (!modelUsage || typeof modelUsage !== 'object' || Array.isArray(modelUsage)) return;
     for (const entry of Object.values(modelUsage as Record<string, unknown>)) {
@@ -677,7 +742,7 @@ export class CodebuddySessionProjection {
   private applyUsageObject(raw: unknown): void {
     if (!raw || typeof raw !== 'object') return;
     const u = raw as Record<string, unknown>;
-    const normalized = normalizeUsage(u);
+    const normalized = normalizeCodebuddyUsage(u);
     const used = normalized
       ? totalOf(normalized)
       : typeof u.total_tokens === 'number' && u.total_tokens > 0

@@ -215,51 +215,9 @@ jobs:
 
       - name: Prepare release notes
         run: |
-          # CHANGELOG 里 "## <版本>" 到下一个 "## " 之间的内容
+          # CHANGELOG 里 "## <版本>" 到下一个 "## " 之间的内容（先中文后英文）
           awk -v v="## ${VERSION}" '$0 == v {found=1; next} found && /^## / {exit} found {print}' packages/extension/CHANGELOG.md > release/changes.md
           {
-            echo "## 安装 / Install"
-            echo
-            echo "### VS Code"
-            echo
-            echo "1. 下载下面的 \`harness-deck-${VERSION}.vsix\`。"
-            echo "   Download \`harness-deck-${VERSION}.vsix\` below."
-            echo "2. VS Code 扩展视图右上角「⋯ → 从 VSIX 安装…」，或执行："
-            echo "   In the Extensions view choose \"… → Install from VSIX…\", or run:"
-            echo
-            echo '   ```bash'
-            echo "   code --install-extension harness-deck-${VERSION}.vsix"
-            echo '   ```'
-            echo
-            echo "### JetBrains IDE (IntelliJ IDEA / WebStorm / PyCharm / GoLand / Rider)"
-            echo
-            echo "1. 下载下面的 \`harness-deck-jetbrains-${VERSION}.zip\`（需要本地已安装 Node.js >= 20）。"
-            echo "   Download \`harness-deck-jetbrains-${VERSION}.zip\` below (requires Node.js >= 20)."
-            echo "2. 在 IDE 设置「Plugins → ⚙ → Install Plugin from Disk…」选择该压缩包安装。"
-            echo "   In IDE Settings → Plugins → ⚙ → Install Plugin from Disk…, select the zip archive."
-            echo
-            echo "### 桌面端 / Desktop (Windows / macOS / Linux)"
-            echo
-            echo "下载对应平台的安装包（未签名，首次打开可能需要在系统设置中允许）："
-            echo "Download the installer for your platform (unsigned; the OS may ask you to allow it on first launch):"
-            echo
-            echo "- Windows: \`Halo-${VERSION}-win-x64.exe\`"
-            echo "- macOS: \`Halo-${VERSION}-mac-*.dmg\`"
-            echo "- Linux: \`Halo-${VERSION}-linux-*.AppImage\`（\`chmod +x\` 后直接运行）"
-            echo
-            echo "### 底层 / Backends"
-            echo
-            echo "至少装好一个底层：dsh（0.2.1-rc.5 及以上，DeepSeek Desktop 菜单「管理 dsh 命令…」或 \`npm install -g @deepseek-ai/dsh\`）、Claude Code（\`npm install -g @anthropic-ai/claude-code\`）、Codex（\`npm install -g @openai/codex\`）、CodeBuddy（\`npm install -g @tencent-ai/codebuddy-code\`）、Pi（\`npm install -g @earendil-works/pi-coding-agent\`）、ZCode（\`npm install -g zcode-app-cli\`）或 OpenCode（\`npm install -g opencode-ai\`）。"
-            echo "Install at least one backend: dsh 0.2.1-rc.5+ (DeepSeek Desktop → \"Manage dsh command…\", or \`npm install -g @deepseek-ai/dsh\`), Claude Code (\`npm install -g @anthropic-ai/claude-code\`), Codex (\`npm install -g @openai/codex\`), CodeBuddy (\`npm install -g @tencent-ai/codebuddy-code\`), Pi (\`npm install -g @earendil-works/pi-coding-agent\`), ZCode (\`npm install -g zcode-app-cli\`), or OpenCode (\`npm install -g opencode-ai\`)."
-            echo
-            echo "### SHA-256"
-            echo
-            echo "- \`harness-deck-${VERSION}.vsix\`: \`$(cut -d' ' -f1 "release/harness-deck-${VERSION}.vsix.sha256")\`"
-            echo "- \`harness-deck-jetbrains-${VERSION}.zip\`: \`$(cut -d' ' -f1 "release/harness-deck-jetbrains-${VERSION}.zip.sha256")\`"
-            for file in release/Halo-*.sha256; do
-              echo "- \`$(basename "$file" .sha256)\`: \`$(cut -d' ' -f1 "$file")\`"
-            done
-            echo
             echo "## 更新内容 / Changes"
             cat release/changes.md
           } > release/notes.md
