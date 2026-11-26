@@ -75,9 +75,9 @@ export function GeneralSettings() {
           ) : undefined
         }
       >
-        <div className="flex flex-col gap-0.5 p-1.5">
-          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
-            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.includeActiveEditor')}</span>
+        <div className="flex flex-col divide-y divide-line/55 px-4">
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{t('settings.includeActiveEditor')}</span>
             <Switch
               data-testid="pref-include-active"
               aria-label={t('settings.includeActiveEditor')}
@@ -86,8 +86,8 @@ export function GeneralSettings() {
             />
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
-            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.showTurnChanges')}</span>
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{t('settings.showTurnChanges')}</span>
             <Switch
               data-testid="pref-show-turn-changes"
               aria-label={t('settings.showTurnChanges')}
@@ -96,10 +96,10 @@ export function GeneralSettings() {
             />
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
+          <div className="flex items-center justify-between gap-6 py-3.5">
             <div className="min-w-0 flex-1">
-              <div className="text-[12.5px] text-ink">{t('settings.fetchQuota')}</div>
-              <div className="mt-0.5 text-[11.5px] text-ink-3">{t('settings.fetchQuotaHint')}</div>
+              <div className="text-[13px] leading-5 text-ink">{t('settings.fetchQuota')}</div>
+              <div className="mt-1 text-[12px] leading-relaxed text-ink-3">{t('settings.fetchQuotaHint')}</div>
             </div>
             <Switch
               data-testid="pref-fetch-quota"
@@ -194,9 +194,9 @@ export function AdvancedSettings() {
     <div className="flex flex-col gap-8" data-testid="settings-advanced">
       {/* 1. 权限与诊断开关 */}
       <SettingsSection title={t('settings.advanced.title')}>
-        <div className="flex flex-col gap-1 p-1.5">
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl px-3 py-2.5">
-            <span className="text-[12.5px] font-medium text-ink">{t('settings.schedules.title')}</span>
+        <div className="flex flex-col divide-y divide-line/55 px-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 py-3.5">
+            <span className="text-[13px] leading-5 text-ink">{t('settings.schedules.title')}</span>
             <div className="w-52">
               <Select
                 value={preferences.schedulePermission ?? 'danger-full-access'}
@@ -221,8 +221,8 @@ export function AdvancedSettings() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
-            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('settings.advanced.backendTrace')}</span>
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{t('settings.advanced.backendTrace')}</span>
             <Switch
               data-testid="adv-backend-trace"
               aria-label={t('settings.advanced.backendTrace')}
@@ -234,8 +234,8 @@ export function AdvancedSettings() {
         </div>
       </SettingsSection>
 
-      {/* 2. 可执行文件路径（双列紧凑网格，无需额外分组标题与分割线） */}
-      <section className="grid grid-cols-1 gap-x-4 gap-y-4 rounded-2xl bg-field/55 p-4 sm:grid-cols-2 dark:bg-surface/65">
+      {/* 2. 可执行文件路径（双列网格浅底卡片） */}
+      <section className="grid grid-cols-1 gap-x-5 gap-y-4 rounded-2xl bg-field/55 p-5 sm:grid-cols-2 dark:bg-surface/65">
         <label className="flex flex-col gap-1.5">
           <span className="text-[12px] font-medium text-ink-2">{t('settings.advanced.dshPath')}</span>
           <Input

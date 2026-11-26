@@ -14,7 +14,7 @@ import type {
   SkillMarketItem,
   SkillMarketState,
 } from '@harness-deck/shared';
-import { createProxyAwareFetch, type FetchLike } from '../providers/proxyFetch.ts';
+import { createProxyAwareFetch, describeFetchError, type FetchLike } from '../providers/proxyFetch.ts';
 import { parseSkillMarkdown } from './skillService.ts';
 
 const MCP_REGISTRY_ENDPOINTS = [
@@ -25,6 +25,7 @@ const SKILLS_SH_SEARCH_ENDPOINT = 'https://skills.sh/api/search';
 const MCP_MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const SKILL_MARKET_CACHE_TTL_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 12_000;
+const SKILL_MD_FETCH_TIMEOUT_MS = 4_000;
 const MAX_RESPONSE_BYTES = 1_500_000;
 const USER_AGENT = 'Halo-IDE-Extension/1.0';
 
@@ -358,10 +359,11 @@ async function fetchTextCapped(
   url: string,
   fetchImpl: FetchLike,
   accept = 'application/json',
+  timeoutMs = FETCH_TIMEOUT_MS,
 ): Promise<string> {
   const response = await fetchImpl(url, {
     headers: { Accept: accept, 'User-Agent': USER_AGENT },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     throw new Error(`HTTP ${String(response.status)}`);
@@ -616,7 +618,7 @@ export async function fetchOnlineMcpMarket(options?: {
     mcpMarketCache.set(cacheKey, { expiresAt: now + MCP_MARKET_CACHE_TTL_MS, state });
     return state;
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = describeFetchError(error);
     return {
       items: BUILTIN_MCP_MARKET,
       source: 'fallback',
@@ -702,8 +704,10 @@ async function fetchRepoSkills(
 
   const items: SkillMarketItem[] = [];
   const CONCURRENCY = 6;
+  let rawGithubBlocked = false;
   for (let i = 0; i < skillPaths.length; i += CONCURRENCY) {
     const batch = skillPaths.slice(i, i + CONCURRENCY);
+    let batchSuccess = 0;
     const resolved = await Promise.all(
       batch.map(async (entry): Promise<SkillMarketItem> => {
         const key = `${source.repo.toLowerCase()}:${entry.subpath.toLowerCase()}`;
@@ -711,14 +715,17 @@ async function fetchRepoSkills(
         let name = builtin?.name ?? entry.folderName;
         let description = builtin?.description ?? '';
 
-        try {
-          const rawUrl = `https://raw.githubusercontent.com/${source.repo}/${encodeURIComponent(source.ref)}/${entry.rawPath}`;
-          const md = await fetchTextCapped(rawUrl, fetchImpl, 'text/plain');
-          const meta = parseSkillMarkdown(md, entry.folderName);
-          if (meta.name) name = meta.name;
-          if (meta.description) description = meta.description;
-        } catch {
-          // 单个 SKILL.md 抓取失败时保留目录名与内置简介
+        if (!rawGithubBlocked) {
+          try {
+            const rawUrl = `https://raw.githubusercontent.com/${source.repo}/${encodeURIComponent(source.ref)}/${entry.rawPath}`;
+            const md = await fetchTextCapped(rawUrl, fetchImpl, 'text/plain', SKILL_MD_FETCH_TIMEOUT_MS);
+            const meta = parseSkillMarkdown(md, entry.folderName);
+            if (meta.name) name = meta.name;
+            if (meta.description) description = meta.description;
+            batchSuccess++;
+          } catch {
+            // 单个 SKILL.md 抓取失败时保留目录名与内置简介
+          }
         }
 
         const desc = description || builtin?.description || name;
@@ -735,6 +742,9 @@ async function fetchRepoSkills(
         };
       }),
     );
+    if (!rawGithubBlocked && batch.length > 0 && batchSuccess === 0) {
+      rawGithubBlocked = true;
+    }
     items.push(...resolved);
   }
 
@@ -772,7 +782,7 @@ export async function fetchOnlineSkillMarket(options?: {
       skillMarketCache.set(cacheKey, { expiresAt: now + SKILL_MARKET_CACHE_TTL_MS, state });
       return state;
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = describeFetchError(error);
       return {
         items: BUILTIN_SKILL_MARKET,
         source: 'fallback',
@@ -804,7 +814,7 @@ export async function fetchOnlineSkillMarket(options?: {
         }
       }
     } else {
-      errors.push(res.reason instanceof Error ? res.reason.message : String(res.reason));
+      errors.push(describeFetchError(res.reason));
     }
   }
 
@@ -822,7 +832,7 @@ export async function fetchOnlineSkillMarket(options?: {
         }
       }
     } else {
-      errors.push(res.reason instanceof Error ? res.reason.message : String(res.reason));
+      errors.push(describeFetchError(res.reason));
     }
   }
 

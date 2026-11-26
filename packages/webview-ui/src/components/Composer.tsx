@@ -494,8 +494,8 @@ export function Composer({ onNewWorktree }: { readonly onNewWorktree?: () => voi
           aria-expanded={menuOpen}
           {...(menuOpen ? { 'aria-controls': 'composer-completion', 'aria-activedescendant': `completion-${selected}` } : {})}
         />
-        <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
-          <div className="relative">
+        <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1.5 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
+          <div className="relative flex items-center">
             <button
               type="button"
               data-testid="composer-attach-btn"
@@ -509,9 +509,9 @@ export function Composer({ onNewWorktree }: { readonly onNewWorktree?: () => voi
                   postToHost({ type: 'pickFiles', payload: {} });
                 }
               }}
-              className="inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+              className="flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
-              <PaperclipIcon className="size-4" />
+              <PaperclipIcon className="size-4" strokeWidth={1.75} />
             </button>
             <input
               ref={imageInputRef}
@@ -531,13 +531,13 @@ export function Composer({ onNewWorktree }: { readonly onNewWorktree?: () => voi
           {session.planMode ? (
             <button
               type="button"
-              className="toolbar-button plan-badge inline-flex h-7 items-center gap-1 rounded-[8px] bg-accent-tint px-2 text-[12px] font-medium text-accent-ink transition-opacity duration-150 hover:opacity-85"
+              className="toolbar-button plan-badge flex h-7 items-center gap-1.5 rounded-[8px] bg-accent-tint px-2 text-[12px] leading-4 font-medium text-accent-ink transition-opacity duration-150 hover:opacity-85"
               title={t('composer.planTitle')}
               onClick={() => postToHost({ type: 'sendMessage', payload: { text: '/plan off' } })}
               data-testid="plan-badge"
             >
               <PlanIcon className="size-3.5" />
-              <span className="toolbar-button__text">{t('composer.plan')}</span>
+              <span className="toolbar-button__text leading-4">{t('composer.plan')}</span>
               <CloseIcon className="size-3" />
             </button>
           ) : null}
@@ -554,7 +554,7 @@ export function Composer({ onNewWorktree }: { readonly onNewWorktree?: () => voi
             <button
               type="button"
               className={cn(
-                'send-button send-button--stop inline-flex size-7 items-center justify-center rounded-full bg-red-tint text-red shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--red)_28%,transparent)] transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red hover:text-white active:scale-[0.94] max-md:size-8',
+                'send-button send-button--stop flex size-7 items-center justify-center rounded-full bg-red-tint text-red shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--red)_28%,transparent)] transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red hover:text-white active:scale-[0.94] max-md:size-8',
                 showSend && 'send-button--secondary',
               )}
               onClick={() => postToHost({ type: 'interrupt', payload: {} })}
@@ -568,7 +568,7 @@ export function Composer({ onNewWorktree }: { readonly onNewWorktree?: () => voi
             <button
               type="button"
               className={cn(
-                'send-button inline-flex size-7 items-center justify-center rounded-full transition-[background-color,color,box-shadow,transform,opacity] duration-150 enabled:active:scale-[0.94] disabled:cursor-default max-md:size-8',
+                'send-button flex size-7 items-center justify-center rounded-full transition-[background-color,color,box-shadow,transform,opacity] duration-150 enabled:active:scale-[0.94] disabled:cursor-default max-md:size-8',
                 canSend
                   ? 'bg-brand text-brand-foreground shadow-xs inset-shadow-[0_1px_rgb(255_255_255/16%)] hover:bg-brand/90'
                   : 'bg-field text-ink-3 shadow-hairline',

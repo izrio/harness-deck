@@ -313,7 +313,8 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
 
     expect(screen.getByTestId('settings-runtime-env')).toBeTruthy();
     expect(screen.getByTestId('settings-backends')).toBeTruthy();
-    expect(screen.getByTestId('settings-backend-dsh').getAttribute('data-slot')).toBe('card');
+    expect(screen.getByTestId('settings-backend-dsh')).toBeTruthy();
+    expect(screen.queryByTestId('backend-alive-badge-claude')).toBeNull();
     expect(screen.getByTestId('node-env-missing')).toBeTruthy();
     openActionsMenu('backend-actions-claude');
     expect(screen.getByTestId('install-backend-menu-claude').getAttribute('aria-disabled')).toBe('true');
@@ -596,16 +597,16 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
     // 默认状态下本地协议转换网关关闭，点击「添加服务商」通过弹窗打开编辑器
     const gwSwitch = screen.getByTestId('provider-protocol-gateway-switch');
     expect(gwSwitch.getAttribute('aria-checked')).toBe('false');
-    expect(screen.getByTestId('provider-protocol-gateway-card').textContent).toContain('已关闭');
+    expect(screen.getByTestId('provider-protocol-gateway-card').textContent).not.toContain('已关闭');
     expect(screen.queryByTestId('provider-editor')).toBeNull();
 
     // 仅填 OpenAI Chat 地址且网关关闭时不可绑定 Claude Code
     fireEvent.click(screen.getByTestId('provider-add-btn'));
     expect(screen.getByTestId('provider-editor')).toBeTruthy();
     // 弹窗内各厂商预设展示对应品牌图标
-    expect(screen.getByTestId('provider-preset-volcengine-coding').querySelector('[data-provider-icon="doubao"]')).toBeTruthy();
+    expect(screen.getByTestId('provider-preset-volcengine-coding').querySelector('[data-provider-icon="volcengine"]')).toBeTruthy();
     expect(screen.getByTestId('provider-preset-zhipu-coding').querySelector('[data-provider-icon="zhipu"]')).toBeTruthy();
-    expect(screen.getByTestId('provider-preset-bailian-coding').querySelector('[data-provider-icon="qwen"]')).toBeTruthy();
+    expect(screen.getByTestId('provider-preset-bailian-coding').querySelector('[data-provider-icon="aliyun"]')).toBeTruthy();
     expect(screen.getByTestId('provider-preset-kimi-coding').querySelector('[data-provider-icon="kimi"]')).toBeTruthy();
     expect(screen.getByTestId('provider-preset-minimax-coding').querySelector('[data-provider-icon="minimax"]')).toBeTruthy();
 
@@ -725,8 +726,9 @@ describe('Sidebar Nav 设置页面与「会话 -> 聊天命令」', () => {
         ],
       },
     });
-    expect(screen.getByTestId('provider-protocol-gateway-card').textContent).toContain('已启动 · http://127.0.0.1:43123');
-    expect(screen.getByTestId('provider-card-volcengine').textContent).toContain('已存 Key');
+    expect(screen.getByTestId('provider-protocol-gateway-card').textContent).toContain('http://127.0.0.1:43123');
+    expect(screen.getByTestId('provider-card-volcengine').textContent).toContain('ark-code-latest');
+    expect(screen.getByTestId('provider-card-volcengine').textContent).not.toContain('已存 Key');
     expect(screen.getByTestId('provider-card-volcengine').textContent).toContain('Claude Code');
     expect(screen.getByTestId('provider-card-volcengine').textContent).toContain('代码审查官');
     expect(screen.getByTestId('provider-card-openai-gw').textContent).toContain('OpenAI → Claude');

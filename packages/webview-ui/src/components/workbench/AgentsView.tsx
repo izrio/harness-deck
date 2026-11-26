@@ -38,8 +38,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { AgentDelegateDialog } from './agents/AgentDelegateDialog.tsx';
 
 let nextAgentModelFetchId = 200_000;
 
@@ -65,9 +64,7 @@ export function AgentsView() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | undefined>();
-  const [delegatingId, setDelegatingId] = useState<string | undefined>();
-  const [delegatePrompt, setDelegatePrompt] = useState('');
-  const [delegateProject, setDelegateProject] = useState(projects.currentPath ?? projects.recent[0]?.path ?? '');
+  const [delegatingAgent, setDelegatingAgent] = useState<AgentProfile | undefined>();
 
   // 编辑表单字段
   const [name, setName] = useState('');
@@ -210,19 +207,17 @@ export function AgentsView() {
     setPendingFetch(undefined);
   };
 
-  const submitDelegate = (agentId: string) => {
-    if (!delegatePrompt.trim()) return;
+  const submitDelegate = (payload: { readonly agentId: string; readonly prompt: string; readonly projectPath: string }) => {
     postToHost({
       type: 'delegateToAgent',
       payload: {
-        agentId,
-        prompt: delegatePrompt.trim(),
-        ...(delegateProject ? { projectPath: delegateProject } : {}),
+        agentId: payload.agentId,
+        prompt: payload.prompt,
+        ...(payload.projectPath ? { projectPath: payload.projectPath } : {}),
         runImmediately: true,
       },
     });
-    setDelegatePrompt('');
-    setDelegatingId(undefined);
+    setDelegatingAgent(undefined);
   };
 
   return (
@@ -297,8 +292,8 @@ export function AgentsView() {
                     }}
                   />
 
-                  <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
-                    <div className="relative min-w-0">
+                  <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1.5 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
+                    <div className="relative flex min-w-0 items-center">
                       <Popover open={runtimeMenuOpen} onOpenChange={setRuntimeMenuOpen}>
                         <PopoverTrigger asChild>
                           <button
@@ -306,11 +301,11 @@ export function AgentsView() {
                             data-testid="agent-runtime-picker"
                             aria-label={t('wb.agents.fieldBackend')}
                             title={t('wb.agents.fieldBackend')}
-                            className="toolbar-button inline-flex h-7 max-w-full items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
+                            className="toolbar-button flex h-7 max-w-full items-center gap-1.5 rounded-[8px] px-2 text-[12px] leading-4 font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
                           >
                             <BackendLogo backend={currentBackend} size="sm" />
-                            <span className="toolbar-button__text min-w-0 truncate">{currentBackend.name}</span>
-                            <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+                            <span className="toolbar-button__text min-w-0 truncate leading-4">{currentBackend.name}</span>
+                            <ChevronDownIcon className="-ml-0.5 size-3 shrink-0 text-ink-3" />
                           </button>
                         </PopoverTrigger>
                         <PopoverContent
@@ -319,7 +314,7 @@ export function AgentsView() {
                           sideOffset={6}
                           aria-label={t('wb.agents.fieldBackend')}
                           onOpenAutoFocus={focusActiveMenuRow}
-                          className="model-menu flex max-h-72 w-auto min-w-[200px] max-w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-1 shadow-overlay"
+                          className="model-menu flex max-h-72 w-auto min-w-[200px] max-w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-1.5 shadow-overlay"
                         >
                           <ScrollArea className="max-h-60">
                             <div role="menu" data-testid="agent-runtime-list">
@@ -444,7 +439,6 @@ export function AgentsView() {
               providers.find((p) => (p.boundAgentIds ?? []).includes(agent.id)) ??
               (agent.provider ? providers.find((p) => p.id === agent.provider) : undefined) ??
               providers.find((p) => p.boundBackendIds.includes(agent.backendId));
-            const isDelegating = delegatingId === agent.id;
             const permText =
               agent.tools.permissionPreset === 'read-only'
                 ? t('wb.schedules.permRead')
@@ -529,60 +523,27 @@ export function AgentsView() {
                       variant="outline"
                       size="xs"
                       data-testid={`agent-delegate-toggle-${agent.id}`}
-                      onClick={() => {
-                        setDelegatingId(isDelegating ? undefined : agent.id);
-                        setDelegateProject(projects.currentPath ?? projects.recent[0]?.path ?? '');
-                      }}
+                      onClick={() => setDelegatingAgent(agent)}
                     >
                       <SendIcon className="size-3" />
                       <span>{t('wb.agents.delegate')}</span>
                     </Button>
                   </div>
-
-                  {isDelegating ? (
-                    <div className="mt-1 flex flex-col gap-2 rounded-control border border-line bg-inset/50 p-2.5" data-testid={`agent-delegate-box-${agent.id}`}>
-                      <Textarea
-                        data-testid={`agent-delegate-input-${agent.id}`}
-                        rows={2}
-                        value={delegatePrompt}
-                        placeholder={t('wb.agents.delegatePromptPlaceholder')}
-                        onChange={(e) => setDelegatePrompt(e.target.value)}
-                      />
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        {projectOptions.length > 0 ? (
-                          <div className="min-w-36 flex-1">
-                            <Select value={delegateProject || undefined} onValueChange={setDelegateProject}>
-                              <SelectTrigger size="sm" className="w-full" aria-label={t('wb.tasks.selectProject')}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {projectOptions.map(([path, label]) => (
-                                  <SelectItem key={path} value={path}>
-                                    {label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        ) : <span />}
-                        <Button
-                          type="button"
-                          size="sm"
-                          data-testid={`agent-delegate-submit-${agent.id}`}
-                          disabled={!delegatePrompt.trim()}
-                          onClick={() => submitDelegate(agent.id)}
-                        >
-                          {t('wb.agents.delegateConfirm')}
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               </section>
             );
           })}
         </div>
       </div>
+
+      {delegatingAgent ? (
+        <AgentDelegateDialog
+          agent={delegatingAgent}
+          projectOptions={projectOptions}
+          onClose={() => setDelegatingAgent(undefined)}
+          onSubmit={submitDelegate}
+        />
+      ) : null}
     </div>
   );
 }

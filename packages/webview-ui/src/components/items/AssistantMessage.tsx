@@ -27,7 +27,7 @@ export function Reasoning({ text, active }: { text: string; active: boolean }) {
     <div className="reasoning mb-1.5">
       <button
         type="button"
-        className="reasoning__toggle flex w-fit items-center gap-2 py-1 text-[13px] font-medium text-ink-2 transition-colors duration-100 hover:text-ink"
+        className="reasoning__toggle flex w-fit items-center gap-2 py-1 text-[13px] leading-4 font-medium text-ink-2 transition-colors duration-100 hover:text-ink"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
@@ -37,14 +37,14 @@ export function Reasoning({ text, active }: { text: string; active: boolean }) {
           strokeWidth={1.8}
           className={cn('shrink-0', active ? 'text-accent-ink' : 'text-ink-3')}
         />
-        <span className={active ? 'text-accent-ink' : undefined}>{active ? t('reasoning.active') : t('reasoning.done')}</span>
+        <span className={cn('leading-4', active && 'text-accent-ink')}>{active ? t('reasoning.active') : t('reasoning.done')}</span>
         <ChevronDownIcon
- width={13}
- height={13}
- strokeWidth={2}
- className="text-ink-3 transition-transform duration-300"
- style={{ transform: open ? 'rotate(180deg)' : 'rotate(0)' }}
- />
+          width={13}
+          height={13}
+          strokeWidth={2}
+          className="text-ink-3 transition-transform duration-300"
+          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0)' }}
+        />
       </button>
       <CollapsibleDrawer open={open}>
           {open ? (

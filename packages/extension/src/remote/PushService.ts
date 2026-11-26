@@ -15,7 +15,12 @@ import {
   hkdfSync,
   randomBytes,
 } from 'node:crypto';
-import type { RemotePushConfig, RemoteWebhookConfig, RemoteWebhookPreset } from '@harness-deck/shared';
+import type {
+  RemotePushConfig,
+  RemoteWebhookChannelConfig,
+  RemoteWebhookConfig,
+  RemoteWebhookPreset,
+} from '@harness-deck/shared';
 import type { KeyValueStore } from '../host/HostPlatform.ts';
 import type { DeviceAuthStore, WebPushSubscriptionRecord } from './DeviceAuthStore.ts';
 
@@ -90,6 +95,22 @@ function parseVapidKeys(raw: unknown): VapidKeyPair | undefined {
   return { publicKey: obj.publicKey, privateJwk: jwk };
 }
 
+function normalizeChannelConfig(raw: unknown): RemoteWebhookChannelConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const url = typeof obj.url === 'string' ? obj.url.trim() : '';
+  const secret = typeof obj.secret === 'string' && obj.secret.trim() ? obj.secret.trim() : undefined;
+  const chatId = typeof obj.chatId === 'string' && obj.chatId.trim() ? obj.chatId.trim() : undefined;
+  const group = typeof obj.group === 'string' && obj.group.trim() ? obj.group.trim() : undefined;
+  if (!url && !secret && !chatId && !group) return undefined;
+  return {
+    url,
+    ...(secret ? { secret } : {}),
+    ...(chatId ? { chatId } : {}),
+    ...(group ? { group } : {}),
+  };
+}
+
 function parsePushConfig(raw: unknown): StoredRemotePushConfig {
   if (!raw || typeof raw !== 'object') return DEFAULT_PUSH_CONFIG;
   const obj = raw as Record<string, unknown>;
@@ -98,7 +119,29 @@ function parsePushConfig(raw: unknown): StoredRemotePushConfig {
     typeof wh.preset === 'string' && VALID_PRESETS.has(wh.preset as RemoteWebhookPreset)
       ? (wh.preset as RemoteWebhookPreset)
       : 'bark';
-  const secret = typeof wh.secret === 'string' && wh.secret.trim() ? wh.secret.trim() : undefined;
+
+  const channels: Partial<Record<RemoteWebhookPreset, RemoteWebhookChannelConfig>> = {};
+  if (wh.channels && typeof wh.channels === 'object') {
+    for (const [k, v] of Object.entries(wh.channels as Record<string, unknown>)) {
+      if (!VALID_PRESETS.has(k as RemoteWebhookPreset)) continue;
+      const parsed = normalizeChannelConfig(v);
+      if (parsed) channels[k as RemoteWebhookPreset] = parsed;
+    }
+  }
+
+  // 兼容旧版单套 url/secret 持久化结构：自动迁移到当前 preset 对应的独立渠道槽位
+  const legacyActive = normalizeChannelConfig({
+    url: wh.url,
+    secret: wh.secret,
+    chatId: wh.chatId,
+    group: wh.group,
+  });
+  if (legacyActive && !channels[preset]) {
+    channels[preset] = legacyActive;
+  }
+
+  const activeChannel = channels[preset];
+  const hasAnyChannels = Object.keys(channels).length > 0;
   return {
     webPushEnabled: typeof obj.webPushEnabled === 'boolean' ? obj.webPushEnabled : DEFAULT_PUSH_CONFIG.webPushEnabled,
     suppressWhenFocused:
@@ -108,8 +151,11 @@ function parsePushConfig(raw: unknown): StoredRemotePushConfig {
     webhook: {
       enabled: typeof wh.enabled === 'boolean' ? wh.enabled : false,
       preset,
-      url: typeof wh.url === 'string' ? wh.url : '',
-      ...(secret ? { secret } : {}),
+      url: activeChannel?.url ?? '',
+      ...(activeChannel?.secret ? { secret: activeChannel.secret } : {}),
+      ...(activeChannel?.chatId ? { chatId: activeChannel.chatId } : {}),
+      ...(activeChannel?.group ? { group: activeChannel.group } : {}),
+      ...(hasAnyChannels ? { channels } : {}),
     },
   };
 }
@@ -178,50 +224,76 @@ function escapeHtml(text: string): string {
   return text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
 }
 
+function parseHttpUrl(raw: string): URL | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildAuthHeader(token: string | undefined): string | undefined {
+  const trimmed = token?.trim();
+  if (!trimmed) return undefined;
+  if (/^(?:Bearer|Basic)\s+/iu.test(trimmed)) return trimmed;
+  return `Bearer ${trimmed}`;
+}
+
 export function formatWebhookRequest(
   config: RemoteWebhookConfig,
   payload: PushPayload,
   nowMs = Date.now(),
 ): { readonly url: string; readonly headers: Record<string, string>; readonly body: string } | undefined {
   const rawUrl = config.url.trim();
-  if (!rawUrl) return undefined;
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
-  } catch {
-    return undefined;
-  }
-
   const linkUrl = payload.externalUrl ?? payload.url;
   const secret = config.secret?.trim() || undefined;
-  const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
+  const chatIdField = config.chatId?.trim() || undefined;
+  const groupField = config.group?.trim() || undefined;
+  const jsonHeaders: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' };
 
   switch (config.preset) {
-    case 'bark':
+    case 'bark': {
+      // Bark 支持直接粘贴完整 URL，也支持只填 Device Key（自动补全官方服务器前缀）
+      let targetUrl = parseHttpUrl(rawUrl);
+      if (!targetUrl && rawUrl && !/[\s/?#]/u.test(rawUrl)) {
+        targetUrl = parseHttpUrl(`https://api.day.app/${encodeURIComponent(rawUrl)}/`);
+      }
+      if (!targetUrl) return undefined;
       return {
-        url: parsed.toString(),
+        url: targetUrl.toString(),
         headers: jsonHeaders,
         body: JSON.stringify({
           title: payload.title,
           body: payload.body,
-          group: 'Halo',
+          group: groupField || 'Halo',
           ...(linkUrl ? { url: linkUrl } : {}),
         }),
       };
+    }
 
-    case 'ntfy':
+    case 'ntfy': {
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed) return undefined;
+      const auth = buildAuthHeader(secret);
       return {
         url: parsed.toString(),
         headers: {
           'Content-Type': 'text/plain; charset=utf-8',
           Title: payload.title,
           ...(linkUrl && /^https?:\/\//iu.test(linkUrl) ? { Click: linkUrl } : {}),
+          ...(auth ? { Authorization: auth } : {}),
         },
         body: payload.body,
       };
+    }
 
     case 'feishu': {
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed) return undefined;
       const timestamp = String(Math.floor(nowMs / 1000));
       const sign = secret
         ? createHmac('sha256', `${timestamp}\n${secret}`).update('').digest('base64')
@@ -249,6 +321,8 @@ export function formatWebhookRequest(
     }
 
     case 'wecom': {
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed) return undefined;
       const mdLines = [`**${payload.title}**`, payload.body];
       if (linkUrl && /^https?:\/\//iu.test(linkUrl)) {
         mdLines.push(`[打开会话](${linkUrl})`);
@@ -264,6 +338,8 @@ export function formatWebhookRequest(
     }
 
     case 'dingtalk': {
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed) return undefined;
       const targetUrl = new URL(parsed.toString());
       if (secret) {
         const timestamp = String(nowMs);
@@ -286,9 +362,24 @@ export function formatWebhookRequest(
     }
 
     case 'telegram': {
-      const targetUrl = new URL(parsed.toString());
-      const chatId = targetUrl.searchParams.get('chat_id')?.trim() || secret;
-      targetUrl.searchParams.delete('chat_id');
+      // 支持两种配置：
+      // 1. 新版分字段：secret = Bot Token，chatId = Chat ID，url 可选（自定义反代 API 根地址，默认 https://api.telegram.org）
+      // 2. 兼容旧版完整 URL：https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>
+      const parsed = parseHttpUrl(rawUrl);
+      let targetUrl: URL | undefined;
+      let chatId = chatIdField;
+
+      if (parsed && /\/bot[^/]+\/sendMessage/iu.test(parsed.pathname)) {
+        targetUrl = new URL(parsed.toString());
+        chatId = targetUrl.searchParams.get('chat_id')?.trim() || chatId || secret;
+        targetUrl.searchParams.delete('chat_id');
+      } else if (secret) {
+        const base = parsed ? parsed.toString().replace(/\/+$/u, '') : 'https://api.telegram.org';
+        const token = secret.replace(/^bot/iu, '');
+        targetUrl = parseHttpUrl(`${base}/bot${token}/sendMessage`);
+      }
+
+      if (!targetUrl) return undefined;
       const lines = [`<b>${escapeHtml(payload.title)}</b>`, escapeHtml(payload.body)];
       if (linkUrl && /^https?:\/\//iu.test(linkUrl)) {
         lines.push(`<a href="${escapeHtml(linkUrl)}">Open Session</a>`);
@@ -306,6 +397,8 @@ export function formatWebhookRequest(
     }
 
     case 'slack': {
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed) return undefined;
       const linkSuffix = linkUrl && /^https?:\/\//iu.test(linkUrl) ? `\n<${linkUrl}|Open Session>` : '';
       return {
         url: parsed.toString(),
@@ -317,6 +410,8 @@ export function formatWebhookRequest(
     }
 
     case 'discord': {
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed) return undefined;
       const color = payload.kind === 'unexpectedExit' ? 0xef4444 : payload.kind === 'attention' ? 0xf59e0b : 0x3b82f6;
       return {
         url: parsed.toString(),
@@ -334,10 +429,16 @@ export function formatWebhookRequest(
       };
     }
 
-    default:
+    default: {
+      const parsed = parseHttpUrl(rawUrl);
+      if (!parsed) return undefined;
+      const auth = buildAuthHeader(secret);
       return {
         url: parsed.toString(),
-        headers: jsonHeaders,
+        headers: {
+          ...jsonHeaders,
+          ...(auth ? { Authorization: auth } : {}),
+        },
         body: JSON.stringify({
           event: payload.kind,
           title: payload.title,
@@ -347,6 +448,7 @@ export function formatWebhookRequest(
           timestamp: nowMs,
         }),
       };
+    }
   }
 }
 
@@ -396,15 +498,68 @@ export class PushService {
       readonly preset?: RemoteWebhookPreset;
       readonly url?: string;
       readonly secret?: string;
+      readonly chatId?: string;
+      readonly group?: string;
     };
   }): Promise<RemotePushConfig> {
+    const prevWebhook = this.config.webhook;
+    const prevPreset = prevWebhook.preset;
+    const nextPreset = patch.webhook?.preset ?? prevPreset;
+
+    const channels: Partial<Record<RemoteWebhookPreset, RemoteWebhookChannelConfig>> = {
+      ...(prevWebhook.channels ?? {}),
+    };
+
+    // 先将当前激活渠道已填内容同步回渠道表，确保切走时不会丢失
+    const prevActive = normalizeChannelConfig({
+      url: prevWebhook.url,
+      secret: prevWebhook.secret,
+      chatId: prevWebhook.chatId,
+      group: prevWebhook.group,
+    });
+    if (prevActive) {
+      channels[prevPreset] = prevActive;
+    }
+
+    // 读取目标渠道原有配置，并合并本次针对目标渠道的字段更新
+    const baseChannel = channels[nextPreset];
+    const hasFieldPatch =
+      patch.webhook?.url !== undefined ||
+      patch.webhook?.secret !== undefined ||
+      patch.webhook?.chatId !== undefined ||
+      patch.webhook?.group !== undefined;
+
+    const nextUrl = patch.webhook?.url !== undefined ? patch.webhook.url.trim() : (baseChannel?.url ?? '');
     const nextSecret =
-      patch.webhook?.secret !== undefined ? patch.webhook.secret.trim() : this.config.webhook.secret;
+      patch.webhook?.secret !== undefined ? patch.webhook.secret.trim() : (baseChannel?.secret ?? '');
+    const nextChatId =
+      patch.webhook?.chatId !== undefined ? patch.webhook.chatId.trim() : (baseChannel?.chatId ?? '');
+    const nextGroup =
+      patch.webhook?.group !== undefined ? patch.webhook.group.trim() : (baseChannel?.group ?? '');
+
+    if (hasFieldPatch) {
+      const merged = normalizeChannelConfig({
+        url: nextUrl,
+        secret: nextSecret,
+        chatId: nextChatId,
+        group: nextGroup,
+      });
+      if (merged) {
+        channels[nextPreset] = merged;
+      } else {
+        delete channels[nextPreset];
+      }
+    }
+
+    const hasAnyChannels = Object.keys(channels).length > 0;
     const nextWebhook: RemoteWebhookConfig = {
-      enabled: patch.webhook?.enabled ?? this.config.webhook.enabled,
-      preset: patch.webhook?.preset ?? this.config.webhook.preset,
-      url: patch.webhook?.url !== undefined ? patch.webhook.url.trim() : this.config.webhook.url,
+      enabled: patch.webhook?.enabled ?? prevWebhook.enabled,
+      preset: nextPreset,
+      url: nextUrl,
       ...(nextSecret ? { secret: nextSecret } : {}),
+      ...(nextChatId ? { chatId: nextChatId } : {}),
+      ...(nextGroup ? { group: nextGroup } : {}),
+      ...(hasAnyChannels ? { channels } : {}),
     };
     this.config = {
       webPushEnabled: patch.webPushEnabled ?? this.config.webPushEnabled,
@@ -467,7 +622,7 @@ export class PushService {
       }
     }
 
-    if (this.config.webhook.enabled && this.config.webhook.url.trim()) {
+    if (this.config.webhook.enabled) {
       const req = formatWebhookRequest(this.config.webhook, payload);
       if (req) {
         try {

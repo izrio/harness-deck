@@ -601,6 +601,64 @@ describe('HD-27 PushService', () => {
     expect(JSON.parse(discord!.body)).toMatchObject({
       embeds: [{ title: 'Halo', description: 'Approve bash', url: 'https://demo.trycloudflare.com/?session=s-42' }],
     });
+
+    // 方案 A 渠道专属字段：Bark 纯 Device Key + 自定义分组、ntfy Bearer Token、Telegram 分字段 Token + Chat ID + 代理、Custom Bearer Token
+    const barkKeyOnly = formatWebhookRequest(
+      { enabled: true, preset: 'bark', url: 'myDeviceKey123', group: 'Work' },
+      payload,
+    );
+    expect(barkKeyOnly!.url).toBe('https://api.day.app/myDeviceKey123/');
+    expect(JSON.parse(barkKeyOnly!.body)).toMatchObject({ title: 'Halo', group: 'Work' });
+
+    const ntfyAuth = formatWebhookRequest(
+      { enabled: true, preset: 'ntfy', url: 'https://ntfy.sh/halo-secret', secret: 'tk_abc' },
+      payload,
+    );
+    expect(ntfyAuth!.headers.Authorization).toBe('Bearer tk_abc');
+
+    const telegramSplit = formatWebhookRequest(
+      { enabled: true, preset: 'telegram', url: 'https://tg-proxy.example.com/', secret: '123456:AAH_tok', chatId: '-100999' },
+      payload,
+    );
+    expect(telegramSplit!.url).toBe('https://tg-proxy.example.com/bot123456:AAH_tok/sendMessage');
+    expect(JSON.parse(telegramSplit!.body)).toMatchObject({ chat_id: '-100999', parse_mode: 'HTML' });
+
+    const customAuth = formatWebhookRequest(
+      { enabled: true, preset: 'custom', url: 'http://192.168.1.50:8080/hook', secret: 'my-token' },
+      payload,
+    );
+    expect(customAuth!.headers.Authorization).toBe('Bearer my-token');
+  });
+
+  it('PushService 按渠道独立保存配置，切换渠道互不覆盖且切回即恢复', async () => {
+    const kv = new MemoryKVStore();
+    const devices = new DeviceAuthStore(kv);
+    const fetched: { url: string; body: string }[] = [];
+    const push = new PushService(kv, devices, {
+      isWindowFocused: () => false,
+      fetchImpl: (async (url, init) => {
+        fetched.push({ url: String(url), body: String(init?.body ?? '') });
+        return new Response('ok', { status: 200 });
+      }) as typeof fetch,
+    });
+
+    await push.updateConfig({
+      webhook: { enabled: true, preset: 'feishu', url: 'https://open.feishu.cn/open-apis/bot/v2/hook/abc', secret: 'fs-sec' },
+    });
+    // 切到 Telegram 并使用分字段 Token + Chat ID（不填 url）
+    await push.updateConfig({ webhook: { preset: 'telegram' } });
+    expect(push.getConfig().webhook.url).toBe('');
+    expect(push.getConfig().webhook.secret).toBeUndefined();
+
+    await push.updateConfig({ webhook: { secret: '111:TOKEN', chatId: '222' } });
+    const dispatchRes = await push.dispatch({ kind: 'test', title: 'Halo', body: 'Ping' }, { ignoreFocusCheck: true });
+    expect(dispatchRes.webhookSent).toBe(true);
+    expect(fetched.at(-1)?.url).toBe('https://api.telegram.org/bot111:TOKEN/sendMessage');
+
+    // 切回飞书时完整恢复原飞书配置
+    await push.updateConfig({ webhook: { preset: 'feishu' } });
+    expect(push.getConfig().webhook.url).toBe('https://open.feishu.cn/open-apis/bot/v2/hook/abc');
+    expect(push.getConfig().webhook.secret).toBe('fs-sec');
   });
 });
 

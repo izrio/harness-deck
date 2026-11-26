@@ -35,11 +35,11 @@ export function ContextChips({
       {pinned.map((a) => (
         <span
           key={a.id}
-          className="chip inline-flex h-6.5 max-w-full min-w-0 items-center gap-1.5 rounded-chip bg-field py-0.5 pr-1 pl-2 text-[11.5px] text-ink-2 shadow-hairline"
+          className="chip inline-flex h-6.5 max-w-full min-w-0 items-center gap-1.5 rounded-chip bg-field py-0.5 pr-1 pl-2 text-[11.5px] leading-4 text-ink-2 shadow-hairline"
           title={t('chip.pinnedTitle', a.startLine ? t('chip.lines', a.path, a.startLine, a.endLine ?? a.startLine) : a.path)}
         >
           {a.kind === 'selection' ? <SelectionIcon className="size-3 shrink-0 text-ink-3" /> : <FileIcon className="size-3 shrink-0 text-ink-3" />}
-          <span className="chip__label min-w-0 truncate font-mono">{attachmentLabel(a)}</span>
+          <span className="chip__label min-w-0 truncate font-mono leading-4">{attachmentLabel(a)}</span>
           <button
             type="button"
             className="chip__remove inline-flex size-5 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-colors duration-100 hover:bg-line/70 hover:text-ink"
@@ -54,7 +54,7 @@ export function ContextChips({
         <button
           type="button"
           className={cn(
-            'chip chip--active inline-flex h-6.5 max-w-full min-w-0 items-center gap-1.5 rounded-chip px-2 text-[11.5px] transition-colors duration-100',
+            'chip chip--active inline-flex h-6.5 max-w-full min-w-0 items-center gap-1.5 rounded-chip px-2 text-[11.5px] leading-4 transition-colors duration-100',
             included
               ? 'bg-field text-ink-2 shadow-hairline hover:bg-hover hover:text-ink'
               : 'chip--excluded border border-dashed border-line-strong bg-transparent text-ink-3 hover:bg-hover',
@@ -69,8 +69,8 @@ export function ContextChips({
           data-testid="active-context"
         >
           {active.kind === 'selection' ? <SelectionIcon className="size-3 shrink-0 text-ink-3" /> : <FileIcon className="size-3 shrink-0 text-ink-3" />}
-          <span className={cn('chip__label min-w-0 truncate font-mono', !included && 'line-through')}>{attachmentLabel(active)}</span>
-          <span className="chip__hint shrink-0 text-ink-3">{active.kind === 'selection' ? t('chip.selection') : t('chip.file')}</span>
+          <span className={cn('chip__label min-w-0 truncate font-mono leading-4', !included && 'line-through')}>{attachmentLabel(active)}</span>
+          <span className="chip__hint shrink-0 leading-4 text-ink-3">{active.kind === 'selection' ? t('chip.selection') : t('chip.file')}</span>
         </button>
       ) : null}
     </div>

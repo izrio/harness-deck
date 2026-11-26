@@ -365,15 +365,15 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                   variant="ghost"
                   size="xs"
                   data-testid="changes-branch-trigger"
-                  className="min-w-0 max-w-[168px] font-mono text-[11.5px] font-medium text-ink hover:bg-hover"
+                  className="min-w-0 max-w-[168px] gap-1.5 px-2 font-mono text-[11.5px] leading-4 font-medium text-ink hover:bg-hover"
                 >
                   <GitBranchIcon className="size-3.5 shrink-0 text-accent-ink" />
-                  <span className="min-w-0 truncate">{state.branch ?? 'HEAD'}</span>
-                  <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+                  <span className="min-w-0 truncate leading-4">{state.branch ?? 'HEAD'}</span>
+                  <ChevronDownIcon className="-ml-0.5 size-3 shrink-0 text-ink-3" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="start" sideOffset={6} className="w-64 max-w-[calc(100vw-24px)] overflow-hidden p-2">
-                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+              <PopoverContent align="start" sideOffset={6} className="w-64 max-w-[calc(100vw-24px)] overflow-hidden p-1.5">
+                <div className="mb-1 flex items-center justify-between gap-2 px-2 pt-0.5">
                   <span className="truncate text-[11px] font-medium text-ink-3">{t('wb.changes.switchBranch')}</span>
                   {state.remote ? (
                     <Button
@@ -394,55 +394,57 @@ export function ChangesView({ compact = false }: { readonly compact?: boolean } 
                   ) : null}
                 </div>
                 <ScrollArea className="max-h-44">
-                  {(state.branches ?? []).map((b) => {
-                    const current = b === state.branch;
-                    if (current) {
+                  <div className="flex flex-col gap-0.5">
+                    {(state.branches ?? []).map((b) => {
+                      const current = b === state.branch;
+                      if (current) {
+                        return (
+                          <button
+                            key={b}
+                            type="button"
+                            data-testid={`changes-branch-item-${b}`}
+                            disabled={busy}
+                            onClick={() => checkoutBranch(b)}
+                            className="flex w-full items-center justify-between gap-2 rounded-control bg-field px-2 py-1.5 text-left text-[12px] leading-4 font-medium text-ink transition-colors hover:bg-hover"
+                          >
+                            <span className="truncate font-mono text-[11.5px] leading-4">{b}</span>
+                            <CheckIcon className="size-3.5 shrink-0 text-accent-ink" />
+                          </button>
+                        );
+                      }
                       return (
-                        <button
+                        <div
                           key={b}
-                          type="button"
-                          data-testid={`changes-branch-item-${b}`}
-                          disabled={busy}
-                          onClick={() => checkoutBranch(b)}
-                          className="flex w-full items-center justify-between gap-2 rounded-control bg-field px-2 py-1 text-left text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                          className="group/branch flex items-center gap-0.5 rounded-control transition-colors hover:bg-hover"
                         >
-                          <span className="truncate font-mono text-[11.5px]">{b}</span>
-                          <CheckIcon className="size-3.5 shrink-0 text-accent-ink" />
-                        </button>
+                          <button
+                            type="button"
+                            data-testid={`changes-branch-item-${b}`}
+                            disabled={busy}
+                            onClick={() => checkoutBranch(b)}
+                            className="flex min-w-0 flex-1 items-center rounded-control px-2 py-1.5 text-left text-[12px] leading-4 text-ink-2 transition-colors hover:text-ink"
+                          >
+                            <span className="truncate font-mono text-[11.5px] leading-4">{b}</span>
+                          </button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            data-testid={`changes-branch-delete-${b}`}
+                            disabled={busy}
+                            aria-label={t('wb.changes.deleteBranchNamed', b)}
+                            title={t('wb.changes.deleteBranch')}
+                            onClick={() => requestDeleteBranch(b)}
+                            className="shrink-0 text-ink-3/65 transition-colors hover:bg-red-tint hover:text-red group-hover/branch:text-ink-2"
+                          >
+                            <TrashIcon className="size-3" />
+                          </Button>
+                        </div>
                       );
-                    }
-                    return (
-                      <div
-                        key={b}
-                        className="group/branch flex items-center gap-0.5 rounded-control transition-colors hover:bg-hover"
-                      >
-                        <button
-                          type="button"
-                          data-testid={`changes-branch-item-${b}`}
-                          disabled={busy}
-                          onClick={() => checkoutBranch(b)}
-                          className="flex min-w-0 flex-1 items-center rounded-control px-2 py-1 text-left text-[12px] text-ink-2 transition-colors hover:text-ink"
-                        >
-                          <span className="truncate font-mono text-[11.5px]">{b}</span>
-                        </button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          data-testid={`changes-branch-delete-${b}`}
-                          disabled={busy}
-                          aria-label={t('wb.changes.deleteBranchNamed', b)}
-                          title={t('wb.changes.deleteBranch')}
-                          onClick={() => requestDeleteBranch(b)}
-                          className="shrink-0 text-ink-3/65 transition-colors hover:bg-red-tint hover:text-red group-hover/branch:text-ink-2"
-                        >
-                          <TrashIcon className="size-3" />
-                        </Button>
-                      </div>
-                    );
-                  })}
+                    })}
+                  </div>
                 </ScrollArea>
-                <div className="mt-2 flex items-center gap-1 border-t border-line pt-2">
+                <div className="mt-1.5 flex items-center gap-1 border-t border-line pt-1.5">
                   <Input
                     size="xs"
                     value={newBranchName}

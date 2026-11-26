@@ -48,7 +48,7 @@
   "command.selectBackend": "Switch Agent",
   "command.selectChannel": "Switch Model Channel / Official Account",
   "command.loginAccount": "Sign In Official Agent Account",
-  "config.defaultBackend": "Default agent ID started on launch (for example `dsh`, `claude`, `codex`, `codebuddy`, `pi`, `zcode`, `antigravity`, `opencode`, or a custom ACP agent ID). Selecting an agent in Settings updates this automatically.",
+  "config.defaultBackend": "Default agent ID started on launch (defaults to `claude` on first launch; supports `claude`, `dsh`, `codex`, `codebuddy`, `pi`, `zcode`, `antigravity`, `opencode`, or a custom ACP agent ID). Selecting an agent in Settings updates this automatically.",
   "config.backends": "Extra agents reachable over ACP (Agent Client Protocol). DeepSeek (dsh), Claude Code (`claude -p`), Codex (`codex app-server`), CodeBuddy (`codebuddy -p`), Pi (`pi --mode rpc`), ZCode (`zcode app-server --stdio`), OpenCode (`opencode acp`) and Antigravity (`agy acp`) are built in; an entry with the `id` of a built-in ACP one (`opencode`, `antigravity`) replaces it, for example to give the full path of the command. Each entry needs a `name` and the `command` (plus `args`) that starts the agent in ACP mode. Switch from the chat panel's Settings page or the \"Switch Agent\" command.",
   "config.backends.id": "Stable id (defaults to the name). Sessions and tabs are remembered per id.",
   "config.backends.name": "Name shown in the panel, e.g. `oh-my-pi`.",

@@ -306,7 +306,7 @@ export function AccountSettings() {
           </>
         }
       >
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4">
           {backends.map((backend) => (
             <BackendAccountCard
               key={backend.id}
@@ -906,28 +906,29 @@ function BackendAccountCard({
 
       {/* 官方账号列表 */}
       {accounts.length > 0 ? (
-        <div className="flex flex-col gap-0.5 px-2 pb-2">
-          {accounts.map((acc) => {
-            const isCurrent = activeMode === 'official' && activeAccountId === acc.id;
-            const canEdit = true;
-            const statusKey = `settings.accounts.status.${acc.status}` as const;
-            const showUse = !isCurrent;
-            const showLogin = accountCap?.loginKind !== 'api-key' || acc.isSystemDefault;
-            const showLogout = acc.status === 'authenticated' || acc.status === 'expired';
-            const showDelete = !acc.isSystemDefault;
-            const hasPrimary = showUse || showLogin || canEdit;
-            const hasSecondary = showLogout || showDelete;
-            const visibleQuotaWindows = (acc.quota?.windows ?? []).filter(
-              (win) => win.label.trim().toLowerCase() !== '3p',
-            );
-            const showIdentity = Boolean(acc.identity && acc.identity !== acc.label);
+        <div className="px-4">
+          <div className="flex flex-col divide-y divide-line/55 border-t border-line/55">
+            {accounts.map((acc) => {
+              const isCurrent = activeMode === 'official' && activeAccountId === acc.id;
+              const canEdit = true;
+              const statusKey = `settings.accounts.status.${acc.status}` as const;
+              const showUse = !isCurrent;
+              const showLogin = accountCap?.loginKind !== 'api-key' || acc.isSystemDefault;
+              const showLogout = acc.status === 'authenticated' || acc.status === 'expired';
+              const showDelete = !acc.isSystemDefault;
+              const hasPrimary = showUse || showLogin || canEdit;
+              const hasSecondary = showLogout || showDelete;
+              const visibleQuotaWindows = (acc.quota?.windows ?? []).filter(
+                (win) => win.label.trim().toLowerCase() !== '3p',
+              );
+              const showIdentity = Boolean(acc.identity && acc.identity !== acc.label);
 
-            return (
-              <div
-                key={acc.id}
-                data-testid={`account-row-${acc.id}`}
-                className="flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 transition-colors hover:bg-canvas/70 dark:hover:bg-hover/35"
-              >
+              return (
+                <div
+                  key={acc.id}
+                  data-testid={`account-row-${acc.id}`}
+                  className="flex items-center justify-between gap-3 py-3"
+                >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <span
@@ -1052,8 +1053,9 @@ function BackendAccountCard({
                   </div>
                 ) : null}
               </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       ) : null}
     </Card>

@@ -51,7 +51,7 @@ describe('模型选择', () => {
     const active = document.querySelector('[data-testid="model-list"] .menu-item--active');
     expect(active?.textContent).toContain('V4.1-Flash');
     expect(active?.querySelector('.model-item__check svg')).not.toBeNull();
-    expect(active?.querySelector('.menu-item__hint')?.textContent).toBe('Medium');
+    expect(active?.querySelector('.menu-item__hint')).toBeNull();
     expect(active?.querySelector('[data-testid="model-rate"]')?.textContent).toBe('0.11x');
     expect(items[1]?.querySelector('[data-testid="model-rate"]')).toBeNull();
     expect(screen.getByTestId('model-picker-rate').textContent).toBe('0.11x');

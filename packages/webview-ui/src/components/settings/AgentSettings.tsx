@@ -176,7 +176,6 @@ export function AgentSettings() {
       <SettingsSection
         title={t('settings.backends')}
         testId="settings-backends"
-        surface="plain"
         actions={
           <>
             <Button
@@ -200,7 +199,7 @@ export function AgentSettings() {
           </>
         }
       >
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col divide-y divide-line/55 px-4">
           {backends.items.map((backend) => {
             const channel = accounts.channels[backend.id] ?? backend.activeChannel;
             const boundProvider =

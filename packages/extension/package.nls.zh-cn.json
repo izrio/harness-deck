@@ -48,7 +48,7 @@
   "command.selectBackend": "切换智能体",
   "command.selectChannel": "切换模型渠道 / 官方账号",
   "command.loginAccount": "登录智能体官方账号",
-  "config.defaultBackend": "启动时默认启动的智能体 ID（如 `dsh`、`claude`、`codex`、`codebuddy`、`pi`、`zcode`、`antigravity`、`opencode` 或自定义 ACP 智能体 ID）。在对话面板设置中选中智能体时会自动同步更新。",
+  "config.defaultBackend": "启动时默认启动的智能体 ID（首次默认 `claude`，可选 `claude`、`dsh`、`codex`、`codebuddy`、`pi`、`zcode`、`antigravity`、`opencode` 或自定义 ACP 智能体 ID）。在对话面板设置中选中智能体时会自动同步更新。",
   "config.backends": "额外通过 ACP（Agent Client Protocol）接入的智能体。DeepSeek（dsh）、Claude Code（`claude -p`）、Codex（`codex app-server`）、CodeBuddy（`codebuddy -p`）、Pi（`pi --mode rpc`）、ZCode（`zcode app-server --stdio`）、OpenCode（`opencode acp`）和 Antigravity（`agy acp`）已经内置；`id` 与内置 ACP 项相同（`opencode`、`antigravity`）的一项会替换内置项，例如写上命令的完整路径。每项需要 `name` 和以 ACP 模式启动代理的 `command`（以及 `args`）。在对话面板的「设置」页面或「切换智能体」命令里切换。",
   "config.backends.id": "固定的标识（默认取名称），会话和标签按它分开保存。",
   "config.backends.name": "面板里显示的名称，例如 `oh-my-pi`。",

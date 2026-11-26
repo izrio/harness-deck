@@ -164,11 +164,11 @@ export function ChatCommandSettings() {
             {t('settings.commands.empty')}
           </div>
         ) : (
-          <div className="flex flex-col gap-1 p-1.5">
+          <div className="flex flex-col divide-y divide-line/55 px-4">
             {chatCommands.map((cmd) => (
               <div
                 key={cmd.name}
-                className="flex items-start justify-between gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-canvas/70 dark:hover:bg-hover/35"
+                className="flex items-start justify-between gap-4 py-3.5"
                 data-testid={`chat-command-item-${cmd.name}`}
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-1">

@@ -20,7 +20,6 @@ import {
   UsersIcon,
 } from '../../icons.tsx';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -117,72 +116,71 @@ export function BackendCard({
 
   return (
     <>
-      <Card
-        className="flex-row items-center gap-3.5 rounded-2xl border-0 bg-field/55 px-4 py-3 shadow-none transition-colors hover:bg-field/85 dark:bg-surface/65 dark:hover:bg-surface/90"
+      <div
+        className="flex items-center gap-3.5 py-3.5"
         data-testid={`settings-backend-${backend.id}`}
       >
         <BackendLogo backend={backend} />
 
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[13px] font-semibold text-ink">{backend.name}</span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span
+              className="text-[13px] leading-5 font-semibold text-ink sm:w-28 sm:shrink-0 sm:truncate"
+              title={backend.name}
+            >
+              {backend.name}
+            </span>
 
-            {backend.busy ? (
-              <span className="inline-flex items-center gap-1 text-[11.5px] text-accent-ink">
-                <SpinnerIcon className="size-3" />
-                <span>{t(`settings.backend.busy.${backend.busy}` as MessageKey)}</span>
-              </span>
-            ) : backend.available === undefined ? (
-              <span className="inline-flex items-center gap-1 text-[11.5px] text-ink-3">
-                <SpinnerIcon className="size-3" />
-                <span>{t('backend.checking')}</span>
-              </span>
-            ) : backend.available ? (
-              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-3">
-                <span className="size-1.5 rounded-full bg-green" aria-label={t('backend.installed')} />
-                {backend.version ? (
-                  <code className="font-mono text-[11.5px] text-ink-3">
-                    {t('settings.backend.version', backend.version)}
-                  </code>
-                ) : null}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-orange">
-                <span className="size-1.5 rounded-full bg-orange" />
-                <span>{t('backend.missing')}</span>
-              </span>
-            )}
+            <div className="inline-flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+              {backend.busy ? (
+                <span className="inline-flex items-center gap-1.5 text-[11.5px] leading-none text-accent-ink sm:min-w-[72px]">
+                  <SpinnerIcon className="size-3 shrink-0" />
+                  <span>{t(`settings.backend.busy.${backend.busy}` as MessageKey)}</span>
+                </span>
+              ) : backend.available === undefined ? (
+                <span className="inline-flex items-center gap-1.5 text-[11.5px] leading-none text-ink-3 sm:min-w-[72px]">
+                  <SpinnerIcon className="size-3 shrink-0" />
+                  <span>{t('backend.checking')}</span>
+                </span>
+              ) : backend.available ? (
+                <span className="inline-flex items-center gap-1.5 text-[11.5px] leading-none text-ink-3 tabular-nums sm:min-w-[72px]">
+                  <span className="size-1.5 shrink-0 rounded-full bg-green" aria-label={t('backend.installed')} />
+                  {backend.version ? (
+                    <code className="font-mono text-[11.5px] leading-none text-ink-3">
+                      {t('settings.backend.version', backend.version)}
+                    </code>
+                  ) : null}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-[11.5px] leading-none text-orange">
+                  <span className="size-1.5 shrink-0 rounded-full bg-orange" />
+                  <span>{t('backend.missing')}</span>
+                </span>
+              )}
 
-            {isDefault ? (
-              <span
-                className="rounded-md bg-canvas/85 px-1.5 py-0.5 text-[10.5px] font-medium text-ink-2 dark:bg-page/55"
-                data-testid={`backend-default-badge-${backend.id}`}
-              >
-                {t('settings.backend.default')}
-              </span>
-            ) : null}
+              {isDefault ? (
+                <span
+                  className="inline-flex items-center rounded-md bg-canvas/85 px-1.5 py-0.5 text-[10.5px] leading-4 font-medium text-ink-2 dark:bg-page/55"
+                  data-testid={`backend-default-badge-${backend.id}`}
+                >
+                  {t('settings.backend.default')}
+                </span>
+              ) : null}
 
-            {backend.running ? (
-              <span
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-accent-ink"
-                data-testid={`backend-running-badge-${backend.id}`}
-              >
-                <SpinnerIcon className="size-2.5" />
-                <span>{t('settings.backend.running')}</span>
-              </span>
-            ) : !active && backend.alive ? (
-              <span
-                className="inline-flex items-center gap-1 text-[11px] text-green"
-                data-testid={`backend-alive-badge-${backend.id}`}
-              >
-                <span className="size-1.5 rounded-full bg-green" />
-                <span>{t('settings.backend.alive')}</span>
-              </span>
-            ) : null}
+              {backend.running ? (
+                <span
+                  className="inline-flex items-center gap-1 text-[11px] leading-none font-medium text-accent-ink"
+                  data-testid={`backend-running-badge-${backend.id}`}
+                >
+                  <SpinnerIcon className="size-2.5 shrink-0" />
+                  <span>{t('settings.backend.running')}</span>
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {!backend.npmPackage && backend.available === false && (backend.installHint || backend.command) ? (
-            <p className="mt-1 mb-0 truncate font-mono text-[11.5px] text-ink-3">
+            <p className="mt-1 mb-0 truncate font-mono text-[11.5px] leading-4 text-ink-3">
               {backend.installHint ?? backend.command}
             </p>
           ) : null}
@@ -344,7 +342,7 @@ export function BackendCard({
             </DropdownMenu>
           ) : null}
         </div>
-      </Card>
+      </div>
 
       {backend.npmPackage && backend.npmOwned !== false ? (
         <Dialog open={versionDialogOpen} onOpenChange={setVersionDialogOpen}>

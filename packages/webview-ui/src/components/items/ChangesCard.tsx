@@ -29,7 +29,7 @@ export function Stats({ stats }: { stats: Partial<LineStats> }) {
   if (additions === undefined && deletions === undefined) return null;
   const both = !additions && !deletions;
   return (
-    <span className="stats inline-flex shrink-0 items-center gap-1 font-mono text-[11.5px] tabular-nums">
+    <span className="stats inline-flex shrink-0 items-center gap-1 font-mono text-[11.5px] leading-4 tabular-nums">
       {additions !== undefined && (additions > 0 || both) ? <span className="stats__add text-green">+{additions}</span> : null}
       {deletions !== undefined && deletions > 0 ? <span className="stats__del text-red">−{deletions}</span> : null}
     </span>
@@ -45,18 +45,18 @@ export function ChangesCard({ item }: { item: Of<'changes'> }) {
   );
   return (
     <section className="changes overflow-hidden rounded-xl border border-line/80 bg-surface shadow-xs" aria-label={t('changes.label')}>
-      <header className="changes__header primitive-card-bar flex items-center gap-2 border-b border-line/70 text-[12.5px] font-medium text-ink">
+      <header className="changes__header primitive-card-bar flex items-center gap-2 border-b border-line/70 text-[12.5px] leading-4 font-medium text-ink">
         <DiffIcon className="size-3.5 shrink-0 text-ink-3" />
         <span className="min-w-0 flex-1">{t('changes.title', item.total)}</span>
         <Stats stats={total} />
       </header>
-      <GlideMenu className="p-1" highlightClassName="inset-x-1 rounded-[6px] bg-hover">
-        <ul className="changes__list m-0 list-none p-0">
+      <GlideMenu className="p-1.5" highlightClassName="inset-x-1.5 rounded-[6px] bg-hover">
+        <ul className="changes__list m-0 flex list-none flex-col gap-0.5 p-0">
           {item.files.map((file) => (
             <li key={`${file.path}:${JSON.stringify(file.ref)}`}>
               <ChangedFileButton
                 file={file}
-                className="changes__file relative z-10 flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] transition-colors duration-100"
+                className="changes__file relative z-10 flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12.5px] leading-4 transition-colors duration-100"
               />
             </li>
           ))}

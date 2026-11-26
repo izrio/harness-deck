@@ -45,8 +45,8 @@ Halo introduces stepped sub-`xs` text utilities for metadata, badges, counters, 
 - **Radii Hierarchy**:
   - Small chips / inline code / menu items: `4px–6px` (`rounded-sm` / `rounded-md`)
   - Interactive controls (buttons, inputs, selects): `8px` (`--control-radius: 0.5rem` / `rounded-lg`)
-  - Settings groups & cards: `10px–12px` (`rounded-xl`)
-  - Composer, attached banners, dialogs, message bubbles: `16px` (`rounded-2xl`)
+  - Inset sub-blocks (previews, channel sub-forms): `12px` (`rounded-xl`)
+  - Settings tonal cards, composer, attached banners, dialogs, message bubbles: `16px` (`rounded-2xl`)
   - Pills / scroll-to-bottom / action send buttons: `9999px` (`rounded-full`)
 
 ### Sidebar Hierarchy

@@ -61,6 +61,22 @@
    - **禁止**在业务组件中通过 `className="h-7"`、`className="h-8"`、`className="h-9"`、`className="h-[30px]"` 等内联高度类覆盖 `Input`、`Button`、`NativeSelect`、`SelectTrigger` 的高度，必须通过 `size` 属性表达。
    - **豁免**：无边框内联透明输入（如 `QuestionCard` 中的 `h-auto` 自定义输入）与 `variant="link"` 纯文字链接按钮（`h-auto p-0`）。
 
+## 设置页与分组卡片视觉规范（macOS 设置风格）
+
+设置页及同类分组表单视图（`packages/webview-ui/src/components/settings/*`）统一采用 **macOS 设置风格的「无外框浅底圆角卡片 + 内缩极细横线分割 + 宽松行距呼吸感」**，严禁堆叠多层边框盒子或在卡片内嵌套圆角行胶囊：
+
+1. **分组容器（`SettingsSection`）**：
+   - 分区标题轻落在卡片外（`flex flex-col gap-2.5`，标题 `text-[13px] font-semibold tracking-tight text-ink`，右侧微操作按钮使用 `size="xs"` 或 `size="sm"`）。
+   - 卡片本体使用**无外边框的柔和浅底圆角容器**：`overflow-hidden rounded-2xl bg-field/55 dark:bg-surface/65`（禁止添加外圈 `border` 或沉重阴影）。
+   - 相邻分组之间保持充足留白（`gap-8`）。
+2. **卡片内行间极细横线与宽松行距**：
+   - 行列表容器使用 `flex flex-col divide-y divide-line/55 px-4`，让 `1px` 极细分割线与文本左右内缩对齐（16px inset）；需要整行选中态背景的列表（如最近项目、已保存服务商）使用 `flex flex-col divide-y divide-line/55` 配合行内 `px-4`，使选中底色在 `overflow-hidden` 卡片内齐边铺满。
+   - **宽松呼吸感**：单行开关/下拉/步进器行统一 `py-3.5`、`gap-6`，主标签使用 `text-[13px] leading-5 text-ink`；多行或内含子表单的区块行使用 `py-4`。
+   - **禁止卡片内套圆角行胶囊**：静态开关行与常规列表行不再套 `rounded-xl hover:bg-canvas/65` 嵌套底盒；仅内嵌预览块、渠道子表单或提示条等独立内容块允许使用 `rounded-xl bg-canvas/70 dark:bg-page/50` 轻量内凹面。
+3. **文字对齐与微交互呼吸感**：
+   - 同一行内图标、文字与次级数值（如倍速/计数）必须垂直居中对齐（`inline-flex items-center` + `leading-none` / 匹配行高），禁止因字号差异导致基线漂移。
+   - 渠道/服务商等需要配置指引的设置项，使用离线品牌图标 + 轻量问号 `Popover` 展示配置说明，不把长篇大段说明直接平铺在主表单中破坏留白。
+
 ## 图标规范（Iconify 离线优先）
 
 本项目前端界面（`packages/webview-ui`）中的通用 UI 图标**统一使用 Iconify 生态**，并且**必须支持 VS Code / JetBrains 插件在离线环境与严格 Webview CSP（`default-src 'none'`）下正常渲染，严禁运行时联网拉取图标**。

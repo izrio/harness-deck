@@ -556,8 +556,12 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
       payload: { agentId: 'builtin-architect', projectPath: '/repo/alpha' },
     });
 
-    // 委派任务
+    // 委派任务：Modal 弹窗 + 会话输入框（支持 @ 文件、项目选择与 Cmd/Ctrl+Enter）
     fireEvent.click(screen.getByTestId('agent-delegate-toggle-builtin-architect'));
+    const delegateModal = screen.getByTestId('agent-delegate-dialog');
+    expect(delegateModal.getAttribute('role')).toBe('dialog');
+    expect(delegateModal.getAttribute('aria-modal')).toBe('true');
+    expect(delegateModal.querySelector('[data-testid="agent-delegate-composer"] .composer')).toBeTruthy();
     fireEvent.change(screen.getByTestId('agent-delegate-input-builtin-architect'), {
       target: { value: '梳理工作台模块依赖图' },
     });
@@ -571,6 +575,7 @@ describe('工作台五大模块（总览 / 定时 / 智能体 / 任务 / 项目�
         runImmediately: true,
       },
     });
+    expect(screen.queryByTestId('agent-delegate-dialog')).toBeNull();
 
     // 新建与编辑智能体使用 Modal 弹窗（支持 Escape / 遮罩关闭）
     fireEvent.click(screen.getByTestId('agent-new-btn'));

@@ -137,7 +137,7 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
       )}
       data-testid="composer-footer"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-0.5">
+      <div className="flex min-w-0 flex-1 items-center gap-1">
         {showProject ? (
           <Popover open={projectOpen} onOpenChange={setProjectOpen}>
             <PopoverTrigger asChild>
@@ -148,52 +148,54 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                 disabled={remoteReadOnly}
                 data-testid="composer-project-trigger"
                 title={currentProjectPath ?? currentProjectName}
-                className="min-w-0 max-w-[180px] text-ink-2 hover:bg-hover hover:text-ink max-md:max-w-[132px]"
+                className="min-w-0 max-w-[180px] gap-1.5 px-2 leading-4 text-ink-2 hover:bg-hover hover:text-ink max-md:max-w-[132px]"
               >
                 <FolderIcon className="size-3.5 shrink-0 text-ink-3" />
-                <span className="min-w-0 truncate">{currentProjectName}</span>
-                {!remoteReadOnly ? <ChevronDownIcon className="size-3 shrink-0 text-ink-3" /> : null}
+                <span className="min-w-0 truncate leading-4">{currentProjectName}</span>
+                {!remoteReadOnly ? <ChevronDownIcon className="-ml-0.5 size-3 shrink-0 text-ink-3" /> : null}
               </Button>
             </PopoverTrigger>
             <PopoverContent
               side="top"
               align="start"
               sideOffset={6}
-              className="w-64 p-2"
+              className="w-64 p-1.5"
               data-testid="composer-project-popover"
             >
-              <div className="mb-1.5 px-1 text-[11px] font-medium text-ink-3">
+              <div className="mb-1 px-2 pt-0.5 text-[11px] font-medium text-ink-3">
                 {t('composer.switchProject')}
               </div>
               {projectOptions.length > 0 ? (
                 <ScrollArea className="max-h-48">
-                  {projectOptions.map(([path, name]) => {
-                    const isCurrent = path === currentProjectPath;
-                    return (
-                      <button
-                        key={path}
-                        type="button"
-                        data-testid={`composer-project-item-${name}`}
-                        title={path}
-                        onClick={() => handleSelectProject(path)}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-control px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-hover',
-                          isCurrent ? 'bg-field font-medium text-ink' : 'text-ink-2',
-                        )}
-                      >
-                        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                          <FolderIcon className="size-3.5 shrink-0 text-ink-3" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate leading-4">{name}</span>
-                            <span className="block truncate font-mono text-[10px] leading-3.5 text-ink-3">
-                              {path}
+                  <div className="flex flex-col gap-0.5">
+                    {projectOptions.map(([path, name]) => {
+                      const isCurrent = path === currentProjectPath;
+                      return (
+                        <button
+                          key={path}
+                          type="button"
+                          data-testid={`composer-project-item-${name}`}
+                          title={path}
+                          onClick={() => handleSelectProject(path)}
+                          className={cn(
+                            'flex w-full items-center justify-between gap-2 rounded-control px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-hover',
+                            isCurrent ? 'bg-field font-medium text-ink' : 'text-ink-2',
+                          )}
+                        >
+                          <span className="flex min-w-0 flex-1 items-center gap-2">
+                            <FolderIcon className="size-3.5 shrink-0 text-ink-3" />
+                            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                              <span className="block truncate leading-4">{name}</span>
+                              <span className="block truncate font-mono text-[10px] leading-3.5 text-ink-3">
+                                {path}
+                              </span>
                             </span>
                           </span>
-                        </span>
-                        {isCurrent ? <CheckIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
-                      </button>
-                    );
-                  })}
+                          {isCurrent ? <CheckIcon className="size-3.5 shrink-0 text-accent-ink" /> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </ScrollArea>
               ) : (
                 <div className="px-2 py-1.5 text-[11.5px] text-ink-3">{t('composer.noProjects')}</div>
@@ -205,13 +207,13 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                     variant="ghost"
                     size="xs"
                     data-testid="composer-add-project"
-                    className="w-full justify-start text-ink-2 hover:text-ink"
+                    className="w-full justify-start gap-2 px-2 text-ink-2 hover:text-ink"
                     onClick={() => {
                       setProjectOpen(false);
                       postToHost({ type: 'addRecentProject', payload: {} });
                     }}
                   >
-                    <PlusIcon className="size-3" />
+                    <PlusIcon className="size-3.5 shrink-0" />
                     <span>{t('wb.sessions.addProject')}</span>
                   </Button>
                 </div>
@@ -230,21 +232,21 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                   size="xs"
                   data-testid="composer-branch-trigger"
                   title={`${t('wb.changes.branch')}: ${currentBranch}`}
-                  className="min-w-0 max-w-[160px] font-mono text-ink-2 hover:bg-hover hover:text-ink max-md:max-w-[124px]"
+                  className="min-w-0 max-w-[160px] gap-1.5 px-2 font-mono leading-4 text-ink-2 hover:bg-hover hover:text-ink max-md:max-w-[124px]"
                 >
                   <GitBranchIcon className="size-3.5 shrink-0 text-ink-3" />
-                  <span className="min-w-0 truncate">{currentBranch}</span>
-                  <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+                  <span className="min-w-0 truncate leading-4">{currentBranch}</span>
+                  <ChevronDownIcon className="-ml-0.5 size-3 shrink-0 text-ink-3" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent
                 side="top"
                 align="start"
                 sideOffset={6}
-                className="w-64 max-w-[calc(100vw-24px)] overflow-hidden p-2"
+                className="w-64 max-w-[calc(100vw-24px)] overflow-hidden p-1.5"
                 data-testid="composer-branch-popover"
               >
-                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+                <div className="mb-1 flex items-center justify-between gap-2 px-2 pt-0.5">
                   <span className="truncate text-[11px] font-medium text-ink-3">
                     {t('wb.changes.switchBranch')}
                   </span>
@@ -268,55 +270,57 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                   ) : null}
                 </div>
                 <ScrollArea className="max-h-44">
-                  {branches.map((branch) => {
-                    const isCurrent = branch === currentBranch;
-                    if (isCurrent) {
+                  <div className="flex flex-col gap-0.5">
+                    {branches.map((branch) => {
+                      const isCurrent = branch === currentBranch;
+                      if (isCurrent) {
+                        return (
+                          <button
+                            key={branch}
+                            type="button"
+                            data-testid={`composer-branch-item-${branch}`}
+                            disabled={branchBusy}
+                            onClick={() => checkoutBranch(branch)}
+                            className="flex w-full items-center justify-between gap-2 rounded-control bg-field px-2 py-1.5 text-left text-[12px] leading-4 font-medium text-ink transition-colors hover:bg-hover"
+                          >
+                            <span className="truncate font-mono text-[11.5px] leading-4">{branch}</span>
+                            <CheckIcon className="size-3.5 shrink-0 text-accent-ink" />
+                          </button>
+                        );
+                      }
                       return (
-                        <button
+                        <div
                           key={branch}
-                          type="button"
-                          data-testid={`composer-branch-item-${branch}`}
-                          disabled={branchBusy}
-                          onClick={() => checkoutBranch(branch)}
-                          className="flex w-full items-center justify-between gap-2 rounded-control bg-field px-2 py-1 text-left text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                          className="group/branch flex items-center gap-0.5 rounded-control transition-colors hover:bg-hover"
                         >
-                          <span className="truncate font-mono text-[11.5px]">{branch}</span>
-                          <CheckIcon className="size-3.5 shrink-0 text-accent-ink" />
-                        </button>
+                          <button
+                            type="button"
+                            data-testid={`composer-branch-item-${branch}`}
+                            disabled={branchBusy}
+                            onClick={() => checkoutBranch(branch)}
+                            className="flex min-w-0 flex-1 items-center rounded-control px-2 py-1.5 text-left text-[12px] leading-4 text-ink-2 transition-colors hover:text-ink"
+                          >
+                            <span className="truncate font-mono text-[11.5px] leading-4">{branch}</span>
+                          </button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            data-testid={`composer-branch-delete-${branch}`}
+                            disabled={branchBusy}
+                            aria-label={t('wb.changes.deleteBranchNamed', branch)}
+                            title={t('wb.changes.deleteBranch')}
+                            onClick={() => requestDeleteBranch(branch)}
+                            className="shrink-0 text-ink-3/65 transition-colors hover:bg-red-tint hover:text-red group-hover/branch:text-ink-2"
+                          >
+                            <TrashIcon className="size-3" />
+                          </Button>
+                        </div>
                       );
-                    }
-                    return (
-                      <div
-                        key={branch}
-                        className="group/branch flex items-center gap-0.5 rounded-control transition-colors hover:bg-hover"
-                      >
-                        <button
-                          type="button"
-                          data-testid={`composer-branch-item-${branch}`}
-                          disabled={branchBusy}
-                          onClick={() => checkoutBranch(branch)}
-                          className="flex min-w-0 flex-1 items-center rounded-control px-2 py-1 text-left text-[12px] text-ink-2 transition-colors hover:text-ink"
-                        >
-                          <span className="truncate font-mono text-[11.5px]">{branch}</span>
-                        </button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          data-testid={`composer-branch-delete-${branch}`}
-                          disabled={branchBusy}
-                          aria-label={t('wb.changes.deleteBranchNamed', branch)}
-                          title={t('wb.changes.deleteBranch')}
-                          onClick={() => requestDeleteBranch(branch)}
-                          className="shrink-0 text-ink-3/65 transition-colors hover:bg-red-tint hover:text-red group-hover/branch:text-ink-2"
-                        >
-                          <TrashIcon className="size-3" />
-                        </Button>
-                      </div>
-                    );
-                  })}
+                    })}
+                  </div>
                 </ScrollArea>
-                <div className="mt-2 flex items-center gap-1 border-t border-line pt-2">
+                <div className="mt-1.5 flex items-center gap-1 border-t border-line pt-1.5">
                   <Input
                     size="xs"
                     value={newBranchName}
@@ -347,7 +351,7 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                     size="xs"
                     data-testid="new-worktree-session"
                     disabled={branchBusy || remoteReadOnly}
-                    className="w-full min-w-0 shrink justify-start text-ink-2 hover:text-ink"
+                    className="w-full min-w-0 shrink justify-start gap-2 px-2 text-ink-2 hover:text-ink"
                     onClick={() => {
                       setBranchOpen(false);
                       if (onNewWorktree) {
@@ -357,7 +361,7 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
                       }
                     }}
                   >
-                    <GitForkIcon className="size-3 shrink-0" />
+                    <GitForkIcon className="size-3.5 shrink-0" />
                     <span className="truncate">{t('wb.sessions.worktreeSession')}</span>
                   </Button>
                 </div>
@@ -367,10 +371,10 @@ export function ComposerFooter({ onNewWorktree }: { readonly onNewWorktree?: () 
             <span
               data-testid="composer-branch-readonly"
               title={`${t('wb.changes.branch')}: ${currentBranch}`}
-              className="inline-flex h-6 min-w-0 max-w-[160px] items-center gap-1 rounded-md px-1.5 font-mono text-xs text-ink-3"
+              className="inline-flex h-6 min-w-0 max-w-[160px] items-center gap-1.5 rounded-md px-2 font-mono text-xs leading-4 text-ink-3"
             >
               <GitBranchIcon className="size-3.5 shrink-0" />
-              <span className="min-w-0 truncate">{currentBranch}</span>
+              <span className="min-w-0 truncate leading-4">{currentBranch}</span>
             </span>
           )
         ) : null}

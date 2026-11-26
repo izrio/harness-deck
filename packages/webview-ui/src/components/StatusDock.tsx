@@ -102,14 +102,14 @@ export function StatusDock() {
           style={{ animation: 'pop-in 170ms cubic-bezier(0.23,1,0.32,1) both', transformOrigin: 'bottom center' }}
         >
           <ScrollArea className="max-h-[min(40vh,260px)]">
-            <div className="p-1">
+            <div className="p-1.5">
               <GlideMenu highlightClassName="inset-x-0 rounded-[6px] bg-hover">
-                <ul className="session-changes__list m-0 list-none p-0" aria-label={t('sessionChanges.label')}>
+                <ul className="session-changes__list m-0 flex list-none flex-col gap-0.5 p-0" aria-label={t('sessionChanges.label')}>
                   {shownChanges.files.map((file) => (
                     <li key={file.path}>
                       <ChangedFileButton
                         file={file}
-                        className="session-changes__file relative z-10 flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left transition-colors duration-100"
+                        className="session-changes__file relative z-10 flex h-8 w-full items-center gap-2 rounded-[6px] px-2.5 text-left leading-4 transition-colors duration-100"
                       />
                     </li>
                   ))}
@@ -145,7 +145,7 @@ export function StatusDock() {
               <div className="p-1">
                 <button
                   type="button"
-                  className="dock__seg dock__seg--todos todo-card__header flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[7px] px-2 text-left text-ink transition-colors duration-100 hover:bg-hover"
+                  className="dock__seg dock__seg--todos todo-card__header flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[7px] px-2 text-left leading-4 text-ink transition-colors duration-100 hover:bg-hover"
                   aria-expanded={panel === 'todos'}
                   {...(panel === 'todos' ? { 'aria-controls': 'dock-panel' } : {})}
                   onClick={() => toggle('todos')}
@@ -153,9 +153,9 @@ export function StatusDock() {
                 >
                   <ChevronRightIcon className={cn('chevron size-3.5 shrink-0 text-ink-3 transition-transform duration-200', panel === 'todos' && 'chevron--open rotate-90')} />
                   <ChecklistIcon className="todo-card__icon size-3.5 shrink-0 text-ink-2" />
-                  <span className="status-strip__label shrink-0 font-medium text-ink">{t('todo.title')}</span>
+                  <span className="status-strip__label shrink-0 leading-4 font-medium text-ink">{t('todo.title')}</span>
                   {panel !== 'todos' && current ? (
-                    <span className="dock__seg-text min-w-0 flex-1 truncate text-ink-2">
+                    <span className="dock__seg-text min-w-0 flex-1 truncate leading-4 text-ink-2">
                       {current.status === 'in_progress' && running ? (
                         <Shimmer className="max-w-full truncate align-bottom">{current.content}</Shimmer>
                       ) : (
@@ -180,7 +180,7 @@ export function StatusDock() {
                 >
                   <button
                     type="button"
-                    className="dock__seg session-changes__toggle flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left text-ink"
+                    className="dock__seg session-changes__toggle flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left leading-4 text-ink"
                     aria-expanded={panel === 'changes'}
                     {...(panel === 'changes' ? { 'aria-controls': 'dock-panel' } : {})}
                     onClick={() => toggle('changes')}
@@ -188,7 +188,7 @@ export function StatusDock() {
                   >
                     <ChevronRightIcon className={cn('chevron size-3.5 shrink-0 text-ink-3 transition-transform duration-200', panel === 'changes' && 'chevron--open rotate-90')} />
                     <DiffIcon className="size-3.5 shrink-0 text-ink-3" />
-                    <span className="dock__seg-label whitespace-nowrap font-medium">{t('dock.changes', shownChanges.files.length)}</span>
+                    <span className="dock__seg-label whitespace-nowrap leading-4 font-medium">{t('dock.changes', shownChanges.files.length)}</span>
                     <Stats stats={shownChanges} />
                   </button>
                   <button

@@ -268,7 +268,7 @@ export function ContextRing({
   );
 
   const badgeClass = cn(
-    'context-ring inline-flex h-7 items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium tabular-nums transition-colors duration-150',
+    'context-ring flex h-7 items-center gap-1.5 rounded-[8px] px-2 text-[12px] leading-4 font-medium tabular-nums transition-colors duration-150',
     level === 'high' ? 'text-red' : level === 'medium' ? 'text-orange' : 'text-ink-2',
   );
 

@@ -79,8 +79,8 @@ export function RunStatus() {
         <span className="run-status__icon inline-flex size-4 shrink-0 items-center justify-center">
           <span className="dot dot--attention inline-block size-2 rounded-full bg-orange" />
         </span>
-        <span className="run-status__label min-w-0 truncate font-medium">{label}</span>
-        <span className="run-status__time shrink-0 font-mono text-[12px] text-ink-3 tabular-nums">{elapsed}</span>
+        <span className="run-status__label min-w-0 truncate leading-5 font-medium">{label}</span>
+        <span className="run-status__time shrink-0 text-[12px] leading-5 text-ink-3 tabular-nums">{elapsed}</span>
       </div>
     );
   }
@@ -162,10 +162,10 @@ export const TurnDone = memo(function TurnDone({
   const [checkpointConfirmOpen, setCheckpointConfirmOpen] = useState(false);
   const hasActions = copyText !== undefined;
   return (
-    <div className={cn('turn-done flex flex-wrap items-center gap-2 text-[12px] text-ink-3', hasActions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
+    <div className={cn('turn-done flex flex-wrap items-center gap-2 text-[12px] leading-4 text-ink-3', hasActions ? '-mt-2' : '-mt-1')} data-testid="turn-done">
       {hasActions ? <AssistantActions text={copyText} inline /> : null}
-      {turnSeq !== undefined ? <span className="text-ink-3">{t('run.turn', turnSeq)}</span> : null}
-      <span className="flex items-center gap-1.5">
+      {turnSeq !== undefined ? <span className="leading-4 text-ink-3">{t('run.turn', turnSeq)}</span> : null}
+      <span className="flex items-center gap-1.5 leading-4">
         {item.completed ? (
           <span className="inline-flex size-3.5 items-center justify-center text-green">
             <CheckIcon className="size-3.5" strokeWidth={2.5} />
@@ -176,7 +176,7 @@ export const TurnDone = memo(function TurnDone({
       {canRollback && !remoteReadOnly ? (
         <button
           type="button"
-          className="rounded px-1 text-[11.5px] text-ink-3 underline-offset-2 hover:text-ink hover:underline"
+          className="inline-flex h-6 items-center rounded-md px-1.5 text-[11.5px] leading-4 text-ink-3 underline-offset-2 transition-colors hover:bg-hover hover:text-ink hover:underline"
           onClick={() => {
             if (clientSurface === 'mobile-web') {
               setRollbackConfirmOpen(true);
@@ -193,7 +193,7 @@ export const TurnDone = memo(function TurnDone({
           type="button"
           data-testid={`turn-checkpoint-rollback-${turnSeq}`}
           title={t('turn.rollbackCheckpointTitle', turnSeq)}
-          className="inline-flex items-center gap-1 rounded px-1 text-[11.5px] text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+          className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] leading-4 text-ink-3 transition-colors hover:bg-hover hover:text-ink"
           onClick={() => setCheckpointConfirmOpen(true)}
         >
           <UndoIcon className="size-3" />
@@ -205,7 +205,7 @@ export const TurnDone = memo(function TurnDone({
           type="button"
           data-testid={`turn-fork-${turnSeq}`}
           title={t('turn.forkTitle', turnSeq)}
-          className="inline-flex items-center gap-1 rounded px-1 text-[11.5px] text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+          className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] leading-4 text-ink-3 transition-colors hover:bg-hover hover:text-ink"
           onClick={() => postToHost({ type: 'forkSessionAtTurn', payload: { turnSeq } })}
         >
           <GitForkIcon className="size-3" />

@@ -47,62 +47,49 @@ export function SavedProviderCard({
     <div
       data-testid={`provider-card-${provider.id}`}
       className={cn(
-        'flex items-start justify-between gap-3 rounded-xl px-3 py-3 transition-colors duration-150',
-        editing ? 'bg-accent-tint/50' : 'hover:bg-canvas/70 dark:hover:bg-hover/35',
+        'flex items-center gap-3.5 px-4 py-3.5 transition-colors duration-150',
+        editing ? 'bg-accent-tint/45' : 'hover:bg-canvas/45 dark:hover:bg-hover/30',
       )}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <ProviderVendorIcon
-            presetId={provider.presetId}
-            name={provider.name}
-            defaultModel={provider.defaultModel}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="text-[13px] font-semibold text-ink">{provider.name}</span>
-              {provider.hasApiKey ? (
-                <span className="text-[11.5px] text-green">
-                  {t('settings.providers.apiKeySavedBadge')}
-                </span>
-              ) : (
-                <span className="text-[11.5px] text-orange">
-                  {t('settings.providers.apiKeyMissingBadge')}
-                </span>
-              )}
-              {provider.defaultModel ? (
-                <span className="font-mono text-[11.5px] text-ink-3">
-                  {t('settings.providers.defaultTag', provider.defaultModel)}
-                </span>
-              ) : null}
-              {provider.smallModel && provider.smallModel !== provider.defaultModel ? (
-                <span className="font-mono text-[11.5px] text-ink-3">
-                  {t('settings.providers.smallTag', provider.smallModel)}
-                </span>
-              ) : null}
-              {usesGatewayConversion ? (
-                <span className="rounded-md bg-accent-tint/70 px-1.5 py-0.5 text-[10.5px] font-medium text-accent-ink">
-                  {t('settings.providers.convertedBadge')}
-                </span>
-              ) : null}
-            </div>
-          </div>
+      <ProviderVendorIcon
+        presetId={provider.presetId}
+        name={provider.name}
+        defaultModel={provider.defaultModel}
+      />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <span className="text-[13px] leading-5 font-semibold text-ink">{provider.name}</span>
+          {provider.defaultModel ? (
+            <code className="font-mono text-[11.5px] leading-none text-ink-3">
+              {provider.defaultModel}
+            </code>
+          ) : null}
+          {!provider.hasApiKey ? (
+            <span className="inline-flex items-center gap-1.5 text-[11.5px] leading-none text-orange">
+              <span className="size-1.5 shrink-0 rounded-full bg-orange" />
+              <span>{t('settings.providers.apiKeyMissingBadge')}</span>
+            </span>
+          ) : null}
+          {usesGatewayConversion ? (
+            <span className="inline-flex items-center rounded-md bg-canvas/85 px-1.5 py-0.5 text-[10.5px] leading-4 font-medium text-ink-2 dark:bg-page/55">
+              {t('settings.providers.convertedBadge')}
+            </span>
+          ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 pl-9.5 text-[11.5px]">
-          {allBoundNames.length > 0 ? (
-            allBoundNames.map((name) => (
+        {allBoundNames.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {allBoundNames.map((name) => (
               <span
                 key={name}
-                className="rounded-md bg-accent-tint/65 px-1.5 py-0.5 text-[11px] font-medium text-accent-ink"
+                className="inline-flex items-center rounded-md bg-canvas/85 px-2 py-0.5 text-[11px] leading-4 text-ink-2 dark:bg-page/55"
               >
                 {name}
               </span>
-            ))
-          ) : (
-            <span className="text-ink-3">{t('settings.providers.unbound')}</span>
-          )}
-        </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="shrink-0">

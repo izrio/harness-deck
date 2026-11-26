@@ -319,20 +319,20 @@ export function TaskCreateDialog({
                   onKeyDown={onPromptKeyDown}
                 />
 
-                <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
+                <div className="composer__toolbar flex min-w-0 items-center gap-1 pt-1.5 [&>*]:flex-none [&>.model-picker]:min-w-0 [&>.model-picker]:flex-[0_1_auto]">
                   <button
                     type="button"
                     data-testid="task-attach-btn"
                     aria-label={t('composer.attach')}
                     title={t('composer.attach')}
                     onClick={() => postToHost({ type: 'pickTaskFiles', payload: { projectPath } })}
-                    className="inline-flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
+                    className="flex size-7 items-center justify-center rounded-[8px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
                   >
-                    <PaperclipIcon className="size-4" />
+                    <PaperclipIcon className="size-4" strokeWidth={1.75} />
                   </button>
 
                   {/* 运行时选择器（置于模型选择器前面，带运行时图标；切换时刷新模型列表） */}
-                  <div className="relative min-w-0">
+                  <div className="relative flex min-w-0 items-center">
                     <Popover open={runtimeMenuOpen} onOpenChange={setRuntimeMenuOpen}>
                       <PopoverTrigger asChild>
                         <button
@@ -340,11 +340,11 @@ export function TaskCreateDialog({
                           data-testid="task-runtime-picker"
                           aria-label={t('wb.tasks.selectHarness')}
                           title={t('wb.tasks.selectHarness')}
-                          className="toolbar-button inline-flex h-7 max-w-full items-center gap-1.5 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
+                          className="toolbar-button flex h-7 max-w-full items-center gap-1.5 rounded-[8px] px-2 text-[12px] leading-4 font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
                         >
                           <BackendLogo backend={currentBackend} size="sm" />
-                          <span className="toolbar-button__text min-w-0 truncate">{currentBackend.name}</span>
-                          <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+                          <span className="toolbar-button__text min-w-0 truncate leading-4">{currentBackend.name}</span>
+                          <ChevronDownIcon className="-ml-0.5 size-3 shrink-0 text-ink-3" />
                         </button>
                       </PopoverTrigger>
                       <PopoverContent
@@ -353,7 +353,7 @@ export function TaskCreateDialog({
                         sideOffset={6}
                         aria-label={t('wb.tasks.selectHarness')}
                         onOpenAutoFocus={focusActiveMenuRow}
-                        className="model-menu flex max-h-72 w-auto min-w-[200px] max-w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-1 shadow-overlay"
+                        className="model-menu flex max-h-72 w-auto min-w-[200px] max-w-[min(280px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl p-1.5 shadow-overlay"
                       >
                         <ScrollArea className="max-h-60">
                           <div role="menu" data-testid="task-runtime-list">

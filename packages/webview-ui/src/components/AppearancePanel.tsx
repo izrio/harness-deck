@@ -121,11 +121,11 @@ export function AppearancePanel() {
   const activePreset = FONT_PRESETS.find((p) => p.value === (appearance.fontFamily ?? ''));
 
   return (
-    <div className="flex flex-col gap-5 p-4" data-testid="appearance-panel">
+    <div className="flex flex-col divide-y divide-line/55 px-4" data-testid="appearance-panel">
       {/* 字体选择：预设快捷胶囊 + 自定义输入 */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2.5 py-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.proseFont')}</span>
+          <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.proseFont')}</span>
           <div className="flex flex-wrap items-center gap-1">
             {FONT_PRESETS.map((preset) => {
               const selected = activePreset?.id === preset.id;
@@ -141,7 +141,7 @@ export function AppearancePanel() {
                     'rounded-full px-2.5 text-[11.5px]',
                     selected
                       ? 'bg-accent-tint font-medium text-accent-ink hover:bg-accent-tint'
-                      : 'text-ink-2 hover:bg-canvas/70 hover:text-ink dark:hover:bg-page/45',
+                      : 'text-ink-2 hover:bg-hover hover:text-ink',
                   )}
                 >
                   {t(preset.id === 'vscode' && hostKind === 'jetbrains' ? 'settings.appearance.fontPreset.ide' : preset.labelKey)}
@@ -163,99 +163,97 @@ export function AppearancePanel() {
       </div>
 
       {/* 排版数值参数 */}
-      <div className="flex flex-col gap-3.5">
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-[12.5px] font-medium text-ink">{t('appearance.size')}</span>
-          <NumberStepper
-            size="sm"
-            decLabel={t('appearance.smaller')}
-            incLabel={t('appearance.larger')}
-            decDisabled={size <= MIN_SIZE}
-            incDisabled={size >= MAX_SIZE}
-            onDec={() => setSize(size - 1)}
-            onInc={() => setSize(size + 1)}
-            valueTestId="appearance-size"
-          >
-            {size}px
-          </NumberStepper>
-        </div>
+      <div className="flex items-center justify-between gap-6 py-3.5">
+        <span className="text-[13px] leading-5 text-ink">{t('appearance.size')}</span>
+        <NumberStepper
+          size="sm"
+          decLabel={t('appearance.smaller')}
+          incLabel={t('appearance.larger')}
+          decDisabled={size <= MIN_SIZE}
+          incDisabled={size >= MAX_SIZE}
+          onDec={() => setSize(size - 1)}
+          onInc={() => setSize(size + 1)}
+          valueTestId="appearance-size"
+        >
+          {size}px
+        </NumberStepper>
+      </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.lineHeight')}</span>
-          <NumberStepper
-            size="sm"
-            decLabel={t('settings.appearance.lineHeightSmaller')}
-            incLabel={t('settings.appearance.lineHeightLarger')}
-            decDisabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
-            incDisabled={lineHeight >= MAX_LINE_HEIGHT - 0.01}
-            onDec={() => setLineHeight(lineHeight - 0.1)}
-            onInc={() => setLineHeight(lineHeight + 0.1)}
-            valueTestId="prose-line-height"
-          >
-            {lineHeight.toFixed(1)}
-          </NumberStepper>
-        </div>
+      <div className="flex items-center justify-between gap-6 py-3.5">
+        <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.lineHeight')}</span>
+        <NumberStepper
+          size="sm"
+          decLabel={t('settings.appearance.lineHeightSmaller')}
+          incLabel={t('settings.appearance.lineHeightLarger')}
+          decDisabled={lineHeight <= MIN_LINE_HEIGHT + 0.01}
+          incDisabled={lineHeight >= MAX_LINE_HEIGHT - 0.01}
+          onDec={() => setLineHeight(lineHeight - 0.1)}
+          onInc={() => setLineHeight(lineHeight + 0.1)}
+          valueTestId="prose-line-height"
+        >
+          {lineHeight.toFixed(1)}
+        </NumberStepper>
+      </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.paragraphSpacing')}</span>
-          <NumberStepper
-            size="sm"
-            decLabel={t('settings.appearance.paragraphSpacingSmaller')}
-            incLabel={t('settings.appearance.paragraphSpacingLarger')}
-            decDisabled={paragraphSpacing <= MIN_SPACING}
-            incDisabled={paragraphSpacing >= MAX_SPACING}
-            onDec={() => setParagraphSpacing(paragraphSpacing - 2)}
-            onInc={() => setParagraphSpacing(paragraphSpacing + 2)}
-            valueTestId="prose-paragraph-spacing"
-          >
-            {paragraphSpacing}px
-          </NumberStepper>
-        </div>
+      <div className="flex items-center justify-between gap-6 py-3.5">
+        <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.paragraphSpacing')}</span>
+        <NumberStepper
+          size="sm"
+          decLabel={t('settings.appearance.paragraphSpacingSmaller')}
+          incLabel={t('settings.appearance.paragraphSpacingLarger')}
+          decDisabled={paragraphSpacing <= MIN_SPACING}
+          incDisabled={paragraphSpacing >= MAX_SPACING}
+          onDec={() => setParagraphSpacing(paragraphSpacing - 2)}
+          onInc={() => setParagraphSpacing(paragraphSpacing + 2)}
+          valueTestId="prose-paragraph-spacing"
+        >
+          {paragraphSpacing}px
+        </NumberStepper>
+      </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.contentWidth')}</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1">
-              {WIDTH_PRESETS.map((preset) => {
-                const selected = contentWidth === preset.width;
-                return (
-                  <Button
-                    key={preset.width}
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    data-testid={`width-preset-${preset.width}`}
-                    onClick={() => setContentWidth(preset.width)}
-                    className={cn(
-                      'rounded-full px-2 text-[11px]',
-                      selected
-                        ? 'bg-accent-tint font-medium text-accent-ink hover:bg-accent-tint'
-                        : 'text-ink-2 hover:bg-canvas/70 hover:text-ink dark:hover:bg-page/45',
-                    )}
-                  >
-                    {t(preset.labelKey)}
-                  </Button>
-                );
-              })}
-            </div>
-            <NumberStepper
-              size="sm"
-              decLabel={t('settings.appearance.contentWidthSmaller')}
-              incLabel={t('settings.appearance.contentWidthLarger')}
-              decDisabled={contentWidth <= MIN_WIDTH}
-              incDisabled={contentWidth >= MAX_WIDTH}
-              onDec={() => setContentWidth(contentWidth - 40)}
-              onInc={() => setContentWidth(contentWidth + 40)}
-              valueTestId="prose-content-width"
-            >
-              {contentWidth}px
-            </NumberStepper>
+      <div className="flex flex-wrap items-center justify-between gap-4 py-3.5">
+        <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.contentWidth')}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            {WIDTH_PRESETS.map((preset) => {
+              const selected = contentWidth === preset.width;
+              return (
+                <Button
+                  key={preset.width}
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  data-testid={`width-preset-${preset.width}`}
+                  onClick={() => setContentWidth(preset.width)}
+                  className={cn(
+                    'rounded-full px-2 text-[11px]',
+                    selected
+                      ? 'bg-accent-tint font-medium text-accent-ink hover:bg-accent-tint'
+                      : 'text-ink-2 hover:bg-hover hover:text-ink',
+                  )}
+                >
+                  {t(preset.labelKey)}
+                </Button>
+              );
+            })}
           </div>
+          <NumberStepper
+            size="sm"
+            decLabel={t('settings.appearance.contentWidthSmaller')}
+            incLabel={t('settings.appearance.contentWidthLarger')}
+            decDisabled={contentWidth <= MIN_WIDTH}
+            incDisabled={contentWidth >= MAX_WIDTH}
+            onDec={() => setContentWidth(contentWidth - 40)}
+            onInc={() => setContentWidth(contentWidth + 40)}
+            valueTestId="prose-content-width"
+          >
+            {contentWidth}px
+          </NumberStepper>
         </div>
       </div>
 
       {/* 实时预览 + 重置 */}
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-2.5 py-4">
         <div
           className="rounded-xl bg-canvas/85 p-4 dark:bg-page/55"
           data-testid="reading-live-preview"

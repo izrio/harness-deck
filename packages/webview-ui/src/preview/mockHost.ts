@@ -17,6 +17,8 @@ import type {
   WebviewToHost,
   WorkbenchState,
 } from '@harness-deck/shared';
+import { MCP_MARKET_CATALOG } from '../components/settings/mcp/mcpCatalog.ts';
+import { SKILL_MARKET_CATALOG } from '../components/settings/skillCatalog.ts';
 import {
   createInitialSessionList,
   createInitialSessions,
@@ -1142,6 +1144,61 @@ function installMockHost(): void {
         };
         postToWebview({ type: 'browserState', payload: browserState });
         return;
+
+      case 'fetchSkillMarket': {
+        const q = message.payload.query?.trim().toLowerCase() ?? '';
+        const items = q
+          ? SKILL_MARKET_CATALOG.filter(
+              (item) =>
+                item.name.toLowerCase().includes(q) ||
+                item.description.toLowerCase().includes(q) ||
+                item.repo.toLowerCase().includes(q),
+            )
+          : SKILL_MARKET_CATALOG;
+        postToWebview({
+          type: 'extensions',
+          payload: {
+            ...PREVIEW_EXTENSIONS,
+            skills: {
+              ...PREVIEW_EXTENSIONS.skills,
+              market: {
+                items,
+                source: 'online',
+                ...(q ? { query: message.payload.query?.trim() } : {}),
+                updatedAt: Date.now(),
+              },
+            },
+          },
+        });
+        return;
+      }
+
+      case 'fetchMcpMarket': {
+        const q = message.payload.query?.trim().toLowerCase() ?? '';
+        const items = q
+          ? MCP_MARKET_CATALOG.filter(
+              (item) =>
+                item.name.toLowerCase().includes(q) ||
+                item.description.toLowerCase().includes(q),
+            )
+          : MCP_MARKET_CATALOG;
+        postToWebview({
+          type: 'extensions',
+          payload: {
+            ...PREVIEW_EXTENSIONS,
+            mcp: {
+              ...PREVIEW_EXTENSIONS.mcp,
+              market: {
+                items,
+                source: 'online',
+                ...(q ? { query: message.payload.query?.trim() } : {}),
+                updatedAt: Date.now(),
+              },
+            },
+          },
+        });
+        return;
+      }
 
       case 'browserRequestFrame':
       case 'browserMouse':

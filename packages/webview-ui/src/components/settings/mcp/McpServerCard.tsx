@@ -44,7 +44,7 @@ export function McpServerCard({
   return (
     <div
       className={cn(
-        'flex flex-col gap-2.5 rounded-2xl bg-field/55 px-4 py-3.5 transition-colors hover:bg-field/80 dark:bg-surface/65 dark:hover:bg-surface/85',
+        'flex flex-col gap-2.5 py-4 transition-opacity',
         server.enabled ? '' : 'opacity-60',
       )}
       data-testid={`mcp-server-${server.id}`}

@@ -1424,12 +1424,30 @@ export interface RemoteTailscaleView {
   readonly error?: string;
 }
 
+export interface RemoteWebhookChannelConfig {
+  /** 主推送地址（或 Telegram 自定义 API 代理根地址；Bark 也支持直接填 Device Key）。 */
+  readonly url: string;
+  /** 可选凭证/密钥：飞书/钉钉加签密钥、ntfy/自定义 JSON Bearer Token、Telegram Bot Token。 */
+  readonly secret?: string;
+  /** Telegram 目标 Chat ID（私聊或群组 ID）。 */
+  readonly chatId?: string;
+  /** Bark 自定义推送分组名（默认 Halo）。 */
+  readonly group?: string;
+}
+
 export interface RemoteWebhookConfig {
   readonly enabled: boolean;
   readonly preset: RemoteWebhookPreset;
+  /** 当前激活渠道的主地址（始终与 `channels[preset].url` 同步，兼容旧快照）。 */
   readonly url: string;
-  /** 可选签名密钥（飞书/钉钉加签）或 Telegram Chat ID。 */
+  /** 当前激活渠道的密钥/Token（始终与 `channels[preset].secret` 同步）。 */
   readonly secret?: string;
+  /** 当前激活渠道的 Telegram Chat ID（始终与 `channels[preset].chatId` 同步）。 */
+  readonly chatId?: string;
+  /** 当前激活渠道的 Bark 分组（始终与 `channels[preset].group` 同步）。 */
+  readonly group?: string;
+  /** 按渠道独立保存的配置表：切换渠道互不覆盖，切回即恢复。 */
+  readonly channels?: Readonly<Partial<Record<RemoteWebhookPreset, RemoteWebhookChannelConfig>>>;
 }
 
 export interface RemotePushConfig {

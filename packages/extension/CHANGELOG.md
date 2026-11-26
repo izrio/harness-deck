@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## 0.18.2
+
+### 中文
+
+- **设置页 macOS 风格视觉升级与全局留白对齐**：所有设置分组统一采用无外框柔和浅底圆角卡片 + 卡片内缩极细横线分割与宽松行距；精简服务商页与项目页冗余小字与嵌套胶囊，移除运行时「运行保活中」标签并列齐安装版本号；全局优化对话输入框、模型选择器倍率基线、顶部标签栏、工作台与下拉菜单文字对齐与呼吸感。
+- **远程推送 Webhook 渠道深度适配与官方图标**：9 种推送渠道（Bark、ntfy、飞书、企业微信、钉钉、Telegram、Slack、Discord、自定义 JSON）支持官方离线厂商图标、独立配置保存、渠道专属字段表单、实时格式校验与问号 `Popover` 配置说明。
+- **首次启动默认智能体与 WSL2 市场连通性修复**：未配置默认运行时时首次启动默认启用 `claude`；修复纯 Node.js（VS Code Remote-WSL）下代理隧道并发连接、自动 `gzip`/`deflate`/`br` 解压、30x 重定向以及 WSL2 NAT 回环代理与 IPv6 黑洞回退，解决 WSL 下技能市场与 MCP 市场连不上的问题。
+
+### English
+
+- **macOS-Style Settings & Global UI Spacing Polish**: Unified all Settings sections with borderless soft-tinted rounded cards, inset hairline dividers, and generous row breathing room; decluttered Providers and Projects views, removed the background keep-alive badge and column-aligned runtime versions, and refined text baseline alignment across the composer, model multipliers, tabs, menus, and workbench.
+- **Tailored Remote Push Webhook Channels & Official Logos**: Added official offline brand logos, per-channel persisted configs, tailored input fields, live format validation, and `?` help popovers for all 9 push channels (Bark, ntfy, Feishu, WeCom, DingTalk, Telegram, Slack, Discord, and Custom JSON).
+- **Default Startup Backend & WSL2 Marketplace Connectivity**: Set `claude` as the first-launch default backend when unconfigured; hardened pure Node.js (`VS Code Remote-WSL`) proxy tunneling with `agent: false`, automatic `gzip`/`deflate`/`br` decompression, redirect following, and WSL2 NAT loopback-proxy / IPv4 fallbacks so Skill and MCP marketplaces connect reliably in WSL.
+
 ## 0.18.1
 
 ### 中文

@@ -3,14 +3,14 @@
  * 复用离线品牌矢量 `ModelVendorLogo`（火山方舟/豆包、智谱 GLM、阿里云百炼/通义、Kimi、MiniMax、DeepSeek、OpenAI、Claude、Gemini 等），
  * 对 CLIProxyAPI 与自定义网关使用离线 Iconify 语义图标。
  */
-import { detectModelVendor, ModelVendorLogo } from '../../ModelVendorLogo.tsx';
+import { detectModelVendor, ModelVendorLogo, type ModelVendor } from '../../ModelVendorLogo.tsx';
 import { ServerIcon, SlidersIcon } from '../../icons.tsx';
 import { cn } from '../../../lib/utils.ts';
 
-const PRESET_VENDOR_HINT: Readonly<Record<string, string>> = {
+const PRESET_VENDOR_HINT: Readonly<Record<string, ModelVendor>> = {
   'volcengine-coding': 'volcengine',
   'zhipu-coding': 'zhipu',
-  'bailian-coding': 'bailian',
+  'bailian-coding': 'aliyun',
   'kimi-coding': 'kimi',
   'minimax-coding': 'minimax',
 };
@@ -48,11 +48,7 @@ export function ProviderVendorIcon({
   }
 
   const presetHint = presetId ? PRESET_VENDOR_HINT[presetId] : undefined;
-  const vendor = detectModelVendor({
-    provider: presetHint ?? name,
-    model: defaultModel,
-    name,
-  });
+  const vendor = presetHint ?? detectModelVendor({ provider: name, model: defaultModel, name });
 
   if (vendor) {
     return (
@@ -65,7 +61,7 @@ export function ProviderVendorIcon({
           className,
         )}
       >
-        <ModelVendorLogo provider={presetHint ?? name} model={defaultModel} name={name} className={iconClass} />
+        <ModelVendorLogo vendor={vendor} className={iconClass} />
       </span>
     );
   }

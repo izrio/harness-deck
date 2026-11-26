@@ -130,8 +130,8 @@ export function AppearanceSettings() {
     <div className="flex flex-col gap-8" data-testid="settings-appearance">
       {/* 1. 主题 */}
       <SettingsSection id="appearance-sec-theme" title={t('settings.appearance.theme')}>
-        <div className="flex flex-col gap-5 p-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" role="radiogroup" aria-label={t('settings.appearance.theme')}>
+        <div className="flex flex-col divide-y divide-line/55 px-4">
+          <div className="grid grid-cols-1 gap-3 py-4 sm:grid-cols-3" role="radiogroup" aria-label={t('settings.appearance.theme')}>
             {THEME_CARDS.map(({ mode, titleKey }) => {
               const active = currentTheme === mode;
               return (
@@ -145,8 +145,8 @@ export function AppearanceSettings() {
                   className={cn(
                     'group flex flex-col gap-2 rounded-xl p-2 text-center transition-all duration-150',
                     active
-                      ? 'bg-canvas ring-2 ring-brand dark:bg-page/70'
-                      : 'bg-canvas/55 hover:bg-canvas/90 dark:bg-page/35 dark:hover:bg-page/60',
+                      ? 'bg-canvas ring-2 ring-brand dark:bg-page/75'
+                      : 'bg-canvas/70 hover:bg-canvas dark:bg-page/40 dark:hover:bg-page/65',
                   )}
                 >
                   <ThemePreview mode={mode} />
@@ -163,8 +163,8 @@ export function AppearanceSettings() {
             })}
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.preset')}</span>
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.preset')}</span>
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={t('settings.appearance.preset')}>
               {THEME_PRESETS.map(({ id, swatch, labelKey }) => {
                 const active = currentPreset === id;
@@ -180,8 +180,8 @@ export function AppearanceSettings() {
                     className={cn(
                       'rounded-full px-2.5',
                       active
-                        ? 'bg-canvas font-medium text-ink ring-1 ring-brand/60 hover:bg-canvas dark:bg-page/75'
-                        : 'text-ink-2 hover:bg-canvas/70 hover:text-ink dark:hover:bg-page/45',
+                        ? 'bg-field font-medium text-ink ring-1 ring-brand/60 hover:bg-field dark:bg-surface'
+                        : 'text-ink-2 hover:bg-hover hover:text-ink',
                     )}
                     onClick={() => selectPreset(id)}
                   >
@@ -197,8 +197,8 @@ export function AppearanceSettings() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.highContrast')}</span>
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.highContrast')}</span>
             <Switch
               checked={highContrast}
               data-testid="theme-high-contrast-switch"
@@ -236,9 +236,9 @@ export function AppearanceSettings() {
           </Button>
         }
       >
-        <div className="flex flex-col gap-4 p-4">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalFont')}</span>
+        <div className="flex flex-col divide-y divide-line/55 px-4">
+          <label className="flex flex-col gap-2 py-4">
+            <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.terminalFont')}</span>
             <Input
               size="sm"
               data-testid="terminal-font-family"
@@ -251,8 +251,8 @@ export function AppearanceSettings() {
             />
           </label>
 
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalSize')}</span>
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.terminalSize')}</span>
             <NumberStepper
               size="sm"
               decLabel={t('settings.appearance.terminalSizeSmaller')}
@@ -267,8 +267,8 @@ export function AppearanceSettings() {
             </NumberStepper>
           </div>
 
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-[12.5px] font-medium text-ink">{t('settings.appearance.terminalLineHeight')}</span>
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <span className="text-[13px] leading-5 text-ink">{t('settings.appearance.terminalLineHeight')}</span>
             <NumberStepper
               size="sm"
               decLabel={t('settings.appearance.terminalLineHeightSmaller')}
@@ -283,12 +283,14 @@ export function AppearanceSettings() {
             </NumberStepper>
           </div>
 
-          <pre
-            data-testid="terminal-live-preview"
-            className="terminal-surface m-0 overflow-auto rounded-xl bg-canvas/85 px-3.5 py-2.5 whitespace-pre-wrap text-ink-2 [overflow-wrap:anywhere] dark:bg-page/55"
-          >
-            {'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
-          </pre>
+          <div className="py-4">
+            <pre
+              data-testid="terminal-live-preview"
+              className="terminal-surface m-0 overflow-auto rounded-xl bg-canvas/85 px-3.5 py-2.5 whitespace-pre-wrap text-ink-2 [overflow-wrap:anywhere] dark:bg-page/55"
+            >
+              {'$ pnpm typecheck && pnpm test\n✓ 40 test files passed (302 tests)'}
+            </pre>
+          </div>
         </div>
       </SettingsSection>
 
@@ -298,8 +300,8 @@ export function AppearanceSettings() {
         testId="appearance-language"
         title={t('settings.appearance.language')}
       >
-        <div className="flex items-center justify-between gap-4 px-4 py-3.5">
-          <span className="text-[12.5px] font-medium text-ink">{t('settings.language')}</span>
+        <div className="flex items-center justify-between gap-6 px-4 py-3.5">
+          <span className="text-[13px] leading-5 text-ink">{t('settings.language')}</span>
           <div className="w-44">
             <Select
               value={preferences.language}

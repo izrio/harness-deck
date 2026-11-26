@@ -12,5 +12,6 @@
 | `opencode.svg` | `anomalyco/opencode` 官方仓库 `packages/ui/src/assets/favicon/favicon-v3.svg` | 去除外层嵌套 `<svg>` 与 `<style>` |
 | `antigravity.svg` | Google Antigravity 官方徽标（`lobehub/lobe-icons` `antigravity-color.svg` / Wikimedia `Google_Antigravity_Logo.svg`） | 补充纯色底路径、设为 `256×256` 并由 `BackendLogo` 白色圆角底板渲染 |
 | `zcode.svg` | `zcode.z.ai` / Z.ai 官方徽标（`z-cdn.chatglm.cn/z-ai/static/logo.svg`） | 去掉外描边并缩放到 256×256 圆角底板 |
+| `volcengine.png` | 火山引擎官方站点 `favicon.png`（`portal.volccdn.com`） | 原图 `192×192` 透明底，作为火山方舟等服务商徽标使用 |
 
 这些图标只用来指明对应的产品，不表示 Halo 与它们有关联或得到认可。

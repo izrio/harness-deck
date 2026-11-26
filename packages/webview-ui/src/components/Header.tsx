@@ -137,21 +137,21 @@ export function Header({
                   <SidebarIcon className="size-3.5" />
                 </Button>
               ) : null}
-              <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] font-medium text-ink">
-                <span className="text-ink-2">
+              <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] leading-4 font-medium text-ink">
+                <span className="inline-flex shrink-0 items-center text-ink-2">
                   {settingsOpen ? (
                     <SettingsIcon className="size-3.5 shrink-0" />
                   ) : (
                     renderModuleIcon(activeModule)
                   )}
                 </span>
-                <span className="truncate">{currentTitle}</span>
+                <span className="truncate leading-4">{currentTitle}</span>
               </span>
             </>
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-0.5" data-testid="header-actions">
+        <div className="flex shrink-0 items-center gap-1" data-testid="header-actions">
           {startedRuntimes.length > 0 ? (
             <div
               className="mr-1 flex items-center gap-1"

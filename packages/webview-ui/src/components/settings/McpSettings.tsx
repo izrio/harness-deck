@@ -492,7 +492,7 @@ export function McpSettings() {
               </Button>
             </div>
           ) : (
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col divide-y divide-line/55 overflow-hidden rounded-2xl bg-field/55 px-4 dark:bg-surface/65">
               {mcp.servers.map((server) => (
                 <McpServerCard key={server.id} agents={agents} openEdit={openEdit} toggleServerEnabled={toggleServerEnabled} toggleServerAgent={toggleServerAgent} deleteServer={deleteServer} server={server} />
               ))}

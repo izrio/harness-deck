@@ -134,13 +134,13 @@ export function PermissionPicker({
   const currentLabel = current ? (labels?.[current]?.name ?? permissionName(current, t)) : t('permission.label');
   const danger = classifyPermission(current, labels?.[current ?? '']?.name) === 'danger';
   return (
-    <div className="model-picker relative min-w-0">
+    <div className="model-picker relative flex min-w-0 items-center">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             className={cn(
-              'toolbar-button inline-flex h-7 max-w-full items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium transition-colors duration-150 hover:bg-hover disabled:cursor-default disabled:opacity-55',
+              'toolbar-button flex h-7 max-w-full items-center gap-1.5 rounded-[8px] px-2 text-[12px] leading-4 font-medium transition-colors duration-150 hover:bg-hover disabled:cursor-default disabled:opacity-55',
               danger ? 'toolbar-button--danger text-orange hover:text-orange' : 'text-ink-2 hover:text-ink',
             )}
             disabled={disabled}
@@ -148,8 +148,8 @@ export function PermissionPicker({
             data-testid={testId}
           >
             <PresetIcon preset={current} name={labels?.[current ?? '']?.name} />
-            <span className="toolbar-button__text permission-picker__text min-w-0 truncate">{currentLabel}</span>
-            <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+            <span className="toolbar-button__text permission-picker__text min-w-0 truncate leading-4">{currentLabel}</span>
+            <ChevronDownIcon className="-ml-0.5 size-3 shrink-0 text-ink-3" />
           </button>
         </PopoverTrigger>
         <PopoverContent
@@ -161,7 +161,7 @@ export function PermissionPicker({
           className="model-menu permission-menu w-[304px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl p-0 shadow-overlay"
         >
           <ScrollArea className="max-h-80">
-            <div role="menu" className="p-1">
+            <div role="menu" className="p-1.5">
             <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[8px] bg-hover">
               {options.map((preset) => {
                 const active = preset === current;

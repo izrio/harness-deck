@@ -1,6 +1,6 @@
 /**
  * 设置 -> 项目：
- * 去线留白：移除行间分割线与左竖线选中条，使用柔和背景层区分选中项目与 Worktree 表单。
+ * macOS 设置风格：无外框浅底圆角卡片 + 卡片内缩极细横线分割 + 宽松行距呼吸感。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { WorktreeProjectConfig } from '@harness-deck/shared';
@@ -9,7 +9,7 @@ import { useT } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
 import { setProjectsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { FolderIcon, FolderOpenIcon, GitBranchIcon, MoreIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
+import { CheckIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, MoreIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -60,6 +60,7 @@ export function ProjectSettings() {
     selectedPath && projects.recent.some((r) => r.path === selectedPath)
       ? selectedPath
       : (projects.currentPath ?? projects.recent[0]?.path);
+  const activeProject = projects.recent.find((r) => r.path === activePath);
 
   const savedConfig = (activePath ? projects.configs[activePath] : undefined) ?? EMPTY_CONFIG;
   const [copyFilesText, setCopyFilesText] = useState(() => toLines(savedConfig.copyFiles));
@@ -115,7 +116,6 @@ export function ProjectSettings() {
                 >
                   <FolderIcon className="size-3.5 text-ink-3" />
                   <span>{t('header.folder')}</span>
-                  <span className="text-[11px] text-ink-3">{folder}</span>
                 </Button>
               ) : null}
               <Button
@@ -137,40 +137,54 @@ export function ProjectSettings() {
             {t('settings.projects.empty')}
           </div>
         ) : (
-          <div className="flex flex-col gap-1 p-1.5">
+          <div className="flex flex-col divide-y divide-line/55 px-4">
             {projects.recent.map((project, index) => {
               const selected = project.path === activePath;
               return (
                 <div
                   key={project.path}
                   data-testid={`recent-project-${index}`}
-                  className={cn(
-                    'flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-colors duration-150',
-                    selected
-                      ? 'bg-canvas dark:bg-page/65'
-                      : 'hover:bg-canvas/65 dark:hover:bg-hover/35',
-                  )}
+                  className="flex items-center gap-3.5 py-3.5"
                 >
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    className="group flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
                     onClick={() => setSelectedPath(project.path)}
                   >
-                    <FolderIcon className={cn('size-4 shrink-0', selected ? 'text-accent-ink' : 'text-ink-3')} />
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'inline-flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors',
+                        selected
+                          ? 'bg-accent-tint/70 text-accent-ink'
+                          : 'bg-canvas/80 text-ink-3 group-hover:text-ink-2 dark:bg-page/55',
+                      )}
+                    >
+                      <FolderIcon className="size-3.5" />
+                    </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className={cn('truncate text-[12.5px]', selected ? 'font-semibold text-ink' : 'font-medium text-ink')}>
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span
+                          className={cn(
+                            'truncate text-[13px] leading-5 transition-colors',
+                            selected ? 'font-semibold text-ink' : 'font-medium text-ink-2 group-hover:text-ink',
+                          )}
+                        >
                           {project.name}
                         </span>
                         {project.isCurrent ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-accent-ink">
-                            <span className="size-1.5 rounded-full bg-brand" />
-                            <span>{t('settings.projects.current')}</span>
+                          <span className="inline-flex items-center rounded-md bg-canvas/85 px-1.5 py-0.5 text-[10.5px] leading-4 font-medium text-ink-2 dark:bg-page/55">
+                            {t('settings.projects.current')}
                           </span>
                         ) : null}
                       </span>
-                      <span className="block truncate font-mono text-[11px] text-ink-3">{project.path}</span>
+                      <span className="mt-0.5 block truncate font-mono text-[11.5px] leading-4 text-ink-3">
+                        {project.path}
+                      </span>
                     </span>
+                    {selected && projects.recent.length > 1 ? (
+                      <CheckIcon className="size-3.5 shrink-0 text-accent-ink" />
+                    ) : null}
                   </button>
                   {!isMobileRemote ? (
                     <div className="shrink-0">
@@ -277,13 +291,13 @@ export function ProjectSettings() {
             </>
           }
         >
-          <div className="flex flex-col gap-4 p-4">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.copyFiles')}</span>
+          <div className="flex flex-col divide-y divide-line/55 px-4">
+            <label className="flex flex-col gap-2 py-4">
+              <span className="text-[13px] leading-5 font-medium text-ink">{t('settings.projects.copyFiles')}</span>
               <Textarea
                 data-testid="project-copy-files"
-                rows={3}
-                className="font-mono text-[12px]"
+                rows={2}
+                className="min-h-14 resize-none rounded-xl border-line/60 bg-canvas/70 px-3 py-2.5 font-mono text-[12px] leading-relaxed shadow-none dark:bg-page/45"
                 disabled={isMobileRemote}
                 value={copyFilesText}
                 placeholder={t('settings.projects.copyFilesPlaceholder')}
@@ -291,12 +305,12 @@ export function ProjectSettings() {
               />
             </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.setupCommands')}</span>
+            <label className="flex flex-col gap-2 py-4">
+              <span className="text-[13px] leading-5 font-medium text-ink">{t('settings.projects.setupCommands')}</span>
               <Textarea
                 data-testid="project-setup-commands"
                 rows={2}
-                className="font-mono text-[12px]"
+                className="min-h-14 resize-none rounded-xl border-line/60 bg-canvas/70 px-3 py-2.5 font-mono text-[12px] leading-relaxed shadow-none dark:bg-page/45"
                 disabled={isMobileRemote}
                 value={setupText}
                 placeholder={t('settings.projects.setupCommandsPlaceholder')}
@@ -304,12 +318,12 @@ export function ProjectSettings() {
               />
             </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[12.5px] font-medium text-ink">{t('settings.projects.verifyCommands')}</span>
+            <label className="flex flex-col gap-2 py-4">
+              <span className="text-[13px] leading-5 font-medium text-ink">{t('settings.projects.verifyCommands')}</span>
               <Textarea
                 data-testid="project-verify-commands"
                 rows={2}
-                className="font-mono text-[12px]"
+                className="min-h-14 resize-none rounded-xl border-line/60 bg-canvas/70 px-3 py-2.5 font-mono text-[12px] leading-relaxed shadow-none dark:bg-page/45"
                 disabled={isMobileRemote}
                 value={verifyText}
                 placeholder={t('settings.projects.verifyCommandsPlaceholder')}
@@ -318,8 +332,17 @@ export function ProjectSettings() {
             </label>
 
             {!isMobileRemote ? (
-              <div className="flex items-center justify-end gap-2.5 pt-1">
-                {justSaved ? <span className="text-[11.5px] text-green">{t('settings.projects.saved')}</span> : null}
+              <div className="flex items-center justify-between gap-4 py-3.5">
+                <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-3">
+                  {justSaved ? (
+                    <span className="inline-flex items-center gap-1.5 text-green">
+                      <CheckIcon className="size-3.5 shrink-0" />
+                      <span>{t('settings.projects.saved')}</span>
+                    </span>
+                  ) : activeProject ? (
+                    <span className="truncate font-mono text-[11.5px]">{activeProject.name}</span>
+                  ) : null}
+                </div>
                 <Button type="button" size="sm" data-testid="project-save-btn" onClick={saveConfig}>
                   {t('settings.projects.saveConfig')}
                 </Button>

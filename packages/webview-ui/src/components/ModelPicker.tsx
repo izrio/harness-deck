@@ -138,12 +138,12 @@ export function ModelPicker({
   const showEfforts = Boolean(option && option.efforts.length > 1);
 
   return (
-    <div className="model-picker relative min-w-0">
+    <div className="model-picker relative flex min-w-0 items-center">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="toolbar-button inline-flex h-7 max-w-full items-center gap-1 rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-55"
+            className="toolbar-button flex h-7 max-w-full items-center gap-1.5 rounded-[8px] px-2 text-[12px] leading-4 font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-55"
             disabled={disabled || options.length === 0}
             title={t('model.switch')}
             data-testid={testId}
@@ -159,17 +159,28 @@ export function ModelPicker({
                 className="size-3.5 shrink-0"
               />
             )}
-            <span className="toolbar-button__text min-w-0 truncate">{label}</span>
+            <span className="toolbar-button__text min-w-0 truncate leading-4">
+              {option ? (
+                <>
+                  {option.name}
+                  {effort && option.efforts.length > 1 ? (
+                    <span className="font-normal text-ink-3"> · {effort.name}</span>
+                  ) : null}
+                </>
+              ) : (
+                label
+              )}
+            </span>
             {rate ? (
               <span
-                className="toolbar-button__rate shrink-0 font-mono text-[10.5px] font-normal text-ink-3"
+                className="toolbar-button__rate ml-0.5 shrink-0 text-[11px] leading-4 font-normal tabular-nums text-ink-3"
                 title={t('model.rate')}
                 data-testid="model-picker-rate"
               >
                 {rate}
               </span>
             ) : null}
-            <ChevronDownIcon className="size-3 shrink-0 text-ink-3" />
+            <ChevronDownIcon className="-ml-0.5 size-3 shrink-0 text-ink-3" />
           </button>
         </PopoverTrigger>
         <PopoverContent
@@ -329,16 +340,15 @@ export function ModelPicker({
             </div>
           ) : null}
           <ScrollArea className="max-h-60">
-            <div role="menu" className="model-menu__level p-1" data-testid="model-list">
+            <div role="menu" className="model-menu__level p-1.5" data-testid="model-list">
               <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[6px] bg-hover">
                 {groups.map((group) => (
                   <div key={group} className="model-menu__group">
-                    {groups.length > 1 ? <div className="menu-heading px-2 pt-1.5 pb-0.5 text-[11px] font-medium text-ink-3">{group}</div> : null}
+                    {groups.length > 1 ? <div className="menu-heading px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-ink-3">{group}</div> : null}
                   {options
                     .filter((o) => o.group === group)
                     .map((o) => {
                       const active = isCurrent(o);
-                      const currentEffort = active ? o.efforts.find((e) => e.id === current?.reasoningEffort) : undefined;
                       const nextEffort =
                         (current?.reasoningEffort && o.efforts.some((e) => e.id === current.reasoningEffort)
                           ? current.reasoningEffort
@@ -353,7 +363,6 @@ export function ModelPicker({
                           icon={<ModelVendorLogo provider={o.provider} model={o.model} name={o.name} group={o.group} className="size-3.5 shrink-0" />}
                           {...(o.description ? { title: o.description } : {})}
                           {...(rate ? { rate } : {})}
-                          {...(active && o.efforts.length > 1 && currentEffort ? { hint: currentEffort.name } : {})}
                           onSelect={() => select(o, nextEffort, o.efforts.length <= 1)}
                         >
                           {o.name}
@@ -537,7 +546,6 @@ function ModelItem({
   active,
   icon,
   rate,
-  hint,
   title,
   onSelect,
   children,
@@ -545,7 +553,6 @@ function ModelItem({
   active: boolean;
   icon?: ReactNode;
   rate?: string;
-  hint?: string;
   title?: string;
   onSelect: () => void;
   children: string;
@@ -558,25 +565,24 @@ function ModelItem({
       role="menuitemradio"
       aria-checked={active}
       className={cn(
-        'menu-item model-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-[12.5px] transition-colors duration-100',
+        'menu-item model-item relative z-10 flex h-8 w-full items-center gap-2 rounded-chip px-2.5 text-left text-[12.5px] leading-4 transition-colors duration-100',
         active ? 'menu-item--active bg-field font-medium text-ink group-data-[gliding=true]/glide-menu:bg-transparent' : 'text-ink-2 hover:text-ink',
       )}
       onClick={onSelect}
       title={title ?? children}
     >
-      <span className="model-item__check inline-flex w-3.5 shrink-0 text-ink">{active ? <CheckIcon className="size-3.5" strokeWidth={2.2} /> : null}</span>
+      <span className="model-item__check inline-flex w-3.5 shrink-0 items-center justify-center text-ink">{active ? <CheckIcon className="size-3.5" strokeWidth={2.2} /> : null}</span>
       {icon ? <span className="model-item__vendor inline-flex shrink-0 items-center">{icon}</span> : null}
-      <span className="menu-item__label min-w-0 flex-1 truncate">{children}</span>
+      <span className="menu-item__label min-w-0 flex-1 truncate leading-4">{children}</span>
       {rate ? (
         <span
-          className={cn('menu-item__rate shrink-0 font-mono text-[11px]', active ? 'text-ink-2' : 'text-ink-3')}
+          className={cn('menu-item__rate ml-1 shrink-0 text-[11px] leading-4 tabular-nums', active ? 'text-ink-2' : 'text-ink-3')}
           title={t('model.rate')}
           data-testid="model-rate"
         >
           {rate}
         </span>
       ) : null}
-      {hint ? <span className={cn('menu-item__hint shrink-0 font-mono text-[11px]', active ? 'text-ink-2' : 'text-ink-3')}>{hint}</span> : null}
     </button>
   );
 }

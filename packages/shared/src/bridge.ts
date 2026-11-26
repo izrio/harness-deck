@@ -960,6 +960,8 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
             .optional(),
           url: z.string().max(2_000).optional(),
           secret: z.string().max(512).optional(),
+          chatId: z.string().max(128).optional(),
+          group: z.string().max(128).optional(),
         })
         .optional(),
     }),

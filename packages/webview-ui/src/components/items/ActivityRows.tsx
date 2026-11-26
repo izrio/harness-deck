@@ -60,14 +60,14 @@ export function ActivityRow({ item }: { item: Of<'activity'> }) {
         </span>
         <span
           className={cn(
-            'activity__name shrink-0 font-medium',
+            'activity__name shrink-0 leading-4 font-medium',
             item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink-2',
           )}
         >
           {command ? commandVerb : name}
         </span>
         {chipText ? (
-          <span className="activity__detail inline-flex h-5 min-w-0 items-center truncate rounded-chip bg-field px-1.5 font-mono text-[11px] text-ink-2 shadow-hairline">
+          <span className="activity__detail inline-flex h-5 min-w-0 items-center truncate rounded-chip bg-field px-1.5 font-mono text-[11px] leading-none text-ink-2 shadow-hairline">
             {chipText}
           </span>
         ) : null}
@@ -127,7 +127,7 @@ export function EditRow({ item }: { item: Of<'activity'> }) {
         </span>
         <span
           className={cn(
-            'activity__name shrink-0 font-medium',
+            'activity__name shrink-0 leading-4 font-medium',
             item.status === 'error' ? 'text-red' : item.status === 'running' ? 'text-accent-ink' : 'text-ink-2',
           )}
         >
@@ -136,7 +136,7 @@ export function EditRow({ item }: { item: Of<'activity'> }) {
         <FilePath
           path={item.label}
           className={cn(
-            'activity__detail activity__file inline-flex h-5 min-w-0 items-center rounded-chip bg-field px-1.5 font-mono text-[11px] shadow-hairline',
+            'activity__detail activity__file inline-flex h-5 min-w-0 items-center rounded-chip bg-field px-1.5 font-mono text-[11px] leading-none shadow-hairline',
             diff ? 'activity__file--link text-accent-ink group-hover/row:underline' : 'text-ink-2',
           )}
         />

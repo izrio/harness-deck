@@ -1,6 +1,6 @@
 /**
  * 设置 -> 界面 -> 通知：
- * 去线留白：将总开关与触发时机自然分为两个留白区块，移除卡片内灰底分割栏与行间横线。
+ * macOS 设置风格：无外框浅底圆角卡片，卡片内行与行以极细内缩横线分隔，保持宽松行距与呼吸感。
  */
 import type { NotificationPreferences } from '@harness-deck/shared';
 import { useT } from '../../i18n.ts';
@@ -49,7 +49,7 @@ export function NotificationSettings() {
           </Button>
         }
       >
-        <div className="flex flex-col gap-0.5 p-1.5">
+        <div className="flex flex-col divide-y divide-line/55 px-4">
           <SwitchRow
             testId="notif-enabled"
             label={t('settings.notifications.enabled')}
@@ -67,7 +67,7 @@ export function NotificationSettings() {
       </SettingsSection>
 
       <SettingsSection title={t('settings.notifications.triggers')}>
-        <div className="flex flex-col gap-0.5 p-1.5">
+        <div className="flex flex-col divide-y divide-line/55 px-4">
           <SwitchRow
             testId="notif-attention"
             label={t('settings.notifications.onAttention')}
@@ -117,10 +117,10 @@ function SwitchRow({
 }) {
   return (
     <div
-      className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 aria-disabled:opacity-45 aria-disabled:hover:bg-transparent dark:hover:bg-hover/35"
+      className="flex items-center justify-between gap-6 py-3.5 transition-opacity aria-disabled:opacity-45"
       aria-disabled={disabled}
     >
-      <span className="min-w-0 flex-1 text-[12.5px] text-ink">{label}</span>
+      <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{label}</span>
       <Switch
         data-testid={testId}
         aria-label={label}

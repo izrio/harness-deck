@@ -107,6 +107,7 @@ export type {
   RemoteScope,
   RemoteState,
   RemoteTailscaleView,
+  RemoteWebhookChannelConfig,
   RemoteWebhookConfig,
   RemoteWebhookPreset,
   RemoteWslNatInfo,

@@ -189,7 +189,7 @@ export function WorkbenchRightPanel() {
           <TabsTrigger
             value="files"
             data-testid="right-panel-tab-files"
-            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
+            className="h-9 flex-none gap-1.5 rounded-none px-2.5 text-[12px] leading-4 after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
             onClick={() => setRightPanelTab('files')}
           >
             <FilesIcon className="size-3.5 shrink-0" />
@@ -198,13 +198,13 @@ export function WorkbenchRightPanel() {
           <TabsTrigger
             value="git"
             data-testid="right-panel-tab-git"
-            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
+            className="h-9 flex-none gap-1.5 rounded-none px-2.5 text-[12px] leading-4 after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
             onClick={() => setRightPanelTab('git')}
           >
             <GitBranchIcon className="size-3.5 shrink-0" />
             <span>{t('wb.rightPanel.git')}</span>
             {changesCount > 0 ? (
-              <span className="rounded-full bg-field px-1.5 text-[10.5px] font-medium text-ink-2 tabular-nums">
+              <span className="inline-flex h-4 items-center rounded-full bg-field px-1.5 text-[10.5px] leading-none font-medium text-ink-2 tabular-nums">
                 {changesCount}
               </span>
             ) : null}
@@ -212,13 +212,13 @@ export function WorkbenchRightPanel() {
           <TabsTrigger
             value="terminal"
             data-testid="right-panel-tab-terminal"
-            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
+            className="h-9 flex-none gap-1.5 rounded-none px-2.5 text-[12px] leading-4 after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
             onClick={() => setRightPanelTab('terminal')}
           >
             <TerminalIcon className="size-3.5 shrink-0" />
             <span>{t('wb.rightPanel.terminal')}</span>
             {runningTerminals > 0 ? (
-              <span className="rounded-full bg-green-tint px-1.5 text-[10.5px] font-medium text-green tabular-nums">
+              <span className="inline-flex h-4 items-center rounded-full bg-green-tint px-1.5 text-[10.5px] leading-none font-medium text-green tabular-nums">
                 {runningTerminals}
               </span>
             ) : null}
@@ -226,7 +226,7 @@ export function WorkbenchRightPanel() {
           <TabsTrigger
             value="browser"
             data-testid="right-panel-tab-browser"
-            className="h-9 flex-none gap-1 rounded-none px-2 text-[12px] after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
+            className="h-9 flex-none gap-1.5 rounded-none px-2.5 text-[12px] leading-4 after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-0"
             onClick={() => setRightPanelTab('browser')}
           >
             <GlobeIcon className="size-3.5 shrink-0" />

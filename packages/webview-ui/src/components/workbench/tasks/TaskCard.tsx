@@ -70,14 +70,14 @@ export function TaskCard({
 
   return (
     <article
-      className="flex flex-col gap-2 px-3 py-2.5 transition-colors duration-100 hover:bg-hover/40"
+      className="flex flex-col gap-2.5 px-3.5 py-3 transition-colors duration-100 hover:bg-hover/40"
       data-testid={`task-card-${task.id}`}
     >
       {/* 标题行：序标 + 运行时图标 + 标题 + 删除 */}
-      <div className="flex items-start justify-between gap-1.5">
+      <div className="flex items-center justify-between gap-1.5">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {col === 'todo' ? (
-            <span className="shrink-0 font-mono text-[11px] text-ink-3 tabular-nums">#{idx + 1}</span>
+            <span className="shrink-0 text-[11px] leading-4 text-ink-3 tabular-nums">#{idx + 1}</span>
           ) : col === 'in_progress' ? (
             <SpinnerIcon className="size-3.5 shrink-0 text-accent-ink" />
           ) : null}
@@ -91,7 +91,7 @@ export function TaskCard({
             <BackendLogo backend={{ id: task.backendId, name: backendName }} size="sm" />
           </span>
 
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{task.title}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-5 font-medium text-ink">{task.title}</span>
         </div>
 
         <Button
@@ -121,37 +121,37 @@ export function TaskCard({
       ) : null}
 
       {/* 轻量元信息行（项目 / 模型 / 智能体 / 定时） */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
-        <span className="max-w-[120px] truncate">{task.projectName}</span>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-ink-3">
+        <span className="max-w-[120px] truncate leading-4">{task.projectName}</span>
         {task.model ? (
-          <span className="max-w-[130px] truncate font-mono text-[10.5px]" title={task.model}>
+          <span className="max-w-[130px] truncate text-[11px] leading-4 tabular-nums" title={task.model}>
             · {task.model}
           </span>
         ) : null}
-        {assignedAgent ? <span className="max-w-[100px] truncate">· {assignedAgent.name}</span> : null}
+        {assignedAgent ? <span className="max-w-[100px] truncate leading-4">· {assignedAgent.name}</span> : null}
         {worktreeLabel ? (
           <span
-            className="inline-flex max-w-[140px] items-center gap-1 font-mono text-[10.5px] text-accent-ink"
+            className="inline-flex max-w-[140px] items-center gap-1 text-[11px] leading-4 text-accent-ink"
             title={task.worktreePath ?? worktreeLabel}
             data-testid={`task-worktree-badge-${task.id}`}
           >
             <GitBranchIcon className="size-3 shrink-0" />
-            <span className="truncate">{worktreeLabel}</span>
+            <span className="truncate leading-4">{worktreeLabel}</span>
           </span>
         ) : null}
         {scheduleLabel ? (
           <span
-            className="inline-flex items-center gap-1 text-accent-ink tabular-nums"
+            className="inline-flex items-center gap-1 leading-4 text-accent-ink tabular-nums"
             data-testid={`task-schedule-badge-${task.id}`}
           >
             <ClockIcon className="size-3 shrink-0" />
-            <span>{scheduleLabel}</span>
+            <span className="leading-4">{scheduleLabel}</span>
           </span>
         ) : null}
       </div>
 
       {/* 底部操作行（无多余内部分割线，与列内 divide-y 保持干净层次） */}
-      <div className="flex flex-wrap items-center justify-between gap-1 pt-0.5">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
         {col === 'todo' ? (
           <>
             <div className="flex items-center gap-0.5">

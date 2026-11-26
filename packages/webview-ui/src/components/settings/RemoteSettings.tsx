@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useT, type MessageKey } from '../../i18n.ts';
@@ -41,12 +42,14 @@ import {
   BellIcon,
   CheckIcon,
   CopyIcon,
+  ErrorIcon,
   GlobeIcon,
   LinkIcon,
   LogOutIcon,
   MoreIcon,
   PencilIcon,
   QrCodeIcon,
+  QuestionIcon,
   RefreshIcon,
   ShieldIcon,
   ShieldOffIcon,
@@ -56,6 +59,8 @@ import {
 } from '../icons.tsx';
 import { QrCodeSvg } from '../QrCodeSvg.tsx';
 import { SettingsSection } from './SettingsSection.tsx';
+import { WebhookChannelLogo } from './WebhookChannelLogo.tsx';
+import { isWebhookChannelConfigured, validateWebhookDraft } from './webhookChannels.ts';
 
 const WEBHOOK_PRESETS: readonly RemoteWebhookPreset[] = [
   'bark',
@@ -82,7 +87,7 @@ function webhookUrlPlaceholder(preset: RemoteWebhookPreset, fallback: string): s
     case 'dingtalk':
       return 'https://oapi.dingtalk.com/robot/send?access_token=<token>';
     case 'telegram':
-      return 'https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>';
+      return 'https://api.telegram.org';
     case 'slack':
       return 'https://hooks.slack.com/services/T.../B.../...';
     case 'discord':
@@ -90,10 +95,6 @@ function webhookUrlPlaceholder(preset: RemoteWebhookPreset, fallback: string): s
     default:
       return fallback;
   }
-}
-
-function presetSupportsSecret(preset: RemoteWebhookPreset): boolean {
-  return preset === 'feishu' || preset === 'dingtalk' || preset === 'telegram';
 }
 
 function formatExpiryClock(ts: number): string {
@@ -129,9 +130,9 @@ function MobileRemoteSelfPanel() {
   return (
     <div className="flex flex-col gap-8" data-testid="settings-remote-mobile">
       <SettingsSection title={t('remote.mobileCardTitle')} testId="remote-mobile-self">
-        <div className="flex flex-col gap-5 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-[12.5px] font-medium text-ink">
+        <div className="flex flex-col divide-y divide-line/55 px-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 py-3.5">
+            <div className="flex items-center gap-2 text-[13px] leading-5 font-medium text-ink">
               <SmartphoneIcon className="size-4 text-accent-ink" />
               <span>{transport.device?.name ?? 'Mobile Browser'}</span>
               <span
@@ -157,8 +158,8 @@ function MobileRemoteSelfPanel() {
             </Button>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <span className="text-[12.5px] font-medium text-ink">{t('remote.mobilePushToggle')}</span>
+          <div className="flex flex-col gap-2.5 py-4">
+            <span className="text-[13px] leading-5 font-medium text-ink">{t('remote.mobilePushToggle')}</span>
             {pushSupported && vapidPublicKey ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -198,13 +199,13 @@ function MobileRemoteSelfPanel() {
                 </Button>
               </div>
             ) : (
-              <p className="m-0 text-[11.5px] text-ink-3">{t('remote.mobilePushUnsupported')}</p>
+              <p className="m-0 text-[12px] text-ink-3">{t('remote.mobilePushUnsupported')}</p>
             )}
           </div>
 
           {transport.routes.length > 0 ? (
-            <div className="flex flex-col gap-2" data-testid="mobile-routes-list">
-              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
+            <div className="flex flex-col gap-2.5 py-4" data-testid="mobile-routes-list">
+              <span className="flex items-center gap-1.5 text-[13px] leading-5 font-medium text-ink">
                 <LinkIcon className="size-3.5 text-ink-2" />
                 <span>{t('remote.mobileRoutesTitle')}</span>
               </span>
@@ -226,7 +227,7 @@ function MobileRemoteSelfPanel() {
             </div>
           ) : null}
 
-          <p className="m-0 text-[11.5px] text-ink-3">{t('remote.mobileBlockedHint')}</p>
+          <p className="m-0 py-3.5 text-[12px] text-ink-3">{t('remote.mobileBlockedHint')}</p>
         </div>
       </SettingsSection>
     </div>
@@ -241,6 +242,8 @@ function IdeRemoteSettingsPanel() {
   const [tunnelDraft, setTunnelDraft] = useState(remote?.tunnelUrl ?? '');
   const [webhookUrlDraft, setWebhookUrlDraft] = useState(remote?.push?.webhook.url ?? '');
   const [webhookSecretDraft, setWebhookSecretDraft] = useState(remote?.push?.webhook.secret ?? '');
+  const [webhookChatIdDraft, setWebhookChatIdDraft] = useState(remote?.push?.webhook.chatId ?? '');
+  const [webhookGroupDraft, setWebhookGroupDraft] = useState(remote?.push?.webhook.group ?? '');
   const [copiedPairing, setCopiedPairing] = useState(false);
   const [copiedWslCmd, setCopiedWslCmd] = useState(false);
   const [copiedQuickTunnel, setCopiedQuickTunnel] = useState(false);
@@ -270,7 +273,15 @@ function IdeRemoteSettingsPanel() {
   useEffect(() => {
     setWebhookUrlDraft(remote?.push?.webhook.url ?? '');
     setWebhookSecretDraft(remote?.push?.webhook.secret ?? '');
-  }, [remote?.push?.webhook.url, remote?.push?.webhook.secret]);
+    setWebhookChatIdDraft(remote?.push?.webhook.chatId ?? '');
+    setWebhookGroupDraft(remote?.push?.webhook.group ?? '');
+  }, [
+    remote?.push?.webhook.preset,
+    remote?.push?.webhook.url,
+    remote?.push?.webhook.secret,
+    remote?.push?.webhook.chatId,
+    remote?.push?.webhook.group,
+  ]);
 
   const enabled = remote?.enabled === true;
   const running = remote?.running === true;
@@ -350,9 +361,9 @@ function IdeRemoteSettingsPanel() {
           </div>
         }
       >
-        <div className="flex flex-col gap-3 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-0 flex-1 text-[12.5px] font-medium text-ink">{t('remote.enabled')}</span>
+        <div className="flex flex-col gap-3 px-4 py-3.5">
+          <div className="flex items-center justify-between gap-6">
+            <span className="min-w-0 flex-1 text-[13px] leading-5 text-ink">{t('remote.enabled')}</span>
             <Switch
               data-testid="remote-enabled-switch"
               aria-label={t('remote.enabled')}
@@ -384,8 +395,8 @@ function IdeRemoteSettingsPanel() {
           </Button>
         }
       >
-        <div className="flex flex-col gap-5 p-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="flex flex-col divide-y divide-line/55 px-4">
+          <div className="grid grid-cols-1 gap-4 py-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="remote-lan-select" className="text-[12px] font-medium text-ink-2">
                 {t('remote.lanHost')}
@@ -444,64 +455,66 @@ function IdeRemoteSettingsPanel() {
           </div>
 
           {remote?.wslNat?.active ? (
-            <div
-              data-testid="remote-wsl-nat-card"
-              className="flex flex-col gap-2 rounded-xl bg-canvas/80 px-3.5 py-3 dark:bg-page/55"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[12px] font-medium text-ink">{t('remote.wslNatTitle')}</span>
-                <span className={cn('text-[11px] font-medium', remote.wslNat.portProxyConfigured ? 'text-green' : 'text-ink-3')}>
-                  {remote.wslNat.portProxyConfigured ? t('remote.wslNatReady') : t('remote.wslNatNeeded')}
-                </span>
-              </div>
-              <p className="m-0 text-[11.5px] text-ink-3">
-                {remote.wslNat.portProxyConfigured
-                  ? t(
-                      'remote.wslNatReadyHint',
-                      remote.wslNat.windowsAddress,
-                      remote.port ?? 37890,
-                      remote.wslNat.wslAddress,
-                    )
-                  : t('remote.wslNatNeededHint', remote.wslNat.windowsAddress, remote.wslNat.wslAddress)}
-              </p>
-              {!remote.wslNat.portProxyConfigured ? (
-                <>
-                  <code
-                    data-testid="remote-wsl-nat-cmd"
-                    className="block rounded-lg bg-field/80 px-2.5 py-2 font-mono text-[11px] break-all text-ink dark:bg-surface/80"
-                  >
-                    {remote.wslNat.setupCommand}
-                  </code>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="xs"
-                      data-testid="remote-copy-wsl-cmd-btn"
-                      onClick={copyWslSetupCommand}
+            <div className="py-4">
+              <div
+                data-testid="remote-wsl-nat-card"
+                className="flex flex-col gap-2 rounded-xl bg-canvas/80 px-3.5 py-3 dark:bg-page/55"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[12px] font-medium text-ink">{t('remote.wslNatTitle')}</span>
+                  <span className={cn('text-[11px] font-medium', remote.wslNat.portProxyConfigured ? 'text-green' : 'text-ink-3')}>
+                    {remote.wslNat.portProxyConfigured ? t('remote.wslNatReady') : t('remote.wslNatNeeded')}
+                  </span>
+                </div>
+                <p className="m-0 text-[11.5px] text-ink-3">
+                  {remote.wslNat.portProxyConfigured
+                    ? t(
+                        'remote.wslNatReadyHint',
+                        remote.wslNat.windowsAddress,
+                        remote.port ?? 37890,
+                        remote.wslNat.wslAddress,
+                      )
+                    : t('remote.wslNatNeededHint', remote.wslNat.windowsAddress, remote.wslNat.wslAddress)}
+                </p>
+                {!remote.wslNat.portProxyConfigured ? (
+                  <>
+                    <code
+                      data-testid="remote-wsl-nat-cmd"
+                      className="block rounded-lg bg-field/80 px-2.5 py-2 font-mono text-[11px] break-all text-ink dark:bg-surface/80"
                     >
-                      {copiedWslCmd ? <CheckIcon className="size-3 text-green" /> : <CopyIcon className="size-3" />}
-                      <span>{t('remote.wslNatCopyCmd')}</span>
-                    </Button>
-                  </div>
-                </>
-              ) : null}
+                      {remote.wslNat.setupCommand}
+                    </code>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        data-testid="remote-copy-wsl-cmd-btn"
+                        onClick={copyWslSetupCommand}
+                      >
+                        {copiedWslCmd ? <CheckIcon className="size-3 text-green" /> : <CopyIcon className="size-3" />}
+                        <span>{t('remote.wslNatCopyCmd')}</span>
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
           {/* 一键公网临时隧道（Cloudflare Quick Tunnel） */}
-          <div className="flex flex-col gap-2" data-testid="remote-quick-tunnel-block">
+          <div className="flex flex-col gap-2.5 py-4" data-testid="remote-quick-tunnel-block">
             <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5 text-[12px] font-medium text-ink-2">
-                <GlobeIcon className="size-3.5" />
+              <span className="flex items-center gap-1.5 text-[13px] leading-5 font-medium text-ink">
+                <GlobeIcon className="size-3.5 text-ink-2" />
                 <span>{t('remote.quickTunnelTitle')}</span>
                 {quickTunnel?.status === 'starting' ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-accent-ink">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-normal text-accent-ink">
                     <SpinnerIcon className="size-3" />
                     <span>{t('remote.quickTunnelStarting')}</span>
                   </span>
                 ) : quickTunnel?.status === 'running' ? (
-                  <span className="text-[11px] text-green">{t('remote.quickTunnelReady')}</span>
+                  <span className="text-[11px] font-normal text-green">{t('remote.quickTunnelReady')}</span>
                 ) : null}
               </span>
               <div className="flex items-center gap-2">
@@ -528,7 +541,7 @@ function IdeRemoteSettingsPanel() {
               </div>
             </div>
             {quickTunnel && !quickTunnel.installed ? (
-              <p className="m-0 text-[11.5px] text-ink-3">{t('remote.quickTunnelNotInstalled')}</p>
+              <p className="m-0 text-[12px] text-ink-3">{t('remote.quickTunnelNotInstalled')}</p>
             ) : quickTunnel?.url ? (
               <div className="flex items-center justify-between gap-2 rounded-xl bg-canvas/80 px-3 py-2 dark:bg-page/55">
                 <code className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink" data-testid="remote-quick-tunnel-url">
@@ -546,15 +559,15 @@ function IdeRemoteSettingsPanel() {
                 </Button>
               </div>
             ) : quickTunnel?.error ? (
-              <p className="m-0 text-[11.5px] text-red">{quickTunnel.error}</p>
+              <p className="m-0 text-[12px] text-red">{quickTunnel.error}</p>
             ) : null}
           </div>
 
           {/* Tailscale */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2.5 py-4">
             <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5 text-[12px] font-medium text-ink-2">
-                <GlobeIcon className="size-3.5" />
+              <span className="flex items-center gap-1.5 text-[13px] leading-5 font-medium text-ink">
+                <GlobeIcon className="size-3.5 text-ink-2" />
                 <span>{t('remote.tailscaleTitle')}</span>
               </span>
               <Button
@@ -570,9 +583,9 @@ function IdeRemoteSettingsPanel() {
               </Button>
             </div>
             {!tailscale ? null : !tailscale.installed ? (
-              <p className="m-0 text-[11.5px] text-ink-3">{t('remote.tailscaleNotInstalled')}</p>
+              <p className="m-0 text-[12px] text-ink-3">{t('remote.tailscaleNotInstalled')}</p>
             ) : !tailscale.loggedIn ? (
-              <p className="m-0 text-[11.5px] text-ink-3">
+              <p className="m-0 text-[12px] text-ink-3">
                 {t('remote.tailscaleNotLoggedIn', tailscale.error ?? 'Not running')}
               </p>
             ) : (
@@ -598,8 +611,8 @@ function IdeRemoteSettingsPanel() {
           </div>
 
           {/* BYO Tunnel */}
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-ink-2">{t('remote.tunnelUrl')}</span>
+          <div className="flex flex-col gap-2 py-4">
+            <span className="text-[13px] leading-5 font-medium text-ink">{t('remote.tunnelUrl')}</span>
             <div className="flex items-center gap-2">
               <Input
                 size="sm"
@@ -707,19 +720,19 @@ function IdeRemoteSettingsPanel() {
             {t('remote.devicesEmpty')}
           </div>
         ) : (
-          <div className="flex flex-col gap-1 p-1.5">
+          <div className="flex flex-col divide-y divide-line/55 px-4">
             {devices.map((dev) => {
               const nextScope: RemoteScope = dev.scope === 'operate' ? 'read-only' : 'operate';
               return (
                 <div
                   key={dev.id}
                   data-testid={`remote-device-${dev.id}`}
-                  className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/70 dark:hover:bg-hover/35"
+                  className="flex items-center justify-between gap-3 py-3.5"
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className={cn('size-2 shrink-0 rounded-full', dev.connected ? 'bg-green' : 'bg-ink-4')} />
-                      <span className="truncate text-[12.5px] font-medium text-ink">{dev.name}</span>
+                      <span className="truncate text-[13px] leading-5 font-medium text-ink">{dev.name}</span>
                       <span className={cn('text-[11.5px]', dev.scope === 'operate' ? 'text-accent-ink' : 'text-ink-3')}>
                         {dev.scope}
                       </span>
@@ -813,9 +826,17 @@ function IdeRemoteSettingsPanel() {
           </Button>
         }
       >
-        <div className="flex flex-col gap-1 p-1.5">
-          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
-            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('remote.webPushEnabled')}</span>
+        <div className="flex flex-col divide-y divide-line/55 px-4">
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="truncate text-[13px] leading-5 text-ink">{t('remote.webPushEnabled')}</span>
+              <PushHelpPopover
+                title={t('remote.webPushHelpTitle')}
+                detail={t('remote.webPushHelpDetail')}
+                note={t('remote.webPushHelpNote')}
+                testId="remote-webpush-help"
+              />
+            </div>
             <Switch
               data-testid="remote-webpush-switch"
               aria-label={t('remote.webPushEnabled')}
@@ -824,8 +845,15 @@ function IdeRemoteSettingsPanel() {
             />
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-canvas/65 dark:hover:bg-hover/35">
-            <span className="min-w-0 flex-1 text-[12.5px] text-ink">{t('remote.suppressFocused')}</span>
+          <div className="flex items-center justify-between gap-6 py-3.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="truncate text-[13px] leading-5 text-ink">{t('remote.suppressFocused')}</span>
+              <PushHelpPopover
+                title={t('remote.suppressFocusedHelpTitle')}
+                detail={t('remote.suppressFocusedHelpDetail')}
+                testId="remote-suppress-focused-help"
+              />
+            </div>
             <Switch
               data-testid="remote-suppress-focused-switch"
               aria-label={t('remote.suppressFocused')}
@@ -836,9 +864,17 @@ function IdeRemoteSettingsPanel() {
             />
           </div>
 
-          <div className="flex flex-col gap-3 rounded-xl px-3 py-2.5">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-[12.5px] font-medium text-ink">{t('remote.webhookEnabled')}</span>
+          <div className="flex flex-col gap-3.5 py-4">
+            <div className="flex items-center justify-between gap-6">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                <span className="truncate text-[13px] leading-5 text-ink">{t('remote.webhookEnabled')}</span>
+                <PushHelpPopover
+                  title={t('remote.webhookHelpTitle')}
+                  detail={t('remote.webhookHelpDetail')}
+                  note={t('remote.webhookHelpNote')}
+                  testId="remote-webhook-help"
+                />
+              </div>
               <Switch
                 data-testid="remote-webhook-switch"
                 aria-label={t('remote.webhookEnabled')}
@@ -849,85 +885,112 @@ function IdeRemoteSettingsPanel() {
               />
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Select
-                value={push.webhook.preset}
-                onValueChange={(value) =>
-                  postToHost({
-                    type: 'setRemotePushConfig',
-                    payload: { webhook: { preset: value as RemoteWebhookPreset } },
-                  })
-                }
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="sm:w-40"
-                  aria-label={t('remote.webhookPreset')}
-                  data-testid="remote-webhook-preset"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WEBHOOK_PRESETS.map((preset) => (
-                    <SelectItem key={preset} value={preset}>
-                      {t(`remote.webhookPreset.${preset}` as MessageKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                size="sm"
-                aria-label={t('remote.webhookUrl')}
-                data-testid="remote-webhook-url"
-                className="flex-1 font-mono"
-                value={webhookUrlDraft}
-                placeholder={webhookUrlPlaceholder(push.webhook.preset, t('remote.webhookUrlPlaceholder'))}
-                onChange={(e) => setWebhookUrlDraft(e.target.value)}
-                onBlur={() =>
-                  webhookUrlDraft.trim() !== push.webhook.url &&
-                  postToHost({ type: 'setRemotePushConfig', payload: { webhook: { url: webhookUrlDraft.trim() } } })
-                }
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    postToHost({ type: 'setRemotePushConfig', payload: { webhook: { url: webhookUrlDraft.trim() } } });
-                  }
-                }}
-              />
-            </div>
+            <div className="flex flex-col gap-3 rounded-xl bg-canvas/70 p-3.5 dark:bg-page/50">
+              {/* 渠道选择行 + 配置指南问号 */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Select
+                    value={push.webhook.preset}
+                    onValueChange={(value) => {
+                      const nextPreset = value as RemoteWebhookPreset;
+                      const saved = push.webhook.channels?.[nextPreset];
+                      setWebhookUrlDraft(saved?.url ?? '');
+                      setWebhookSecretDraft(saved?.secret ?? '');
+                      setWebhookChatIdDraft(saved?.chatId ?? '');
+                      setWebhookGroupDraft(saved?.group ?? '');
+                      postToHost({
+                        type: 'setRemotePushConfig',
+                        payload: { webhook: { preset: nextPreset } },
+                      });
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full max-w-[220px]"
+                      aria-label={t('remote.webhookPreset')}
+                      data-testid="remote-webhook-preset"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WEBHOOK_PRESETS.map((preset) => {
+                        const saved =
+                          preset === push.webhook.preset
+                            ? {
+                                url: webhookUrlDraft,
+                                secret: webhookSecretDraft || undefined,
+                                chatId: webhookChatIdDraft || undefined,
+                                group: webhookGroupDraft || undefined,
+                              }
+                            : push.webhook.channels?.[preset];
+                        const configured = isWebhookChannelConfigured(preset, saved);
+                        return (
+                          <SelectItem key={preset} value={preset} data-testid={`remote-webhook-preset-item-${preset}`}>
+                            <WebhookChannelLogo preset={preset} className="size-4 shrink-0" />
+                            <span>{t(`remote.webhookPreset.${preset}` as MessageKey)}</span>
+                            {configured ? (
+                              <span
+                                aria-hidden="true"
+                                className="ml-1 inline-block size-1.5 shrink-0 rounded-full bg-green"
+                              />
+                            ) : null}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {isWebhookChannelConfigured(push.webhook.preset, {
+                    url: webhookUrlDraft,
+                    ...(webhookSecretDraft ? { secret: webhookSecretDraft } : {}),
+                    ...(webhookChatIdDraft ? { chatId: webhookChatIdDraft } : {}),
+                    ...(webhookGroupDraft ? { group: webhookGroupDraft } : {}),
+                  }) ? (
+                    <span className="hidden items-center gap-1 text-[11px] leading-4 text-green sm:inline-flex">
+                      <span aria-hidden="true" className="size-1.5 rounded-full bg-green" />
+                      <span>{t('remote.webhookChannelConfigured')}</span>
+                    </span>
+                  ) : null}
+                </div>
+                <WebhookChannelGuidePopover preset={push.webhook.preset} />
+              </div>
 
-            {presetSupportsSecret(push.webhook.preset) ? (
-              <Input
-                size="sm"
-                type={push.webhook.preset === 'telegram' ? 'text' : 'password'}
-                aria-label={
-                  push.webhook.preset === 'telegram' ? t('remote.webhookTelegramChatId') : t('remote.webhookSecret')
-                }
-                data-testid="remote-webhook-secret"
-                className="font-mono"
-                value={webhookSecretDraft}
-                placeholder={
-                  push.webhook.preset === 'telegram'
-                    ? t('remote.webhookTelegramChatIdPlaceholder')
-                    : t('remote.webhookSecretPlaceholder')
-                }
-                onChange={(e) => setWebhookSecretDraft(e.target.value)}
-                onBlur={() =>
-                  webhookSecretDraft.trim() !== (push.webhook.secret ?? '') &&
-                  postToHost({
-                    type: 'setRemotePushConfig',
-                    payload: { webhook: { secret: webhookSecretDraft.trim() } },
-                  })
-                }
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    postToHost({
-                      type: 'setRemotePushConfig',
-                      payload: { webhook: { secret: webhookSecretDraft.trim() } },
-                    });
-                  }
-                }}
+              {/* 渠道专属配置表单 */}
+              <WebhookChannelFields
+                preset={push.webhook.preset}
+                url={webhookUrlDraft}
+                secret={webhookSecretDraft}
+                chatId={webhookChatIdDraft}
+                group={webhookGroupDraft}
+                savedUrl={push.webhook.url}
+                savedSecret={push.webhook.secret ?? ''}
+                savedChatId={push.webhook.chatId ?? ''}
+                savedGroup={push.webhook.group ?? ''}
+                onUrlChange={setWebhookUrlDraft}
+                onSecretChange={setWebhookSecretDraft}
+                onChatIdChange={setWebhookChatIdDraft}
+                onGroupChange={setWebhookGroupDraft}
               />
-            ) : null}
+
+              {(() => {
+                const warnKey = validateWebhookDraft(push.webhook.preset, {
+                  url: webhookUrlDraft,
+                  secret: webhookSecretDraft,
+                  chatId: webhookChatIdDraft,
+                  group: webhookGroupDraft,
+                });
+                if (!warnKey) return null;
+                return (
+                  <div
+                    role="status"
+                    data-testid="remote-webhook-validation-warning"
+                    className="flex items-start gap-1.5 rounded-lg bg-orange-tint/65 px-2.5 py-2 text-[11.5px] leading-4 text-orange"
+                  >
+                    <ErrorIcon className="mt-0.5 size-3.5 shrink-0" />
+                    <span>{t(warnKey)}</span>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
       </SettingsSection>
@@ -967,5 +1030,317 @@ function IdeRemoteSettingsPanel() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** 按所选 Webhook 渠道渲染专属配置表单字段（方案 A：单活渠道 + 专属表单）。 */
+function WebhookChannelFields({
+  preset,
+  url,
+  secret,
+  chatId,
+  group,
+  savedUrl,
+  savedSecret,
+  savedChatId,
+  savedGroup,
+  onUrlChange,
+  onSecretChange,
+  onChatIdChange,
+  onGroupChange,
+}: {
+  readonly preset: RemoteWebhookPreset;
+  readonly url: string;
+  readonly secret: string;
+  readonly chatId: string;
+  readonly group: string;
+  readonly savedUrl: string;
+  readonly savedSecret: string;
+  readonly savedChatId: string;
+  readonly savedGroup: string;
+  readonly onUrlChange: (v: string) => void;
+  readonly onSecretChange: (v: string) => void;
+  readonly onChatIdChange: (v: string) => void;
+  readonly onGroupChange: (v: string) => void;
+}) {
+  const t = useT();
+
+  const commitField = (field: 'url' | 'secret' | 'chatId' | 'group', next: string, saved: string) => {
+    const trimmed = next.trim();
+    if (trimmed === saved) return;
+    postToHost({ type: 'setRemotePushConfig', payload: { webhook: { [field]: trimmed } } });
+  };
+
+  if (preset === 'telegram') {
+    return (
+      <div className="flex flex-col gap-2.5" data-testid="remote-webhook-fields-telegram">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11.5px] leading-4 font-medium text-ink-2">
+              {t('remote.webhookField.telegramToken')}
+            </span>
+            <Input
+              size="sm"
+              type="password"
+              aria-label={t('remote.webhookField.telegramToken')}
+              data-testid="remote-webhook-secret"
+              className="font-mono"
+              value={secret}
+              placeholder={t('remote.webhookField.telegramTokenPlaceholder')}
+              onChange={(e) => onSecretChange(e.target.value)}
+              onBlur={() => commitField('secret', secret, savedSecret)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitField('secret', secret, savedSecret);
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11.5px] leading-4 font-medium text-ink-2">
+              {t('remote.webhookTelegramChatId')}
+            </span>
+            <Input
+              size="sm"
+              type="text"
+              aria-label={t('remote.webhookTelegramChatId')}
+              data-testid="remote-webhook-chat-id"
+              className="font-mono"
+              value={chatId}
+              placeholder={t('remote.webhookTelegramChatIdPlaceholder')}
+              onChange={(e) => onChatIdChange(e.target.value)}
+              onBlur={() => commitField('chatId', chatId, savedChatId)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitField('chatId', chatId, savedChatId);
+              }}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11.5px] leading-4 font-medium text-ink-2">
+            {t('remote.webhookField.telegramApiBase')}
+          </span>
+          <Input
+            size="sm"
+            aria-label={t('remote.webhookField.telegramApiBase')}
+            data-testid="remote-webhook-url"
+            className="font-mono"
+            value={url}
+            placeholder={t('remote.webhookField.telegramApiBasePlaceholder')}
+            onChange={(e) => onUrlChange(e.target.value)}
+            onBlur={() => commitField('url', url, savedUrl)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitField('url', url, savedUrl);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (preset === 'bark') {
+    return (
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-[minmax(0,1fr)_168px]" data-testid="remote-webhook-fields-bark">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11.5px] leading-4 font-medium text-ink-2">{t('remote.webhookField.barkUrl')}</span>
+          <Input
+            size="sm"
+            aria-label={t('remote.webhookField.barkUrl')}
+            data-testid="remote-webhook-url"
+            className="font-mono"
+            value={url}
+            placeholder={t('remote.webhookField.barkUrlPlaceholder')}
+            onChange={(e) => onUrlChange(e.target.value)}
+            onBlur={() => commitField('url', url, savedUrl)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitField('url', url, savedUrl);
+            }}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11.5px] leading-4 font-medium text-ink-2">{t('remote.webhookField.barkGroup')}</span>
+          <Input
+            size="sm"
+            aria-label={t('remote.webhookField.barkGroup')}
+            data-testid="remote-webhook-group"
+            value={group}
+            placeholder={t('remote.webhookField.barkGroupPlaceholder')}
+            onChange={(e) => onGroupChange(e.target.value)}
+            onBlur={() => commitField('group', group, savedGroup)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitField('group', group, savedGroup);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const urlLabelKey: Record<Exclude<RemoteWebhookPreset, 'telegram' | 'bark'>, MessageKey> = {
+    ntfy: 'remote.webhookField.ntfyUrl',
+    feishu: 'remote.webhookField.feishuUrl',
+    wecom: 'remote.webhookField.wecomUrl',
+    dingtalk: 'remote.webhookField.dingtalkUrl',
+    slack: 'remote.webhookField.slackUrl',
+    discord: 'remote.webhookField.discordUrl',
+    custom: 'remote.webhookField.customUrl',
+  };
+
+  const secretMeta: Partial<
+    Record<
+      Exclude<RemoteWebhookPreset, 'telegram' | 'bark'>,
+      { readonly label: MessageKey; readonly placeholder: MessageKey }
+    >
+  > = {
+    ntfy: { label: 'remote.webhookField.ntfyToken', placeholder: 'remote.webhookField.ntfyTokenPlaceholder' },
+    feishu: { label: 'remote.webhookField.feishuSecret', placeholder: 'remote.webhookField.feishuSecretPlaceholder' },
+    dingtalk: {
+      label: 'remote.webhookField.dingtalkSecret',
+      placeholder: 'remote.webhookField.dingtalkSecretPlaceholder',
+    },
+    custom: { label: 'remote.webhookField.customToken', placeholder: 'remote.webhookField.customTokenPlaceholder' },
+  };
+
+  const sec = secretMeta[preset];
+
+  return (
+    <div className="flex flex-col gap-2.5" data-testid={`remote-webhook-fields-${preset}`}>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11.5px] leading-4 font-medium text-ink-2">{t(urlLabelKey[preset])}</span>
+        <Input
+          size="sm"
+          aria-label={t(urlLabelKey[preset])}
+          data-testid="remote-webhook-url"
+          className="font-mono"
+          value={url}
+          placeholder={webhookUrlPlaceholder(preset, t('remote.webhookUrlPlaceholder'))}
+          onChange={(e) => onUrlChange(e.target.value)}
+          onBlur={() => commitField('url', url, savedUrl)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitField('url', url, savedUrl);
+          }}
+        />
+      </div>
+      {sec ? (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11.5px] leading-4 font-medium text-ink-2">{t(sec.label)}</span>
+          <Input
+            size="sm"
+            type="password"
+            aria-label={t(sec.label)}
+            data-testid="remote-webhook-secret"
+            className="font-mono"
+            value={secret}
+            placeholder={t(sec.placeholder)}
+            onChange={(e) => onSecretChange(e.target.value)}
+            onBlur={() => commitField('secret', secret, savedSecret)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitField('secret', secret, savedSecret);
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 轻量问号帮助浮窗（复用 shadcn Popover + Button + 离线 QuestionIcon）。 */
+function PushHelpPopover({
+  title,
+  detail,
+  note,
+  testId,
+}: {
+  readonly title: string;
+  readonly detail: string;
+  readonly note?: string;
+  readonly testId: string;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={title}
+          title={title}
+          data-testid={testId}
+          className="shrink-0 text-ink-3 hover:text-ink"
+        >
+          <QuestionIcon className="size-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-80 p-3.5" data-testid={`${testId}-popover`}>
+        <div className="flex flex-col gap-2">
+          <div className="text-[12.5px] leading-4 font-semibold text-ink">{title}</div>
+          <p className="m-0 text-[12px] leading-relaxed text-ink-2">{detail}</p>
+          {note ? (
+            <p className="m-0 rounded-lg bg-field/70 px-2.5 py-2 text-[11.5px] leading-relaxed text-ink-2">{note}</p>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** 当前所选 Webhook 渠道的使用指南浮窗：展示渠道厂商图标、配置步骤、示例地址与附加说明。 */
+function WebhookChannelGuidePopover({ preset }: { readonly preset: RemoteWebhookPreset }) {
+  const t = useT();
+  const channelName = t(`remote.webhookPreset.${preset}` as MessageKey);
+  const summary = t(`remote.webhookGuide.${preset}.summary` as MessageKey);
+  const steps = t(`remote.webhookGuide.${preset}.steps` as MessageKey)
+    .split('\n')
+    .filter(Boolean);
+  const note = t(`remote.webhookGuide.${preset}.note` as MessageKey);
+  const exampleUrl = webhookUrlPlaceholder(preset, t('remote.webhookUrlPlaceholder'));
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('remote.webhookChannelHelpAria')}
+          title={`${channelName} · ${t('remote.webhookGuideBadge')}`}
+          data-testid="remote-webhook-channel-help"
+          className="shrink-0 text-ink-3 hover:text-ink"
+        >
+          <QuestionIcon className="size-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        className="w-84 max-w-[calc(100vw-2rem)] p-3.5"
+        data-testid="remote-webhook-channel-help-popover"
+      >
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-2">
+            <WebhookChannelLogo preset={preset} className="size-4 shrink-0" />
+            <span className="truncate text-[13px] leading-4 font-semibold text-ink">{channelName}</span>
+            <span className="ml-auto shrink-0 rounded-md bg-field px-1.5 py-0.5 text-[10.5px] leading-none font-medium text-ink-3">
+              {t('remote.webhookGuideBadge')}
+            </span>
+          </div>
+
+          <p className="m-0 text-[12px] leading-relaxed text-ink-2">{summary}</p>
+
+          <ol className="m-0 flex list-none flex-col gap-1.5 p-0 text-[11.5px] leading-relaxed text-ink">
+            {steps.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ol>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] leading-4 font-medium text-ink-3">{t('remote.webhookGuideExample')}</span>
+            <code className="block rounded-lg bg-field/80 px-2.5 py-1.5 font-mono text-[11px] break-all text-ink-2">
+              {exampleUrl}
+            </code>
+          </div>
+
+          <p className="m-0 border-t border-line pt-2 text-[11px] leading-relaxed text-ink-3">{note}</p>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

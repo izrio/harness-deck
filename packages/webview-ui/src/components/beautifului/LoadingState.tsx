@@ -33,7 +33,7 @@ export function LoadingState({
     >
       <LoaderGrid variant={variant} />
       <span
-        className="min-w-0 truncate bg-clip-text text-[13px] font-medium text-transparent"
+        className="min-w-0 truncate bg-clip-text text-[13px] leading-5 font-medium text-transparent"
         style={{
           backgroundImage: 'linear-gradient(90deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%)',
           backgroundSize: '200% 100%',
@@ -43,7 +43,7 @@ export function LoadingState({
         {label}
       </span>
       {elapsed ? (
-        <span className="shrink-0 font-mono text-[12px] text-ink-3 tabular-nums">
+        <span className="shrink-0 text-[12px] leading-5 text-ink-3 tabular-nums">
           {elapsed}
         </span>
       ) : null}

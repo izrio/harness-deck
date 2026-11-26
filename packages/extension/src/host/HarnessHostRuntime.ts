@@ -122,6 +122,7 @@ import {
 } from '../backend/npmManager.ts';
 import { createPiBackend } from '../backend/pi.ts';
 import {
+  CLAUDE_PROFILE,
   DSH_PROFILE,
   builtinProfiles,
   deleteBackendSetting,
@@ -602,11 +603,14 @@ export function createHarnessHostRuntime(
     return raw;
   };
 
+  const fallbackBackendId = (): string =>
+    profiles().some((p) => p.id === CLAUDE_PROFILE.id) ? CLAUDE_PROFILE.id : DSH_PROFILE.id;
+
   const resolveBackendId = (rawId: string | undefined): string => {
     const trimmed = rawId?.trim();
-    if (!trimmed) return DSH_PROFILE.id;
+    if (!trimmed) return fallbackBackendId();
     const mapped = trimmed === 'oh-my-pi' && !profiles().some((p) => p.id === 'oh-my-pi') ? 'pi' : trimmed;
-    return profiles().some((p) => p.id === mapped) ? mapped : DSH_PROFILE.id;
+    return profiles().some((p) => p.id === mapped) ? mapped : fallbackBackendId();
   };
 
   const persistBackendKeys = async (id: string): Promise<void> => {
@@ -621,7 +625,7 @@ export function createHarnessHostRuntime(
     void platform.globalState.update(BACKEND_KEY, initialSavedBackend);
   }
   const initialConfiguredDefault = platform.settings.get<string>('defaultBackend', '').trim();
-  let defaultBackendId = resolveBackendId(initialConfiguredDefault || initialSavedBackend || DSH_PROFILE.id);
+  let defaultBackendId = resolveBackendId(initialConfiguredDefault || initialSavedBackend || fallbackBackendId());
   let targetBackendId = defaultBackendId;
 
   const persistDefaultBackend = async (id: string): Promise<void> => {
@@ -1740,7 +1744,7 @@ export function createHarnessHostRuntime(
   };
 
   const updateStatusBar = (): void => {
-    const fallbackName = profiles().find((p) => p.id === targetBackendId)?.name ?? DSH_PROFILE.name;
+    const fallbackName = profiles().find((p) => p.id === targetBackendId)?.name ?? CLAUDE_PROFILE.name;
     const backendName = active?.backend.profile.name ?? fallbackName;
     const status: RuntimeStatus = active?.backend.currentStatus() ?? { kind: 'idle' };
     platform.onStatusUpdate({
@@ -2287,7 +2291,8 @@ export function createHarnessHostRuntime(
   ): Promise<void> =>
     withSuppressedTabSync(async () => {
       targetBackendId = id;
-      const profile = profiles().find((p) => p.id === id) ?? DSH_PROFILE;
+      const fallbackProfile = profiles().find((p) => p.id === CLAUDE_PROFILE.id) ?? DSH_PROFILE;
+      const profile = profiles().find((p) => p.id === id) ?? fallbackProfile;
       if (forceReload) {
         await stopAndDeleteManagedBackend(profile.id);
       }
@@ -2999,8 +3004,8 @@ export function createHarnessHostRuntime(
         const currentProfiles = profiles();
         const byId = new Map(currentProfiles.map((p) => [p.id, p]));
         if (!byId.has(defaultBackendId)) {
-          defaultBackendId = DSH_PROFILE.id;
-          void persistDefaultBackend(DSH_PROFILE.id);
+          defaultBackendId = fallbackBackendId();
+          void persistDefaultBackend(defaultBackendId);
         }
         if (unifiedTabsRestored) {
           for (const tab of [...unifiedTabs.items]) {
@@ -4317,6 +4322,9 @@ export function createHarnessHostRuntime(
           getHttpProxy: () => platform.settings.getHttpProxy(),
         });
         if (seq !== skillMarketSeq) return;
+        if (next.source === 'fallback' && next.error) {
+          log(`在线技能市场请求失败，已回退离线精选：${next.error}`);
+        }
         skillMarket = next;
         pushExtensions();
       })();
@@ -4339,6 +4347,9 @@ export function createHarnessHostRuntime(
           getHttpProxy: () => platform.settings.getHttpProxy(),
         });
         if (seq !== mcpMarketSeq) return;
+        if (next.source === 'fallback' && next.error) {
+          log(`在线 MCP 市场请求失败，已回退离线精选：${next.error}`);
+        }
         mcpMarket = next;
         pushExtensions();
       })();

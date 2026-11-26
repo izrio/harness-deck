@@ -7,6 +7,7 @@ import { cn } from '../lib/utils.ts';
 import claudeLogo from '../assets/backends/claude.svg?inline';
 import codebuddyLogo from '../assets/backends/codebuddy.svg?inline';
 import deepseekLogo from '../assets/backends/deepseek.svg?inline';
+import volcengineLogo from '../assets/backends/volcengine.png?inline';
 import { SparkleIcon } from './icons.tsx';
 
 export type ModelVendor =
@@ -22,7 +23,9 @@ export type ModelVendor =
   | 'grok'
   | 'mistral'
   | 'meta'
-  | 'codebuddy';
+  | 'codebuddy'
+  | 'volcengine'
+  | 'aliyun';
 
 export interface ModelVendorInput {
   readonly provider?: string | undefined;
@@ -53,9 +56,11 @@ const PROVIDER_PATTERNS: readonly (readonly [ModelVendor, RegExp])[] = [
   ['openai', /(?:^|[\s/_.-])(openai|codex|chatgpt)(?:$|[\s/_.-])/iu],
   ['deepseek', /(?:^|[\s/_.-])(deepseek|dsh)(?:$|[\s/_.-])/iu],
   ['zhipu', /(?:^|[\s/_.-])(zhipu|bigmodel|zai|z-ai|z\.ai|zcode)(?:$|[\s/_.-])|智谱/iu],
-  ['qwen', /(?:^|[\s/_.-])(qwen|alibaba|aliyun|bailian|dashscope|tongyi)(?:$|[\s/_.-])|通义|百炼|阿里/iu],
+  ['aliyun', /(?:^|[\s/_.-])(alibaba|aliyun|bailian|dashscope)(?:$|[\s/_.-])|通义|百炼|阿里/iu],
+  ['qwen', /(?:^|[\s/_.-])qwen(?:$|[\s/_.-])|qwen/iu],
   ['kimi', /(?:^|[\s/_.-])(kimi|moonshot)(?:$|[\s/_.-])|月之暗面/iu],
-  ['doubao', /(?:^|[\s/_.-])(doubao|volcengine|volces|bytedance|ark)(?:$|[\s/_.-])|火山|豆包/iu],
+  ['volcengine', /(?:^|[\s/_.-])(volcengine|volces)(?:$|[\s/_.-])|火山引擎|火山方舟/iu],
+  ['doubao', /(?:^|[\s/_.-])(doubao|bytedance|ark)(?:$|[\s/_.-])|豆包/iu],
   ['minimax', /minimax/iu],
   ['grok', /(?:^|[\s/_.-])(xai|x-ai|grok)(?:$|[\s/_.-])/iu],
   ['mistral', /mistral/iu],
@@ -121,10 +126,19 @@ function QwenMark({ className }: { readonly className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" className={className} data-vendor="qwen">
       <path
-        fill="#615CED"
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M12 2.2L15.1 7.6L21.2 8.2L16.9 12.6L18.1 18.6L12 15.8L5.9 18.6L7.1 12.6L2.8 8.2L8.9 7.6L12 2.2ZM12 7.4L9.2 12L12 16.6L14.8 12L12 7.4Z"
+        fill="#6950EF"
+        d="M23.919 14.545 20.817 9.17l1.47-2.544a.56.56 0 0 0 0-.566l-1.633-2.83a.57.57 0 0 0-.49-.283h-6.207L12.487.402a.57.57 0 0 0-.49-.284H8.732a.56.56 0 0 0-.49.284L5.139 5.775h-2.94a.56.56 0 0 0-.49.284L.077 8.887a.56.56 0 0 0 0 .567L3.18 14.83l-1.47 2.545a.56.56 0 0 0 0 .566l1.634 2.83a.57.57 0 0 0 .49.283h6.205l1.47 2.545a.57.57 0 0 0 .49.284h3.266a.57.57 0 0 0 .49-.284l3.104-5.375h2.94a.57.57 0 0 0 .49-.283l1.634-2.828a.55.55 0 0 0-.004-.568M8.733.686l1.634 2.828-1.634 2.828H21.8L20.164 9.17H7.425L5.63 6.06Zm1.306 19.801-6.205-.002 1.634-2.83h3.265L2.201 6.344h3.267q3.182 5.517 6.367 11.032zm10.124-5.66L18.53 12l-6.532 11.315-1.634-2.83c2.129-3.673 4.25-7.351 6.373-11.028h3.592l3.102 5.374z"
+      />
+    </svg>
+  );
+}
+
+function AliyunMark({ className }: { readonly className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" className={className} data-vendor="aliyun">
+      <path
+        fill="#FF6A00"
+        d="M3.996 4.517h5.291L8.01 6.324 4.153 7.506a1.668 1.668 0 0 0-1.165 1.601v5.786a1.668 1.668 0 0 0 1.165 1.6l3.857 1.183 1.277 1.807H3.996A3.996 3.996 0 0 1 0 15.487V8.513a3.996 3.996 0 0 1 3.996-3.996m16.008 0h-5.291l1.277 1.807 3.857 1.182c.715.227 1.17.889 1.165 1.601v5.786a1.668 1.668 0 0 1-1.165 1.6l-3.857 1.183-1.277 1.807h5.291A3.996 3.996 0 0 0 24 15.487V8.513a3.996 3.996 0 0 0-3.996-3.996m-4.007 8.345H8.002v-1.804h7.995Z"
       />
     </svg>
   );
@@ -132,9 +146,11 @@ function QwenMark({ className }: { readonly className?: string }) {
 
 function KimiMark({ className }: { readonly className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false" className={className} data-vendor="kimi">
-      <path d="M5 4h3.2v6.6L14.9 4h4.1l-6.8 6.9L19.4 20h-4.1l-5.6-6.9-1.5 1.5V20H5V4z" />
-      <circle cx="18.2" cy="5.8" r="1.8" fill="#1A8CFF" />
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" className={className} data-vendor="kimi">
+      <path
+        fill="currentColor"
+        d="M21.765.351C22.998.351 24 1.353 24 2.586S22.998 4.82 21.765 4.82h-1.974c-.15 0-.26-.12-.26-.26V2.586A2.237 2.237 0 0 1 21.765.35M9.41 13.388l8.447-8.377c.16-.16.07-.471-.14-.471h-4.55s-.1.02-.14.06l-9.099 9.029c-.14.14-.35.02-.35-.21V4.81c0-.15-.1-.27-.221-.27H.22c-.12 0-.22.12-.22.27v18.57c0 .15.1.27.22.27h3.137c.12 0 .22-.12.22-.27v-3.79c0-.08.03-.16.08-.21l2.826-2.796c.07-.07.16-.08.241-.03l7.546 5.551a8.9 8.9 0 0 0 4.018 1.493c.12.01.23-.11.23-.27V19.76c0-.14-.08-.25-.19-.26a5.8 5.8 0 0 1-2.355-.942l-6.533-4.73c-.14-.09-.15-.32-.03-.441"
+      />
     </svg>
   );
 }
@@ -157,23 +173,11 @@ function DoubaoMark({ className }: { readonly className?: string }) {
 }
 
 function MiniMaxMark({ className }: { readonly className?: string }) {
-  const id = useId().replace(/:/gu, '');
-  const gradId = `${id}-minimax`;
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" className={className} data-vendor="minimax">
-      <defs>
-        <linearGradient id={gradId} x1="2" y1="12" x2="22" y2="12" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#E21B5A" />
-          <stop offset="55%" stopColor="#F84B5C" />
-          <stop offset="100%" stopColor="#FF8A3D" />
-        </linearGradient>
-      </defs>
       <path
-        d="M3 17.5V7.8C3 6.5 4.5 5.8 5.5 6.6L12 11.8L18.5 6.6C19.5 5.8 21 6.5 21 7.8V17.5"
-        stroke={`url(#${gradId})`}
-        strokeWidth="2.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        fill="#E73562"
+        d="M11.43 3.92a.86.86 0 1 0-1.718 0v14.236a1.999 1.999 0 0 1-3.997 0V9.022a.86.86 0 1 0-1.718 0v3.87a1.999 1.999 0 0 1-3.997 0V11.49a.57.57 0 0 1 1.139 0v1.404a.86.86 0 0 0 1.719 0V9.022a1.999 1.999 0 0 1 3.997 0v9.134a.86.86 0 0 0 1.719 0V3.92a1.998 1.998 0 1 1 3.996 0v11.788a.57.57 0 1 1-1.139 0zm10.572 3.105a2 2 0 0 0-1.999 1.997v7.63a.86.86 0 0 1-1.718 0V3.923a1.999 1.999 0 0 0-3.997 0v16.16a.86.86 0 0 1-1.719 0V18.08a.57.57 0 1 0-1.138 0v2a1.998 1.998 0 0 0 3.996 0V3.92a.86.86 0 0 1 1.719 0v12.73a1.999 1.999 0 0 0 3.996 0V9.023a.86.86 0 1 1 1.72 0v6.686a.57.57 0 0 0 1.138 0V9.022a2 2 0 0 0-1.998-1.997"
       />
     </svg>
   );
@@ -228,6 +232,7 @@ const IMAGE_LOGOS: Readonly<Partial<Record<ModelVendor, string>>> = {
   claude: claudeLogo,
   deepseek: deepseekLogo,
   codebuddy: codebuddyLogo,
+  volcengine: volcengineLogo,
 };
 
 export function ModelVendorLogo({
@@ -235,9 +240,10 @@ export function ModelVendorLogo({
   model,
   name,
   group,
+  vendor: vendorOverride,
   className = 'size-3.5 shrink-0',
-}: ModelVendorInput & { readonly className?: string }) {
-  const vendor = detectModelVendor({ provider, model, name, group });
+}: ModelVendorInput & { readonly vendor?: ModelVendor | undefined; readonly className?: string }) {
+  const vendor = vendorOverride ?? detectModelVendor({ provider, model, name, group });
   if (!vendor) {
     return <SparkleIcon className={cn('text-ink-3', className)} />;
   }
@@ -263,6 +269,8 @@ export function ModelVendorLogo({
       return <ZhipuMark className={className} />;
     case 'qwen':
       return <QwenMark className={className} />;
+    case 'aliyun':
+      return <AliyunMark className={className} />;
     case 'kimi':
       return <KimiMark className={className} />;
     case 'doubao':

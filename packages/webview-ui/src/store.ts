@@ -217,7 +217,7 @@ const emptyWorkbench: WorkbenchState = {
 
 function readInitialBackends(): BackendsState {
   if (typeof (globalThis as { acquireVsCodeApi?: unknown }).acquireVsCodeApi !== 'function') {
-    return { items: [], active: 'dsh' };
+    return { items: [], active: 'claude', defaultBackend: 'claude' };
   }
   try {
     const saved = loadState().activeBackend;
@@ -230,7 +230,7 @@ function readInitialBackends(): BackendsState {
   } catch {
     // ignore
   }
-  return { items: [], active: 'dsh' };
+  return { items: [], active: 'claude', defaultBackend: 'claude' };
 }
 
 function persistActiveBackend(backends: BackendsState | undefined): void {

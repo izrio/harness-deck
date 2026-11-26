@@ -318,11 +318,11 @@ export function WorkbenchSidebar({
                 ) : null}
 
                 {mod === 'tasks' && tasksActiveCount > 0 ? (
-                  <span className="text-[11.5px] font-normal text-ink-3 tabular-nums">{tasksActiveCount}</span>
+                  <span className="text-[11.5px] leading-4 font-normal text-ink-3 tabular-nums">{tasksActiveCount}</span>
                 ) : null}
 
                 {mod === 'sessions' && totalSessions > 0 ? (
-                  <span className="text-[12px] font-normal text-ink-3 tabular-nums">{totalSessions}</span>
+                  <span className="text-[11.5px] leading-4 font-normal text-ink-3 tabular-nums">{totalSessions}</span>
                 ) : null}
               </button>
 
@@ -347,7 +347,7 @@ export function WorkbenchSidebar({
               ) : null}
 
               {mod === 'sessions' ? (
-                <div className="flex shrink-0 items-center gap-0.5 pr-1.5">
+                <div className="flex shrink-0 items-center gap-1 pr-1.5">
                   <Button
                     type="button"
                     variant={searchOpen || query ? 'secondary' : 'ghost'}

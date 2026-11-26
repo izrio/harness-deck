@@ -371,34 +371,28 @@ export function ProviderSettings() {
     <div className="flex flex-col gap-8" data-testid="settings-providers">
       {/* 本地协议转换网关（OpenAI 兼容 -> Claude Anthropic，默认关闭） */}
       <section
-        className="flex items-center justify-between gap-3 rounded-2xl bg-field/55 px-4 py-3.5 dark:bg-surface/65"
+        className="flex items-center justify-between gap-6 rounded-2xl bg-field/55 px-4 py-3.5 dark:bg-surface/65"
         data-testid="provider-protocol-gateway-card"
       >
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-          <h3 className="m-0 text-[13px] font-semibold text-ink">{t('settings.providers.gatewayTitle')}</h3>
-          {protocolGatewayEnabled ? (
-            <span className="inline-flex items-center gap-1.5 font-mono text-[11.5px] text-green">
-              <span className="size-1.5 rounded-full bg-green" />
-              <span>
-                {protocolGatewayOrigin
-                  ? t('settings.providers.gatewayRunningBadge', protocolGatewayOrigin)
-                  : t('settings.providers.gatewayEnabledBadge')}
-              </span>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
+          <h3 className="m-0 text-[13px] leading-5 font-medium text-ink">{t('settings.providers.gatewayTitle')}</h3>
+          {protocolGatewayEnabled && protocolGatewayOrigin ? (
+            <span className="inline-flex items-center gap-1.5 font-mono text-[11.5px] leading-none text-green tabular-nums">
+              <span className="size-1.5 shrink-0 rounded-full bg-green" />
+              <span>{protocolGatewayOrigin}</span>
             </span>
-          ) : (
-            <span className="text-[11.5px] text-ink-3">{t('settings.providers.gatewayOffBadge')}</span>
-          )}
+          ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2.5">
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="xs"
             className="text-ink-2 hover:text-ink"
             data-testid="provider-gateway-logs-btn"
             onClick={() => setLogsOpen(true)}
           >
-            <LogIcon className="size-3.5" />
+            <LogIcon className="size-3" />
             <span>{t('settings.providers.gatewayLogsBtn')}</span>
             {gatewayLogs.length > 0 ? (
               <ValuePill
@@ -436,7 +430,7 @@ export function ProviderSettings() {
             {t('settings.providers.empty')}
           </div>
         ) : (
-          <div className="flex flex-col gap-1 p-1.5">
+          <div className="flex flex-col divide-y divide-line/55">
             {providers.map((item) => (
               <SavedProviderCard
                 key={item.id}

@@ -706,4 +706,115 @@ describe('HD-25 内嵌 Diff 审阅与无 IDE 弹窗降级', () => {
     const allowBtn = screen.getByRole('button', { name: '允许本次' }) as HTMLButtonElement;
     expect(allowBtn.disabled).toBe(true);
   });
+
+  it('手机端推送通知展示渠道厂商图标，并为 Web Push、静默策略与各 Webhook 渠道提供问号使用说明浮窗', () => {
+    render(<App />);
+    act(() =>
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          remote: {
+            enabled: true,
+            running: true,
+            port: 37888,
+            bindHost: '0.0.0.0',
+            scope: 'operate',
+            selectedHost: '192.168.1.10',
+            interfaces: [],
+            devices: [],
+            connectedClients: 0,
+            push: {
+              webPushEnabled: true,
+              suppressWhenFocused: true,
+              webhook: { enabled: true, preset: 'feishu', url: '' },
+            },
+          },
+        }),
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId('settings-button'));
+    fireEvent.click(screen.getByTestId('settings-tab-remote'));
+
+    // 渠道触发器内展示对应厂商矢量图标（飞书）
+    const presetTrigger = screen.getByTestId('remote-webhook-preset');
+    expect(presetTrigger.querySelector('[data-webhook-channel="feishu"]')).not.toBeNull();
+
+    // 点击 VAPID Web Push 问号打开说明浮窗
+    fireEvent.click(screen.getByTestId('remote-webpush-help'));
+    expect(screen.getByTestId('remote-webpush-help-popover').textContent).toContain('VAPID Web Push');
+
+    // 点击前台静默问号打开说明浮窗
+    fireEvent.click(screen.getByTestId('remote-suppress-focused-help'));
+    expect(screen.getByTestId('remote-suppress-focused-help-popover').textContent).toContain('聚焦活跃状态');
+
+    // 点击 Webhook 兜底问号打开说明浮窗
+    fireEvent.click(screen.getByTestId('remote-webhook-help'));
+    expect(screen.getByTestId('remote-webhook-help-popover').textContent).toContain('局域网 HTTP');
+
+    // 点击当前渠道（飞书）问号打开渠道配置指南浮窗，含厂商图标、步骤与地址示例
+    fireEvent.click(screen.getByTestId('remote-webhook-channel-help'));
+    const channelGuide = screen.getByTestId('remote-webhook-channel-help-popover');
+    expect(channelGuide.querySelector('[data-webhook-channel="feishu"]')).not.toBeNull();
+    expect(channelGuide.textContent).toContain('飞书机器人');
+    expect(channelGuide.textContent).toContain('open.feishu.cn/open-apis/bot/v2/hook/');
+
+    // 在飞书渠道填入非飞书域名地址时给出实时格式校验提示
+    fireEvent.change(screen.getByTestId('remote-webhook-url'), {
+      target: { value: 'https://oapi.dingtalk.com/robot/send?access_token=xyz' },
+    });
+    expect(screen.getByTestId('remote-webhook-validation-warning').textContent).toContain('飞书');
+  });
+
+  it('Telegram 渠道展示专属 Bot Token + Chat ID + 可选代理地址表单并支持分字段提交', () => {
+    render(<App />);
+    act(() =>
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          remote: {
+            enabled: true,
+            running: true,
+            port: 37888,
+            bindHost: '0.0.0.0',
+            scope: 'operate',
+            selectedHost: '192.168.1.10',
+            interfaces: [],
+            devices: [],
+            connectedClients: 0,
+            push: {
+              webPushEnabled: true,
+              suppressWhenFocused: true,
+              webhook: { enabled: true, preset: 'telegram', url: '', secret: '', chatId: '' },
+            },
+          },
+        }),
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId('settings-button'));
+    fireEvent.click(screen.getByTestId('settings-tab-remote'));
+
+    expect(screen.getByTestId('remote-webhook-fields-telegram')).toBeTruthy();
+    const tokenInput = screen.getByTestId('remote-webhook-secret');
+    const chatIdInput = screen.getByTestId('remote-webhook-chat-id');
+
+    fireEvent.change(tokenInput, { target: { value: '123456:AAH_secret' } });
+    // 只填了 Token 未填 Chat ID 时给出友好提示
+    expect(screen.getByTestId('remote-webhook-validation-warning').textContent).toContain('Chat ID');
+
+    fireEvent.blur(tokenInput);
+    expect(vscode.posted).toContainEqual({
+      type: 'setRemotePushConfig',
+      payload: { webhook: { secret: '123456:AAH_secret' } },
+    });
+
+    fireEvent.change(chatIdInput, { target: { value: '-10012345' } });
+    expect(screen.queryByTestId('remote-webhook-validation-warning')).toBeNull();
+    fireEvent.blur(chatIdInput);
+    expect(vscode.posted).toContainEqual({
+      type: 'setRemotePushConfig',
+      payload: { webhook: { chatId: '-10012345' } },
+    });
+  });
 });

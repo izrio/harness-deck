@@ -286,7 +286,7 @@ export function SettingsPage() {
             data-testid="settings-content"
             className="topbar-scroll-fade min-h-0 min-w-0 flex-1"
           >
-            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-9 px-6 py-7 pb-8 sm:px-10 sm:py-9">
+            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-8 px-6 py-7 pb-10 sm:px-10 sm:py-9">
               {renderActiveTab(activeTab)}
             </div>
           </ScrollArea>

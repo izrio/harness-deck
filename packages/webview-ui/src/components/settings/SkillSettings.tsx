@@ -446,7 +446,7 @@ export function SkillSettings() {
               </Button>
             </div>
           ) : (
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col divide-y divide-line/55 overflow-hidden rounded-2xl bg-field/55 px-4 dark:bg-surface/65">
               {skills.items.map((skill) => {
                 const isUniversal = !skill.agents || skill.agents.length === 0;
                 const busy = skill.busy !== undefined;
@@ -454,7 +454,7 @@ export function SkillSettings() {
                   <div
                     key={skill.id}
                     className={cn(
-                      'flex flex-col gap-2.5 rounded-2xl bg-field/55 px-4 py-3.5 transition-colors hover:bg-field/80 dark:bg-surface/65 dark:hover:bg-surface/85',
+                      'flex flex-col gap-2.5 py-4 transition-opacity',
                       skill.enabled ? '' : 'opacity-60',
                     )}
                     data-testid={`skill-item-${skill.id}`}

@@ -47,9 +47,9 @@ export function TabBar() {
   const endDrag = () => setDrag(null);
 
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-line bg-canvas px-2 py-1 max-md:px-1.5 max-md:py-0.5">
+    <div className="flex shrink-0 items-center gap-1.5 border-b border-line bg-canvas px-2 py-1 max-md:px-1.5 max-md:py-0.5">
       <div
-        className="tabs flex min-w-0 flex-1 touch-pan-x items-center gap-0.5 overflow-x-auto"
+        className="tabs flex min-w-0 flex-1 touch-pan-x items-center gap-1 overflow-x-auto"
         role="tablist"
         aria-label={t('tabs.label')}
         ref={strip}
@@ -89,7 +89,7 @@ export function TabBar() {
             <ContextMenuTrigger asChild>
               <div
                 className={cn(
-                  'tab group/tab relative flex min-w-[72px] max-w-[184px] flex-none items-center gap-1.5 rounded-[7px] py-[3px] pr-1 pl-2 text-[12.5px] select-none transition-[background-color,color,opacity] duration-100 max-md:min-h-7 max-md:min-w-[56px] max-md:max-w-[140px] max-md:gap-1 max-md:py-0.5 max-md:pr-1 max-md:pl-1.5 max-md:text-[12px]',
+                  'tab group/tab relative flex h-7 min-w-[72px] max-w-[184px] flex-none items-center gap-1.5 rounded-[7px] pr-1.5 pl-2.5 text-[12.5px] leading-4 select-none transition-[background-color,color,opacity] duration-100 max-md:min-h-7 max-md:min-w-[56px] max-md:max-w-[140px] max-md:gap-1 max-md:pr-1 max-md:pl-2 max-md:text-[12px]',
                   active
                     ? 'tab--active cursor-default bg-surface font-medium text-ink shadow-hairline dark:bg-field'
                     : 'cursor-pointer text-ink-2 hover:bg-hover hover:text-ink',
@@ -135,10 +135,10 @@ export function TabBar() {
                   <span className="dot dot--running inline-block size-1.5 shrink-0 rounded-full bg-brand" style={{ animation: 'pulse 1.4s ease-in-out infinite' }} aria-label={t('header.running')} />
                 ) : null}
                 {backend ? <BackendLogo backend={backend} size="sm" /> : null}
-                <span className="tab__title min-w-0 flex-1 truncate">{tab.title}</span>
+                <span className="tab__title min-w-0 flex-1 truncate leading-4">{tab.title}</span>
                 {tab.worktreeBranch ? (
                   <span
-                    className="hidden shrink-0 items-center gap-0.5 rounded bg-accent-tint px-1 py-0.5 font-mono text-[10px] text-accent-ink sm:inline-flex"
+                    className="hidden shrink-0 items-center gap-0.5 rounded bg-accent-tint px-1.5 py-0.5 font-mono text-[10px] leading-none text-accent-ink sm:inline-flex"
                     title={tab.worktreePath ?? tab.worktreeBranch}
                     data-testid="tab-worktree-badge"
                   >

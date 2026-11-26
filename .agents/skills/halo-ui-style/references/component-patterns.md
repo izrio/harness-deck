@@ -43,12 +43,12 @@ When a banner (approval request, queued run, status notice, error) attaches abov
 - **Expanded Output Panel**: Indented `ms-7` (aligned under the label text past the `24px` icon + `4px` gap), `max-h-96 overflow-auto`, subtle hairline border or `bg-inset` code/command surface.
 - **In-Progress Shimmer**: Overlay the active label with a soft horizontal highlight sweep (see `motion-and-performance.md`) rather than spinning every tool icon simultaneously.
 
-## 4. Settings Groups (`SettingsGroup`)
+## 4. Settings Groups (`SettingsSection` — macOS Settings Style)
 
-- **Grouped Card**: `rounded-xl border border-line/60 bg-surface/40 shadow-xs/5` (light) / `bg-surface/60` (dark).
-- **Hairline Row Dividers**: `*:not-first:border-t *:not-first:border-line/50` — rows inside a group have `rounded-none` so focus rings and hover highlights stay flush inside the outer `rounded-xl` clip.
-- **Flat Detail Panes**: Avoid nesting bordered cards inside an already-bordered detail card (`border-transparent bg-transparent shadow-none` on inner groups, relying on headings and row dividers instead).
-- **Uniform Controls**: Every `Input`, `SelectTrigger`, `NativeSelect`, and `Button` inside a settings row uses `size="sm"` (`h-8`, 32px).
+- **Borderless Tonal Card**: Section title sits quietly above the card (`flex flex-col gap-2.5`, title `text-[13px] font-semibold tracking-tight text-ink`); the card shell uses a borderless soft-tinted surface (`overflow-hidden rounded-2xl bg-field/55 dark:bg-surface/65`) with generous `gap-8` spacing between sections—no outer `border` or heavy shadow.
+- **Inset Hairline Row Dividers & Breathing Room**: Stack rows inside `flex flex-col divide-y divide-line/55 px-4` so 1px hairlines sit inset 16px from card edges like macOS System Settings (use full-bleed `px-4` per row inside `overflow-hidden` only when rows need edge-to-edge selected backgrounds). Give single-line switch/select rows `py-3.5 gap-6 text-[13px] leading-5 text-ink`, and multi-line form blocks `py-4`.
+- **No Nested Pill Rows**: Avoid wrapping static switch/list rows in nested `rounded-xl hover:bg-...` pills inside the tonal card; reserve soft inset blocks (`rounded-xl bg-canvas/70 dark:bg-page/50`) only for distinct sub-panels such as live previews, QR blocks, or tailored channel sub-forms.
+- **Uniform Controls**: Every `Input`, `SelectTrigger`, `NativeSelect`, and `Button` inside a settings row uses `size="sm"` (`h-8`, 32px), while compact section-header actions use `size="xs"` (`h-6`, 24px).
 
 ## 5. Markdown, Code Blocks & Diff Surfaces
 

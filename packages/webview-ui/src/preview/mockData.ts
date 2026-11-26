@@ -48,7 +48,8 @@ export const PREVIEW_FILES: readonly FileCandidate[] = [
 ];
 
 export const PREVIEW_BACKENDS: BackendsState = {
-  active: 'dsh',
+  active: 'claude',
+  defaultBackend: 'claude',
   workspace: 'harness-deck',
   nodeEnv: { checked: true, hasNode: true, hasNpm: true, nodeVersion: 'v22.14.0', npmVersion: '10.9.2' },
   items: [

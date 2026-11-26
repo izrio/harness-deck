@@ -372,7 +372,18 @@ describe('HarnessHostRuntime 多智能体常驻保活与默认启动持久化', 
     vi.restoreAllMocks();
   });
 
-  it('启动时默认启动设置中的 defaultBackend，未配置时回退到已保存的默认智能体', async () => {
+  it('启动时默认启动设置中的 defaultBackend，未配置时回退到已保存的默认智能体，首次启动默认 claude', async () => {
+    const { platform: p0 } = createFakePlatform();
+    const f0 = createFakeBackendFactory();
+    const rt0 = createHarnessHostRuntime(p0, { createBackend: f0.createBackend });
+    runtimes.push(rt0);
+    await flushAsync();
+
+    expect(f0.created.map((b) => b.profile.id)).toEqual(['claude']);
+    const backends0 = f0.created[0]?.host.controllerOptions().backends?.();
+    expect(backends0?.active).toBe('claude');
+    expect(backends0?.defaultBackend).toBe('claude');
+
     const { platform: p1 } = createFakePlatform({
       initialSettings: { defaultBackend: 'claude' },
       initialGlobalState: { 'harnessDeck.backend': 'zcode' },

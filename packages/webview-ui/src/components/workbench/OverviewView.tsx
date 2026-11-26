@@ -56,8 +56,8 @@ export function OverviewView() {
 
   return (
     <ScrollArea className="min-h-0 flex-1" data-testid="workbench-overview">
-      <div className="flex flex-col px-3.5 py-3">
-        <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-3">
+      <div className="flex flex-col px-4 py-4">
+        <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
           <div>
             <h2 className="m-0 text-[15px] font-semibold tracking-tight text-ink">{t('wb.overview.title')}</h2>
@@ -128,7 +128,7 @@ export function OverviewView() {
         </section>
 
         {/* 中部响应式双列网格：2. 在跑 + 3. 待办 + 4. 接下来 + 5. 未读 */}
-        <div className="grid grid-cols-1 gap-3 @[680px]:grid-cols-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3.5 @[680px]:grid-cols-2 sm:grid-cols-2">
           {/* 2. 在跑 */}
           <section
             className="flex flex-col overflow-hidden rounded-card bg-surface shadow-card"
