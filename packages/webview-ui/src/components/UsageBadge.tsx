@@ -592,10 +592,16 @@ function CreditPackRow({
 /** 全局递增请求号：防止组件卸载重挂（如从设置页切完账号返回对话）时复用 requestId=1 撞上 store 里的旧结果。 */
 let nextQuotaRequestId = 0;
 
+function activeChannelOf(state: ReturnType<typeof getState>) {
+  const active = state.backends.active ?? '';
+  if (!active) return undefined;
+  const activeBackend = state.backends.items.find((b) => b.id === active);
+  return state.session.channel ?? state.accounts.channels[active] ?? activeBackend?.activeChannel;
+}
+
 function quotaScopeOf(state: ReturnType<typeof getState>): string {
   const active = state.backends.active ?? '';
-  const activeBackend = state.backends.items.find((b) => b.id === active);
-  const channel = active ? (state.accounts.channels[active] ?? activeBackend?.activeChannel) : undefined;
+  const channel = activeChannelOf(state);
   if (channel?.mode === 'provider') {
     return `${active}|provider:${channel.providerId}`;
   }
@@ -606,8 +612,7 @@ function quotaScopeOf(state: ReturnType<typeof getState>): string {
 function accountStatusOf(state: ReturnType<typeof getState>): string {
   const active = state.backends.active ?? '';
   if (!active) return '';
-  const activeBackend = state.backends.items.find((b) => b.id === active);
-  const channel = state.accounts.channels[active] ?? activeBackend?.activeChannel;
+  const channel = activeChannelOf(state);
   if (channel?.mode === 'provider') return '';
   const accountId = channel?.accountId ?? `system:${active}`;
   return state.accounts.items.find((a) => a.id === accountId)?.status ?? '';
@@ -621,7 +626,7 @@ function supportsQuotaOf(state: ReturnType<typeof getState>): boolean {
   if (!activeBackend) return false;
   const caps = activeBackend.capabilities ?? backendCapabilities(activeBackend);
   if (!caps.quota) return false;
-  const channel = state.accounts.channels[active] ?? activeBackend.activeChannel;
+  const channel = activeChannelOf(state);
   if (caps.quota !== 'antigravity' && channel?.mode === 'provider') return false;
   return true;
 }
@@ -630,8 +635,7 @@ function activeAccountQuotaOf(state: ReturnType<typeof getState>): QuotaView | u
   if (!supportsQuotaOf(state)) return undefined;
   const active = state.backends.active;
   if (!active) return undefined;
-  const activeBackend = state.backends.items.find((b) => b.id === active);
-  const channel = state.accounts.channels[active] ?? activeBackend?.activeChannel;
+  const channel = activeChannelOf(state);
   if (channel?.mode === 'provider') return undefined;
   const accountId = channel?.accountId ?? `system:${active}`;
   const quota = state.accounts.items.find((a) => a.id === accountId)?.quota;

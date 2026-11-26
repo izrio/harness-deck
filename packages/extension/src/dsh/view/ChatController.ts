@@ -86,6 +86,8 @@ export interface ChatControllerOptions extends ControllerHostOptions {
   readonly showTurnChanges?: () => boolean;
   /** 当前绑定到 dsh 的第三方服务商配置（若有）。 */
   readonly boundProvider?: () => ProviderConfig | undefined;
+  /** 记录该会话在绑定第三方服务商下选中的模型（供本机代理按工具与会话隔离）。 */
+  readonly onProviderModelSelected?: (providerId: string, model: string, sessionId?: string) => void;
 }
 
 /** 同时读取改动汇总的请求数：打开长会话时不一次发出几十个请求，把 dsh 堵住（点开 Diff 的请求要排在后面）。 */
@@ -898,7 +900,8 @@ export class ChatController implements ChatBackendController {
     return pending;
   }
 
-  private isSessionRunning(sessionId: string): boolean {
+  isSessionRunning(sessionId: string | undefined = this.activeId): boolean {
+    if (!sessionId) return false;
     if (this.stream?.sessionId === sessionId && this.stream.status.kind === 'live') {
       const events = this.stream.journal.events;
       if (this.eventsMemo && this.eventsMemo.key[0] === events && this.eventsMemo.key[1] === events.length) {
@@ -1226,6 +1229,10 @@ export class ChatController implements ChatBackendController {
   }
 
   private async selectModel(selection: ModelSelection): Promise<void> {
+    const bound = this.options.boundProvider?.();
+    if (bound && selection.provider === bound.id) {
+      this.options.onProviderModelSelected?.(bound.id, selection.model, this.activeId);
+    }
     if (!this.activeId || !this.service) {
       this.draftModel = selection;
       this.scheduleRender();

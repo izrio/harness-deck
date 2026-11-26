@@ -80,6 +80,17 @@ const REMOTE_BLOCKED_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'setQuickTunnelEnabled',
   'setRemotePushConfig',
   'testRemotePush',
+  'updateImBotChannel',
+  'generateImBotPairing',
+  'clearImBotPairing',
+  'revokeImBotUser',
+  'testImBotChannel',
+  'upsertAccount',
+  'deleteAccount',
+  'toggleAccountDisabled',
+  'setAccountAutomation',
+  'importAccounts',
+  'exportAccounts',
 ]);
 
 export function extractHostname(hostHeader: string): string | undefined {

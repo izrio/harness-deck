@@ -3,6 +3,7 @@
  * 代理意外退出时显示失败和最后几行错误输出，可以从横幅里重试。
  */
 import type { RuntimeStatus } from '@harness-deck/shared';
+import { buildProviderProxyScope } from '../accounts/SessionIsolationStore.ts';
 import { AcpController, type AcpInitialize, type AuthMethod, type PreferredModel, type StoredSession } from '../acp/AcpController.ts';
 import { AcpConnection, AcpTimeoutError } from '../acp/connection.ts';
 import {
@@ -59,9 +60,11 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
     saveActiveSessionId: (sessionId) => void state.update(key('activeSessionId'), sessionId),
     loadSessions: () => state.get<StoredSession[]>(key('sessions')),
     saveSessions: (sessions) => void state.update(key('sessions'), [...sessions]),
-    // 模型选择按用户记（不分工作区）：换个项目打开，新对话也是上次选的模型
+    // 模型选择按用户记（不分工作区）：换个项目打开，新对话也是上次选的模型；已有会话各自独立持久化
     loadPreferredModel: () => host.globalState.get<PreferredModel>(`harnessDeck.acp.${profile.id}.model`),
     savePreferredModel: (preferred) => void host.globalState.update(`harnessDeck.acp.${profile.id}.model`, preferred),
+    loadSessionModels: () => host.globalState.get<Record<string, PreferredModel>>(`harnessDeck.sessionModels.${profile.id}`),
+    saveSessionModels: (models) => void host.globalState.update(`harnessDeck.sessionModels.${profile.id}`, models),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
     authenticate: (methods, run) =>
@@ -72,7 +75,15 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
     singleSession: profile.singleSession === true,
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
     boundProvider: () => host.boundProvider?.(profile.id),
-    ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
+    ...(host.onProviderModelSelected
+      ? {
+          onProviderModelSelected: (providerId: string, model: string, sessionId?: string) =>
+            host.onProviderModelSelected?.(providerId, model, {
+              backendId: profile.id,
+              ...(sessionId ? { sessionId } : {}),
+            }),
+        }
+      : {}),
     mcpServers: () =>
       mcpServersForBackend(
         common.runtimeMcpServers?.() ?? common.extensions?.().mcp.servers ?? latestPrepared?.mcpServers ?? [],
@@ -147,6 +158,7 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
           storageDir: host.storageRoot,
           baseEnv: env,
           protocolGatewayEnabled: host.isProtocolGatewayEnabled?.() ?? false,
+          proxyScope: buildProviderProxyScope(profile.id),
         });
         if (current !== generation) return;
         if (adapted) {
@@ -154,7 +166,7 @@ export function createAcpBackend(profile: Extract<BackendProfile, { kind: 'acp' 
           launchEnv = adapted.env;
           const savedPref = host.globalState.get<PreferredModel>(`harnessDeck.acp.${profile.id}.model`);
           const chosen = savedPref?.model ?? boundProvider.defaultModel ?? boundProvider.models[0]?.id;
-          if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen);
+          if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen, { backendId: profile.id });
         }
       } catch (error) {
         host.log(`准备服务商 ${boundProvider.name} 的 ${profile.name} 配置失败：${error instanceof Error ? error.message : String(error)}`);

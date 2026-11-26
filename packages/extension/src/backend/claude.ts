@@ -6,6 +6,7 @@
  */
 import { join } from 'node:path';
 import type { RuntimeStatus } from '@harness-deck/shared';
+import { buildProviderProxyScope } from '../accounts/SessionIsolationStore.ts';
 import type { StoredSession } from '../acp/AcpController.ts';
 import { ClaudeConnection } from '../claude/connection.ts';
 import { ClaudeController, type ClaudePreferredModel } from '../claude/ClaudeController.ts';
@@ -30,6 +31,8 @@ export function createClaudeBackend(
   // 兼容旧版 ACP Claude Code 的会话标题缓存键，同时优先使用原生键
   const key = (name: string) => host.stateKey(`claude.${name}`);
   const legacyKey = (name: string) => host.stateKey(`acp.claude.${name}`);
+  const modelKey = `harnessDeck.${profile.id}.model`;
+  const sessionModelsKey = `harnessDeck.sessionModels.${profile.id}`;
   let status: RuntimeStatus = { kind: 'idle' };
   let generation = 0;
   let currentClaudeConfigDir: string | undefined;
@@ -43,14 +46,27 @@ export function createClaudeBackend(
     saveActiveSessionId: (sessionId) => void state.update(key('activeSessionId'), sessionId),
     loadSessions: () => state.get<StoredSession[]>(key('sessions')) ?? state.get<StoredSession[]>(legacyKey('sessions')),
     saveSessions: (sessions) => void state.update(key('sessions'), [...sessions]),
-    loadPreferredModel: () => host.globalState.get<ClaudePreferredModel>('harnessDeck.claude.model'),
-    savePreferredModel: (preferred) => void host.globalState.update('harnessDeck.claude.model', preferred),
+    loadPreferredModel: () => host.globalState.get<ClaudePreferredModel>(modelKey),
+    savePreferredModel: (preferred) => void host.globalState.update(modelKey, preferred),
+    loadSessionModels: () => host.globalState.get<Record<string, ClaudePreferredModel>>(sessionModelsKey),
+    saveSessionModels: (models) => void host.globalState.update(sessionModelsKey, models),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')) ?? state.get<string[]>(legacyKey('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
-    claudeConfigDir: () => currentClaudeConfigDir ?? resolveClaudeConfigDir(host.processEnv()),
+    claudeConfigDir: (sessionId) =>
+      host.resolveAccountConfigDir?.(profile.id, sessionId) ??
+      currentClaudeConfigDir ??
+      resolveClaudeConfigDir(host.processEnv()),
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
-    boundProvider: () => host.boundProvider?.(profile.id),
-    ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
+    boundProvider: (sessionId) => host.boundProvider?.(profile.id, sessionId),
+    ...(host.onProviderModelSelected
+      ? {
+          onProviderModelSelected: (providerId: string, model: string, sessionId?: string) =>
+            host.onProviderModelSelected?.(providerId, model, {
+              backendId: profile.id,
+              ...(sessionId ? { sessionId } : {}),
+            }),
+        }
+      : {}),
   });
 
   const setStatus = (next: RuntimeStatus): void => {
@@ -131,11 +147,12 @@ export function createClaudeBackend(
     controller.setSpawner(async (spawnParams) => {
       let launchEnv: Record<string, string | undefined> = host.processEnv();
       const providerExtraArgs: string[] = [];
-      const boundProvider = host.boundProvider?.(profile.id);
+      const sessionId = spawnParams.sessionId;
+      const boundProvider = host.boundProvider?.(profile.id, sessionId);
       if (boundProvider && host.ensureProviderProxy) {
-        currentClaudeConfigDir = undefined;
         try {
           const proxy = await host.ensureProviderProxy();
+          const proxyScope = buildProviderProxyScope(profile.id, sessionId);
           const adapted = prepareClaudeProviderRuntime({
             provider: boundProvider,
             proxyOrigin: proxy.origin,
@@ -143,6 +160,7 @@ export function createClaudeBackend(
             baseEnv: launchEnv,
             protocolGatewayEnabled: host.isProtocolGatewayEnabled?.() ?? false,
             ...(spawnParams.model ? { selectedModel: spawnParams.model } : {}),
+            proxyScope,
           });
           if (adapted) {
             launchEnv = adapted.env;
@@ -151,6 +169,7 @@ export function createClaudeBackend(
                 join(host.storageRoot, 'runtime'),
                 boundProvider.id,
                 adapted.settingsJson,
+                proxyScope,
               );
               providerExtraArgs.push('--settings', settingsPath);
             } catch (error) {
@@ -159,7 +178,12 @@ export function createClaudeBackend(
               );
             }
             const chosen = spawnParams.model ?? boundProvider.defaultModel ?? boundProvider.models[0]?.id;
-            if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen);
+            if (chosen) {
+              host.onProviderModelSelected?.(boundProvider.id, chosen, {
+                backendId: profile.id,
+                ...(sessionId ? { sessionId } : {}),
+              });
+            }
             host.log(
               `Claude Code 已绑定服务商 ${boundProvider.name}，代理地址：${adapted.env.ANTHROPIC_BASE_URL}${adapted.converted ? '（OpenAI -> Claude 本地协议转换）' : ''}`,
             );
@@ -173,10 +197,10 @@ export function createClaudeBackend(
         }
       } else if (host.prepareAccountLaunch) {
         try {
-          const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv);
+          const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv, sessionId);
           if (accountPatch) {
             launchEnv = accountPatch.env;
-            currentClaudeConfigDir = accountPatch.configDir;
+            if (!sessionId) currentClaudeConfigDir = accountPatch.configDir;
           }
         } catch (error) {
           host.log(`准备 Claude Code 官方账号环境失败：${error instanceof Error ? error.message : String(error)}`);

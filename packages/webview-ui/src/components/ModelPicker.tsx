@@ -49,6 +49,8 @@ export function ModelPicker({
   testId = 'model-picker',
 }: ModelPickerProps) {
   const storeModels = useView((s) => s.models);
+  const session = useView((s) => s.session);
+  const tabs = useView((s) => s.tabs);
   const backends = useView((s) => s.backends);
   const providers = useView((s) => s.providers);
   const accounts = useView((s) => s.accounts);
@@ -83,7 +85,8 @@ export function ModelPicker({
     () => backends.items.find((b) => b.id === backends.active),
     [backends.items, backends.active],
   );
-  const activeChannel = activeBackend ? (accounts.channels[activeBackend.id] ?? activeBackend.activeChannel) : undefined;
+  const activeChannel =
+    session.channel ?? (activeBackend ? (accounts.channels[activeBackend.id] ?? activeBackend.activeChannel) : undefined);
   const backendAccounts = useMemo(
     () => (activeBackend ? accounts.items.filter((a) => a.backendId === activeBackend.id) : []),
     [accounts.items, activeBackend],
@@ -236,7 +239,14 @@ export function ModelPicker({
                               onClick={() => {
                                 postToHost({
                                   type: 'setBackendChannel',
-                                  payload: { backendId: activeBackend.id, mode: 'official', accountId: acc.id },
+                                  payload: {
+                                    backendId: activeBackend.id,
+                                    mode: 'official',
+                                    accountId: acc.id,
+                                    scope: 'session',
+                                    ...(session.id ? { sessionId: session.id } : {}),
+                                    ...(tabs.active ? { tabKey: tabs.active } : {}),
+                                  },
                                 });
                                 close();
                               }}
@@ -295,7 +305,14 @@ export function ModelPicker({
                               onClick={() => {
                                 postToHost({
                                   type: 'setBackendChannel',
-                                  payload: { backendId: activeBackend.id, mode: 'provider', providerId: p.id },
+                                  payload: {
+                                    backendId: activeBackend.id,
+                                    mode: 'provider',
+                                    providerId: p.id,
+                                    scope: 'session',
+                                    ...(session.id ? { sessionId: session.id } : {}),
+                                    ...(tabs.active ? { tabKey: tabs.active } : {}),
+                                  },
                                 });
                                 close();
                               }}

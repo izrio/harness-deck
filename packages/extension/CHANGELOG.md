@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## 0.19.0
+
+### 中文
+
+- **IM 机器人双向聊天（企微 / 飞书 / 钉钉 / Telegram）**：支持零公网 IP 长连接与长轮询接入企业微信智能机器人、飞书 / Lark 自建应用、钉钉 Stream 机器人与 Telegram Bot；内置 6 位一次性 `/pair <码>` 授权配对、免配对白名单、群聊 `@机器人` 防误触发、跨底层流式回复、审批与提问卡片直接回复，以及 `/status`、`/new`、`/stop`、`/sessions`、`/switch` 等远程指令。
+- **远程互通模块逻辑与顺序重构**：拆分为「手机网页 / IM 机器人 / 消息推送」三大独立分栏；手机网页按「桥接开关 → 1. 选择入口（4 选 1 卡片）→ 2. 扫码配对（含就近权限选择与外网路由自动同步）→ 3. 已授权设备」线性引导，开启 Tailscale Serve 时自动拉起本地桥接；IM 机器人调整为「先配置通道 → 再授权配对与管理用户」，消息推送按「推送策略 → 推送渠道」分层并支持折叠未启用的 Webhook 表单。
+- **多账号管理升级（Account Cockpit）与会话级渠道隔离**：官方账号新增标签、备注、禁用、搜索与按配额/健康度排序、低配额/过期自动切号与定时刷新，以及兼容 cockpit-tools 的导入/导出备份（默认脱敏不含凭据）；新增跨工具与单会话级官方账号/服务商渠道路由及 `ProviderProxy` 模型作用域隔离，多标签并发切换互不串扰。
+
+### English
+
+- **IM Bot Bidirectional Chat (WeCom / Feishu / DingTalk / Telegram)**: Added zero-public-IP long-connection and long-polling adapters for WeCom AI Bot, Feishu / Lark, DingTalk Stream, and Telegram Bot with 6-digit `/pair <code>` authorization, allowlists, group `@mention` guard, cross-backend streaming replies, approval/question responses, and `/status`, `/new`, `/stop`, `/sessions`, `/switch` commands.
+- **Remote Access Flow & Architecture Overhaul**: Reorganized Remote Access into three independent tabs (Mobile Web, IM Bots, Push Alerts); streamlined Mobile Web into a linear Bridge → 1. Access Route selector (auto-syncing active tunnels and auto-starting the bridge on Tailscale Serve) → 2. QR Pairing with inline permission scope → 3. Authorized Devices flow, reordered IM Bots to Channels → Pairing & Users, and separated Push Policy from Push Channels.
+- **Account Cockpit & Per-Session Channel Isolation**: Added account tags, notes, disable toggles, search/quota sorting, low-quota/expiry auto-switch with scheduled quota refresh, and cockpit-tools-compatible import/export backups; added cross-tool and per-session channel bindings with scoped `ProviderProxy` model mapping so parallel tabs and agents never interfere.
+
 ## 0.18.2
 
 ### 中文

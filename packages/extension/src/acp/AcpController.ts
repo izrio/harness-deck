@@ -115,6 +115,8 @@ export interface AcpControllerOptions extends ControllerHostOptions {
    */
   readonly loadPreferredModel?: () => PreferredModel | undefined;
   readonly savePreferredModel?: (preferred: PreferredModel) => void;
+  readonly loadSessionModels?: () => Readonly<Record<string, PreferredModel>> | undefined;
+  readonly saveSessionModels?: (models: Readonly<Record<string, PreferredModel>>) => void;
   /** 打开的标签（会话 id，按顺序）；新对话的标签不保存。 */
   readonly loadOpenTabs?: () => readonly string[] | undefined;
   readonly saveOpenTabs?: (sessionIds: readonly string[]) => void;
@@ -141,7 +143,7 @@ export interface AcpControllerOptions extends ControllerHostOptions {
   /** 当前绑定到该 ACP 智能体的第三方服务商配置（若有）。 */
   readonly boundProvider?: () => ProviderConfig | undefined;
   /** 用户在模型选择器中切换绑定服务商的模型时通知本机代理同步映射。 */
-  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
+  readonly onProviderModelSelected?: (providerId: string, model: string, sessionId?: string) => void;
 }
 
 export interface PreferredModel {
@@ -205,6 +207,8 @@ export class AcpController implements ChatBackendController {
   private cachedCommands: readonly AcpCommand[] = [];
   /** 通用 ACP 代理下已注入过 `<available_skills>` 目录索引的会话 id。 */
   private readonly skillCatalogInjected = new Set<string>();
+  /** 按会话隔离保存的模型/思考档位（特别用于绑定第三方服务商或延迟加载会话）。 */
+  private readonly sessionModels = new Map<string, PreferredModel>();
   private workspacePath: string;
   private renderTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly publisher: ViewPublisher;
@@ -213,6 +217,14 @@ export class AcpController implements ChatBackendController {
     this.workspacePath = options.workspacePath;
     this.activeId = options.loadActiveSessionId();
     this.stored = [...(options.loadSessions() ?? [])];
+    const restoredSessionModels = options.loadSessionModels?.();
+    if (restoredSessionModels) {
+      for (const [sid, model] of Object.entries(restoredSessionModels)) {
+        if (sid && model?.model) {
+          this.sessionModels.set(sid, model);
+        }
+      }
+    }
     this.publisher = new ViewPublisher(options.post, options.onModelChange);
     this.editorContext = new EditorContext(
       () => this.workbench,
@@ -1176,6 +1188,11 @@ export class AcpController implements ChatBackendController {
     return this.effectiveOptions(projection).find((o) => o.category === 'mode' || o.id === 'mode');
   }
 
+  private persistSessionModels(): void {
+    if (!this.options.saveSessionModels) return;
+    this.options.saveSessionModels(Object.fromEntries(this.sessionModels.entries()));
+  }
+
   private modelsOf(projection: AcpSessionProjection | undefined): ModelState {
     const bound = this.options.boundProvider?.();
     const model = this.modelOption(projection);
@@ -1183,7 +1200,7 @@ export class AcpController implements ChatBackendController {
     const acpEfforts = (effort?.options ?? []).map((o) => ({ id: o.value, name: o.name ?? o.value }));
 
     if (bound && bound.models.length > 0) {
-      const saved = this.options.loadPreferredModel?.();
+      const saved = (this.activeId ? this.sessionModels.get(this.activeId) : undefined) ?? this.options.loadPreferredModel?.();
       const boundOptions: ModelOption[] = bound.models.map((m) => {
         const itemEfforts =
           m.efforts && m.efforts.length > 0 ? m.efforts.map((e) => ({ id: e, name: e })) : acpEfforts;
@@ -1205,6 +1222,7 @@ export class AcpController implements ChatBackendController {
         (saved?.effort && chosenOption.efforts.some((e) => e.id === saved.effort) ? saved.effort : undefined) ??
         effort?.currentValue ??
         chosenOption.defaultEffort;
+      this.options.onProviderModelSelected?.(bound.id, chosenModel, this.activeId);
       return {
         options: boundOptions,
         current: {
@@ -1218,7 +1236,9 @@ export class AcpController implements ChatBackendController {
     if (!model?.options?.length) return { options: [] };
     const efforts = acpEfforts;
     const usingFallback = !projection?.configOptions.length;
-    const preferred = usingFallback && !this.activeId ? this.options.loadPreferredModel?.() : undefined;
+    const preferred = usingFallback
+      ? (this.activeId ? this.sessionModels.get(this.activeId) : this.options.loadPreferredModel?.())
+      : undefined;
     const activeModel =
       preferred && model.options.some((o) => o.value === preferred.model) ? preferred.model : model.currentValue;
     const activeEffort =
@@ -1245,9 +1265,14 @@ export class AcpController implements ChatBackendController {
   private async selectModel(model: string, effort?: string): Promise<void> {
     const bound = this.options.boundProvider?.();
     if (bound) {
-      this.options.onProviderModelSelected?.(bound.id, model);
+      this.options.onProviderModelSelected?.(bound.id, model, this.activeId);
     }
-    this.options.savePreferredModel?.({ model, ...(effort ? { effort } : {}) });
+    const nextPref: PreferredModel = { model, ...(effort ? { effort } : {}) };
+    if (this.activeId) {
+      this.sessionModels.set(this.activeId, nextPref);
+      this.persistSessionModels();
+    }
+    this.options.savePreferredModel?.(nextPref);
     this.scheduleRender();
     const sessionId = this.currentId() ?? (await this.ensureDraft());
     const option = this.modelOption(this.currentProjection());
@@ -1270,8 +1295,10 @@ export class AcpController implements ChatBackendController {
       if (effort && effortOption && effort !== effortOption.currentValue && effortSupported) {
         await this.setOption(sessionId, effortOption.id, effort);
       }
-      // 已经建好、还没用过的草稿会话也换过来
-      if (this.draftId && this.draftId !== sessionId) await this.applyPreferredModel(this.draftId);
+      // 已经建好、还没用过的空白草稿会话沿用最新默认模型，绝不改动其他已有会话
+      if (this.draftId && this.draftId !== sessionId) {
+        await this.applyPreferredModel(this.draftId);
+      }
     } catch (error) {
       if (!bound) this.toast('error', t('model.failed', describe(error)));
     }

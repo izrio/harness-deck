@@ -57,8 +57,8 @@ const MAX_PARAM_RETRIES = 3;
 export interface ProviderProxyOptions {
   readonly getProvider: (id: string) => ProviderConfig | undefined;
   readonly getApiKey: (id: string) => Promise<string | undefined>;
-  /** 当前会话为指定服务商选中的模型（用于把 Claude Code 等发出的 "default" / "sonnet" 映射到真实模型）。 */
-  readonly getSelectedModel?: (providerId: string) => string | undefined;
+  /** 当前会话/工具为指定服务商选中的模型（按可选 `scope` 隔离不同工具与不同会话，避免模型串用）。 */
+  readonly getSelectedModel?: (providerId: string, scope?: string) => string | undefined;
   /** 是否启用本地协议转换网关（将 OpenAI 兼容接口转换为 Claude Anthropic 协议，默认 false）。 */
   readonly isProtocolGatewayEnabled?: () => boolean;
   /** 可选 IDE HTTP 代理配置（供纯 Node.js Sidecar 环境访问上游外网接口）。 */
@@ -205,7 +205,17 @@ function parseRoute(pathname: string): {
   readonly providerId: string;
   readonly protocol: ProviderProtocol;
   readonly subPath: string;
+  readonly scope?: string;
 } | undefined {
+  const scopedMatch = /^\/s\/([^/]+)\/p\/([^/]+)\/(anthropic|openai-chat|openai-responses)(\/.*)?$/u.exec(pathname);
+  if (scopedMatch) {
+    return {
+      scope: decodeURIComponent(scopedMatch[1]!),
+      providerId: decodeURIComponent(scopedMatch[2]!),
+      protocol: scopedMatch[3] as ProviderProtocol,
+      subPath: scopedMatch[4] ?? '/',
+    };
+  }
   const match = /^\/p\/([^/]+)\/(anthropic|openai-chat|openai-responses)(\/.*)?$/u.exec(pathname);
   if (!match) return undefined;
   return {
@@ -511,8 +521,12 @@ export class ProviderProxy {
     return id;
   }
 
-  endpointFor(providerId: string, protocol: ProviderProtocol): string {
+  endpointFor(providerId: string, protocol: ProviderProtocol, scope?: string): string {
     if (!this.boundOrigin) throw new Error('ProviderProxy has not started yet');
+    const cleanScope = scope?.trim();
+    if (cleanScope) {
+      return `${this.boundOrigin}/s/${encodeURIComponent(cleanScope)}/p/${encodeURIComponent(providerId)}/${protocol}`;
+    }
     return `${this.boundOrigin}/p/${encodeURIComponent(providerId)}/${protocol}`;
   }
 
@@ -622,7 +636,7 @@ export class ProviderProxy {
     const contentType = typeof req.headers['content-type'] === 'string' ? req.headers['content-type'] : '';
     const reqModelHint =
       method === 'POST' && contentType.includes('json') ? extractModelFromBody(bodyBuf) : undefined;
-    const selectedModel = this.options.getSelectedModel?.(provider.id);
+    const selectedModel = this.options.getSelectedModel?.(provider.id, route.scope);
 
     if (
       route.protocol === 'anthropic' &&
@@ -633,7 +647,7 @@ export class ProviderProxy {
         selectedModel,
       )
     ) {
-      await this.handleAnthropicViaOpenAi(req, res, provider, route.subPath, parsedUrl.search, bodyBuf);
+      await this.handleAnthropicViaOpenAi(req, res, provider, route.subPath, parsedUrl.search, bodyBuf, route.scope);
       return;
     }
 
@@ -842,6 +856,7 @@ export class ProviderProxy {
     subPath: string,
     search: string,
     bodyBuf: Buffer,
+    scope?: string,
   ): Promise<void> {
     const startedAt = Date.now();
     const method = req.method ?? 'POST';
@@ -897,7 +912,7 @@ export class ProviderProxy {
       return;
     }
 
-    const selectedModel = this.options.getSelectedModel?.(provider.id);
+    const selectedModel = this.options.getSelectedModel?.(provider.id, scope);
     const reqModelHint = extractModelFromBody(bodyBuf);
     const previewModel =
       (reqModelHint ? resolveMappedProviderModel(reqModelHint, provider, selectedModel) : undefined) ??

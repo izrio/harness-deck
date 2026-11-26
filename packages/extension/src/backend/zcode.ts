@@ -4,6 +4,7 @@
  * 接管 NDJSON 双向通信并挂载 `ZcodeController`。
  */
 import type { RuntimeStatus } from '@harness-deck/shared';
+import { buildProviderProxyScope } from '../accounts/SessionIsolationStore.ts';
 import type { StoredSession } from '../acp/AcpController.ts';
 import { t } from '../i18n.ts';
 import { prepareZcodeProviderRuntime } from '../providers/ProviderRuntime.ts';
@@ -24,6 +25,8 @@ export function createZcodeBackend(
 ): RunningBackend {
   const state = host.workspaceState;
   const key = (name: string) => host.stateKey(`zcode.${name}`);
+  const modelKey = `harnessDeck.${profile.id}.model`;
+  const sessionModelsKey = `harnessDeck.sessionModels.${profile.id}`;
   let status: RuntimeStatus = { kind: 'idle' };
   let connection: ZcodeConnection | undefined;
   let generation = 0;
@@ -37,13 +40,23 @@ export function createZcodeBackend(
     saveActiveSessionId: (sessionId) => void state.update(key('activeSessionId'), sessionId),
     loadSessions: () => state.get<StoredSession[]>(key('sessions')),
     saveSessions: (sessions) => void state.update(key('sessions'), [...sessions]),
-    loadPreferredModel: () => host.globalState.get<ZcodePreferredModel>('harnessDeck.zcode.model'),
-    savePreferredModel: (preferred) => void host.globalState.update('harnessDeck.zcode.model', preferred),
+    loadPreferredModel: () => host.globalState.get<ZcodePreferredModel>(modelKey),
+    savePreferredModel: (preferred) => void host.globalState.update(modelKey, preferred),
+    loadSessionModels: () => host.globalState.get<Record<string, ZcodePreferredModel>>(sessionModelsKey),
+    saveSessionModels: (models) => void host.globalState.update(sessionModelsKey, models),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
     boundProvider: () => host.boundProvider?.(profile.id),
-    ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
+    ...(host.onProviderModelSelected
+      ? {
+          onProviderModelSelected: (providerId: string, model: string, sessionId?: string) =>
+            host.onProviderModelSelected?.(providerId, model, {
+              backendId: profile.id,
+              ...(sessionId ? { sessionId } : {}),
+            }),
+        }
+      : {}),
   });
 
   const setStatus = (next: RuntimeStatus): void => {
@@ -111,6 +124,7 @@ export function createZcodeBackend(
           proxyToken: proxy.token,
           storageDir: host.storageRoot,
           baseEnv: spawnEnv,
+          proxyScope: buildProviderProxyScope(profile.id),
         });
         if (current !== generation) return;
         if (adapted) spawnEnv = adapted.env;

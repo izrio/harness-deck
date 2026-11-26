@@ -1,6 +1,8 @@
 /**
- * 设置 -> Agent -> 账号：
- * 去线留白：移除隔离实现方式标签、卡片边框与行间分割线，用紧凑版面表达渠道与账号层级。
+ * 设置 -> Agent -> 账号（参考 cockpit-tools 升级版）：
+ * - 保留 Halo 去线留白视觉与各智能体官方/服务商渠道路由
+ * - 增强可视化配额进度条、重置倒计时、单账号一键切号与单号刷新
+ * - 新增标签/备注/启用禁用管理、搜索与按配额排序、低配额自动切号、以及兼容 cockpit-tools 的导入/导出备份
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -33,7 +35,10 @@ import { setSettingsTab, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
 import { BackendLogo } from '../BackendLogo.tsx';
 import {
+  BanIcon,
   CheckIcon,
+  ClockIcon,
+  CodeIcon,
   CopyIcon,
   ErrorIcon,
   GlobeIcon,
@@ -44,13 +49,17 @@ import {
   PencilIcon,
   PlusIcon,
   RefreshIcon,
+  SearchIcon,
   SpinnerIcon,
   TerminalIcon,
   TrashIcon,
+  ZapIcon,
 } from '../icons.tsx';
+import { AccountAutomationDialog, AccountPortabilityDialog } from './AccountDialogs.tsx';
 import { SettingsSection } from './SettingsSection.tsx';
 
 const REGION_DEFAULT_VALUE = '__default__';
+type AccountSortMode = 'default' | 'quota' | 'status';
 
 interface AccountEditorState {
   readonly isNew: boolean;
@@ -60,6 +69,8 @@ interface AccountEditorState {
   readonly label: string;
   readonly isolateSessions: boolean;
   readonly region: AccountRegion | '';
+  readonly tagsText: string;
+  readonly notes: string;
   readonly apiKey: string;
   readonly hasSecret: boolean;
   readonly usageCookie: string;
@@ -74,6 +85,8 @@ function emptyEditor(backendId: string): AccountEditorState {
     label: '',
     isolateSessions: false,
     region: '',
+    tagsText: '',
+    notes: '',
     apiKey: '',
     hasSecret: false,
     usageCookie: '',
@@ -91,6 +104,8 @@ function editorFromAccount(account: AccountView): AccountEditorState {
     label: account.label,
     isolateSessions: account.isolateSessions === true,
     region: account.region ?? '',
+    tagsText: (account.tags ?? []).join(', '),
+    notes: account.notes ?? '',
     apiKey: '',
     hasSecret: account.hasSecret === true,
     usageCookie: '',
@@ -99,14 +114,28 @@ function editorFromAccount(account: AccountView): AccountEditorState {
   };
 }
 
-function formatQuotaChip(win: QuotaWindowView, t: ReturnType<typeof useT>): string {
+function parseTagsInput(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(/[,，]+/u)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function formatQuotaLabel(win: QuotaWindowView, t: ReturnType<typeof useT>): string {
   const kindLabel =
     win.kind === 'session'
       ? t('settings.accounts.quotaWindow.session')
       : win.kind === 'weekly' || win.kind === 'weeklyModel'
         ? t('settings.accounts.quotaWindow.weekly')
         : t('settings.accounts.quotaWindow.cycle');
-  const scope = win.label ? `${kindLabel}·${win.label}` : kindLabel;
+  return win.label ? `${kindLabel}·${win.label}` : kindLabel;
+}
+
+function formatQuotaValue(win: QuotaWindowView, t: ReturnType<typeof useT>): string {
   if (win.remainingAmount !== undefined) {
     const unit = win.unit?.trim() || t('usage.credits.unit');
     const rem = new Intl.NumberFormat(undefined, {
@@ -116,11 +145,40 @@ function formatQuotaChip(win: QuotaWindowView, t: ReturnType<typeof useT>): stri
       const tot = new Intl.NumberFormat(undefined, {
         maximumFractionDigits: Number.isInteger(win.totalAmount) ? 0 : 1,
       }).format(win.totalAmount);
-      return `${scope} ${rem}/${tot} ${unit}`;
+      return `${rem}/${tot} ${unit}`;
     }
-    return `${scope} ${rem} ${unit}`;
+    return `${rem} ${unit}`;
   }
-  return `${scope} ${t('settings.accounts.quotaRemaining', Math.round(win.remainingPercent))}`;
+  return t('settings.accounts.quotaRemaining', Math.round(win.remainingPercent));
+}
+
+function formatResetCountdown(resetsAt: number | undefined, t: ReturnType<typeof useT>): string | undefined {
+  if (!resetsAt || !Number.isFinite(resetsAt)) return undefined;
+  const diffMs = resetsAt - Date.now();
+  if (diffMs <= 60_000) return t('settings.accounts.quotaResetSoon');
+  const totalMin = Math.floor(diffMs / 60_000);
+  const days = Math.floor(totalMin / (60 * 24));
+  const hours = Math.floor((totalMin % (60 * 24)) / 60);
+  const mins = totalMin % 60;
+  let duration: string;
+  if (days > 0) duration = `${days}d ${hours}h`;
+  else if (hours > 0) duration = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  else duration = `${mins}m`;
+  return t('settings.accounts.quotaResetIn', duration);
+}
+
+function minVisibleQuotaPercent(acc: AccountView): number {
+  const wins = (acc.quota?.windows ?? []).filter((w) => w.label.trim().toLowerCase() !== '3p');
+  if (wins.length === 0) return -1;
+  return Math.min(...wins.map((w) => Math.max(0, Math.min(100, w.remainingPercent))));
+}
+
+function statusSortRank(acc: AccountView): number {
+  if (acc.disabled) return 4;
+  if (acc.status === 'authenticated') return 0;
+  if (acc.status === 'logging-in') return 1;
+  if (acc.status === 'expired') return 2;
+  return 3;
 }
 
 export function AccountSettings() {
@@ -138,6 +196,11 @@ export function AccountSettings() {
     { readonly backendId: string; readonly existingIds: ReadonlySet<string> } | undefined
   >();
   const [copiedKey, setCopiedKey] = useState<string | undefined>();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortMode, setSortMode] = useState<AccountSortMode>('default');
+  const [selectedTag, setSelectedTag] = useState<string>('');
+  const [automationOpen, setAutomationOpen] = useState(false);
+  const [portabilityOpen, setPortabilityOpen] = useState(false);
   const initialRefreshedRef = useRef(false);
 
   useEffect(() => {
@@ -170,15 +233,53 @@ export function AccountSettings() {
     [backends],
   );
 
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const acc of accountsState.items) {
+      for (const tag of acc.tags ?? []) set.add(tag);
+    }
+    return [...set];
+  }, [accountsState.items]);
+
+  useEffect(() => {
+    if (selectedTag && !allTags.includes(selectedTag)) {
+      setSelectedTag('');
+    }
+  }, [allTags, selectedTag]);
+
   const accountsByBackend = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     const map = new Map<string, AccountView[]>();
     for (const acc of accountsState.items) {
+      if (selectedTag && !(acc.tags ?? []).includes(selectedTag)) continue;
+      if (q) {
+        const hay = [acc.label, acc.identity, acc.notes, acc.plan, ...(acc.tags ?? [])]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
       const list = map.get(acc.backendId);
       if (list) list.push(acc);
       else map.set(acc.backendId, [acc]);
     }
+    if (sortMode !== 'default') {
+      for (const list of map.values()) {
+        list.sort((a, b) => {
+          if (sortMode === 'quota') {
+            return minVisibleQuotaPercent(b) - minVisibleQuotaPercent(a);
+          }
+          return statusSortRank(a) - statusSortRank(b);
+        });
+      }
+    }
     return map;
-  }, [accountsState.items]);
+  }, [accountsState.items, searchQuery, selectedTag, sortMode]);
+
+  const refreshingSet = useMemo(
+    () => new Set(accountsState.refreshingIds ?? []),
+    [accountsState.refreshingIds],
+  );
 
   const openAdd = (backendId?: string) => {
     const fallback = backendId ?? multiAccountBackends[0]?.id ?? backends[0]?.id ?? 'claude';
@@ -207,6 +308,10 @@ export function AccountSettings() {
         .filter((item) => !item.isSystemDefault && item.backendId === editor.backendId)
         .map((item) => item.id),
     );
+    const parsedTags = parseTagsInput(editor.tagsText);
+    const trimmedNotes = editor.notes.trim();
+    const editingExisting = !editor.isNew && !editor.isSystemDefault;
+
     postToHost({
       type: 'upsertAccount',
       payload: {
@@ -215,6 +320,8 @@ export function AccountSettings() {
         label,
         ...(editorAccountCap?.supportsSessionIsolation ? { isolateSessions: editor.isolateSessions } : {}),
         ...(editorAccountCap?.supportsRegion && editor.region ? { region: editor.region } : {}),
+        ...(parsedTags.length > 0 || editingExisting ? { tags: parsedTags } : {}),
+        ...(trimmedNotes || editingExisting ? { notes: trimmedNotes } : {}),
         ...((editorAccountCap?.loginKind === 'api-key' || editorAccountCap?.supportsRegion) && editor.apiKey.trim()
           ? { apiKey: editor.apiKey.trim() }
           : {}),
@@ -271,6 +378,8 @@ export function AccountSettings() {
     setAuthCode('');
   };
 
+  const autoSwitchOn = accountsState.automation?.autoSwitchEnabled === true;
+
   return (
     <>
       <SettingsSection
@@ -279,6 +388,29 @@ export function AccountSettings() {
         surface="plain"
         actions={
           <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-ink-2 hover:text-ink"
+              data-testid="accounts-automation-btn"
+              onClick={() => setAutomationOpen(true)}
+            >
+              <ZapIcon className={cn('size-3.5', autoSwitchOn && 'text-green')} />
+              <span>{t('settings.accounts.automation.btn')}</span>
+              {autoSwitchOn ? <span aria-hidden="true" className="size-1.5 rounded-full bg-green" /> : null}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-ink-2 hover:text-ink"
+              data-testid="accounts-portability-btn"
+              onClick={() => setPortabilityOpen(true)}
+            >
+              <CodeIcon className="size-3.5" />
+              <span>{t('settings.accounts.portability.btn')}</span>
+            </Button>
             <Button
               type="button"
               variant="ghost"
@@ -306,6 +438,59 @@ export function AccountSettings() {
           </>
         }
       >
+        {/* 轻量搜索、配额排序与标签过滤条 */}
+        {accountsState.items.length > 1 ? (
+          <div className="mb-3 flex flex-col gap-2" data-testid="accounts-toolbar">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-44 flex-1">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-ink-3" />
+                <Input
+                  size="sm"
+                  data-testid="accounts-search-input"
+                  className="pl-8"
+                  value={searchQuery}
+                  placeholder={t('settings.accounts.searchPlaceholder')}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <Select value={sortMode} onValueChange={(v) => setSortMode(v as AccountSortMode)}>
+                <SelectTrigger size="sm" className="w-44" data-testid="accounts-sort-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">{t('settings.accounts.sortDefault')}</SelectItem>
+                  <SelectItem value="quota">{t('settings.accounts.sortQuota')}</SelectItem>
+                  <SelectItem value="status">{t('settings.accounts.sortStatus')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {allTags.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="accounts-tag-filters">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant={selectedTag === '' ? 'default' : 'ghost'}
+                  onClick={() => setSelectedTag('')}
+                >
+                  {t('settings.accounts.tagAll')}
+                </Button>
+                {allTags.map((tag) => (
+                  <Button
+                    key={tag}
+                    type="button"
+                    size="xs"
+                    variant={selectedTag === tag ? 'default' : 'secondary'}
+                    data-testid={`accounts-tag-filter-${tag}`}
+                    onClick={() => setSelectedTag((cur) => (cur === tag ? '' : tag))}
+                  >
+                    #{tag}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="flex flex-col gap-4">
           {backends.map((backend) => (
             <BackendAccountCard
@@ -315,6 +500,8 @@ export function AccountSettings() {
               providers={providers}
               protocolGatewayEnabled={protocolGatewayEnabled}
               channel={accountsState.channels[backend.id] ?? backend.activeChannel}
+              refreshingSet={refreshingSet}
+              fetchQuotaEnabled={fetchQuotaEnabled}
               onAdd={() => openAdd(backend.id)}
               onEdit={openEdit}
               onDelete={(acc) => setPendingDelete(acc)}
@@ -322,6 +509,20 @@ export function AccountSettings() {
           ))}
         </div>
       </SettingsSection>
+
+      {/* 自动切号与定时刷新弹窗 */}
+      <AccountAutomationDialog
+        open={automationOpen}
+        onOpenChange={setAutomationOpen}
+        automation={accountsState.automation}
+      />
+
+      {/* 导入 / 导出备份弹窗 */}
+      <AccountPortabilityDialog
+        open={portabilityOpen}
+        onOpenChange={setPortabilityOpen}
+        backends={backends}
+      />
 
       {/* 添加 / 编辑官方账号弹窗 */}
       <Dialog open={Boolean(editor)} onOpenChange={(open) => (!open ? closeEditor() : undefined)}>
@@ -378,6 +579,31 @@ export function AccountSettings() {
                   }}
                 />
               </label>
+
+              {!editor.isSystemDefault ? (
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.tags')}</span>
+                    <Input
+                      size="sm"
+                      data-testid="account-form-tags"
+                      value={editor.tagsText}
+                      placeholder={t('settings.accounts.form.tagsPlaceholder')}
+                      onChange={(e) => setEditor({ ...editor, tagsText: e.target.value })}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[12px] font-medium text-ink-2">{t('settings.accounts.form.notes')}</span>
+                    <Input
+                      size="sm"
+                      data-testid="account-form-notes"
+                      value={editor.notes}
+                      placeholder={t('settings.accounts.form.notesPlaceholder')}
+                      onChange={(e) => setEditor({ ...editor, notes: e.target.value })}
+                    />
+                  </label>
+                </div>
+              ) : null}
 
               {editorAccountCap?.supportsRegion && !editor.isSystemDefault ? (
                 <div className="flex flex-col gap-1">
@@ -746,6 +972,8 @@ function BackendAccountCard({
   providers,
   protocolGatewayEnabled,
   channel,
+  refreshingSet,
+  fetchQuotaEnabled,
   onAdd,
   onEdit,
   onDelete,
@@ -755,6 +983,8 @@ function BackendAccountCard({
   readonly providers: readonly ProviderView[];
   readonly protocolGatewayEnabled: boolean;
   readonly channel: BackendView['activeChannel'];
+  readonly refreshingSet: ReadonlySet<string>;
+  readonly fetchQuotaEnabled: boolean;
   readonly onAdd: () => void;
   readonly onEdit: (account: AccountView) => void;
   readonly onDelete: (account: AccountView) => void;
@@ -910,14 +1140,16 @@ function BackendAccountCard({
           <div className="flex flex-col divide-y divide-line/55 border-t border-line/55">
             {accounts.map((acc) => {
               const isCurrent = activeMode === 'official' && activeAccountId === acc.id;
+              const isRefreshing = refreshingSet.has(acc.id);
               const canEdit = true;
               const statusKey = `settings.accounts.status.${acc.status}` as const;
               const showUse = !isCurrent;
               const showLogin = accountCap?.loginKind !== 'api-key' || acc.isSystemDefault;
               const showLogout = acc.status === 'authenticated' || acc.status === 'expired';
               const showDelete = !acc.isSystemDefault;
+              const showDisable = !acc.isSystemDefault;
               const hasPrimary = showUse || showLogin || canEdit;
-              const hasSecondary = showLogout || showDelete;
+              const hasSecondary = showLogout || showDelete || showDisable;
               const visibleQuotaWindows = (acc.quota?.windows ?? []).filter(
                 (win) => win.label.trim().toLowerCase() !== '3p',
               );
@@ -927,132 +1159,238 @@ function BackendAccountCard({
                 <div
                   key={acc.id}
                   data-testid={`account-row-${acc.id}`}
-                  className="flex items-center justify-between gap-3 py-3"
+                  className={cn(
+                    'flex items-start justify-between gap-3 py-3',
+                    acc.disabled && 'opacity-65',
+                  )}
                 >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <span
-                      className={cn('size-2 shrink-0 rounded-full', isCurrent ? 'bg-green' : 'bg-ink-4')}
-                      data-testid={isCurrent ? `account-active-${acc.id}` : `account-dot-${acc.id}`}
-                      aria-label={isCurrent ? t('settings.accounts.activeBadge') : undefined}
-                      title={isCurrent ? t('settings.accounts.activeBadge') : undefined}
-                    />
-                    <span className={cn('text-[12.5px]', isCurrent ? 'font-semibold text-ink' : 'font-medium text-ink-2')}>
-                      {acc.label}
-                    </span>
-
-                    {acc.status === 'logging-in' ? (
-                      <span className="inline-flex items-center gap-1 text-[11.5px] text-accent-ink">
-                        <SpinnerIcon className="size-2.5" />
-                        <span>{t(statusKey)}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span
+                        className={cn(
+                          'size-2 shrink-0 rounded-full',
+                          isCurrent ? 'bg-green' : acc.status === 'expired' ? 'bg-orange' : 'bg-ink-4',
+                        )}
+                        data-testid={isCurrent ? `account-active-${acc.id}` : `account-dot-${acc.id}`}
+                        aria-label={isCurrent ? t('settings.accounts.activeBadge') : undefined}
+                        title={isCurrent ? t('settings.accounts.activeBadge') : undefined}
+                      />
+                      <span className={cn('text-[12.5px]', isCurrent ? 'font-semibold text-ink' : 'font-medium text-ink-2')}>
+                        {acc.label}
                       </span>
-                    ) : acc.status === 'expired' ? (
-                      <span className="text-[11.5px] font-medium text-orange">{t(statusKey)}</span>
-                    ) : acc.status !== 'authenticated' ? (
-                      <span className="text-[11.5px] text-ink-3">{t(statusKey)}</span>
-                    ) : null}
 
-                    {acc.plan ? <span className="text-[11.5px] text-ink-3">{acc.plan}</span> : null}
-                    {acc.isolateSessions ? (
-                      <span className="text-[11px] text-ink-3">{t('settings.accounts.isolatedSessionBadge')}</span>
-                    ) : null}
-                  </div>
+                      {acc.status === 'logging-in' ? (
+                        <span className="inline-flex items-center gap-1 text-[11.5px] text-accent-ink">
+                          <SpinnerIcon className="size-2.5" />
+                          <span>{t(statusKey)}</span>
+                        </span>
+                      ) : acc.status === 'expired' ? (
+                        <span className="text-[11.5px] font-medium text-orange">{t(statusKey)}</span>
+                      ) : acc.status !== 'authenticated' ? (
+                        <span className="text-[11.5px] text-ink-3">{t(statusKey)}</span>
+                      ) : null}
 
-                  {showIdentity || visibleQuotaWindows.length > 0 ? (
-                    <div className="mt-1 flex flex-wrap items-center gap-2 pl-4 text-[11.5px] text-ink-3 tabular-nums">
-                      {showIdentity ? <span className="truncate font-mono">{acc.identity}</span> : null}
-                      {visibleQuotaWindows.slice(0, 3).map((win, idx) => (
+                      {acc.plan ? <span className="text-[11.5px] text-ink-3">{acc.plan}</span> : null}
+                      {acc.isolateSessions ? (
+                        <span className="text-[11px] text-ink-3">{t('settings.accounts.isolatedSessionBadge')}</span>
+                      ) : null}
+                      {acc.disabled ? (
+                        <span className="rounded-md bg-orange-tint/65 px-1.5 py-0.5 text-[10.5px] font-medium text-orange">
+                          {t('settings.accounts.disabledBadge')}
+                        </span>
+                      ) : null}
+                      {(acc.tags ?? []).map((tag) => (
                         <span
-                          key={`${win.kind}:${win.label}:${idx}`}
-                          className="rounded-md bg-canvas/75 px-1.5 py-0.5 text-[10.5px] text-ink-2 dark:bg-page/45"
+                          key={tag}
+                          className="rounded-md bg-canvas/85 px-1.5 py-0.5 text-[10.5px] text-ink-2 dark:bg-page/55"
                         >
-                          {formatQuotaChip(win, t)}
+                          #{tag}
                         </span>
                       ))}
                     </div>
-                  ) : null}
-                </div>
 
-                {hasPrimary || hasSecondary ? (
-                  <div className="shrink-0">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="shrink-0 text-ink-2 hover:text-ink"
-                          data-testid={`account-actions-${acc.id}`}
-                          aria-label={t('common.moreActions')}
-                          title={t('common.moreActions')}
-                        >
-                          <MoreIcon className="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="min-w-40">
-                        {showUse ? (
-                          <DropdownMenuItem
-                            className="gap-2 text-[12.5px]"
-                            data-testid={`account-use-${acc.id}`}
-                            onSelect={() => switchToOfficial(acc.id)}
-                          >
-                            <CheckIcon className="size-3.5 text-ink-2" />
-                            <span>{t('settings.accounts.use')}</span>
-                          </DropdownMenuItem>
-                        ) : null}
-                        {showLogin ? (
-                          <DropdownMenuItem
-                            className="gap-2 text-[12.5px]"
-                            data-testid={`account-login-${acc.id}`}
-                            onSelect={() =>
-                              postToHost({ type: 'loginAccount', payload: { id: acc.id, backendId: acc.backendId } })
-                            }
-                          >
-                            <LogInIcon className="size-3.5 text-ink-2" />
-                            <span>
-                              {acc.status === 'authenticated'
-                                ? t('settings.accounts.relogin')
-                                : t('settings.accounts.login')}
-                            </span>
-                          </DropdownMenuItem>
-                        ) : null}
-                        {canEdit ? (
-                          <DropdownMenuItem
-                            className="gap-2 text-[12.5px]"
-                            data-testid={`account-edit-${acc.id}`}
-                            onSelect={() => onEdit(acc)}
-                          >
-                            <PencilIcon className="size-3.5 text-ink-2" />
-                            <span>{t('settings.accounts.edit')}</span>
-                          </DropdownMenuItem>
-                        ) : null}
-                        {hasPrimary && hasSecondary ? <DropdownMenuSeparator /> : null}
-                        {showLogout ? (
-                          <DropdownMenuItem
-                            className="gap-2 text-[12.5px]"
-                            data-testid={`account-logout-${acc.id}`}
-                            onSelect={() => postToHost({ type: 'logoutAccount', payload: { id: acc.id } })}
-                          >
-                            <LogOutIcon className="size-3.5 text-ink-2" />
-                            <span>{t('settings.accounts.logout')}</span>
-                          </DropdownMenuItem>
-                        ) : null}
-                        {showDelete ? (
-                          <DropdownMenuItem
-                            variant="destructive"
-                            className="gap-2 text-[12.5px]"
-                            data-testid={`account-delete-${acc.id}`}
-                            onSelect={() => onDelete(acc)}
-                          >
-                            <TrashIcon className="size-3.5" />
-                            <span>{t('settings.accounts.delete')}</span>
-                          </DropdownMenuItem>
-                        ) : null}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {showIdentity || acc.notes ? (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pl-4 text-[11.5px] text-ink-3">
+                        {showIdentity ? <span className="truncate font-mono">{acc.identity}</span> : null}
+                        {acc.notes ? <span className="truncate">{acc.notes}</span> : null}
+                      </div>
+                    ) : null}
+
+                    {/* 可视化配额进度条 + 重置倒计时 */}
+                    {visibleQuotaWindows.length > 0 ? (
+                      <div
+                        className="mt-2 grid grid-cols-1 gap-1.5 pl-4 sm:grid-cols-2"
+                        data-testid={`account-quota-bars-${acc.id}`}
+                      >
+                        {visibleQuotaWindows.slice(0, 4).map((win, idx) => {
+                          const pct = Math.max(0, Math.min(100, Math.round(win.remainingPercent)));
+                          const barColor =
+                            pct <= 10 || win.severity === 'critical'
+                              ? 'bg-red'
+                              : pct <= 30 || win.severity === 'warning'
+                                ? 'bg-orange'
+                                : 'bg-green';
+                          const resetLabel = formatResetCountdown(win.resetsAt, t);
+                          return (
+                            <div
+                              key={`${win.kind}:${win.label}:${idx}`}
+                              className="flex flex-col gap-1 rounded-lg bg-canvas/75 px-2.5 py-1.5 dark:bg-page/45"
+                            >
+                              <div className="flex items-center justify-between gap-2 text-[10.5px] leading-4 tabular-nums">
+                                <span className="truncate font-medium text-ink-2">
+                                  {formatQuotaLabel(win, t)}
+                                </span>
+                                <span className="shrink-0 font-medium text-ink">
+                                  {formatQuotaValue(win, t)}
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+                                <div
+                                  className={cn('h-full rounded-full transition-[width] duration-300', barColor)}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              {resetLabel ? (
+                                <div className="flex items-center gap-1 text-[10px] leading-3.5 text-ink-3 tabular-nums">
+                                  <ClockIcon className="size-2.5 shrink-0" />
+                                  <span>{resetLabel}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
+
+                  {/* 右侧操作：外置一键切号 + 单号刷新 + 更多菜单 */}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {showUse && !acc.disabled ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        data-testid={`account-quick-use-${acc.id}`}
+                        onClick={() => switchToOfficial(acc.id)}
+                      >
+                        <span>{t('settings.accounts.quickUse')}</span>
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-ink-3 hover:text-ink"
+                      disabled={isRefreshing}
+                      data-testid={`account-refresh-${acc.id}`}
+                      aria-label={t('settings.accounts.refreshOne')}
+                      title={t('settings.accounts.refreshOne')}
+                      onClick={() =>
+                        postToHost({
+                          type: 'refreshAccount',
+                          payload: { id: acc.id, backendId: acc.backendId, includeQuota: fetchQuotaEnabled },
+                        })
+                      }
+                    >
+                      {isRefreshing ? <SpinnerIcon className="size-3.5" /> : <RefreshIcon className="size-3.5" />}
+                    </Button>
+
+                    {hasPrimary || hasSecondary ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0 text-ink-2 hover:text-ink"
+                            data-testid={`account-actions-${acc.id}`}
+                            aria-label={t('common.moreActions')}
+                            title={t('common.moreActions')}
+                          >
+                            <MoreIcon className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-44">
+                          {showUse ? (
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              data-testid={`account-use-${acc.id}`}
+                              onSelect={() => switchToOfficial(acc.id)}
+                            >
+                              <CheckIcon className="size-3.5 text-ink-2" />
+                              <span>{t('settings.accounts.use')}</span>
+                            </DropdownMenuItem>
+                          ) : null}
+                          {showLogin ? (
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              data-testid={`account-login-${acc.id}`}
+                              onSelect={() =>
+                                postToHost({ type: 'loginAccount', payload: { id: acc.id, backendId: acc.backendId } })
+                              }
+                            >
+                              <LogInIcon className="size-3.5 text-ink-2" />
+                              <span>
+                                {acc.status === 'authenticated'
+                                  ? t('settings.accounts.relogin')
+                                  : t('settings.accounts.login')}
+                              </span>
+                            </DropdownMenuItem>
+                          ) : null}
+                          {canEdit ? (
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              data-testid={`account-edit-${acc.id}`}
+                              onSelect={() => onEdit(acc)}
+                            >
+                              <PencilIcon className="size-3.5 text-ink-2" />
+                              <span>{t('settings.accounts.edit')}</span>
+                            </DropdownMenuItem>
+                          ) : null}
+                          {hasPrimary && hasSecondary ? <DropdownMenuSeparator /> : null}
+                          {showDisable ? (
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              data-testid={`account-toggle-disabled-${acc.id}`}
+                              onSelect={() =>
+                                postToHost({
+                                  type: 'toggleAccountDisabled',
+                                  payload: { id: acc.id, disabled: !acc.disabled },
+                                })
+                              }
+                            >
+                              <BanIcon className="size-3.5 text-ink-2" />
+                              <span>
+                                {acc.disabled ? t('settings.accounts.enable') : t('settings.accounts.disable')}
+                              </span>
+                            </DropdownMenuItem>
+                          ) : null}
+                          {showLogout ? (
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              data-testid={`account-logout-${acc.id}`}
+                              onSelect={() => postToHost({ type: 'logoutAccount', payload: { id: acc.id } })}
+                            >
+                              <LogOutIcon className="size-3.5 text-ink-2" />
+                              <span>{t('settings.accounts.logout')}</span>
+                            </DropdownMenuItem>
+                          ) : null}
+                          {showDelete ? (
+                            <DropdownMenuItem
+                              variant="destructive"
+                              className="gap-2 text-[12.5px]"
+                              data-testid={`account-delete-${acc.id}`}
+                              onSelect={() => onDelete(acc)}
+                            >
+                              <TrashIcon className="size-3.5" />
+                              <span>{t('settings.accounts.delete')}</span>
+                            </DropdownMenuItem>
+                          ) : null}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : null}
+                  </div>
+                </div>
               );
             })}
           </div>

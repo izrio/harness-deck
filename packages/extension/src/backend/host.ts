@@ -66,19 +66,26 @@ export interface BackendHost {
   ) => void;
   /** 在底层进程启动前准备该 Agent 需要携带的 Skills 挂载目录、dsh patch 与 MCP 服务器列表。 */
   readonly prepareBackendLaunch?: (profile: BackendProfile) => Promise<PreparedBackendLaunch>;
-  /** 读取某个底层智能体当前绑定的第三方服务商配置（切回官方渠道时返回 undefined）。 */
-  readonly boundProvider?: (backendId: string) => ProviderConfig | undefined;
-  /** 当智能体使用官方渠道时，返回当前激活官方账号的隔离环境变量与配置目录补丁。 */
+  /** 读取某个底层智能体（或指定会话）当前绑定的第三方服务商配置（切回官方渠道时返回 undefined）。 */
+  readonly boundProvider?: (backendId: string, sessionId?: string) => ProviderConfig | undefined;
+  /** 当智能体（或指定会话）使用官方渠道时，返回对应官方账号的隔离环境变量与配置目录补丁。 */
   readonly prepareAccountLaunch?: (
     backendId: string,
     baseEnv: Readonly<Record<string, string | undefined>>,
+    sessionId?: string,
   ) => Promise<AccountLaunchPatch | undefined>;
+  /** 同步解析指定会话对应官方账号的隔离配置目录（未隔离时返回 undefined）。 */
+  readonly resolveAccountConfigDir?: (backendId: string, sessionId?: string) => string | undefined;
   /** 启动或复用本机回环服务商代理，返回代理 origin 与一次性本地令牌。 */
   readonly ensureProviderProxy?: () => Promise<{ readonly origin: string; readonly token: string }>;
   /** 是否启用本地协议转换网关（将 OpenAI 兼容接口转换为 Claude Anthropic 协议，默认关闭）。 */
   readonly isProtocolGatewayEnabled?: () => boolean;
-  /** 记录某个服务商最近被选中的模型（供代理映射默认模型）。 */
-  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
+  /** 记录某个服务商在指定工具/会话作用域下选中的模型（供代理按工具与会话隔离映射模型）。 */
+  readonly onProviderModelSelected?: (
+    providerId: string,
+    model: string,
+    scope?: { readonly backendId?: string; readonly sessionId?: string },
+  ) => void;
 }
 
 /** 进程环境变量，加上 npm 全局可执行目录及宿主 IDE 的代理设置（模型请求由底层自己发出）。 */

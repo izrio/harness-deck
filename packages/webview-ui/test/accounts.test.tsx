@@ -228,7 +228,46 @@ describe('AccountSettings & ModelPicker channel switching', () => {
 
     expect(vscodeMock.posted).toContainEqual({
       type: 'setBackendChannel',
-      payload: { backendId: 'claude', mode: 'provider', providerId: 'volc' },
+      payload: { backendId: 'claude', mode: 'provider', providerId: 'volc', scope: 'session', tabKey: 't1' },
+    });
+  });
+
+  it('displays session-specific channel override in ModelPicker and posts sessionId on switch', () => {
+    applyHostMessage({
+      type: 'snapshot',
+      payload: {
+        ...makeSnapshot(),
+        session: {
+          ...makeSnapshot().session,
+          id: 'sess-iso-1',
+          channel: { mode: 'official', accountId: 'claude-work' },
+        },
+        tabs: {
+          items: [{ key: 'utab-1', sessionId: 'sess-iso-1', backendId: 'claude', title: 'Isolated', running: false }],
+          active: 'utab-1',
+        },
+      },
+    });
+    render(<ModelPicker disabled={false} />);
+    vscodeMock.reset();
+
+    fireEvent.click(screen.getByTestId('model-picker'));
+    fireEvent.click(screen.getByTestId('model-channel-toggle'));
+    // 全局默认是 system:claude，但当前会话绑定了 claude-work，因此绿点必须落在 claude-work 上
+    expect(screen.getByTestId('quick-channel-official-dot-claude-work').className).toContain('bg-green');
+    expect(screen.getByTestId('quick-channel-official-dot-system:claude').className).toContain('bg-ink-3/45');
+
+    fireEvent.click(screen.getByTestId('quick-channel-provider-volc'));
+    expect(vscodeMock.posted).toContainEqual({
+      type: 'setBackendChannel',
+      payload: {
+        backendId: 'claude',
+        mode: 'provider',
+        providerId: 'volc',
+        scope: 'session',
+        sessionId: 'sess-iso-1',
+        tabKey: 'utab-1',
+      },
     });
   });
 

@@ -393,21 +393,21 @@ describe('HD-23 本地 QR 编码与远程互通设置页', () => {
     );
 
     render(<RemoteSettings />);
+    expect(screen.getByTestId('remote-tab-web')).toBeTruthy();
+    expect(screen.getByTestId('remote-tab-imbot')).toBeTruthy();
+    expect(screen.getByTestId('remote-tab-push')).toBeTruthy();
     expect(screen.getByTestId('remote-pairing-qr')).toBeTruthy();
     expect(screen.getByTestId('remote-device-dev-1')).toBeTruthy();
 
     fireEvent.click(screen.getByTestId('remote-generate-pairing-btn'));
-    expect(vscode.posted.some((m) => m.type === 'generateRemotePairing')).toBe(true);
+    expect(vscode.posted).toContainEqual({
+      type: 'generateRemotePairing',
+      payload: { scope: 'operate', routeKind: 'lan' },
+    });
 
     fireEvent.keyDown(screen.getByTestId('remote-device-actions-dev-1'), { key: 'Enter' });
     fireEvent.click(screen.getByTestId('remote-revoke-dev-1'));
     expect(vscode.posted).toContainEqual({ type: 'revokeRemoteDevice', payload: { deviceId: 'dev-1' } });
-
-    fireEvent.click(screen.getByTestId('remote-tailscale-probe-btn'));
-    expect(vscode.posted).toContainEqual({ type: 'probeTailscale', payload: {} });
-
-    fireEvent.click(screen.getByTestId('remote-test-push-btn'));
-    expect(vscode.posted).toContainEqual({ type: 'testRemotePush', payload: {} });
 
     fireEvent.click(screen.getByTestId('remote-refresh-network-btn'));
     expect(vscode.posted).toContainEqual({ type: 'refreshRemoteNetwork', payload: {} });
@@ -430,11 +430,55 @@ describe('HD-23 本地 QR 编码与远程互通设置页', () => {
       payload: { deviceId: 'dev-1', name: '我的 iPhone' },
     });
 
-    // 一键公网临时隧道探测与开关
+    // 切换到 Tailscale 入口：未启用 serve 时提示先在步骤 1 开启，并支持探测状态
+    fireEvent.click(screen.getByTestId('remote-route-card-tailscale'));
+    expect(screen.getByTestId('remote-pairing-route-hint')).toBeTruthy();
+    expect((screen.getByTestId('remote-generate-pairing-btn') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('remote-tailscale-probe-btn'));
+    expect(vscode.posted).toContainEqual({ type: 'probeTailscale', payload: {} });
+
+    // 切换到一键公网临时隧道：探测与开关
+    fireEvent.click(screen.getByTestId('remote-route-card-quick-tunnel'));
     fireEvent.click(screen.getByTestId('remote-quick-tunnel-probe-btn'));
     expect(vscode.posted).toContainEqual({ type: 'probeQuickTunnel', payload: {} });
     fireEvent.click(screen.getByTestId('remote-quick-tunnel-switch'));
     expect(vscode.posted).toContainEqual({ type: 'setQuickTunnelEnabled', payload: { enabled: true } });
+
+    // 切换到消息推送分栏并发送测试推送
+    fireEvent.click(screen.getByTestId('remote-tab-push'));
+    fireEvent.click(screen.getByTestId('remote-test-push-btn'));
+    expect(vscode.posted).toContainEqual({ type: 'testRemotePush', payload: {} });
+  });
+
+  it('RemoteSettings 开启外网隧道就绪后自动同步步骤 2 配对入口路由', () => {
+    act(() =>
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          remote: {
+            enabled: true,
+            running: true,
+            port: 37890,
+            bindHost: '0.0.0.0',
+            interfaces: [{ name: 'eth0', address: '192.168.1.10' }],
+            selectedHost: '192.168.1.10',
+            scope: 'operate',
+            connectedClients: 0,
+            devices: [],
+            quickTunnel: { installed: true, status: 'running', url: 'https://fast-owl.trycloudflare.com' },
+          },
+        }),
+      }),
+    );
+
+    render(<RemoteSettings />);
+    expect(screen.getByTestId('remote-quick-tunnel-block')).toBeTruthy();
+    expect(screen.getByTestId('remote-pairing-active-route').textContent).toContain('公网临时隧道');
+    fireEvent.click(screen.getByTestId('remote-generate-pairing-btn'));
+    expect(vscode.posted).toContainEqual({
+      type: 'generateRemotePairing',
+      payload: { scope: 'operate', routeKind: 'quick-tunnel' },
+    });
   });
 
   it('IDE 顶栏提供远程快捷入口浮层（开关、生成配对码、直达远程设置）', () => {
@@ -735,6 +779,7 @@ describe('HD-25 内嵌 Diff 审阅与无 IDE 弹窗降级', () => {
 
     fireEvent.click(screen.getByTestId('settings-button'));
     fireEvent.click(screen.getByTestId('settings-tab-remote'));
+    fireEvent.click(screen.getByTestId('remote-tab-push'));
 
     // 渠道触发器内展示对应厂商矢量图标（飞书）
     const presetTrigger = screen.getByTestId('remote-webhook-preset');
@@ -794,6 +839,7 @@ describe('HD-25 内嵌 Diff 审阅与无 IDE 弹窗降级', () => {
 
     fireEvent.click(screen.getByTestId('settings-button'));
     fireEvent.click(screen.getByTestId('settings-tab-remote'));
+    fireEvent.click(screen.getByTestId('remote-tab-push'));
 
     expect(screen.getByTestId('remote-webhook-fields-telegram')).toBeTruthy();
     const tokenInput = screen.getByTestId('remote-webhook-secret');

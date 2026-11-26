@@ -77,6 +77,7 @@ export interface ClaudePreferredModel {
 }
 
 export interface ClaudeSpawnSessionParams {
+  readonly sessionId?: string;
   readonly resumeSessionId?: string;
   readonly model?: string;
   readonly effort?: string;
@@ -98,12 +99,14 @@ export interface ClaudeControllerOptions extends ControllerHostOptions {
   readonly saveSessions: (sessions: readonly StoredSession[]) => void;
   readonly loadPreferredModel?: () => ClaudePreferredModel | undefined;
   readonly savePreferredModel?: (preferred: ClaudePreferredModel) => void;
+  readonly loadSessionModels?: () => Readonly<Record<string, ClaudePreferredModel>> | undefined;
+  readonly saveSessionModels?: (models: Readonly<Record<string, ClaudePreferredModel>>) => void;
   readonly loadOpenTabs?: () => readonly string[] | undefined;
   readonly saveOpenTabs?: (sessionIds: readonly string[]) => void;
-  readonly claudeConfigDir?: () => string | undefined;
+  readonly claudeConfigDir?: (sessionId?: string) => string | undefined;
   readonly signInHint?: string;
-  readonly boundProvider?: () => ProviderConfig | undefined;
-  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
+  readonly boundProvider?: (sessionId?: string) => ProviderConfig | undefined;
+  readonly onProviderModelSelected?: (providerId: string, model: string, sessionId?: string) => void;
 }
 
 interface QueuedPrompt {
@@ -169,6 +172,8 @@ export class ClaudeController implements ChatBackendController {
   private queueCounter = 0;
   private draftCounter = 0;
   private selectedModel: ClaudePreferredModel | undefined;
+  private readonly sessionModels = new Map<string, ClaudePreferredModel>();
+  private readonly linkProviderSigs = new Map<string, string>();
   private draftMode = 'default';
   /** 回复进行中用户切换的权限模式，延后到下一轮发送前生效。 */
   private readonly pendingModes = new Map<string, string>();
@@ -178,14 +183,20 @@ export class ClaudeController implements ChatBackendController {
   private readonly interactions: ClaudeInteractionManager;
   private readonly publisher: ViewPublisher;
   private renderTimer: ReturnType<typeof setTimeout> | undefined;
-  private lastBoundProviderSig: string;
 
   constructor(private readonly options: ClaudeControllerOptions) {
     this.workspacePath = options.workspacePath;
     this.activeId = options.loadActiveSessionId();
     this.stored = [...(options.loadSessions() ?? [])].filter((s) => !s.id.startsWith('pending:'));
     this.selectedModel = options.loadPreferredModel?.();
-    this.lastBoundProviderSig = this.boundProviderSig();
+    const restoredSessionModels = options.loadSessionModels?.();
+    if (restoredSessionModels) {
+      for (const [sid, model] of Object.entries(restoredSessionModels)) {
+        if (sid && !sid.startsWith('pending:') && model?.provider && model?.model) {
+          this.sessionModels.set(sid, model);
+        }
+      }
+    }
     this.publisher = new ViewPublisher(options.post, options.onModelChange);
     this.editorContext = new EditorContext(
       () => this.workbench,
@@ -381,21 +392,52 @@ export class ClaudeController implements ChatBackendController {
     this.options.post({ type: 'backends', payload: this.backends() });
   }
 
-  private boundProviderSig(): string {
-    return JSON.stringify(this.options.boundProvider?.() ?? null);
+  private boundProviderSig(sessionId?: string): string {
+    return JSON.stringify(this.options.boundProvider?.(sessionId) ?? null);
+  }
+
+  private persistSessionModels(): void {
+    if (!this.options.saveSessionModels) return;
+    const out: Record<string, ClaudePreferredModel> = {};
+    for (const [sid, model] of this.sessionModels.entries()) {
+      if (sid && !sid.startsWith('pending:')) {
+        out[sid] = model;
+      }
+    }
+    this.options.saveSessionModels(out);
+  }
+
+  isSessionRunning(sessionId?: string): boolean {
+    const key = sessionId ?? this.activeId;
+    if (!key) return false;
+    return this.projections.get(key)?.running === true;
+  }
+
+  async onSessionChannelChanged(sessionId?: string): Promise<void> {
+    if (sessionId) {
+      if (!(this.projections.get(sessionId)?.running ?? false)) {
+        await this.closeSessionLink(sessionId);
+      }
+    } else {
+      for (const [sessionKey] of [...this.links.entries()]) {
+        if (this.projections.get(sessionKey)?.running) continue;
+        if (this.linkProviderSigs.get(sessionKey) !== this.boundProviderSig(sessionKey)) {
+          await this.closeSessionLink(sessionKey);
+        }
+      }
+    }
+    void this.refreshDiskSessions();
+    this.scheduleRender();
   }
 
   providersChanged(): void {
     if (this.options.providers) {
       this.options.post({ type: 'providers', payload: this.options.providers() });
     }
-    const nextSig = this.boundProviderSig();
-    if (nextSig !== this.lastBoundProviderSig) {
-      this.lastBoundProviderSig = nextSig;
-      for (const [sessionKey] of this.links) {
-        if (!(this.projections.get(sessionKey)?.running ?? false)) {
-          void this.closeSessionLink(sessionKey);
-        }
+    for (const [sessionKey] of [...this.links.entries()]) {
+      if (this.projections.get(sessionKey)?.running) continue;
+      if (this.linkProviderSigs.get(sessionKey) !== this.boundProviderSig(sessionKey)) {
+        void this.closeSessionLink(sessionKey);
       }
     }
     this.scheduleRender();
@@ -668,7 +710,7 @@ export class ClaudeController implements ChatBackendController {
       const knownDisk = this.diskSessions.find((s) => s.id === sessionId);
       const filePath =
         knownDisk?.filePath ??
-        (await findClaudeSessionFile(sessionId, this.workspacePath, this.options.claudeConfigDir?.()));
+        (await findClaudeSessionFile(sessionId, this.workspacePath, this.options.claudeConfigDir?.(sessionId)));
       if (filePath) {
         const records = await readClaudeSessionEvents(filePath);
         const projection = this.projectionFor(sessionId);
@@ -687,7 +729,7 @@ export class ClaudeController implements ChatBackendController {
   private async refreshDiskSessions(): Promise<void> {
     try {
       const extraProjects = this.options.projects?.().recent.map((p) => p.path) ?? [];
-      this.diskSessions = await scanClaudeSessions(this.workspacePath, this.options.claudeConfigDir?.(), extraProjects);
+      this.diskSessions = await scanClaudeSessions(this.workspacePath, this.options.claudeConfigDir?.(this.activeId), extraProjects);
       this.scheduleRender();
     } catch (error) {
       this.options.log(`扫描 Claude Code 历史会话跳过：${describe(error)}`);
@@ -696,6 +738,7 @@ export class ClaudeController implements ChatBackendController {
 
   private async closeSessionLink(sessionKey: string): Promise<void> {
     const link = this.links.get(sessionKey);
+    this.linkProviderSigs.delete(sessionKey);
     if (!link) return;
     this.links.delete(sessionKey);
     await link.dispose();
@@ -712,6 +755,19 @@ export class ClaudeController implements ChatBackendController {
     if (link) {
       this.links.delete(oldKey);
       this.links.set(realSessionId, link);
+    }
+    const linkSig = this.linkProviderSigs.get(oldKey);
+    if (linkSig !== undefined) {
+      this.linkProviderSigs.delete(oldKey);
+      this.linkProviderSigs.set(realSessionId, linkSig);
+    }
+    const sessionModel = this.sessionModels.get(oldKey);
+    if (sessionModel) {
+      this.sessionModels.delete(oldKey);
+      if (!this.sessionModels.has(realSessionId)) {
+        this.sessionModels.set(realSessionId, sessionModel);
+      }
+      this.persistSessionModels();
     }
     const queue = this.queues.get(oldKey);
     if (queue) {
@@ -751,15 +807,17 @@ export class ClaudeController implements ChatBackendController {
     if (existing?.running) return { key: currentKey, link: existing };
     if (!this.spawner) throw new Error(t('notConnected'));
 
-    const modelState = this.buildModelState();
+    const modelState = this.buildModelState(currentKey);
     const chosenModel = modelState.current?.model;
     const chosenEffort = modelState.current?.reasoningEffort;
     const projection = this.projectionFor(currentKey);
     const mode = projection.mode ?? this.draftMode;
     // bypassPermissions 通过客户端拦截器立即放行所有 can_use_tool 请求，避免 root 环境下 CLI 拒绝 --permission-mode bypassPermissions
     const cliMode = mode === 'bypassPermissions' ? 'default' : mode;
+    const spawnProviderSig = this.boundProviderSig(currentKey);
 
     const link = await this.spawner({
+      sessionId: currentKey,
       ...(isResume && !currentKey.startsWith('pending:') ? { resumeSessionId: currentKey } : {}),
       ...(chosenModel ? { model: chosenModel } : {}),
       ...(chosenEffort ? { effort: chosenEffort } : {}),
@@ -828,6 +886,7 @@ export class ClaudeController implements ChatBackendController {
       },
       onExit: (code, signal, stderr) => {
         this.links.delete(currentKey);
+        this.linkProviderSigs.delete(currentKey);
         this.interactions.clear(currentKey);
         const proj = this.projections.get(currentKey);
         if (proj?.running) {
@@ -839,6 +898,7 @@ export class ClaudeController implements ChatBackendController {
     });
 
     this.links.set(currentKey, link);
+    this.linkProviderSigs.set(currentKey, spawnProviderSig);
     return { key: currentKey, link };
   }
 
@@ -880,13 +940,31 @@ export class ClaudeController implements ChatBackendController {
     let sessionKey = this.activeId;
     let isResume = Boolean(sessionKey && !sessionKey.startsWith('pending:'));
     if (!sessionKey) {
+      const initialModel = this.buildModelState(undefined).current;
       sessionKey = `pending:${++this.draftCounter}`;
       isResume = false;
       this.activeId = sessionKey;
       this.tabs.setCurrentSession(sessionKey);
+      if (initialModel) {
+        this.sessionModels.set(sessionKey, {
+          provider: initialModel.provider,
+          model: initialModel.model,
+          ...(initialModel.reasoningEffort ? { effort: initialModel.reasoningEffort } : {}),
+        });
+      }
       const proj = this.projectionFor(sessionKey);
       proj.title = (prompt || t('acp.image')).replace(/\s+/gu, ' ').trim().slice(0, MAX_TITLE);
       proj.mode = this.draftMode;
+    } else if (!this.sessionModels.has(sessionKey)) {
+      const snapModel = this.buildModelState(sessionKey).current;
+      if (snapModel) {
+        this.sessionModels.set(sessionKey, {
+          provider: snapModel.provider,
+          model: snapModel.model,
+          ...(snapModel.reasoningEffort ? { effort: snapModel.reasoningEffort } : {}),
+        });
+        this.persistSessionModels();
+      }
     }
 
     this.editorContext.clearPinned();
@@ -1012,8 +1090,12 @@ export class ClaudeController implements ChatBackendController {
 
   // ---------------------------------------------------------------- 模型与权限模式
 
-  private buildModelState(): ModelState {
-    const bound = this.options.boundProvider?.();
+  private modelEntryFor(sessionKey?: string): ClaudePreferredModel | undefined {
+    return (sessionKey ? this.sessionModels.get(sessionKey) : undefined) ?? this.selectedModel;
+  }
+
+  private buildModelState(sessionKey: string | undefined = this.activeId): ModelState {
+    const bound = this.options.boundProvider?.(sessionKey);
     const boundOpts: ModelOption[] =
       bound && bound.models.length > 0
         ? bound.models.map((m) => {
@@ -1040,16 +1122,17 @@ export class ClaudeController implements ChatBackendController {
       model: options[0]!.model,
       ...(options[0]!.defaultEffort ? { effort: options[0]!.defaultEffort } : {}),
     };
+    const picked = this.modelEntryFor(sessionKey);
     const current: ClaudePreferredModel =
-      this.selectedModel &&
+      picked &&
       (bound
-        ? this.selectedModel.provider === bound.id &&
-          (bound.models.length === 0 || bound.models.some((m) => m.id === this.selectedModel!.model))
-        : true)
-        ? this.selectedModel
+        ? picked.provider === bound.id &&
+          (bound.models.length === 0 || bound.models.some((m) => m.id === picked.model))
+        : picked.provider === 'anthropic')
+        ? picked
         : (defaultFromBound ?? fallbackFirst);
     if (bound && current.provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, current.model);
+      this.options.onProviderModelSelected?.(bound.id, current.model, sessionKey);
     }
 
     const exists = options.some((o) => o.provider === current.provider && o.model === current.model);
@@ -1076,24 +1159,32 @@ export class ClaudeController implements ChatBackendController {
   }
 
   private async selectModel(provider: string, model: string, effort?: string): Promise<void> {
-    const bound = this.options.boundProvider?.();
+    const sessionKey = this.activeId;
+    const bound = this.options.boundProvider?.(sessionKey);
     if (bound && provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, model);
+      this.options.onProviderModelSelected?.(bound.id, model, sessionKey);
     }
-    const prevModel = this.selectedModel?.model;
-    const prevProvider = this.selectedModel?.provider;
-    const prevEffort = this.selectedModel?.effort;
-    this.selectedModel = { provider, model, ...(effort ? { effort } : {}) };
-    this.options.savePreferredModel?.(this.selectedModel);
+    const prev = this.modelEntryFor(sessionKey);
+    const prevModel = prev?.model;
+    const prevProvider = prev?.provider;
+    const prevEffort = prev?.effort;
+    const nextModel: ClaudePreferredModel = { provider, model, ...(effort ? { effort } : {}) };
+    if (sessionKey) {
+      this.sessionModels.set(sessionKey, nextModel);
+      this.persistSessionModels();
+    } else {
+      this.selectedModel = nextModel;
+      this.options.savePreferredModel?.(nextModel);
+    }
 
-    if (this.activeId) {
-      const link = this.links.get(this.activeId);
+    if (sessionKey) {
+      const link = this.links.get(sessionKey);
       if (link?.running) {
         const modelChanged = model !== prevModel || provider !== prevProvider;
         const effortChanged = effort !== prevEffort;
-        if ((modelChanged || effortChanged) && !(this.projections.get(this.activeId)?.running ?? false)) {
+        if ((modelChanged || effortChanged) && !(this.projections.get(sessionKey)?.running ?? false)) {
           // 思考档位与绑定的环境变量在启动时注入：会话空闲时关闭旧进程，下一条消息以新模型与配置重启（--resume）
-          await this.closeSessionLink(this.activeId);
+          await this.closeSessionLink(sessionKey);
         } else {
           await link.sendControlRequest({ subtype: 'set_model', model }, 8_000).catch(() => undefined);
         }

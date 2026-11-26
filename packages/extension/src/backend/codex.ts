@@ -5,6 +5,7 @@
  * 并挂载 `CodexController`。
  */
 import type { RuntimeStatus } from '@harness-deck/shared';
+import { buildProviderProxyScope } from '../accounts/SessionIsolationStore.ts';
 import type { StoredSession } from '../acp/AcpController.ts';
 import { CodexConnection, CodexTimeoutError } from '../codex/connection.ts';
 import { CodexController, type CodexPreferredModel } from '../codex/CodexController.ts';
@@ -26,6 +27,8 @@ export function createCodexBackend(
 ): RunningBackend {
   const state = host.workspaceState;
   const key = (name: string) => host.stateKey(`codex.${name}`);
+  const modelKey = `harnessDeck.${profile.id}.model`;
+  const sessionModelsKey = `harnessDeck.sessionModels.${profile.id}`;
   let status: RuntimeStatus = { kind: 'idle' };
   let connection: CodexConnection | undefined;
   let generation = 0;
@@ -39,13 +42,23 @@ export function createCodexBackend(
     saveActiveSessionId: (sessionId) => void state.update(key('activeSessionId'), sessionId),
     loadSessions: () => state.get<StoredSession[]>(key('sessions')),
     saveSessions: (sessions) => void state.update(key('sessions'), [...sessions]),
-    loadPreferredModel: () => host.globalState.get<CodexPreferredModel>('harnessDeck.codex.model'),
-    savePreferredModel: (preferred) => void host.globalState.update('harnessDeck.codex.model', preferred),
+    loadPreferredModel: () => host.globalState.get<CodexPreferredModel>(modelKey),
+    savePreferredModel: (preferred) => void host.globalState.update(modelKey, preferred),
+    loadSessionModels: () => host.globalState.get<Record<string, CodexPreferredModel>>(sessionModelsKey),
+    saveSessionModels: (models) => void host.globalState.update(sessionModelsKey, models),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
     boundProvider: () => host.boundProvider?.(profile.id),
-    ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
+    ...(host.onProviderModelSelected
+      ? {
+          onProviderModelSelected: (providerId: string, model: string, sessionId?: string) =>
+            host.onProviderModelSelected?.(providerId, model, {
+              backendId: profile.id,
+              ...(sessionId ? { sessionId } : {}),
+            }),
+        }
+      : {}),
   });
 
   const setStatus = (next: RuntimeStatus): void => {
@@ -119,16 +132,17 @@ export function createCodexBackend(
           proxyOrigin: proxy.origin,
           proxyToken: proxy.token,
           baseEnv,
+          proxyScope: buildProviderProxyScope(profile.id),
         });
         if (adapted) {
           launchEnv = adapted.env;
           extraArgs = [...extraArgs, ...adapted.args];
-          const savedPref = host.globalState.get<CodexPreferredModel>('harnessDeck.codex.model');
+          const savedPref = host.globalState.get<CodexPreferredModel>(modelKey);
           const chosen =
             (savedPref?.provider === boundProvider.id ? savedPref.model : undefined) ??
             boundProvider.defaultModel ??
             boundProvider.models[0]?.id;
-          if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen);
+          if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen, { backendId: profile.id });
         }
       } catch (error) {
         host.log(`准备服务商 ${boundProvider.name} 的 Codex 配置失败：${error instanceof Error ? error.message : String(error)}`);

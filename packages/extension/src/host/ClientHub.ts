@@ -34,6 +34,7 @@ export const UNICAST_HOST_MESSAGE_TYPES: ReadonlySet<HostToWebview['type']> = ne
   'browserNetworkBody',
   'browserConsoleObject',
   'browserConsoleCompletions',
+  'accountsExported',
 ]);
 
 export class ClientHub {
@@ -183,8 +184,17 @@ export class ClientHub {
     const remote =
       message.payload.remote && client.surface === 'mobile-web'
         ? (() => {
-            const { pairing: _omit, ...rest } = message.payload.remote;
-            return rest;
+            const { pairing: _omit, bots, ...rest } = message.payload.remote;
+            const sanitizedBots = bots
+              ? (() => {
+                  const { pairing: _omitBotPairing, ...botsRest } = bots;
+                  return botsRest;
+                })()
+              : undefined;
+            return {
+              ...rest,
+              ...(sanitizedBots ? { bots: sanitizedBots } : {}),
+            };
           })()
         : message.payload.remote;
     return {

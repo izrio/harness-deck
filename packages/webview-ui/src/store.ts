@@ -131,6 +131,13 @@ export interface ViewState {
     readonly models: readonly ProviderModelItem[];
     readonly error?: string;
   };
+  /** 最近一次「导出官方账号」的结果。 */
+  readonly accountsExportResult?: {
+    readonly requestId: number;
+    readonly json: string;
+    readonly count: number;
+    readonly includesSecrets: boolean;
+  };
   /** 最近一次官方订阅额度查询结果；`quota` 缺失表示不可用。 */
   readonly quotaFetchResult?: QuotaFetchResult;
   /** 按 requestId 索引的近期订阅额度查询结果，防止并发或乱序回包互相覆盖。 */
@@ -734,6 +741,9 @@ export function applyHostMessage(message: HostToWebview): void {
           ...(message.payload ? { loginProgress: message.payload } : { loginProgress: undefined }),
         },
       });
+      return;
+    case 'accountsExported':
+      set({ accountsExportResult: message.payload });
       return;
     case 'extensions':
       set({ extensions: message.payload });

@@ -92,12 +92,14 @@ export interface PiControllerOptions extends ControllerHostOptions {
   readonly saveSessions: (sessions: readonly StoredSession[]) => void;
   readonly loadPreferredModel?: () => PiPreferredModel | undefined;
   readonly savePreferredModel?: (preferred: PiPreferredModel) => void;
+  readonly loadSessionModels?: () => Readonly<Record<string, PiPreferredModel>> | undefined;
+  readonly saveSessionModels?: (models: Readonly<Record<string, PiPreferredModel>>) => void;
   readonly loadOpenTabs?: () => readonly string[] | undefined;
   readonly saveOpenTabs?: (sessionIds: readonly string[]) => void;
   readonly piAgentDir?: () => string | undefined;
   readonly signInHint?: string;
   readonly boundProvider?: () => ProviderConfig | undefined;
-  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
+  readonly onProviderModelSelected?: (providerId: string, model: string, sessionId?: string) => void;
 }
 
 interface QueuedPrompt {
@@ -140,6 +142,7 @@ export class PiController implements ChatBackendController {
   private queueCounter = 0;
   private modelOptions: ModelOption[] = [];
   private selectedModel: PiPreferredModel | undefined;
+  private readonly sessionModels = new Map<string, PiPreferredModel>();
   private draftMode = 'auto';
   private agentCommands: CommandView[] = [];
   private readonly skillCatalogInjected = new Set<string>();
@@ -154,6 +157,14 @@ export class PiController implements ChatBackendController {
     this.activeId = options.loadActiveSessionId();
     this.stored = [...(options.loadSessions() ?? [])];
     this.selectedModel = options.loadPreferredModel?.();
+    const restoredSessionModels = options.loadSessionModels?.();
+    if (restoredSessionModels) {
+      for (const [sid, model] of Object.entries(restoredSessionModels)) {
+        if (sid && model?.provider && model?.model) {
+          this.sessionModels.set(sid, model);
+        }
+      }
+    }
     this.publisher = new ViewPublisher(options.post, options.onModelChange);
     this.editorContext = new EditorContext(
       () => this.workbench,
@@ -636,6 +647,7 @@ export class PiController implements ChatBackendController {
       } else if (sessionPath && !rpcBusy) {
         await link.request('switch_session', { sessionPath });
         this.rpcSessionId = sessionId;
+        await this.applySelectedModelToLink(link, sessionId);
         const msgs = await link.request('get_messages');
         projection.applyMessagesSnapshot(msgs);
         this.loadedSessions.add(sessionId);
@@ -667,7 +679,16 @@ export class PiController implements ChatBackendController {
       this.loadedSessions.add(sessionId);
       const projection = this.projectionFor(sessionId);
       projection.setContextWindow(state.model?.contextWindow);
-      await this.applySelectedModelToLink(link);
+      const initial = this.buildModelState(undefined).current;
+      if (initial) {
+        this.sessionModels.set(sessionId, {
+          provider: initial.provider,
+          model: initial.model,
+          ...(initial.reasoningEffort ? { effort: initial.reasoningEffort } : {}),
+        });
+        this.persistSessionModels();
+      }
+      await this.applySelectedModelToLink(link, sessionId);
       return sessionId;
     } catch (error) {
       this.options.log(`新建 Pi 会话失败：${describe(error)}`);
@@ -677,11 +698,14 @@ export class PiController implements ChatBackendController {
   }
 
   private async ensureRpcOnSession(link: PiLink, sessionId: string): Promise<void> {
-    if (this.rpcSessionId === sessionId) return;
-    const sessionPath = this.resolveSessionPath(sessionId);
-    if (!sessionPath) return;
-    await link.request('switch_session', { sessionPath });
-    this.rpcSessionId = sessionId;
+    if (this.rpcSessionId !== sessionId) {
+      const sessionPath = this.resolveSessionPath(sessionId);
+      if (sessionPath) {
+        await link.request('switch_session', { sessionPath });
+        this.rpcSessionId = sessionId;
+      }
+    }
+    await this.applySelectedModelToLink(link, sessionId);
   }
 
   private resolveSessionPath(sessionId: string): string | undefined {
@@ -919,7 +943,16 @@ export class PiController implements ChatBackendController {
 
   // ---------------------------------------------------------------- 模型与思考档位
 
-  private buildModelState(): ModelState {
+  private persistSessionModels(): void {
+    if (!this.options.saveSessionModels) return;
+    this.options.saveSessionModels(Object.fromEntries(this.sessionModels.entries()));
+  }
+
+  private resolveModelEntry(sessionId: string | undefined = this.activeId): PiPreferredModel | undefined {
+    return (sessionId ? this.sessionModels.get(sessionId) : undefined) ?? this.selectedModel;
+  }
+
+  private buildModelState(sessionId: string | undefined = this.activeId): ModelState {
     const bound = this.options.boundProvider?.();
     const boundOpts: ModelOption[] =
       bound && bound.models.length > 0
@@ -955,10 +988,14 @@ export class PiController implements ChatBackendController {
       model: mergedCatalog[0]!.model,
       ...(mergedCatalog[0]!.defaultEffort ? { effort: mergedCatalog[0]!.defaultEffort } : {}),
     };
+    const picked = this.resolveModelEntry(sessionId);
     const current: PiPreferredModel =
-      this.selectedModel && (bound ? this.selectedModel.provider === bound.id : true)
-        ? this.selectedModel
+      picked && (bound ? picked.provider === bound.id : true)
+        ? picked
         : (defaultFromBound ?? fallbackFirst);
+    if (bound && current.provider === bound.id) {
+      this.options.onProviderModelSelected?.(bound.id, current.model, sessionId);
+    }
 
     const exists = mergedCatalog.some((o) => o.provider === current.provider && o.model === current.model);
     const options = exists
@@ -985,26 +1022,34 @@ export class PiController implements ChatBackendController {
   }
 
   private async selectModel(provider: string, model: string, effort?: string): Promise<void> {
+    const sessionId = this.activeId;
     const bound = this.options.boundProvider?.();
     if (bound && provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, model);
+      this.options.onProviderModelSelected?.(bound.id, model, sessionId);
     }
-    this.selectedModel = { provider, model, ...(effort ? { effort } : {}) };
-    this.options.savePreferredModel?.(this.selectedModel);
-    if (this.link) {
-      await this.applySelectedModelToLink(this.link);
+    const nextModel: PiPreferredModel = { provider, model, ...(effort ? { effort } : {}) };
+    if (sessionId) {
+      this.sessionModels.set(sessionId, nextModel);
+      this.persistSessionModels();
+    } else {
+      this.selectedModel = nextModel;
+      this.options.savePreferredModel?.(nextModel);
+    }
+    if (this.link && (!sessionId || this.rpcSessionId === sessionId)) {
+      await this.applySelectedModelToLink(this.link, sessionId);
     }
     this.scheduleRender();
   }
 
-  private async applySelectedModelToLink(link: PiLink): Promise<void> {
-    const sel = this.selectedModel;
+  private async applySelectedModelToLink(link: PiLink, sessionId: string | undefined = this.activeId): Promise<void> {
+    const sel = this.resolveModelEntry(sessionId);
     if (!sel) return;
     const setRes = await link
       .request<{ contextWindow?: number }>('set_model', { provider: sel.provider, modelId: sel.model })
       .catch(() => undefined);
-    if (setRes?.contextWindow && this.activeId) {
-      this.projectionFor(this.activeId).setContextWindow(setRes.contextWindow);
+    const targetId = sessionId ?? this.activeId;
+    if (setRes?.contextWindow && targetId) {
+      this.projectionFor(targetId).setContextWindow(setRes.contextWindow);
     }
     if (sel.effort) {
       await link.request('set_thinking_level', { level: sel.effort }).catch(() => undefined);

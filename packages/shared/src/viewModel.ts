@@ -444,6 +444,8 @@ export interface SessionHeader {
   readonly worktreePath?: string;
   /** 当前会话绑定的 worktree 分支名（如有）。 */
   readonly worktreeBranch?: string;
+  /** 当前会话生效的渠道绑定（官方账号或第三方服务商），按会话独立隔离。 */
+  readonly channel?: BackendChannelBinding;
 }
 
 /** 对话面板里打开的一个标签：一个会话，或还没发送第一条消息的新对话。 */
@@ -1308,6 +1310,12 @@ export interface AccountConfig {
   readonly isolateSessions?: boolean;
   /** CodeBuddy 等支持多区域的官方渠道环境。 */
   readonly region?: AccountRegion;
+  /** 自定义分类标签（如 主力 / 备用 / 团队），用于筛选与分组展示。 */
+  readonly tags?: readonly string[];
+  /** 可选账号备注信息（不含密钥）。 */
+  readonly notes?: string;
+  /** 是否临时禁用该账号（禁用后不参与低配额自动切号）。 */
+  readonly disabled?: boolean;
   readonly createdAt: number;
 }
 
@@ -1315,6 +1323,27 @@ export interface AccountConfig {
 export type BackendChannelBinding =
   | { readonly mode: 'official'; readonly accountId?: string }
   | { readonly mode: 'provider'; readonly providerId: string };
+
+export type AccountAutoSwitchStrategy = 'highest-quota' | 'round-robin';
+
+/** 参考 cockpit-tools 的账号自动化策略（低配额自动切号 + 后台定时刷新）。 */
+export interface AccountAutomationConfig {
+  readonly autoSwitchEnabled: boolean;
+  /** 当活动账号最小剩余额度百分比 <= 该阈值时触发自动切号（0–50，默认 5）。 */
+  readonly autoSwitchThresholdPercent: number;
+  readonly autoSwitchStrategy: AccountAutoSwitchStrategy;
+  /** 后台定时刷新所有官方账号额度的间隔分钟数；0 表示关闭。 */
+  readonly autoRefreshIntervalMin: number;
+  /** 最近一次自动切号记录。 */
+  readonly lastAutoSwitch?: {
+    readonly backendId: string;
+    readonly fromAccountId: string;
+    readonly toAccountId: string;
+    readonly toLabel: string;
+    readonly reason: 'quota-low' | 'expired';
+    readonly at: number;
+  };
+}
 
 /** 下发给 Webview 的脱敏官方账号视图模型（不含任何 Token、Cookie 或 API Key）。 */
 export interface AccountView {
@@ -1325,6 +1354,9 @@ export interface AccountView {
   readonly isSystemDefault?: boolean;
   readonly isolateSessions?: boolean;
   readonly region?: AccountRegion;
+  readonly tags?: readonly string[];
+  readonly notes?: string;
+  readonly disabled?: boolean;
   readonly status: AccountAuthStatus;
   /** 脱敏后的账号标识（如邮箱、用户名或掩码 Key）。 */
   readonly identity?: string;
@@ -1360,10 +1392,14 @@ export interface AccountsState {
   readonly items: readonly AccountView[];
   /** 每个底层智能体当前激活的渠道路由（backendId -> official/provider）。 */
   readonly channels: Readonly<Record<string, BackendChannelBinding>>;
+  /** 低配额自动切号与后台定时刷新策略。 */
+  readonly automation?: AccountAutomationConfig;
   /** 正在进行的官方登录任务状态。 */
   readonly loginProgress?: AccountLoginProgress;
   /** 正在批量刷新账号状态与额度。 */
   readonly checking?: boolean;
+  /** 正在单独刷新的账号 id 列表。 */
+  readonly refreshingIds?: readonly string[];
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1470,6 +1506,56 @@ export interface RemoteWslNatInfo {
   readonly setupCommand: string;
 }
 
+export type ImBotPlatform = 'wecom' | 'feishu' | 'dingtalk' | 'telegram';
+export type ImBotConnectionStatus = 'stopped' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+export type ImBotFeishuDomain = 'feishu' | 'lark';
+
+export interface ImBotChannelView {
+  readonly platform: ImBotPlatform;
+  readonly enabled: boolean;
+  readonly status: ImBotConnectionStatus;
+  /** 企业微信 Bot ID、飞书 App ID、钉钉 Client ID (AppKey)。Telegram 留空。 */
+  readonly appId?: string;
+  /** 本机安全凭据存储中是否已保存 Secret / Bot Token（明文绝不下发到 Webview）。 */
+  readonly hasSecret: boolean;
+  /** 飞书部署区域（国内飞书 `feishu` 或国际版 `lark`）。 */
+  readonly domain?: ImBotFeishuDomain;
+  /** Telegram 可选自定义 API 代理根地址（默认 https://api.telegram.org）。 */
+  readonly apiBase?: string;
+  /** 手动配置的用户 ID / OpenID / Chat ID 白名单（免配对直接放行）。 */
+  readonly allowlist: readonly string[];
+  /** 群聊是否仅响应 @机器人 的消息（默认 true）。 */
+  readonly requireMentionInGroup: boolean;
+  /** 连接后获取到的机器人标识（例如 Telegram @username）。 */
+  readonly botName?: string;
+  readonly lastConnectedAt?: number;
+  readonly lastMessageAt?: number;
+  readonly error?: string;
+}
+
+export interface ImBotBoundUserView {
+  readonly id: string;
+  readonly platform: ImBotPlatform;
+  readonly userId: string;
+  readonly userName?: string;
+  readonly chatId?: string;
+  readonly chatType?: 'single' | 'group';
+  readonly boundAt: number;
+  readonly lastActiveAt: number;
+}
+
+export interface ImBotPairingView {
+  readonly code: string;
+  readonly expiresAt: number;
+  readonly platform?: ImBotPlatform;
+}
+
+export interface ImBotsState {
+  readonly channels: Readonly<Record<ImBotPlatform, ImBotChannelView>>;
+  readonly boundUsers: readonly ImBotBoundUserView[];
+  readonly pairing?: ImBotPairingView;
+}
+
 export interface RemoteState {
   readonly enabled: boolean;
   readonly running: boolean;
@@ -1485,6 +1571,7 @@ export interface RemoteState {
   readonly quickTunnel?: RemoteQuickTunnelView;
   readonly tunnelUrl?: string;
   readonly push?: RemotePushConfig;
+  readonly bots?: ImBotsState;
   readonly wslNat?: RemoteWslNatInfo;
   readonly error?: string;
 }

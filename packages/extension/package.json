@@ -2,7 +2,7 @@
   "name": "harness-deck",
   "displayName": "Halo",
   "description": "%extension.description%",
-  "version": "0.18.2",
+  "version": "0.19.0",
   "publisher": "izrio",
   "icon": "media/icon.png",
   "private": true,
@@ -677,6 +677,18 @@
                   "ai",
                   "internal"
                 ]
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "notes": {
+                "type": "string"
+              },
+              "disabled": {
+                "type": "boolean"
               },
               "createdAt": {
                 "type": "number"

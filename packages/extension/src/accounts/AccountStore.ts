@@ -51,6 +51,25 @@ function cleanRegion(raw: unknown): AccountRegion | undefined {
   return raw === 'cn' || raw === 'ai' || raw === 'internal' ? raw : undefined;
 }
 
+export function cleanTags(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = Array.from(
+    new Set(
+      raw
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim().slice(0, 40))
+        .filter(Boolean),
+    ),
+  ).slice(0, 12);
+  return out.length > 0 ? out : undefined;
+}
+
+export function cleanNotes(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim().slice(0, 300);
+  return trimmed || undefined;
+}
+
 /** 脱敏展示密钥（如 `sk-12...abcd`），绝不泄露完整内容。 */
 export function maskSecretValue(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim();
@@ -78,6 +97,9 @@ export function parseAccountsSetting(raw: unknown): AccountConfig[] {
     seen.add(id);
     const isolateSessions = obj.isolateSessions === true ? true : undefined;
     const region = cleanRegion(obj.region);
+    const tags = cleanTags(obj.tags);
+    const notes = cleanNotes(obj.notes);
+    const disabled = obj.disabled === true ? true : undefined;
     const createdAt =
       typeof obj.createdAt === 'number' && Number.isFinite(obj.createdAt) && obj.createdAt > 0
         ? Math.round(obj.createdAt)
@@ -88,6 +110,9 @@ export function parseAccountsSetting(raw: unknown): AccountConfig[] {
       label,
       ...(isolateSessions ? { isolateSessions: true } : {}),
       ...(region ? { region } : {}),
+      ...(tags ? { tags } : {}),
+      ...(notes ? { notes } : {}),
+      ...(disabled ? { disabled: true } : {}),
       createdAt,
     });
   }
@@ -121,6 +146,9 @@ export interface UpsertAccountInput {
   readonly label: string;
   readonly isolateSessions?: boolean;
   readonly region?: AccountRegion;
+  readonly tags?: readonly string[];
+  readonly notes?: string;
+  readonly disabled?: boolean;
 }
 
 /** 新增或更新一条官方账号配置（不能覆写 system: 默认账号）。 */
@@ -141,12 +169,19 @@ export function upsertAccountSetting(
     id = `${id}-${suffix}`;
   }
 
+  const nextTags = input.tags !== undefined ? cleanTags(input.tags) : prev?.tags;
+  const nextNotes = input.notes !== undefined ? cleanNotes(input.notes) : prev?.notes;
+  const nextDisabled = input.disabled !== undefined ? (input.disabled ? true : undefined) : prev?.disabled;
+
   const account: AccountConfig = {
     id,
     backendId: prev?.backendId ?? backendId,
     label,
     ...(input.isolateSessions === true ? { isolateSessions: true } : {}),
     ...(cleanRegion(input.region) ? { region: cleanRegion(input.region) } : {}),
+    ...(nextTags ? { tags: nextTags } : {}),
+    ...(nextNotes ? { notes: nextNotes } : {}),
+    ...(nextDisabled ? { disabled: true } : {}),
     createdAt: prev?.createdAt ?? now(),
   };
 
@@ -155,6 +190,31 @@ export function upsertAccountSetting(
     : [...existing, account];
 
   return { accounts, account };
+}
+
+/** 切换自定义官方账号的禁用态。 */
+export function toggleAccountDisabledSetting(
+  existing: readonly AccountConfig[],
+  id: string,
+  disabled: boolean,
+): { readonly accounts: AccountConfig[]; readonly target?: AccountConfig } {
+  const target = existing.find((a) => a.id === id);
+  if (!target) return { accounts: [...existing] };
+  const updated: AccountConfig = {
+    id: target.id,
+    backendId: target.backendId,
+    label: target.label,
+    ...(target.isolateSessions ? { isolateSessions: true } : {}),
+    ...(target.region ? { region: target.region } : {}),
+    ...(target.tags ? { tags: target.tags } : {}),
+    ...(target.notes ? { notes: target.notes } : {}),
+    ...(disabled ? { disabled: true } : {}),
+    createdAt: target.createdAt,
+  };
+  return {
+    accounts: existing.map((a) => (a.id === id ? updated : a)),
+    target: updated,
+  };
 }
 
 /** 删除一条自定义官方账号，并把引用该账号的渠道路由安全回退到本机默认官方账号。 */

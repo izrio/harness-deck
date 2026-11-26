@@ -76,11 +76,13 @@ export interface ZcodeControllerOptions extends ControllerHostOptions {
   readonly saveSessions: (sessions: readonly StoredSession[]) => void;
   readonly loadPreferredModel?: () => ZcodePreferredModel | undefined;
   readonly savePreferredModel?: (preferred: ZcodePreferredModel) => void;
+  readonly loadSessionModels?: () => Readonly<Record<string, ZcodePreferredModel>> | undefined;
+  readonly saveSessionModels?: (models: Readonly<Record<string, ZcodePreferredModel>>) => void;
   readonly loadOpenTabs?: () => readonly string[] | undefined;
   readonly saveOpenTabs?: (sessionIds: readonly string[]) => void;
   readonly signInHint?: string;
   readonly boundProvider?: () => ProviderConfig | undefined;
-  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
+  readonly onProviderModelSelected?: (providerId: string, model: string, sessionId?: string) => void;
 }
 
 interface QueuedPrompt {
@@ -121,6 +123,7 @@ export class ZcodeController implements ChatBackendController {
   private modelOptions: ModelOption[] = [];
   private hasRuntimeModelCatalog = false;
   private selectedModel: ZcodePreferredModel | undefined;
+  private readonly sessionModels = new Map<string, ZcodePreferredModel>();
   private draftMode = 'auto';
   /** 回复进行中用户切换的权限模式，延后到下一轮发送前生效。 */
   private readonly pendingModes = new Map<string, string>();
@@ -137,6 +140,14 @@ export class ZcodeController implements ChatBackendController {
     this.activeId = options.loadActiveSessionId();
     this.stored = [...(options.loadSessions() ?? [])];
     this.selectedModel = options.loadPreferredModel?.();
+    const restoredSessionModels = options.loadSessionModels?.();
+    if (restoredSessionModels) {
+      for (const [sid, model] of Object.entries(restoredSessionModels)) {
+        if (sid && model?.provider && model?.model) {
+          this.sessionModels.set(sid, model);
+        }
+      }
+    }
     this.publisher = new ViewPublisher(options.post, options.onModelChange);
     this.editorContext = new EditorContext(
       () => this.workbench,
@@ -645,6 +656,25 @@ export class ZcodeController implements ChatBackendController {
         projection.mode = this.draftMode;
         await this.applyMode(sessionId, this.draftMode, true);
       }
+      const initial = this.buildModelState(undefined).current;
+      if (initial) {
+        this.sessionModels.set(sessionId, {
+          provider: initial.provider,
+          model: initial.model,
+          ...(initial.reasoningEffort ? { effort: initial.reasoningEffort } : {}),
+        });
+        this.persistSessionModels();
+        await link
+          .request('session/setModel', {
+            sessionId,
+            model: {
+              providerId: initial.provider,
+              modelId: initial.model,
+              ...(initial.reasoningEffort ? { options: { reasoningLevel: initial.reasoningEffort } } : {}),
+            },
+          })
+          .catch(() => undefined);
+      }
       return sessionId;
     } catch (error) {
       this.options.log(`新建 ZCode 会话失败：${describe(error)}`);
@@ -814,18 +844,23 @@ export class ZcodeController implements ChatBackendController {
           }))
         : undefined;
 
-    const resolvedEffort = this.selectedModel
-      ? this.resolveReasoningLevel(this.selectedModel.provider, this.selectedModel.model, this.selectedModel.effort)
+    const chosenModel = this.resolveModelEntry(sessionId);
+    if (chosenModel && !this.sessionModels.has(sessionId)) {
+      this.sessionModels.set(sessionId, chosenModel);
+      this.persistSessionModels();
+    }
+    const resolvedEffort = chosenModel
+      ? this.resolveReasoningLevel(chosenModel.provider, chosenModel.model, chosenModel.effort)
       : undefined;
     const sendParams: Record<string, unknown> = {
       sessionId,
       content: wireText,
       ...(attachments ? { attachments } : {}),
-      ...(this.selectedModel
+      ...(chosenModel
         ? {
             modelSelection: {
-              providerId: this.selectedModel.provider,
-              modelId: this.selectedModel.model,
+              providerId: chosenModel.provider,
+              modelId: chosenModel.model,
               ...(resolvedEffort ? { options: { reasoningLevel: resolvedEffort } } : {}),
             },
           }
@@ -969,7 +1004,16 @@ export class ZcodeController implements ChatBackendController {
     return matched?.defaultEffort ?? matched?.efforts[0]?.id ?? explicitEffort;
   }
 
-  private buildModelState(): ModelState {
+  private persistSessionModels(): void {
+    if (!this.options.saveSessionModels) return;
+    this.options.saveSessionModels(Object.fromEntries(this.sessionModels.entries()));
+  }
+
+  private resolveModelEntry(sessionId: string | undefined = this.activeId): ZcodePreferredModel | undefined {
+    return (sessionId ? this.sessionModels.get(sessionId) : undefined) ?? this.selectedModel;
+  }
+
+  private buildModelState(sessionId: string | undefined = this.activeId): ModelState {
     const bound = this.options.boundProvider?.();
     const runtimeByKey = new Map(this.modelOptions.map((o) => [`${o.provider}/${o.model}`, o] as const));
     const boundOpts: ModelOption[] =
@@ -1003,7 +1047,11 @@ export class ZcodeController implements ChatBackendController {
         ? { provider: bound.id, model: bound.defaultModel ?? bound.models[0]!.id }
         : undefined;
     const fallbackFirst: ZcodePreferredModel = { provider: options[0]!.provider, model: options[0]!.model };
-    const current: ZcodePreferredModel = this.selectedModel ?? defaultFromBound ?? fallbackFirst;
+    const picked = this.resolveModelEntry(sessionId);
+    const current: ZcodePreferredModel = picked ?? defaultFromBound ?? fallbackFirst;
+    if (bound && current.provider === bound.id) {
+      this.options.onProviderModelSelected?.(bound.id, current.model, sessionId);
+    }
     const resolvedEffort = this.resolveReasoningLevel(current.provider, current.model, current.effort);
     const exists = options.some((o) => o.provider === current.provider && o.model === current.model);
     const mergedOptions = exists
@@ -1020,17 +1068,24 @@ export class ZcodeController implements ChatBackendController {
   }
 
   private async selectModel(provider: string, model: string, effort?: string): Promise<void> {
+    const sessionId = this.activeId;
     const bound = this.options.boundProvider?.();
     if (bound && provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, model);
+      this.options.onProviderModelSelected?.(bound.id, model, sessionId);
     }
     const resolvedEffort = this.resolveReasoningLevel(provider, model, effort);
-    this.selectedModel = { provider, model, ...(resolvedEffort ? { effort: resolvedEffort } : {}) };
-    this.options.savePreferredModel?.(this.selectedModel);
-    if (this.activeId && this.link) {
+    const nextModel: ZcodePreferredModel = { provider, model, ...(resolvedEffort ? { effort: resolvedEffort } : {}) };
+    if (sessionId) {
+      this.sessionModels.set(sessionId, nextModel);
+      this.persistSessionModels();
+    } else {
+      this.selectedModel = nextModel;
+      this.options.savePreferredModel?.(nextModel);
+    }
+    if (sessionId && this.link) {
       await this.link
         .request('session/setModel', {
-          sessionId: this.activeId,
+          sessionId,
           model: {
             providerId: provider,
             modelId: model,

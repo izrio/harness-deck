@@ -33,8 +33,23 @@ function effectiveModels(provider: ProviderConfig): readonly ProviderModelItem[]
   return [{ id: fallback, name: fallback }];
 }
 
-function proxyUrl(proxyOrigin: string, providerId: string, protocol: ProviderProtocol): string {
-  return `${proxyOrigin.replace(/\/+$/u, '')}/p/${encodeURIComponent(providerId)}/${protocol}`;
+function proxyUrl(
+  proxyOrigin: string,
+  providerId: string,
+  protocol: ProviderProtocol,
+  proxyScope?: string,
+): string {
+  const base = proxyOrigin.replace(/\/+$/u, '');
+  const cleanScope = proxyScope?.trim();
+  if (cleanScope) {
+    return `${base}/s/${encodeURIComponent(cleanScope)}/p/${encodeURIComponent(providerId)}/${protocol}`;
+  }
+  return `${base}/p/${encodeURIComponent(providerId)}/${protocol}`;
+}
+
+function safeFileSegment(value: string): string {
+  const safe = value.replace(/[^a-zA-Z0-9._-]+/gu, '_').slice(0, 80);
+  return safe || 'default';
 }
 
 function mergeLoopbackNoProxy(raw: string | undefined): string {
@@ -72,6 +87,7 @@ const CLAUDE_CONFLICT_ENV_RE = /^(?:ANTHROPIC_|CLAUDE_CODE_USE_|CLAUDE_CODE_OAUT
 export function buildDshPatchYaml(
   provider: ProviderConfig,
   proxyOrigin: string,
+  proxyScope?: string,
 ): { readonly yaml: string; readonly defaultModel?: { readonly provider: string; readonly model: string } } | undefined {
   let protocol: ProviderProtocol | undefined;
   let dshApi: 'openai-completions' | 'anthropic-messages' | 'openai-responses' | undefined;
@@ -103,7 +119,7 @@ export function buildDshPatchYaml(
     `        displayName: ${JSON.stringify(provider.name)}`,
     '        apiKeyEnv: HARNESS_DECK_PROXY_TOKEN',
     `        api: ${JSON.stringify(dshApi)}`,
-    `        baseURL: ${JSON.stringify(proxyUrl(proxyOrigin, provider.id, protocol))}`,
+    `        baseURL: ${JSON.stringify(proxyUrl(proxyOrigin, provider.id, protocol, proxyScope))}`,
     '        models:',
   ];
 
@@ -135,11 +151,15 @@ export async function prepareDshProviderRuntime(
   proxyOrigin: string,
   proxyToken: string,
   storageDir: string,
+  proxyScope?: string,
 ): Promise<DshProviderLaunchPatch | undefined> {
-  const built = buildDshPatchYaml(provider, proxyOrigin);
+  const built = buildDshPatchYaml(provider, proxyOrigin, proxyScope);
   if (!built) return undefined;
   await mkdir(storageDir, { recursive: true });
-  const patchPath = join(storageDir, `dsh-provider-${provider.id}.patch.yml`);
+  const suffix = proxyScope?.trim()
+    ? `${safeFileSegment(proxyScope)}-${safeFileSegment(provider.id)}`
+    : safeFileSegment(provider.id);
+  const patchPath = join(storageDir, `dsh-provider-${suffix}.patch.yml`);
   await writeFile(patchPath, built.yaml, 'utf8');
   return {
     launcherArgs: ['--patch', patchPath],
@@ -154,6 +174,7 @@ export function buildPiModelsJson(
   proxyOrigin: string,
   proxyToken: string,
   existingProviders?: Readonly<Record<string, unknown>>,
+  proxyScope?: string,
 ): string | undefined {
   let protocol: ProviderProtocol | undefined;
   let piApi: 'anthropic-messages' | 'openai-completions' | 'openai-responses' | undefined;
@@ -172,7 +193,7 @@ export function buildPiModelsJson(
 
   const models = effectiveModels(provider);
   const providerEntry = {
-    baseUrl: proxyUrl(proxyOrigin, provider.id, protocol),
+    baseUrl: proxyUrl(proxyOrigin, provider.id, protocol, proxyScope),
     api: piApi,
     apiKey: proxyToken,
     models: models.map((m) => ({
@@ -213,8 +234,9 @@ export function prepareClaudeProviderRuntime(params: {
   readonly baseEnv: Record<string, string | undefined>;
   readonly protocolGatewayEnabled?: boolean;
   readonly selectedModel?: string;
+  readonly proxyScope?: string;
 }): ClaudeProviderRuntimePatch | undefined {
-  const { provider, proxyOrigin, proxyToken, baseEnv, protocolGatewayEnabled, selectedModel } = params;
+  const { provider, proxyOrigin, proxyToken, baseEnv, protocolGatewayEnabled, selectedModel, proxyScope } = params;
   if (
     !isProviderReadyForBackend(
       provider,
@@ -250,7 +272,7 @@ export function prepareClaudeProviderRuntime(params: {
     selectedModel,
   );
   const injected: Record<string, string> = {
-    ANTHROPIC_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'anthropic'),
+    ANTHROPIC_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'anthropic', proxyScope),
     ANTHROPIC_API_KEY: proxyToken,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   };
@@ -289,10 +311,12 @@ export async function writeClaudeProviderSettingsFile(
   storageDir: string,
   providerId: string,
   settingsJson: string,
+  scopeSegment?: string,
 ): Promise<string> {
   await mkdir(storageDir, { recursive: true });
-  const safeId = providerId.replace(/[^a-zA-Z0-9._-]+/gu, '_') || 'provider';
-  const filePath = join(storageDir, `claude-provider-${safeId}.settings.json`);
+  const safeId = safeFileSegment(providerId);
+  const safeScope = scopeSegment?.trim() ? `${safeFileSegment(scopeSegment)}-` : '';
+  const filePath = join(storageDir, `claude-provider-${safeScope}${safeId}.settings.json`);
   await writeFile(filePath, settingsJson, { encoding: 'utf8', mode: 0o600 });
   return filePath;
 }
@@ -304,8 +328,9 @@ export async function preparePiProviderRuntime(params: {
   readonly proxyToken: string;
   readonly storageDir: string;
   readonly baseEnv: Record<string, string | undefined>;
+  readonly proxyScope?: string;
 }): Promise<AcpProviderLaunchPatch | undefined> {
-  const { provider, proxyOrigin, proxyToken, storageDir, baseEnv } = params;
+  const { provider, proxyOrigin, proxyToken, storageDir, baseEnv, proxyScope } = params;
   if (!isProviderReadyForBackend(provider, { id: 'pi', kind: 'pi', name: 'Pi' })) {
     return undefined;
   }
@@ -321,10 +346,13 @@ export async function preparePiProviderRuntime(params: {
     // 用户尚未创建 ~/.pi/agent/models.json
   }
 
-  const modelsJson = buildPiModelsJson(provider, proxyOrigin, proxyToken, existingProviders);
+  const modelsJson = buildPiModelsJson(provider, proxyOrigin, proxyToken, existingProviders, proxyScope);
   if (!modelsJson) return undefined;
 
-  const piDir = join(storageDir, `pi-agent-${provider.id}`);
+  const dirSuffix = proxyScope?.trim()
+    ? `${safeFileSegment(proxyScope)}-${safeFileSegment(provider.id)}`
+    : safeFileSegment(provider.id);
+  const piDir = join(storageDir, `pi-agent-${dirSuffix}`);
   await mkdir(piDir, { recursive: true });
   await Promise.all([
     ensureSymlinkIfExists(join(userPiDir, 'sessions'), join(piDir, 'sessions'), true),
@@ -353,6 +381,7 @@ export function buildOmpModelsYaml(
   provider: ProviderConfig,
   proxyOrigin: string,
   proxyToken: string,
+  proxyScope?: string,
 ): string | undefined {
   let protocol: ProviderProtocol | undefined;
   let ompApi: 'anthropic-messages' | 'openai-completions' | 'openai-responses' | undefined;
@@ -373,7 +402,7 @@ export function buildOmpModelsYaml(
   const lines: string[] = [
     'providers:',
     `  ${JSON.stringify(provider.id)}:`,
-    `    baseUrl: ${JSON.stringify(proxyUrl(proxyOrigin, provider.id, protocol))}`,
+    `    baseUrl: ${JSON.stringify(proxyUrl(proxyOrigin, provider.id, protocol, proxyScope))}`,
     `    api: ${JSON.stringify(ompApi)}`,
     `    apiKey: ${JSON.stringify(proxyToken)}`,
     '    models:',
@@ -429,8 +458,9 @@ export async function prepareAcpProviderRuntime(params: {
   readonly storageDir: string;
   readonly baseEnv: Record<string, string | undefined>;
   readonly protocolGatewayEnabled?: boolean;
+  readonly proxyScope?: string;
 }): Promise<AcpProviderLaunchPatch | undefined> {
-  const { profile, provider, proxyOrigin, proxyToken, storageDir, baseEnv, protocolGatewayEnabled } = params;
+  const { profile, provider, proxyOrigin, proxyToken, storageDir, baseEnv, protocolGatewayEnabled, proxyScope } = params;
   if (
     !isProviderReadyForBackend(
       provider,
@@ -459,7 +489,7 @@ export async function prepareAcpProviderRuntime(params: {
       if (CLAUDE_CONFLICT_ENV_RE.test(k)) continue;
       cleanedEnv[k] = v;
     }
-    cleanedEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic');
+    cleanedEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic', proxyScope);
     cleanedEnv.ANTHROPIC_API_KEY = proxyToken;
     cleanedEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
     if (shouldConvertOpenaiToAnthropic(provider, protocolGatewayEnabled === true, defaultModel)) {
@@ -479,9 +509,12 @@ export async function prepareAcpProviderRuntime(params: {
 
   // 2. Pi (oh-my-pi / omp acp)
   if (idLower === 'oh-my-pi' || /\bomp\b/iu.test(cmdHint)) {
-    const yaml = buildOmpModelsYaml(provider, proxyOrigin, proxyToken);
+    const yaml = buildOmpModelsYaml(provider, proxyOrigin, proxyToken, proxyScope);
     if (!yaml) return undefined;
-    const ompDir = join(storageDir, `omp-agent-${provider.id}`);
+    const dirSuffix = proxyScope?.trim()
+      ? `${safeFileSegment(proxyScope)}-${safeFileSegment(provider.id)}`
+      : safeFileSegment(provider.id);
+    const ompDir = join(storageDir, `omp-agent-${dirSuffix}`);
     await mkdir(ompDir, { recursive: true });
     const userOmpDir = join(homedir(), '.omp', 'agent');
     await Promise.all([
@@ -514,7 +547,7 @@ export async function prepareAcpProviderRuntime(params: {
       args: nextArgs,
       env: withLoopbackNoProxy({
         ...baseEnv,
-        CODEBUDDY_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'openai-chat'),
+        CODEBUDDY_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'openai-chat', proxyScope),
         CODEBUDDY_API_KEY: proxyToken,
       }),
     };
@@ -536,7 +569,7 @@ export async function prepareAcpProviderRuntime(params: {
     }
     if (!protocol) return undefined;
 
-    const base = proxyUrl(proxyOrigin, provider.id, protocol);
+    const base = proxyUrl(proxyOrigin, provider.id, protocol, proxyScope);
     const opencodeModels: Record<string, unknown> = {};
     for (const m of models) {
       const ctx = parseTokenLimit(m.contextWindow);
@@ -581,18 +614,18 @@ export async function prepareAcpProviderRuntime(params: {
   const nextEnv: Record<string, string | undefined> = { ...baseEnv };
   const prefersResponses = /\bcodex\b/iu.test(cmdHint) && Boolean(provider.openaiResponsesUrl?.trim());
   if (prefersResponses) {
-    nextEnv.OPENAI_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'openai-responses');
+    nextEnv.OPENAI_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'openai-responses', proxyScope);
     nextEnv.OPENAI_API_KEY = proxyToken;
   } else if (provider.openaiChatUrl?.trim()) {
-    nextEnv.OPENAI_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'openai-chat');
+    nextEnv.OPENAI_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'openai-chat', proxyScope);
     nextEnv.OPENAI_API_KEY = proxyToken;
   } else if (provider.openaiResponsesUrl?.trim()) {
-    nextEnv.OPENAI_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'openai-responses');
+    nextEnv.OPENAI_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'openai-responses', proxyScope);
     nextEnv.OPENAI_API_KEY = proxyToken;
   }
 
   if (provider.anthropicUrl?.trim()) {
-    nextEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic');
+    nextEnv.ANTHROPIC_BASE_URL = proxyUrl(proxyOrigin, provider.id, 'anthropic', proxyScope);
     nextEnv.ANTHROPIC_API_KEY = proxyToken;
     if (defaultModel) nextEnv.ANTHROPIC_MODEL ??= defaultModel;
     if (smallModel) nextEnv.ANTHROPIC_SMALL_FAST_MODEL ??= smallModel;
@@ -613,8 +646,9 @@ export function prepareCodexProviderRuntime(params: {
   readonly proxyOrigin: string;
   readonly proxyToken: string;
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
+  readonly proxyScope?: string;
 }): AcpProviderLaunchPatch | undefined {
-  const { provider, proxyOrigin, proxyToken, baseEnv } = params;
+  const { provider, proxyOrigin, proxyToken, baseEnv, proxyScope } = params;
   if (!isProviderReadyForBackend(provider, { id: 'codex', kind: 'codex' })) return undefined;
 
   let protocol: 'openai-responses' | 'openai-chat' | undefined;
@@ -629,7 +663,7 @@ export function prepareCodexProviderRuntime(params: {
   if (!protocol || !wireApi) return undefined;
 
   const safeProviderKey = `hd_${provider.id.replace(/[^a-zA-Z0-9_-]+/gu, '_')}`;
-  const baseUrl = proxyUrl(proxyOrigin, provider.id, protocol);
+  const baseUrl = proxyUrl(proxyOrigin, provider.id, protocol, proxyScope);
   const envKey = 'HARNESS_DECK_CODEX_API_KEY';
   const defaultModel = provider.defaultModel?.trim() || provider.models[0]?.id;
 
@@ -663,6 +697,7 @@ export function buildZcodeProviderConfigJson(
   provider: ProviderConfig,
   proxyOrigin: string,
   proxyToken: string,
+  proxyScope?: string,
 ): string | undefined {
   let protocol: ProviderProtocol | undefined;
   let zcodeApiType: 'openai-chat-completions' | 'anthropic-messages' | 'openai-responses' | undefined;
@@ -709,7 +744,7 @@ export function buildZcodeProviderConfigJson(
               },
               api: {
                 type: zcodeApiType,
-                baseUrl: proxyUrl(proxyOrigin, provider.id, protocol),
+                baseUrl: proxyUrl(proxyOrigin, provider.id, protocol, proxyScope),
                 headers: {},
               },
               personalModelIds: modelIds,
@@ -781,17 +816,19 @@ export async function prepareZcodeProviderRuntime(params: {
   readonly proxyToken: string;
   readonly storageDir: string;
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
+  readonly proxyScope?: string;
 }): Promise<AcpProviderLaunchPatch | undefined> {
-  const { provider, proxyOrigin, proxyToken, storageDir, baseEnv } = params;
+  const { provider, proxyOrigin, proxyToken, storageDir, baseEnv, proxyScope } = params;
   if (!isProviderReadyForBackend(provider, { id: 'zcode', kind: 'zcode', name: 'ZCode' })) {
     return undefined;
   }
-  const configJson = buildZcodeProviderConfigJson(provider, proxyOrigin, proxyToken);
+  const configJson = buildZcodeProviderConfigJson(provider, proxyOrigin, proxyToken, proxyScope);
   if (!configJson) return undefined;
 
   await mkdir(storageDir, { recursive: true });
-  const safeId = provider.id.replace(/[^a-zA-Z0-9._-]+/gu, '_') || 'provider';
-  const configPath = join(storageDir, `zcode-provider-${safeId}.json`);
+  const safeId = safeFileSegment(provider.id);
+  const safeScope = proxyScope?.trim() ? `${safeFileSegment(proxyScope)}-` : '';
+  const configPath = join(storageDir, `zcode-provider-${safeScope}${safeId}.json`);
   await writeFile(configPath, configJson, { encoding: 'utf8', mode: 0o600 });
 
   return {
@@ -811,14 +848,15 @@ export function prepareCodebuddyProviderRuntime(params: {
   readonly proxyOrigin: string;
   readonly proxyToken: string;
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
+  readonly proxyScope?: string;
 }): AcpProviderLaunchPatch | undefined {
-  const { provider, proxyOrigin, proxyToken, baseEnv } = params;
+  const { provider, proxyOrigin, proxyToken, baseEnv, proxyScope } = params;
   if (!isProviderReadyForBackend(provider, { id: 'codebuddy', kind: 'codebuddy' })) return undefined;
   return {
     args: [],
     env: withLoopbackNoProxy({
       ...baseEnv,
-      CODEBUDDY_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'openai-chat'),
+      CODEBUDDY_BASE_URL: proxyUrl(proxyOrigin, provider.id, 'openai-chat', proxyScope),
       CODEBUDDY_API_KEY: proxyToken,
     }),
   };

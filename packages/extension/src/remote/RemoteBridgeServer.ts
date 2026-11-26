@@ -453,6 +453,13 @@ export class RemoteBridgeServer {
   async configureTailscaleServe(
     enabled: boolean,
   ): Promise<{ readonly ok: boolean; readonly manualCommand: string; readonly error?: string }> {
+    if (enabled) {
+      if (!this.config.enabled) {
+        await this.setEnabled(true);
+      } else if (!this.isRunning) {
+        await this.start();
+      }
+    }
     const port = this.listeningPort ?? this.options.port ?? 0;
     if (!port) {
       return { ok: false, manualCommand: 'tailscale serve --bg http://127.0.0.1:<port>', error: 'Remote bridge is not running' };

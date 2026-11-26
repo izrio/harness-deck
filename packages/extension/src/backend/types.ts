@@ -61,6 +61,10 @@ export interface ChatBackendController {
   providersChanged?(): void;
   /** 官方账号与渠道路由变化（推送给 Webview）。 */
   accountsChanged?(): void;
+  /** 某个会话的账号/服务商渠道变化时调用（按会话隔离重置空闲连接，不影响其他并发会话）。 */
+  onSessionChannelChanged?(sessionId?: string): Promise<void> | void;
+  /** 指定会话当前是否正在执行回复（缺省时检查当前活动会话）。 */
+  isSessionRunning?(sessionId?: string): boolean;
   /** 项目与 Worktree 配置变化（推送给 Webview）。 */
   projectsChanged(): void;
   /** 扩展（Agent Skills 与 MCP 服务器）配置变化（推送给 Webview）。 */

@@ -5,6 +5,7 @@
  * 启动独立双向流式进程并挂载 `CodebuddyController`，实现多会话并发运行。
  */
 import type { RuntimeStatus } from '@harness-deck/shared';
+import { buildProviderProxyScope } from '../accounts/SessionIsolationStore.ts';
 import type { StoredSession } from '../acp/AcpController.ts';
 import { CodebuddyConnection } from '../codebuddy/connection.ts';
 import {
@@ -34,6 +35,8 @@ export function createCodebuddyBackend(
   // 兼容旧版 ACP CodeBuddy 的会话与标签缓存键，同时优先使用原生键
   const key = (name: string) => host.stateKey(`codebuddy.${name}`);
   const legacyKey = (name: string) => host.stateKey(`acp.codebuddy.${name}`);
+  const modelKey = `harnessDeck.${profile.id}.model`;
+  const sessionModelsKey = `harnessDeck.sessionModels.${profile.id}`;
   let status: RuntimeStatus = { kind: 'idle' };
   let generation = 0;
   let currentCodebuddyConfigDir: string | undefined;
@@ -48,20 +51,35 @@ export function createCodebuddyBackend(
     loadSessions: () => state.get<StoredSession[]>(key('sessions')) ?? state.get<StoredSession[]>(legacyKey('sessions')),
     saveSessions: (sessions) => void state.update(key('sessions'), [...sessions]),
     loadPreferredModel: () =>
-      host.globalState.get<CodebuddyPreferredModel>('harnessDeck.codebuddy.model') ??
-      (() => {
-        const legacy = host.globalState.get<{ readonly model: string; readonly effort?: string }>('harnessDeck.acp.codebuddy.model');
-        return legacy?.model
-          ? { provider: 'codebuddy', model: legacy.model, ...(legacy.effort ? { effort: legacy.effort } : {}) }
-          : undefined;
-      })(),
-    savePreferredModel: (preferred) => void host.globalState.update('harnessDeck.codebuddy.model', preferred),
+      host.globalState.get<CodebuddyPreferredModel>(modelKey) ??
+      (profile.id === 'codebuddy'
+        ? (() => {
+            const legacy = host.globalState.get<{ readonly model: string; readonly effort?: string }>('harnessDeck.acp.codebuddy.model');
+            return legacy?.model
+              ? { provider: 'codebuddy', model: legacy.model, ...(legacy.effort ? { effort: legacy.effort } : {}) }
+              : undefined;
+          })()
+        : undefined),
+    savePreferredModel: (preferred) => void host.globalState.update(modelKey, preferred),
+    loadSessionModels: () => host.globalState.get<Record<string, CodebuddyPreferredModel>>(sessionModelsKey),
+    saveSessionModels: (models) => void host.globalState.update(sessionModelsKey, models),
     loadOpenTabs: () => state.get<string[]>(key('openTabs')) ?? state.get<string[]>(legacyKey('openTabs')),
     saveOpenTabs: (ids) => void state.update(key('openTabs'), [...ids]),
-    codebuddyConfigDir: () => currentCodebuddyConfigDir ?? resolveCodebuddyConfigDir(host.processEnv()),
+    codebuddyConfigDir: (sessionId) =>
+      host.resolveAccountConfigDir?.(profile.id, sessionId) ??
+      currentCodebuddyConfigDir ??
+      resolveCodebuddyConfigDir(host.processEnv()),
     ...(profile.signInHint ? { signInHint: profile.signInHint } : {}),
-    boundProvider: () => host.boundProvider?.(profile.id),
-    ...(host.onProviderModelSelected ? { onProviderModelSelected: host.onProviderModelSelected } : {}),
+    boundProvider: (sessionId) => host.boundProvider?.(profile.id, sessionId),
+    ...(host.onProviderModelSelected
+      ? {
+          onProviderModelSelected: (providerId: string, model: string, sessionId?: string) =>
+            host.onProviderModelSelected?.(providerId, model, {
+              backendId: profile.id,
+              ...(sessionId ? { sessionId } : {}),
+            }),
+        }
+      : {}),
   });
 
   const setStatus = (next: RuntimeStatus): void => {
@@ -175,21 +193,28 @@ export function createCodebuddyBackend(
     }
     controller.setSpawner(async (spawnParams) => {
       let launchEnv: Record<string, string | undefined> = host.processEnv();
-      const boundProvider = host.boundProvider?.(profile.id);
+      const sessionId = spawnParams.sessionId;
+      const boundProvider = host.boundProvider?.(profile.id, sessionId);
       if (boundProvider && host.ensureProviderProxy) {
-        currentCodebuddyConfigDir = undefined;
         try {
           const proxy = await host.ensureProviderProxy();
+          const proxyScope = buildProviderProxyScope(profile.id, sessionId);
           const adapted = prepareCodebuddyProviderRuntime({
             provider: boundProvider,
             proxyOrigin: proxy.origin,
             proxyToken: proxy.token,
             baseEnv: launchEnv,
+            proxyScope,
           });
           if (adapted) {
             launchEnv = adapted.env;
             const chosen = spawnParams.model ?? boundProvider.defaultModel ?? boundProvider.models[0]?.id;
-            if (chosen) host.onProviderModelSelected?.(boundProvider.id, chosen);
+            if (chosen) {
+              host.onProviderModelSelected?.(boundProvider.id, chosen, {
+                backendId: profile.id,
+                ...(sessionId ? { sessionId } : {}),
+              });
+            }
             host.log(`CodeBuddy 已绑定服务商 ${boundProvider.name}，代理地址：${adapted.env.CODEBUDDY_BASE_URL}`);
           } else {
             host.log(
@@ -201,10 +226,10 @@ export function createCodebuddyBackend(
         }
       } else if (host.prepareAccountLaunch) {
         try {
-          const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv);
+          const accountPatch = await host.prepareAccountLaunch(profile.id, launchEnv, sessionId);
           if (accountPatch) {
             launchEnv = accountPatch.env;
-            currentCodebuddyConfigDir = accountPatch.configDir;
+            if (!sessionId) currentCodebuddyConfigDir = accountPatch.configDir;
           }
         } catch (error) {
           host.log(`准备 CodeBuddy 官方账号环境失败：${error instanceof Error ? error.message : String(error)}`);

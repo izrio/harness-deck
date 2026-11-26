@@ -3,6 +3,8 @@ export { IMAGE_MEDIA_TYPES, MAX_IMAGES, TASK_COLUMNS, WORKBENCH_MODULES } from '
 export { joinLabel, splitLabel } from './labels.ts';
 export type {
   AccountAuthStatus,
+  AccountAutomationConfig,
+  AccountAutoSwitchStrategy,
   AccountConfig,
   AccountIsolationKind,
   AccountLoginKind,
@@ -55,6 +57,13 @@ export type {
   GroupedSessionItem,
   ImageMediaType,
   ImageView,
+  ImBotBoundUserView,
+  ImBotChannelView,
+  ImBotConnectionStatus,
+  ImBotFeishuDomain,
+  ImBotPairingView,
+  ImBotPlatform,
+  ImBotsState,
   InstalledSkillView,
   SkillImportCandidate,
   SkillMarketCategory,

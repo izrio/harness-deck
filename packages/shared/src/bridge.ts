@@ -870,11 +870,53 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       apiKey: z.string().max(4_000).optional(),
       /** 仅 CodeBuddy 官方额度查询 Cookie 使用：undefined 保留，空串清除，非空写入 SecretStorage。 */
       usageCookie: z.string().max(8_000).optional(),
+      /** 自定义标签（如 主力 / 备用 / 团队）。 */
+      tags: z.array(z.string().max(40)).max(12).optional(),
+      /** 可选账号备注。 */
+      notes: z.string().max(300).optional(),
+      /** 是否临时禁用（禁用后不参与低配额自动切号）。 */
+      disabled: z.boolean().optional(),
       /** 保存后是否立即设为该智能体的激活官方账号。 */
       setActive: z.boolean().optional(),
     }),
   }),
   z.object({ type: z.literal('deleteAccount'), payload: z.object({ id: z.string().min(1).max(120) }) }),
+  z.object({
+    type: z.literal('toggleAccountDisabled'),
+    payload: z.object({ id: z.string().min(1).max(120), disabled: z.boolean() }),
+  }),
+  z.object({
+    type: z.literal('refreshAccount'),
+    payload: z.object({
+      id: z.string().min(1).max(120),
+      backendId: z.string().min(1).max(100),
+      includeQuota: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('setAccountAutomation'),
+    payload: z.object({
+      autoSwitchEnabled: z.boolean().optional(),
+      autoSwitchThresholdPercent: z.number().int().min(0).max(50).optional(),
+      autoSwitchStrategy: z.enum(['highest-quota', 'round-robin']).optional(),
+      autoRefreshIntervalMin: z.number().int().min(0).max(1_440).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('importAccounts'),
+    payload: z.object({
+      rawJson: z.string().min(1).max(500_000),
+      defaultBackendId: z.string().max(100).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('exportAccounts'),
+    payload: z.object({
+      requestId: z.number().int(),
+      includeSecrets: z.boolean().optional(),
+      backendId: z.string().max(100).optional(),
+    }),
+  }),
   z.object({
     type: z.literal('loginAccount'),
     payload: z.object({
@@ -912,6 +954,10 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       mode: z.enum(['official', 'provider']),
       accountId: z.string().max(120).optional(),
       providerId: z.string().max(100).optional(),
+      /** `'session'` 仅对当前会话/标签生效（隔离其他会话与工具默认渠道）；缺省或 `'default'` 修改该智能体的默认渠道。 */
+      scope: z.enum(['session', 'default']).optional(),
+      sessionId: z.string().max(200).optional(),
+      tabKey: z.string().max(120).optional(),
     }),
   }),
   /** 手机端远程互通（HD-23 / HD-26 / HD-27）。 */
@@ -981,6 +1027,36 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     payload: z.object({ endpoint: z.string().max(2_000).optional() }),
   }),
   z.object({ type: z.literal('testRemotePush'), payload: empty }),
+  /** IM 机器人双向聊天（企微 / 飞书 / 钉钉 / Telegram 长连接与长轮询）。 */
+  z.object({
+    type: z.literal('updateImBotChannel'),
+    payload: z.object({
+      platform: z.enum(['wecom', 'feishu', 'dingtalk', 'telegram']),
+      enabled: z.boolean().optional(),
+      appId: z.string().max(256).optional(),
+      /** undefined 保留原密钥；空字符串清除密钥；非空字符串写入本机 SecretStorage。 */
+      secret: z.string().max(2_000).optional(),
+      domain: z.enum(['feishu', 'lark']).optional(),
+      apiBase: z.string().max(2_000).optional(),
+      allowlist: z.array(z.string().max(256)).max(200).optional(),
+      requireMentionInGroup: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('generateImBotPairing'),
+    payload: z.object({
+      platform: z.enum(['wecom', 'feishu', 'dingtalk', 'telegram']).optional(),
+    }),
+  }),
+  z.object({ type: z.literal('clearImBotPairing'), payload: empty }),
+  z.object({
+    type: z.literal('revokeImBotUser'),
+    payload: z.object({ id: z.string().min(1).max(300) }),
+  }),
+  z.object({
+    type: z.literal('testImBotChannel'),
+    payload: z.object({ platform: z.enum(['wecom', 'feishu', 'dingtalk', 'telegram']) }),
+  }),
 ]);
 
 export type WebviewToHost = z.infer<typeof webviewToHostSchema>;
@@ -1048,6 +1124,15 @@ export type HostToWebview =
   | { readonly type: 'providers'; readonly payload: ProvidersState }
   | { readonly type: 'accounts'; readonly payload: AccountsState }
   | { readonly type: 'accountLoginProgress'; readonly payload: AccountLoginProgress | undefined }
+  | {
+      readonly type: 'accountsExported';
+      readonly payload: {
+        readonly requestId: number;
+        readonly json: string;
+        readonly count: number;
+        readonly includesSecrets: boolean;
+      };
+    }
   | {
       readonly type: 'providerModelsFetched';
       readonly payload: { readonly requestId: number; readonly models: readonly ProviderModelItem[]; readonly error?: string };

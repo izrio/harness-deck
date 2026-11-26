@@ -75,11 +75,13 @@ export interface CodexControllerOptions extends ControllerHostOptions {
   readonly saveSessions: (sessions: readonly StoredSession[]) => void;
   readonly loadPreferredModel?: () => CodexPreferredModel | undefined;
   readonly savePreferredModel?: (preferred: CodexPreferredModel) => void;
+  readonly loadSessionModels?: () => Readonly<Record<string, CodexPreferredModel>> | undefined;
+  readonly saveSessionModels?: (models: Readonly<Record<string, CodexPreferredModel>>) => void;
   readonly loadOpenTabs?: () => readonly string[] | undefined;
   readonly saveOpenTabs?: (sessionIds: readonly string[]) => void;
   readonly signInHint?: string;
   readonly boundProvider?: () => ProviderConfig | undefined;
-  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
+  readonly onProviderModelSelected?: (providerId: string, model: string, sessionId?: string) => void;
 }
 
 interface QueuedPrompt {
@@ -177,6 +179,7 @@ export class CodexController implements ChatBackendController {
   private queueCounter = 0;
   private modelOptions: ModelOption[] = [];
   private selectedModel: CodexPreferredModel | undefined;
+  private readonly sessionModels = new Map<string, CodexPreferredModel>();
   private draftMode: CodexPermissionMode = 'workspace-write';
   private agentCommands: CommandView[] = [];
   private readonly skillCatalogInjected = new Set<string>();
@@ -191,6 +194,14 @@ export class CodexController implements ChatBackendController {
     this.activeId = options.loadActiveSessionId();
     this.stored = [...(options.loadSessions() ?? [])];
     this.selectedModel = options.loadPreferredModel?.();
+    const restoredSessionModels = options.loadSessionModels?.();
+    if (restoredSessionModels) {
+      for (const [sid, model] of Object.entries(restoredSessionModels)) {
+        if (sid && model?.provider && model?.model) {
+          this.sessionModels.set(sid, model);
+        }
+      }
+    }
     this.publisher = new ViewPublisher(options.post, options.onModelChange);
     this.editorContext = new EditorContext(
       () => this.workbench,
@@ -723,6 +734,10 @@ export class CodexController implements ChatBackendController {
       if (!threadId) throw new Error('missing thread.id in thread/start');
       this.resumed.add(threadId);
       this.threadModes.set(threadId, mode);
+      if (selected) {
+        this.sessionModels.set(threadId, selected);
+        this.persistSessionModels();
+      }
       return threadId;
     } catch (error) {
       this.options.log(`新建 Codex 会话失败：${describe(error)}`);
@@ -863,7 +878,11 @@ export class CodexController implements ChatBackendController {
     const wireText = this.enrichPromptWithSkills(threadId, text);
     const input = buildCodexUserInput(wireText, images);
     const modeCfg = codexPermissionConfig(this.modeFor(threadId));
-    const selected = this.resolveCurrentModel();
+    const selected = this.resolveCurrentModel(threadId);
+    if (selected && !this.sessionModels.has(threadId)) {
+      this.sessionModels.set(threadId, selected);
+      this.persistSessionModels();
+    }
 
     const params: Record<string, unknown> = {
       threadId,
@@ -965,7 +984,12 @@ export class CodexController implements ChatBackendController {
 
   // ---------------------------------------------------------------- 模型与权限模式
 
-  private resolveCurrentModel(): CodexPreferredModel | undefined {
+  private persistSessionModels(): void {
+    if (!this.options.saveSessionModels) return;
+    this.options.saveSessionModels(Object.fromEntries(this.sessionModels.entries()));
+  }
+
+  private resolveCurrentModel(threadId: string | undefined = this.activeId): CodexPreferredModel | undefined {
     const bound = this.options.boundProvider?.();
     const defaultFromBound: CodexPreferredModel | undefined =
       bound && (bound.defaultModel || bound.models[0]?.id)
@@ -975,23 +999,24 @@ export class CodexController implements ChatBackendController {
     const fallback: CodexPreferredModel | undefined = first
       ? { provider: first.provider, model: first.model, ...(first.defaultEffort ? { effort: first.defaultEffort } : {}) }
       : undefined;
+    const picked = (threadId ? this.sessionModels.get(threadId) : undefined) ?? this.selectedModel;
     if (bound) {
       if (
-        this.selectedModel &&
-        this.selectedModel.provider === bound.id &&
-        (bound.models.length === 0 || bound.models.some((m) => m.id === this.selectedModel!.model))
+        picked &&
+        picked.provider === bound.id &&
+        (bound.models.length === 0 || bound.models.some((m) => m.id === picked.model))
       ) {
-        return this.selectedModel;
+        return picked;
       }
       return defaultFromBound ?? fallback;
     }
-    if (this.selectedModel && this.selectedModel.provider === 'openai') {
-      return this.selectedModel;
+    if (picked && picked.provider === 'openai') {
+      return picked;
     }
     return fallback;
   }
 
-  private buildModelState(): ModelState {
+  private buildModelState(threadId: string | undefined = this.activeId): ModelState {
     const bound = this.options.boundProvider?.();
     const boundOpts: ModelOption[] =
       bound && bound.models.length > 0
@@ -1009,9 +1034,9 @@ export class CodexController implements ChatBackendController {
         : [];
     const options = boundOpts.length > 0 ? boundOpts : this.modelOptions;
     if (options.length === 0) return { options: [] };
-    const current = this.resolveCurrentModel() ?? { provider: options[0]!.provider, model: options[0]!.model };
+    const current = this.resolveCurrentModel(threadId) ?? { provider: options[0]!.provider, model: options[0]!.model };
     if (bound && current.provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, current.model);
+      this.options.onProviderModelSelected?.(bound.id, current.model, threadId);
     }
     const exists = options.some((o) => o.provider === current.provider && o.model === current.model);
     const mergedOptions = exists
@@ -1028,12 +1053,19 @@ export class CodexController implements ChatBackendController {
   }
 
   private async selectModel(provider: string, model: string, effort?: string): Promise<void> {
+    const threadId = this.activeId;
     const bound = this.options.boundProvider?.();
     if (bound && provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, model);
+      this.options.onProviderModelSelected?.(bound.id, model, threadId);
     }
-    this.selectedModel = { provider, model, ...(effort ? { effort } : {}) };
-    this.options.savePreferredModel?.(this.selectedModel);
+    const nextModel: CodexPreferredModel = { provider, model, ...(effort ? { effort } : {}) };
+    if (threadId) {
+      this.sessionModels.set(threadId, nextModel);
+      this.persistSessionModels();
+    } else {
+      this.selectedModel = nextModel;
+      this.options.savePreferredModel?.(nextModel);
+    }
     this.scheduleRender();
   }
 

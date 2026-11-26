@@ -16,6 +16,7 @@ import {
   backendCapabilities,
   deriveTurns,
   isProviderReadyForBackend,
+  type AccountAutomationConfig,
   type AccountConfig,
   type AccountLoginProgress,
   type AccountsState,
@@ -67,6 +68,7 @@ import { EmbeddedBrowserManager } from '../browser/EmbeddedBrowserManager.ts';
 import { AccountAuthFlowManager } from '../accounts/AccountAuthFlow.ts';
 import { inspectOfficialAccount, type AccountInspectionResult } from '../accounts/AccountInspector.ts';
 import {
+  accountIsolationDir,
   antigravityTokensSameAccount,
   clearAccountCredentials,
   isAntigravityTokenUsable,
@@ -85,15 +87,30 @@ import {
   accountSlotSecretKey,
   activeOfficialAccountId,
   deleteAccountSetting,
-  effectiveProviderForBackend,
   isSystemAccountId,
   parseAccountsSetting,
   parseBackendChannelsSetting,
   resolveBackendChannel,
   setBackendChannelSetting,
   systemAccountId,
+  toggleAccountDisabledSetting,
   upsertAccountSetting,
 } from '../accounts/AccountStore.ts';
+import {
+  ACCOUNT_AUTOMATION_STORAGE_KEY,
+  parseAccountAutomationConfig,
+  pickBestAutoSwitchTarget,
+} from '../accounts/AccountAutomation.ts';
+import {
+  buildAccountsExportJson,
+  parseImportedAccountsJson,
+  type ExportedAccountSecretBundle,
+} from '../accounts/AccountPortability.ts';
+import {
+  SESSION_CHANNELS_STORAGE_KEY,
+  ScopedProviderModelRegistry,
+  SessionChannelStore,
+} from '../accounts/SessionIsolationStore.ts';
 import { createAcpBackend } from '../backend/acp.ts';
 import { parseAcpRegistry } from '../backend/acpRegistry.ts';
 import { createClaudeBackend } from '../backend/claude.ts';
@@ -208,6 +225,7 @@ import { DeviceAuthStore } from '../remote/DeviceAuthStore.ts';
 import { buildMobileDiffContent, buildMobileFileContent } from '../remote/mobileDiff.ts';
 import { PushService } from '../remote/PushService.ts';
 import { RemoteBridgeServer } from '../remote/RemoteBridgeServer.ts';
+import { ImBotManager } from '../remote/bots/ImBotManager.ts';
 import type { TailscaleExec } from '../remote/TailscaleService.ts';
 import { isSchedulerLockHeld, schedulerLockPath } from '../sidecar/schedulerLock.ts';
 
@@ -320,7 +338,14 @@ export function createHarnessHostRuntime(
 
   let updateStatusBarRef: () => void = () => undefined;
   const remoteBridgeBox: { current?: RemoteBridgeServer } = {};
+  const imBotManagerBox: { current?: ImBotManager } = {};
   let startIfNeededRef: () => void = () => undefined;
+
+  const currentRemoteState = (): RemoteState | undefined => {
+    if (!remoteBridgeBox.current) return undefined;
+    const base = remoteBridgeBox.current.getState();
+    return imBotManagerBox.current ? { ...base, bots: imBotManagerBox.current.getState() } : base;
+  };
 
   const clientHub = new ClientHub({
     hostKind: platform.hostKind,
@@ -331,8 +356,9 @@ export function createHarnessHostRuntime(
       if (clientHub.remoteClientCount() > 0) {
         startIfNeededRef();
       }
-      if (remoteBridgeBox.current) {
-        clientHub.broadcastIde({ type: 'remote', payload: remoteBridgeBox.current.getState() });
+      const remoteState = currentRemoteState();
+      if (remoteState) {
+        clientHub.broadcastIde({ type: 'remote', payload: remoteState });
       }
     },
   });
@@ -340,6 +366,7 @@ export function createHarnessHostRuntime(
   const isAnyClientVisible = (): boolean => clientHub.isAnyClientVisible();
 
   const post = (message: HostToWebview): void => {
+    const remoteState = message.type === 'snapshot' && message.payload.remote === undefined ? currentRemoteState() : undefined;
     const outgoing: HostToWebview =
       message.type === 'snapshot'
         ? {
@@ -347,9 +374,7 @@ export function createHarnessHostRuntime(
             payload: {
               ...message.payload,
               ...(message.payload.hostKind === undefined ? { hostKind: platform.hostKind } : {}),
-              ...(remoteBridgeBox.current && message.payload.remote === undefined
-                ? { remote: remoteBridgeBox.current.getState() }
-                : {}),
+              ...(remoteState ? { remote: remoteState } : {}),
             },
           }
         : message;
@@ -369,6 +394,7 @@ export function createHarnessHostRuntime(
         return;
       }
     }
+    imBotManagerBox.current?.observeHostMessage(outgoing);
     clientHub.broadcast(outgoing);
   };
 
@@ -744,10 +770,16 @@ export function createHarnessHostRuntime(
     const curTab = unifiedTabs.current;
     const sid = snapshot.session.id;
     const ckpts = sid ? checkpointsBySession.get(sid) : undefined;
+    const bid = active?.backend.profile.id ?? targetBackendId;
+    const sessionChannel = resolveSessionEffectiveChannel(
+      bid,
+      sid ? { sessionId: sid } : curTab?.backendId === bid ? { tabKey: curTab.key } : undefined,
+    );
     return {
       ...snapshot,
       session: {
         ...snapshot.session,
+        channel: sessionChannel,
         ...(ckpts && ckpts.length > 0 ? { checkpoints: ckpts } : {}),
         ...(curTab?.worktreePath ? { worktreePath: curTab.worktreePath } : {}),
         ...(curTab?.worktreeBranch ? { worktreeBranch: curTab.worktreeBranch } : {}),
@@ -776,6 +808,7 @@ export function createHarnessHostRuntime(
     if (!cur || cur.backendId !== backendId) return;
     const liveTitle = activeBackendTab.title && activeBackendTab.title !== t('session.new') ? activeBackendTab.title : undefined;
     if (!cur.sessionId && reportedSessionId) {
+      sessionChannels.commitDraftToSession(backendId, reportedSessionId, cur.key, channelFor(backendId));
       unifiedTabs.bindCurrentSession(backendId, reportedSessionId, liveTitle);
     } else if (cur.sessionId && !reportedSessionId) {
       unifiedTabs.openNew(backendId);
@@ -1041,7 +1074,11 @@ export function createHarnessHostRuntime(
   // ---- 第三方服务商（Coding Plan 与自定义网关）、官方多账号与渠道路由 ----
   const providerHasKey = new Set<string>();
   const apiKeyCache = new Map<string, string>();
-  const selectedProviderModels = new Map<string, string>();
+  const scopedProviderModels = new ScopedProviderModelRegistry();
+  const sessionChannels = new SessionChannelStore({
+    load: () => platform.globalState.get<unknown>(SESSION_CHANNELS_STORAGE_KEY),
+    save: (record) => void platform.globalState.update(SESSION_CHANNELS_STORAGE_KEY, record),
+  });
   const readProviders = () => parseProvidersSetting(platform.settings.get<unknown>('providers', []));
   const readAccounts = () => parseAccountsSetting(platform.settings.get<unknown>('accounts', []));
   const readBackendChannels = () =>
@@ -1051,7 +1088,16 @@ export function createHarnessHostRuntime(
 
   const accountInspections = new Map<string, AccountInspectionResult & { readonly checkedAt: number }>();
   const accountRevision = new Map<string, number>();
+  const refreshingAccountIds = new Set<string>();
   let accountsChecking = false;
+  let accountAutoRefreshTimer: ReturnType<typeof setInterval> | undefined;
+  let accountAutomation: AccountAutomationConfig = parseAccountAutomationConfig(
+    platform.globalState.get<unknown>(ACCOUNT_AUTOMATION_STORAGE_KEY),
+  );
+  const persistAccountAutomation = async (next: AccountAutomationConfig): Promise<void> => {
+    accountAutomation = next;
+    await platform.globalState.update(ACCOUNT_AUTOMATION_STORAGE_KEY, next);
+  };
   const SYSTEM_ACCOUNT_LABELS_KEY = 'harnessDeck.systemAccountLabels';
   const readSystemAccountLabels = (): Record<string, string> => {
     const raw = platform.globalState.get<unknown>(SYSTEM_ACCOUNT_LABELS_KEY);
@@ -1112,15 +1158,59 @@ export function createHarnessHostRuntime(
   const channelFor = (backendId: string): BackendChannelBinding =>
     resolveBackendChannel(backendId, readBackendChannels(), readProviders(), readAccounts());
 
-  const effectiveProviderFor = (backendId: string) =>
-    effectiveProviderForBackend(backendId, readBackendChannels(), readProviders(), readAccounts());
+  const isPerSessionProcessBackend = (backendId: string): boolean => {
+    const profile = profiles().find((p) => p.id === backendId);
+    return profile?.kind === 'claude' || profile?.kind === 'codebuddy';
+  };
 
-  const boundProviderSignatureFor = (backendId: string): string => {
+  const activeSessionRefFor = (backendId: string): { readonly sessionId?: string; readonly tabKey?: string } => {
+    const curTab = unifiedTabs.current;
+    if (curTab?.backendId === backendId) {
+      return curTab.sessionId ? { sessionId: curTab.sessionId, tabKey: curTab.key } : { tabKey: curTab.key };
+    }
+    const lastTab = unifiedTabs.findLastByBackend(backendId);
+    if (lastTab) {
+      return lastTab.sessionId ? { sessionId: lastTab.sessionId, tabKey: lastTab.key } : { tabKey: lastTab.key };
+    }
+    const sid = managedBackends.get(backendId)?.lastObservedSessionId;
+    return sid ? { sessionId: sid } : {};
+  };
+
+  const resolveSessionEffectiveChannel = (
+    backendId: string,
+    ref?: { readonly sessionId?: string; readonly tabKey?: string },
+  ): BackendChannelBinding =>
+    sessionChannels.resolveEffectiveChannel({
+      backendId,
+      ...(ref?.sessionId ? { sessionId: ref.sessionId } : {}),
+      ...(ref?.tabKey ? { tabKey: ref.tabKey } : {}),
+      backendChannels: readBackendChannels(),
+      providers: readProviders(),
+      accounts: readAccounts(),
+    });
+
+  const effectiveChannelFor = (backendId: string, explicitSessionId?: string): BackendChannelBinding =>
+    resolveSessionEffectiveChannel(
+      backendId,
+      explicitSessionId ? { sessionId: explicitSessionId } : activeSessionRefFor(backendId),
+    );
+
+  const effectiveProviderFor = (backendId: string, explicitSessionId?: string) => {
+    const binding = effectiveChannelFor(backendId, explicitSessionId);
+    if (binding.mode !== 'provider') return undefined;
+    return readProviders().find((p) => p.id === binding.providerId);
+  };
+
+  const activeOfficialAccountIdForSession = (backendId: string, explicitSessionId?: string): string | undefined => {
+    const binding = effectiveChannelFor(backendId, explicitSessionId);
+    if (binding.mode !== 'official') return undefined;
+    return binding.accountId ?? systemAccountId(backendId);
+  };
+
+  const channelSignatureFor = (backendId: string, channel: BackendChannelBinding): string => {
     const providers = readProviders();
     const accounts = readAccounts();
-    const channels = readBackendChannels();
-    const channel = resolveBackendChannel(backendId, channels, providers, accounts);
-    const provider = effectiveProviderForBackend(backendId, channels, providers, accounts);
+    const provider = channel.mode === 'provider' ? providers.find((p) => p.id === channel.providerId) : undefined;
     const activeAcc =
       channel.mode === 'official' && channel.accountId && !isSystemAccountId(channel.accountId)
         ? accounts.find((a) => a.id === channel.accountId)
@@ -1133,6 +1223,11 @@ export function createHarnessHostRuntime(
       gateway: readProtocolGatewayEnabled(),
     });
   };
+
+  const boundProviderSignatureFor = (
+    backendId: string,
+    ref?: { readonly sessionId?: string; readonly tabKey?: string },
+  ): string => channelSignatureFor(backendId, ref ? resolveSessionEffectiveChannel(backendId, ref) : effectiveChannelFor(backendId));
 
   const accountsState = (): AccountsState => {
     const profileList = profiles();
@@ -1195,6 +1290,9 @@ export function createHarnessHostRuntime(
           label: resolvedLabel,
           ...(acc.isolateSessions ? { isolateSessions: true } : {}),
           ...(acc.region ? { region: acc.region } : {}),
+          ...(acc.tags && acc.tags.length > 0 ? { tags: acc.tags } : {}),
+          ...(acc.notes ? { notes: acc.notes } : {}),
+          ...(acc.disabled ? { disabled: true } : {}),
           status: loggingIn ? 'logging-in' : (insp?.status ?? 'unknown'),
           ...(insp?.identity ? { identity: insp.identity } : {}),
           ...(insp?.plan ? { plan: insp.plan } : {}),
@@ -1212,8 +1310,10 @@ export function createHarnessHostRuntime(
     return {
       items,
       channels,
+      automation: accountAutomation,
       ...(loginProg ? { loginProgress: loginProg } : {}),
       ...(accountsChecking ? { checking: true } : {}),
+      ...(refreshingAccountIds.size > 0 ? { refreshingIds: [...refreshingAccountIds] } : {}),
     };
   };
 
@@ -1321,6 +1421,8 @@ export function createHarnessHostRuntime(
     }
   };
 
+  let evaluateAutoSwitchRef: (backendId?: string) => Promise<void> = async () => undefined;
+
   const refreshAccountInspections = async (options?: {
     readonly backendId?: string;
     readonly includeQuota?: boolean;
@@ -1345,7 +1447,27 @@ export function createHarnessHostRuntime(
       accountsChecking = false;
       pushAccounts();
     }
+    if (options?.includeQuota === true) {
+      await evaluateAutoSwitchRef(options.backendId);
+    }
   };
+
+  const syncAccountAutoRefreshTimer = (): void => {
+    if (accountAutoRefreshTimer) {
+      clearInterval(accountAutoRefreshTimer);
+      accountAutoRefreshTimer = undefined;
+    }
+    const mins = accountAutomation.autoRefreshIntervalMin;
+    if (mins > 0) {
+      accountAutoRefreshTimer = setInterval(() => {
+        if (!accountsChecking) {
+          void refreshAccountInspections({ includeQuota: isQuotaFetchEnabled() });
+        }
+      }, mins * 60_000);
+      accountAutoRefreshTimer.unref?.();
+    }
+  };
+  syncAccountAutoRefreshTimer();
 
   let syncManagedBackendsForChannelChange = (_targetBackendId?: string): void => undefined;
 
@@ -1416,7 +1538,7 @@ export function createHarnessHostRuntime(
       }
       return stored;
     },
-    getSelectedModel: (id) => selectedProviderModels.get(id),
+    getSelectedModel: (id, scope) => scopedProviderModels.resolve(id, scope),
     isProtocolGatewayEnabled: readProtocolGatewayEnabled,
     getHttpProxy: () => platform.settings.getHttpProxy(),
     log,
@@ -1861,7 +1983,14 @@ export function createHarnessHostRuntime(
     connection: 'idle',
     sessions: [],
     tabs: buildUnifiedTabsState(),
-    session: { title: t('session.new'), running: false, hasOlder: false, loadingOlder: false, sync: 'idle' },
+    session: {
+      title: t('session.new'),
+      running: false,
+      hasOlder: false,
+      loadingOlder: false,
+      sync: 'idle',
+      channel: effectiveChannelFor(targetBackendId),
+    },
     items: [],
     models: { options: [] },
     interactions: [],
@@ -1881,7 +2010,7 @@ export function createHarnessHostRuntime(
     projects: projectsState(),
     extensions: extensionsState(),
     ...(hub ? { workbench: hub.state() } : {}),
-    ...(remoteBridgeBox.current ? { remote: remoteBridgeBox.current.getState() } : {}),
+    ...(currentRemoteState() ? { remote: currentRemoteState() } : {}),
     terminal: terminalManager.getState(),
     browser: browserManager.getState(),
   });
@@ -1942,10 +2071,15 @@ export function createHarnessHostRuntime(
         const curTab = unifiedTabs.current;
         const sid = message.payload.id;
         const ckpts = sid ? checkpointsBySession.get(sid) : undefined;
+        const sessionChannel = resolveSessionEffectiveChannel(
+          backendId,
+          sid ? { sessionId: sid } : curTab?.backendId === backendId ? { tabKey: curTab.key } : undefined,
+        );
         post({
           type: 'session',
           payload: {
             ...message.payload,
+            channel: sessionChannel,
             ...(ckpts && ckpts.length > 0 ? { checkpoints: ckpts } : {}),
             ...(curTab?.worktreePath ? { worktreePath: curTab.worktreePath } : {}),
             ...(curTab?.worktreeBranch ? { worktreeBranch: curTab.worktreeBranch } : {}),
@@ -2053,6 +2187,7 @@ export function createHarnessHostRuntime(
         if (!suppressTabSync && active?.backend.profile.id === profile.id && obs.sessionId && unifiedTabsRestored) {
           const cur = unifiedTabs.current;
           if (cur && cur.backendId === profile.id && !cur.sessionId) {
+            sessionChannels.commitDraftToSession(profile.id, obs.sessionId, cur.key, channelFor(profile.id));
             unifiedTabs.bindCurrentSession(
               profile.id,
               obs.sessionId,
@@ -2092,6 +2227,8 @@ export function createHarnessHostRuntime(
         hub?.observeSession(obs, profile.id);
       },
       onSessionRekey: (oldSessionId, newSessionId) => {
+        sessionChannels.rekeySession(profile.id, oldSessionId, newSessionId);
+        scopedProviderModels.rekeySession(profile.id, oldSessionId, newSessionId);
         if (unifiedTabs.rekeySession(profile.id, oldSessionId, newSessionId)) {
           pushUnifiedTabs();
         }
@@ -2158,9 +2295,20 @@ export function createHarnessHostRuntime(
       persistEnvCache();
       pushBackends();
     },
-    boundProvider: (backendId) => effectiveProviderFor(backendId),
-    prepareAccountLaunch: async (backendId, baseEnv) => {
-      const binding = channelFor(backendId);
+    boundProvider: (backendId, sessionId) => effectiveProviderFor(backendId, sessionId),
+    resolveAccountConfigDir: (backendId, sessionId) => {
+      const binding = effectiveChannelFor(backendId, sessionId);
+      if (binding.mode !== 'official') return undefined;
+      const accountId = binding.accountId ?? systemAccountId(backendId);
+      if (isSystemAccountId(accountId)) return undefined;
+      const lower = backendId.toLowerCase();
+      if (lower === 'claude' || lower === 'codebuddy' || lower === 'codex' || lower === 'pi' || lower === 'oh-my-pi') {
+        return accountIsolationDir(storageRoot, backendId, accountId);
+      }
+      return undefined;
+    },
+    prepareAccountLaunch: async (backendId, baseEnv, sessionId) => {
+      const binding = effectiveChannelFor(backendId, sessionId);
       if (binding.mode !== 'official') return undefined;
       const accountId = binding.accountId ?? systemAccountId(backendId);
       const acc = isSystemAccountId(accountId) ? undefined : readAccounts().find((a) => a.id === accountId);
@@ -2195,8 +2343,16 @@ export function createHarnessHostRuntime(
       };
     },
     isProtocolGatewayEnabled: readProtocolGatewayEnabled,
-    onProviderModelSelected: (providerId, model) => {
-      selectedProviderModels.set(providerId, model);
+    onProviderModelSelected: (providerId, model, scope) => {
+      const bid = scope?.backendId ?? profile.id;
+      const sid = scope?.sessionId;
+      scopedProviderModels.set(providerId, model, {
+        backendId: bid,
+        ...(sid ? { sessionId: sid } : {}),
+      });
+      if (!isPerSessionProcessBackend(bid)) {
+        scopedProviderModels.setBackendActive(bid, providerId, model);
+      }
     },
     prepareBackendLaunch: async (targetProfile) => {
       await ensureBrowserMcpReady();
@@ -2236,6 +2392,12 @@ export function createHarnessHostRuntime(
   syncManagedBackendsForChannelChange = (targetBackendIdOnly?: string): void => {
     for (const [id, entry] of [...managedBackends.entries()]) {
       if (targetBackendIdOnly && id !== targetBackendIdOnly) continue;
+      if (isPerSessionProcessBackend(id)) {
+        // 按会话起子进程的底层（Claude / CodeBuddy）仅刷新各会话空闲链接，不整机重启打断并发会话
+        entry.boundProviderSignature = boundProviderSignatureFor(id);
+        void entry.backend.controller.onSessionChannelChanged?.();
+        continue;
+      }
       const nextSig = boundProviderSignatureFor(id);
       if (nextSig === entry.boundProviderSignature) continue;
       entry.boundProviderSignature = nextSig;
@@ -2366,11 +2528,43 @@ export function createHarnessHostRuntime(
     });
   switchBackendFn = switchBackend;
 
+  const reloadSingleProcessBackendForChannel = async (
+    backendId: string,
+    targetChannel: BackendChannelBinding,
+    options?: ActivateBackendOptions,
+  ): Promise<boolean> => {
+    if (isPerSessionProcessBackend(backendId)) return false;
+    const existing = managedBackends.get(backendId);
+    const nextSig = channelSignatureFor(backendId, targetChannel);
+    if (!existing || existing.boundProviderSignature === nextSig) return false;
+    if (isBackendRunningTurn(existing)) return false;
+    const prevOwner = targetChannel.mode === 'official' ? currentSlotOwner(backendId) : undefined;
+    await stopAndDeleteManagedBackend(backendId);
+    const lowerBackend = backendId.toLowerCase();
+    if (targetChannel.mode === 'official' && lowerBackend === 'antigravity') {
+      const targetAccountId = targetChannel.accountId ?? systemAccountId(backendId);
+      const sw = await switchAntigravityCredentialSlot({
+        targetAccountId,
+        ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+        secrets: platform.secrets,
+        env: processEnv(),
+      });
+      if (sw.activated) lastActiveAntigravityAccountId = targetAccountId;
+    }
+    await activateBackend(backendId, false, options);
+    return true;
+  };
+
   const openNewTabInActive = (): Promise<void> =>
     enqueueBackendTransition(async () => {
       ensureUnifiedTabsRestored(active);
       const backendId = active?.backend.profile.id ?? targetBackendId;
-      unifiedTabs.openNew(backendId);
+      const createdTab = unifiedTabs.openNew(backendId);
+      const desiredChannel = resolveSessionEffectiveChannel(backendId, { tabKey: createdTab.key });
+      if (await reloadSingleProcessBackendForChannel(backendId, desiredChannel, { openBlank: true })) {
+        pushUnifiedTabs();
+        return;
+      }
       if (active) {
         await withSuppressedTabSync(() => active!.backend.controller.handle({ type: 'newSession', payload: {} }));
       }
@@ -2411,6 +2605,11 @@ export function createHarnessHostRuntime(
       ensureUnifiedTabsRestored(active);
       const backendId = active?.backend.profile.id ?? targetBackendId;
       unifiedTabs.open(backendId, payload.sessionId, payload.label);
+      const desiredChannel = resolveSessionEffectiveChannel(backendId, { sessionId: payload.sessionId });
+      if (await reloadSingleProcessBackendForChannel(backendId, desiredChannel, { targetSessionId: payload.sessionId })) {
+        pushUnifiedTabs();
+        return;
+      }
       if (active) {
         await withSuppressedTabSync(() => active!.backend.controller.handle({ type: 'switchSession', payload }));
       }
@@ -2430,14 +2629,27 @@ export function createHarnessHostRuntime(
         pushProjects();
         void hub?.refreshSourceControl();
       }
+      const desiredChannel = resolveSessionEffectiveChannel(
+        tab.backendId,
+        tab.sessionId ? { sessionId: tab.sessionId } : { tabKey: tab.key },
+      );
+      const tabActivateOpts: ActivateBackendOptions = tab.sessionId
+        ? { targetSessionId: tab.sessionId }
+        : { openBlank: true };
       if (tab.backendId !== active?.backend.profile.id) {
-        await activateBackend(
-          tab.backendId,
-          false,
-          tab.sessionId ? { targetSessionId: tab.sessionId } : { openBlank: true },
-        );
+        if (await reloadSingleProcessBackendForChannel(tab.backendId, desiredChannel, tabActivateOpts)) {
+          if (tab.sessionId) void refreshSessionCheckpoints(tab.worktreePath ?? workspacePath, tab.sessionId);
+          log(`已通过标签切换到底层 ${active?.backend.profile.name ?? tab.backendId}`);
+          return;
+        }
+        await activateBackend(tab.backendId, false, tabActivateOpts);
         if (tab.sessionId) void refreshSessionCheckpoints(tab.worktreePath ?? workspacePath, tab.sessionId);
         log(`已通过标签切换到底层 ${active?.backend.profile.name ?? tab.backendId}`);
+        return;
+      }
+      if (await reloadSingleProcessBackendForChannel(tab.backendId, desiredChannel, tabActivateOpts)) {
+        if (tab.sessionId) void refreshSessionCheckpoints(tab.worktreePath ?? workspacePath, tab.sessionId);
+        pushUnifiedTabs();
         return;
       }
       if (active) {
@@ -2480,16 +2692,28 @@ export function createHarnessHostRuntime(
       return;
     }
     if (activeChanged && active) {
-      await withSuppressedTabSync(async () => {
-        if (nextActive.sessionId) {
-          await active!.backend.controller.handle({
-            type: 'switchSession',
-            payload: { sessionId: nextActive.sessionId },
-          });
-        } else {
-          await active!.backend.controller.handle({ type: 'newSession', payload: {} });
-        }
-      });
+      const nextTab = unifiedTabs.current;
+      const desiredChannel = resolveSessionEffectiveChannel(
+        nextActive.backendId,
+        nextActive.sessionId ? { sessionId: nextActive.sessionId } : nextTab ? { tabKey: nextTab.key } : undefined,
+      );
+      const reloaded = await reloadSingleProcessBackendForChannel(
+        nextActive.backendId,
+        desiredChannel,
+        nextActive.sessionId ? { targetSessionId: nextActive.sessionId } : { openBlank: true },
+      );
+      if (!reloaded) {
+        await withSuppressedTabSync(async () => {
+          if (nextActive.sessionId) {
+            await active!.backend.controller.handle({
+              type: 'switchSession',
+              payload: { sessionId: nextActive.sessionId },
+            });
+          } else {
+            await active!.backend.controller.handle({ type: 'newSession', payload: {} });
+          }
+        });
+      }
     }
     pushUnifiedTabs();
   };
@@ -2916,12 +3140,56 @@ export function createHarnessHostRuntime(
   });
 
   const pushRemote = (): void => {
-    if (!remoteBridgeBox.current) return;
-    clientHub.broadcastIde({ type: 'remote', payload: remoteBridgeBox.current.getState() });
+    const state = currentRemoteState();
+    if (!state) return;
+    clientHub.broadcastIde({ type: 'remote', payload: state });
     updateStatusBar();
   };
 
   let handleWebviewMessageRef: (message: WebviewToHost, clientId?: string) => void = () => undefined;
+
+  evaluateAutoSwitchRef = async (onlyBackendId?: string): Promise<void> => {
+    if (!accountAutomation.autoSwitchEnabled) return;
+    const state = accountsState();
+    const targetBackends = onlyBackendId
+      ? profiles().filter((p) => p.id === onlyBackendId)
+      : profiles();
+
+    for (const profile of targetBackends) {
+      const channel = state.channels[profile.id];
+      if (!channel || channel.mode !== 'official') continue;
+      const managed = managedBackends.get(profile.id);
+      if (managed && isBackendRunningTurn(managed)) continue;
+
+      const activeId = channel.accountId ?? systemAccountId(profile.id);
+      const backendAccounts = state.items.filter((a) => a.backendId === profile.id);
+      const decision = pickBestAutoSwitchTarget(backendAccounts, activeId, accountAutomation);
+      if (!decision) continue;
+
+      await persistAccountAutomation({
+        ...accountAutomation,
+        lastAutoSwitch: {
+          backendId: profile.id,
+          fromAccountId: activeId,
+          toAccountId: decision.target.id,
+          toLabel: decision.target.label,
+          reason: decision.reason,
+          at: Date.now(),
+        },
+      });
+      handleWebviewMessageRef(
+        {
+          type: 'setBackendChannel',
+          payload: { backendId: profile.id, mode: 'official', accountId: decision.target.id },
+        },
+        'ide',
+      );
+      post({
+        type: 'toast',
+        payload: { level: 'info', text: t('account.autoSwitched', profile.name, decision.target.label) },
+      });
+    }
+  };
 
   const remoteBridge = new RemoteBridgeServer({
     hostKind: platform.hostKind,
@@ -2939,7 +3207,26 @@ export function createHarnessHostRuntime(
     ...(runtimeOptions.tailscaleExec ? { tailscaleExec: runtimeOptions.tailscaleExec } : {}),
   });
   remoteBridgeBox.current = remoteBridge;
+
+  const imBotManager = new ImBotManager({
+    globalState: platform.globalState,
+    secrets: platform.secrets,
+    locale: getLocale,
+    isWindowFocused: () => platform.isWindowFocused(),
+    getSnapshot: () =>
+      active
+        ? withUnifiedTabs(active.backend.controller.peekSnapshot?.() ?? active.backend.controller.snapshot())
+        : idleSnapshot(),
+    ensureBackendStarted: () => startIfNeeded(),
+    dispatchMessage: (msg) => handleWebviewMessageRef(msg, 'ide'),
+    onStateChange: () => pushRemote(),
+    log,
+    ...(runtimeOptions.fetchImpl ? { fetchImpl: runtimeOptions.fetchImpl } : {}),
+  });
+  imBotManagerBox.current = imBotManager;
+
   void remoteBridge.restoreIfEnabled().then(() => pushRemote());
+  void imBotManager.restoreEnabled().then(() => pushRemote());
 
   updateStatusBar();
 
@@ -3384,9 +3671,6 @@ export function createHarnessHostRuntime(
           await writeSetting(undefined, 'backendChannels', Object.keys(nextChannels).length > 0 ? nextChannels : undefined);
         }
         await hub?.syncProviderAgentBindings(saved);
-        if (saved.defaultModel) {
-          selectedProviderModels.set(saved.id, saved.defaultModel);
-        }
         pushProviders();
         pushAccounts();
       })();
@@ -3398,7 +3682,8 @@ export function createHarnessHostRuntime(
         await platform.secrets.delete(providerSecretKey(id));
         apiKeyCache.delete(id);
         providerHasKey.delete(id);
-        selectedProviderModels.delete(id);
+        scopedProviderModels.deleteProvider(id);
+        sessionChannels.pruneProvider(id);
         const nextProviders = deleteProviderSetting(readProviders(), id);
         await writeSetting(undefined, 'providers', nextProviders.length > 0 ? nextProviders : undefined);
         let nextChannels = readBackendChannels();
@@ -3526,6 +3811,7 @@ export function createHarnessHostRuntime(
         }
         try {
           const activeAccId =
+            activeOfficialAccountIdForSession(backendId) ??
             activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts()) ??
             systemAccountId(backendId);
           const accCfg = isSystemAccountId(activeAccId)
@@ -3668,6 +3954,9 @@ export function createHarnessHostRuntime(
             if (prev?.quota?.queriedAt !== quota.queriedAt || prev?.status !== 'authenticated') {
               pushAccounts();
             }
+            if (accountAutomation.autoSwitchEnabled) {
+              void evaluateAutoSwitchRef(backendId);
+            }
           } else {
             const reasonText = debugReasons.length > 0 ? debugReasons.join('; ') : 'unavailable';
             const traceEnabled = platform.settings.get<boolean>('backendTrace', false);
@@ -3723,6 +4012,9 @@ export function createHarnessHostRuntime(
           label: effectiveLabel,
           ...(payload.isolateSessions !== undefined ? { isolateSessions: payload.isolateSessions } : {}),
           ...(payload.region ? { region: payload.region } : {}),
+          ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+          ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
+          ...(payload.disabled !== undefined ? { disabled: payload.disabled } : {}),
         });
         if (payload.apiKey !== undefined) {
           const cleanKey = payload.apiKey.trim();
@@ -3809,12 +4101,187 @@ export function createHarnessHostRuntime(
           secrets: platform.secrets,
         });
         accountInspections.delete(id);
+        sessionChannels.pruneAccount(removed.backendId, removed.id);
         await writeSetting(undefined, 'accounts', nextAccounts.length > 0 ? nextAccounts : undefined);
         await writeSetting(undefined, 'backendChannels', Object.keys(nextChannels).length > 0 ? nextChannels : undefined);
         bumpAccountRevision(removed.backendId);
         pushAccounts();
         syncManagedBackendsForChannelChange(removed.backendId);
         post({ type: 'toast', payload: { level: 'info', text: t('account.deleted', removed.label) } });
+      })();
+      return;
+    }
+    if (message.type === 'toggleAccountDisabled') {
+      void (async () => {
+        const { id, disabled } = message.payload;
+        if (isSystemAccountId(id)) return;
+        const { accounts: nextAccounts, target } = toggleAccountDisabledSetting(readAccounts(), id, disabled);
+        if (!target) return;
+        await writeSetting(undefined, 'accounts', nextAccounts);
+        pushAccounts();
+        post({
+          type: 'toast',
+          payload: {
+            level: 'info',
+            text: disabled ? t('account.disabled', target.label) : t('account.enabled', target.label),
+          },
+        });
+      })();
+      return;
+    }
+    if (message.type === 'refreshAccount') {
+      void (async () => {
+        const { id, backendId, includeQuota } = message.payload;
+        if (refreshingAccountIds.has(id)) return;
+        refreshingAccountIds.add(id);
+        pushAccounts();
+        try {
+          const profile = profiles().find((p) => p.id === backendId);
+          if (profile) clearQuotaCacheFor(quotaProviderFor(profile));
+          const acc = isSystemAccountId(id) ? undefined : readAccounts().find((a) => a.id === id);
+          await inspectOneAccount(backendId, id, acc, includeQuota !== false);
+        } finally {
+          refreshingAccountIds.delete(id);
+          pushAccounts();
+        }
+        if (includeQuota !== false) {
+          await evaluateAutoSwitchRef(backendId);
+        }
+      })();
+      return;
+    }
+    if (message.type === 'setAccountAutomation') {
+      void (async () => {
+        const patch = message.payload;
+        const next: AccountAutomationConfig = {
+          ...accountAutomation,
+          ...(patch.autoSwitchEnabled !== undefined ? { autoSwitchEnabled: patch.autoSwitchEnabled } : {}),
+          ...(patch.autoSwitchThresholdPercent !== undefined
+            ? { autoSwitchThresholdPercent: patch.autoSwitchThresholdPercent }
+            : {}),
+          ...(patch.autoSwitchStrategy !== undefined ? { autoSwitchStrategy: patch.autoSwitchStrategy } : {}),
+          ...(patch.autoRefreshIntervalMin !== undefined
+            ? { autoRefreshIntervalMin: patch.autoRefreshIntervalMin }
+            : {}),
+        };
+        await persistAccountAutomation(next);
+        syncAccountAutoRefreshTimer();
+        pushAccounts();
+        if (next.autoSwitchEnabled) {
+          await evaluateAutoSwitchRef();
+        }
+      })();
+      return;
+    }
+    if (message.type === 'importAccounts') {
+      void (async () => {
+        try {
+          const { entries } = parseImportedAccountsJson(message.payload.rawJson, message.payload.defaultBackendId);
+          if (entries.length === 0) {
+            post({ type: 'toast', payload: { level: 'error', text: t('account.importEmpty') } });
+            return;
+          }
+          let working = readAccounts();
+          const knownBackendIds = new Set(profiles().map((p) => p.id));
+          const fallbackBackendId =
+            message.payload.defaultBackendId && knownBackendIds.has(message.payload.defaultBackendId)
+              ? message.payload.defaultBackendId
+              : undefined;
+          const affectedBackends = new Set<string>();
+          const savedIds: { readonly id: string; readonly backendId: string }[] = [];
+          for (const entry of entries) {
+            const targetBackendId = knownBackendIds.has(entry.backendId)
+              ? entry.backendId
+              : fallbackBackendId;
+            if (!targetBackendId) continue;
+            const { accounts: nextAccounts, account: saved } = upsertAccountSetting(working, {
+              backendId: targetBackendId,
+              label: entry.label,
+              ...(entry.isolateSessions ? { isolateSessions: true } : {}),
+              ...(entry.region ? { region: entry.region } : {}),
+              ...(entry.tags ? { tags: entry.tags } : {}),
+              ...(entry.notes ? { notes: entry.notes } : {}),
+              ...(entry.disabled ? { disabled: true } : {}),
+            });
+            working = nextAccounts;
+            affectedBackends.add(saved.backendId);
+            savedIds.push({ id: saved.id, backendId: saved.backendId });
+            if (entry.apiKey) {
+              await platform.secrets.store(accountApiKeySecretKey(saved.id), entry.apiKey);
+            }
+            if (entry.usageCookie) {
+              await platform.secrets.store(accountCookieSecretKey(saved.id), entry.usageCookie);
+            }
+            if (entry.antigravitySlotRaw) {
+              await platform.secrets.store(accountSlotSecretKey(saved.id), entry.antigravitySlotRaw);
+            } else if (entry.codebuddySlotRaw) {
+              await platform.secrets.store(accountSlotSecretKey(saved.id), entry.codebuddySlotRaw);
+            }
+          }
+          if (savedIds.length === 0) {
+            post({ type: 'toast', payload: { level: 'error', text: t('account.importEmpty') } });
+            return;
+          }
+          await writeSetting(undefined, 'accounts', working);
+          for (const bid of affectedBackends) bumpAccountRevision(bid);
+          await Promise.all(
+            savedIds.map(({ id, backendId }) =>
+              inspectOneAccount(
+                backendId,
+                id,
+                working.find((a) => a.id === id),
+                false,
+              ),
+            ),
+          );
+          pushAccounts();
+          post({ type: 'toast', payload: { level: 'info', text: t('account.imported', savedIds.length) } });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          post({ type: 'toast', payload: { level: 'error', text: t('account.importFailed', msg) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'exportAccounts') {
+      void (async () => {
+        const { requestId, includeSecrets, backendId } = message.payload;
+        const all = readAccounts().filter((a) => !backendId || a.backendId === backendId);
+        const secretsMap = new Map<string, ExportedAccountSecretBundle>();
+        if (includeSecrets) {
+          await Promise.all(
+            all.map(async (acc) => {
+              const [apiKey, usageCookie, slotRaw] = await Promise.all([
+                platform.secrets.get(accountApiKeySecretKey(acc.id)),
+                platform.secrets.get(accountCookieSecretKey(acc.id)),
+                platform.secrets.get(accountSlotSecretKey(acc.id)),
+              ]);
+              if (apiKey || usageCookie || slotRaw) {
+                secretsMap.set(acc.id, {
+                  ...(apiKey ? { apiKey } : {}),
+                  ...(usageCookie ? { usageCookie } : {}),
+                  ...(slotRaw ? { slotRaw } : {}),
+                });
+              }
+            }),
+          );
+        }
+        const enriched = all.map((acc) => {
+          const identity = accountInspections.get(acc.id)?.identity;
+          return { ...acc, ...(identity ? { identity } : {}) };
+        });
+        const json = buildAccountsExportJson(enriched, secretsMap, {
+          includeSecrets: includeSecrets === true,
+        });
+        post({
+          type: 'accountsExported',
+          payload: {
+            requestId,
+            json,
+            count: all.length,
+            includesSecrets: includeSecrets === true,
+          },
+        });
       })();
       return;
     }
@@ -3891,14 +4358,51 @@ export function createHarnessHostRuntime(
     }
     if (message.type === 'setBackendChannel') {
       void (async () => {
-        const { backendId, mode, accountId, providerId } = message.payload;
+        const {
+          backendId,
+          mode,
+          accountId,
+          providerId,
+          scope,
+          sessionId: requestedSessionId,
+          tabKey: requestedTabKey,
+        } = message.payload;
         const profile = profiles().find((p) => p.id === backendId);
         if (!profile) return;
+        const isSessionScope = scope === 'session';
         const managed = managedBackends.get(backendId);
-        if (managed && isBackendRunningTurn(managed)) {
+        const curTab = unifiedTabs.current;
+        const targetSessionId =
+          requestedSessionId?.trim() ||
+          (curTab?.backendId === backendId ? curTab.sessionId : undefined) ||
+          (active?.backend.profile.id === backendId
+            ? active.backend.controller.peekSnapshot?.().session.id
+            : undefined);
+        const targetTabKey =
+          requestedTabKey?.trim() || (curTab?.backendId === backendId ? curTab.key : undefined);
+        const perSessionProcess = isPerSessionProcessBackend(backendId);
+        const lowerBackend = backendId.toLowerCase();
+
+        if (isSessionScope && perSessionProcess) {
+          const targetRunning = managed?.backend.controller.isSessionRunning
+            ? managed.backend.controller.isSessionRunning(targetSessionId)
+            : managed
+              ? isBackendRunningTurn(managed)
+              : false;
+          if (targetRunning) {
+            post({ type: 'toast', payload: { level: 'error', text: t('account.switchWhileRunning') } });
+            return;
+          }
+          // CodeBuddy 官方 OAuth 账号共享本机磁盘槽位：若有其他会话仍在执行回合，禁止切换官方磁盘槽位以免串号
+          if (lowerBackend === 'codebuddy' && mode === 'official' && managed && isBackendRunningTurn(managed)) {
+            post({ type: 'toast', payload: { level: 'error', text: t('account.switchWhileRunning') } });
+            return;
+          }
+        } else if (managed && isBackendRunningTurn(managed)) {
           post({ type: 'toast', payload: { level: 'error', text: t('account.switchWhileRunning') } });
           return;
         }
+
         const caps = backendCapabilities(profile);
         const wasActiveBackend = active?.backend.profile.id === backendId;
         const prevOwner = mode === 'official' ? currentSlotOwner(backendId) : undefined;
@@ -3933,52 +4437,143 @@ export function createHarnessHostRuntime(
           }
         }
         clearQuotaCacheFor(quotaProviderFor(profile));
-        const nextChannels = setBackendChannelSetting(readBackendChannels(), backendId, nextBinding);
-        await writeSetting(undefined, 'backendChannels', nextChannels);
-        const existingManaged = managedBackends.get(backendId);
-        if (existingManaged) {
-          // 提前同步签名，避免 onDidChangeConfiguration 重复触发一次并行重启
-          existingManaged.boundProviderSignature = boundProviderSignatureFor(backendId);
-        }
-        pushAccounts();
-        pushProviders();
-        const lowerBackend = backendId.toLowerCase();
-        const needsSlotSwitch =
-          nextBinding.mode === 'official' && (lowerBackend === 'antigravity' || lowerBackend === 'codebuddy');
-        if (existingManaged || needsSlotSwitch) {
-          void enqueueBackendTransition(async () => {
-            // 先彻底停止旧账号的底层进程，再切换磁盘凭据槽位，防止退出中的旧进程回写旧账号 token 覆盖新槽位
-            if (managedBackends.has(backendId)) {
-              await stopAndDeleteManagedBackend(backendId);
-            }
-            if (nextBinding.mode === 'official') {
+
+        if (isSessionScope) {
+          // 仅修改当前会话/标签的渠道绑定，不改动工具全局默认渠道，也不影响其他会话
+          if (targetSessionId) {
+            sessionChannels.setSessionChannel(backendId, targetSessionId, nextBinding);
+          } else if (targetTabKey) {
+            sessionChannels.setDraftTabChannel(targetTabKey, backendId, nextBinding);
+          }
+          const needsSlotSwitch =
+            nextBinding.mode === 'official' && (lowerBackend === 'antigravity' || lowerBackend === 'codebuddy');
+          if (perSessionProcess) {
+            if (needsSlotSwitch && lowerBackend === 'codebuddy' && nextBinding.mode === 'official') {
               const targetAccountId = nextBinding.accountId ?? systemAccountId(backendId);
-              if (lowerBackend === 'antigravity') {
-                const sw = await switchAntigravityCredentialSlot({
-                  targetAccountId,
-                  ...(prevOwner ? { previousAccountId: prevOwner } : {}),
-                  secrets: platform.secrets,
-                  env: processEnv(),
-                });
-                if (sw.activated) lastActiveAntigravityAccountId = targetAccountId;
-              } else if (lowerBackend === 'codebuddy') {
-                const sw = await switchCodebuddyCredentialSlot({
-                  targetAccountId,
-                  ...(prevOwner ? { previousAccountId: prevOwner } : {}),
-                  secrets: platform.secrets,
-                  env: processEnv(),
-                });
-                if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
-              }
+              const sw = await switchCodebuddyCredentialSlot({
+                targetAccountId,
+                ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                secrets: platform.secrets,
+                env: processEnv(),
+              });
+              if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
             }
-            if (wasActiveBackend) {
-              await activateBackend(backendId, false);
-            } else {
-              pushBackends();
+            if (managed) {
+              managed.boundProviderSignature = boundProviderSignatureFor(backendId);
+              await managed.backend.controller.onSessionChannelChanged?.(targetSessionId);
             }
-          });
+            pushAccounts();
+            pushProviders();
+            if (wasActiveBackend && active) {
+              const snap = withUnifiedTabs(active.backend.controller.peekSnapshot?.() ?? active.backend.controller.snapshot());
+              post({ type: 'session', payload: snap.session });
+              post({ type: 'models', payload: snap.models });
+            }
+          } else {
+            const existingManaged = managedBackends.get(backendId);
+            if (existingManaged) {
+              existingManaged.boundProviderSignature = channelSignatureFor(backendId, nextBinding);
+            }
+            pushAccounts();
+            pushProviders();
+            if (existingManaged || needsSlotSwitch) {
+              void enqueueBackendTransition(async () => {
+                if (managedBackends.has(backendId)) {
+                  await stopAndDeleteManagedBackend(backendId);
+                }
+                if (nextBinding.mode === 'official' && lowerBackend === 'antigravity') {
+                  const targetAccountId = nextBinding.accountId ?? systemAccountId(backendId);
+                  const sw = await switchAntigravityCredentialSlot({
+                    targetAccountId,
+                    ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                    secrets: platform.secrets,
+                    env: processEnv(),
+                  });
+                  if (sw.activated) lastActiveAntigravityAccountId = targetAccountId;
+                }
+                if (wasActiveBackend) {
+                  await activateBackend(
+                    backendId,
+                    false,
+                    targetSessionId ? { targetSessionId } : { openBlank: true },
+                  );
+                } else {
+                  pushBackends();
+                }
+              });
+            }
+          }
         } else {
-          syncManagedBackendsForChannelChange(backendId);
+          // 设置页切换：修改该智能体的全局默认渠道（供新会话与未显式绑定渠道的会话使用）
+          const nextChannels = setBackendChannelSetting(readBackendChannels(), backendId, nextBinding);
+          await writeSetting(undefined, 'backendChannels', nextChannels);
+          const activeRef = activeSessionRefFor(backendId);
+          const activeHasExplicitSessionChannel = sessionChannels.hasExplicitBinding(backendId, activeRef);
+          const existingManaged = managedBackends.get(backendId);
+          if (existingManaged) {
+            // 提前同步签名，避免 onDidChangeConfiguration 重复触发一次并行重启
+            existingManaged.boundProviderSignature = boundProviderSignatureFor(backendId);
+          }
+          pushAccounts();
+          pushProviders();
+          const needsSlotSwitch =
+            !activeHasExplicitSessionChannel &&
+            nextBinding.mode === 'official' &&
+            (lowerBackend === 'antigravity' || lowerBackend === 'codebuddy');
+          if (!activeHasExplicitSessionChannel && perSessionProcess) {
+            if (needsSlotSwitch && lowerBackend === 'codebuddy' && nextBinding.mode === 'official') {
+              const targetAccountId = nextBinding.accountId ?? systemAccountId(backendId);
+              const sw = await switchCodebuddyCredentialSlot({
+                targetAccountId,
+                ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                secrets: platform.secrets,
+                env: processEnv(),
+              });
+              if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
+            }
+            if (existingManaged) {
+              await existingManaged.backend.controller.onSessionChannelChanged?.();
+            }
+            if (wasActiveBackend && active) {
+              const snap = withUnifiedTabs(active.backend.controller.peekSnapshot?.() ?? active.backend.controller.snapshot());
+              post({ type: 'session', payload: snap.session });
+              post({ type: 'models', payload: snap.models });
+            }
+          } else if (!activeHasExplicitSessionChannel && (existingManaged || needsSlotSwitch)) {
+            void enqueueBackendTransition(async () => {
+              // 先彻底停止旧账号的底层进程，再切换磁盘凭据槽位，防止退出中的旧进程回写旧账号 token 覆盖新槽位
+              if (managedBackends.has(backendId)) {
+                await stopAndDeleteManagedBackend(backendId);
+              }
+              if (nextBinding.mode === 'official') {
+                const targetAccountId = nextBinding.accountId ?? systemAccountId(backendId);
+                if (lowerBackend === 'antigravity') {
+                  const sw = await switchAntigravityCredentialSlot({
+                    targetAccountId,
+                    ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                    secrets: platform.secrets,
+                    env: processEnv(),
+                  });
+                  if (sw.activated) lastActiveAntigravityAccountId = targetAccountId;
+                } else if (lowerBackend === 'codebuddy') {
+                  const sw = await switchCodebuddyCredentialSlot({
+                    targetAccountId,
+                    ...(prevOwner ? { previousAccountId: prevOwner } : {}),
+                    secrets: platform.secrets,
+                    env: processEnv(),
+                  });
+                  if (sw.activated) lastActiveCodebuddyAccountId = targetAccountId;
+                }
+              }
+              if (wasActiveBackend) {
+                await activateBackend(backendId, false);
+              } else {
+                pushBackends();
+              }
+            });
+          } else if (!activeHasExplicitSessionChannel) {
+            syncManagedBackendsForChannelChange(backendId);
+          }
         }
         const sysId = systemAccountId(backendId);
         const channelLabel =
@@ -5059,9 +5654,7 @@ export function createHarnessHostRuntime(
           const snap: HostSnapshot = {
             ...base,
             ...(base.hostKind === undefined ? { hostKind: platform.hostKind } : {}),
-            ...(remoteBridgeBox.current && base.remote === undefined
-              ? { remote: remoteBridgeBox.current.getState() }
-              : {}),
+            ...(currentRemoteState() && base.remote === undefined ? { remote: currentRemoteState() } : {}),
           };
           for (const cid of affectedClientIds) {
             clientHub.sendTo(cid, { type: 'snapshot', payload: snap });
@@ -5155,6 +5748,42 @@ export function createHarnessHostRuntime(
             post({ type: 'toast', payload: { level: 'info', text: t('remote.pushTestNone') } });
           }
         });
+      return;
+    }
+    if (message.type === 'updateImBotChannel') {
+      void imBotManager.updateChannel(message.payload);
+      return;
+    }
+    if (message.type === 'generateImBotPairing') {
+      imBotManager.generatePairing(message.payload.platform);
+      return;
+    }
+    if (message.type === 'clearImBotPairing') {
+      imBotManager.clearPairing();
+      return;
+    }
+    if (message.type === 'revokeImBotUser') {
+      void imBotManager.revokeBoundUser(message.payload.id).then((removed) => {
+        if (removed) {
+          post({ type: 'toast', payload: { level: 'info', text: t('remote.imBotUserRevoked') } });
+        }
+      });
+      return;
+    }
+    if (message.type === 'testImBotChannel') {
+      void imBotManager.testChannel(message.payload.platform).then((res) => {
+        if (res.ok) {
+          post({
+            type: 'toast',
+            payload: { level: 'info', text: t('remote.imBotTestOk', res.detail ?? 'OK') },
+          });
+        } else {
+          post({
+            type: 'toast',
+            payload: { level: 'error', text: t('remote.imBotTestFailed', res.detail ?? 'unknown') },
+          });
+        }
+      });
       return;
     }
     if (message.type === 'ready') {
@@ -5438,18 +6067,23 @@ export function createHarnessHostRuntime(
     onViewVisible: startIfNeeded,
     onWorkspaceChanged: () => active?.backend.controller.workspaceChanged(),
     executeCommand,
-    getRemoteState: () => remoteBridge.getState(),
+    getRemoteState: () => currentRemoteState() ?? remoteBridge.getState(),
     generateRemotePairing: (opts) => remoteBridge.generatePairing(opts),
     dispose: async () => {
       if (gatewayLogTimer) {
         clearTimeout(gatewayLogTimer);
         gatewayLogTimer = undefined;
       }
+      if (accountAutoRefreshTimer) {
+        clearInterval(accountAutoRefreshTimer);
+        accountAutoRefreshTimer = undefined;
+      }
       accountAuthFlow.dispose();
       terminalManager.dispose();
       await browserMcpServer.stop();
       await browserManager.dispose();
       for (const dispose of disposers.splice(0)) dispose();
+      await imBotManager.dispose();
       await remoteBridge.stop();
       clientHub.dispose();
       hub?.dispose();

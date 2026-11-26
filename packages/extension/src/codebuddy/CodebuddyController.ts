@@ -104,6 +104,7 @@ export function parseCreditsMultiplier(credits: unknown): number | undefined {
 }
 
 export interface CodebuddySpawnSessionParams {
+  readonly sessionId?: string;
   readonly resumeSessionId?: string;
   readonly model?: string;
   readonly effort?: string;
@@ -125,12 +126,14 @@ export interface CodebuddyControllerOptions extends ControllerHostOptions {
   readonly saveSessions: (sessions: readonly StoredSession[]) => void;
   readonly loadPreferredModel?: () => CodebuddyPreferredModel | undefined;
   readonly savePreferredModel?: (preferred: CodebuddyPreferredModel) => void;
+  readonly loadSessionModels?: () => Readonly<Record<string, CodebuddyPreferredModel>> | undefined;
+  readonly saveSessionModels?: (models: Readonly<Record<string, CodebuddyPreferredModel>>) => void;
   readonly loadOpenTabs?: () => readonly string[] | undefined;
   readonly saveOpenTabs?: (sessionIds: readonly string[]) => void;
-  readonly codebuddyConfigDir?: () => string | undefined;
+  readonly codebuddyConfigDir?: (sessionId?: string) => string | undefined;
   readonly signInHint?: string;
-  readonly boundProvider?: () => ProviderConfig | undefined;
-  readonly onProviderModelSelected?: (providerId: string, model: string) => void;
+  readonly boundProvider?: (sessionId?: string) => ProviderConfig | undefined;
+  readonly onProviderModelSelected?: (providerId: string, model: string, sessionId?: string) => void;
 }
 
 interface QueuedPrompt {
@@ -215,6 +218,8 @@ export class CodebuddyController implements ChatBackendController {
   private queueCounter = 0;
   private draftCounter = 0;
   private selectedModel: CodebuddyPreferredModel | undefined;
+  private readonly sessionModels = new Map<string, CodebuddyPreferredModel>();
+  private readonly linkProviderSigs = new Map<string, string>();
   private draftMode = 'auto';
   /** 回复进行中用户切换的权限模式，延后到下一轮发送前生效。 */
   private readonly pendingModes = new Map<string, string>();
@@ -227,14 +232,20 @@ export class CodebuddyController implements ChatBackendController {
   private readonly interactions: CodebuddyInteractionManager;
   private readonly publisher: ViewPublisher;
   private renderTimer: ReturnType<typeof setTimeout> | undefined;
-  private lastBoundProviderSig: string;
 
   constructor(private readonly options: CodebuddyControllerOptions) {
     this.workspacePath = options.workspacePath;
     this.activeId = options.loadActiveSessionId();
     this.stored = [...(options.loadSessions() ?? [])].filter((s) => !s.id.startsWith('pending:'));
     this.selectedModel = options.loadPreferredModel?.();
-    this.lastBoundProviderSig = this.boundProviderSig();
+    const restoredSessionModels = options.loadSessionModels?.();
+    if (restoredSessionModels) {
+      for (const [sid, model] of Object.entries(restoredSessionModels)) {
+        if (sid && !sid.startsWith('pending:') && model?.provider && model?.model) {
+          this.sessionModels.set(sid, model);
+        }
+      }
+    }
     this.publisher = new ViewPublisher(options.post, options.onModelChange);
     this.editorContext = new EditorContext(
       () => this.workbench,
@@ -488,21 +499,52 @@ export class CodebuddyController implements ChatBackendController {
     this.options.post({ type: 'backends', payload: this.backends() });
   }
 
-  private boundProviderSig(): string {
-    return JSON.stringify(this.options.boundProvider?.() ?? null);
+  private boundProviderSig(sessionId?: string): string {
+    return JSON.stringify(this.options.boundProvider?.(sessionId) ?? null);
+  }
+
+  private persistSessionModels(): void {
+    if (!this.options.saveSessionModels) return;
+    const out: Record<string, CodebuddyPreferredModel> = {};
+    for (const [sid, model] of this.sessionModels.entries()) {
+      if (sid && !sid.startsWith('pending:')) {
+        out[sid] = model;
+      }
+    }
+    this.options.saveSessionModels(out);
+  }
+
+  isSessionRunning(sessionId?: string): boolean {
+    const key = sessionId ?? this.activeId;
+    if (!key) return false;
+    return this.projections.get(key)?.running === true;
+  }
+
+  async onSessionChannelChanged(sessionId?: string): Promise<void> {
+    if (sessionId) {
+      if (!(this.projections.get(sessionId)?.running ?? false)) {
+        await this.closeSessionLink(sessionId);
+      }
+    } else {
+      for (const [sessionKey] of [...this.links.entries()]) {
+        if (this.projections.get(sessionKey)?.running) continue;
+        if (this.linkProviderSigs.get(sessionKey) !== this.boundProviderSig(sessionKey)) {
+          await this.closeSessionLink(sessionKey);
+        }
+      }
+    }
+    void this.refreshDiskSessions();
+    this.scheduleRender();
   }
 
   providersChanged(): void {
     if (this.options.providers) {
       this.options.post({ type: 'providers', payload: this.options.providers() });
     }
-    const nextSig = this.boundProviderSig();
-    if (nextSig !== this.lastBoundProviderSig) {
-      this.lastBoundProviderSig = nextSig;
-      for (const [sessionKey] of this.links) {
-        if (!(this.projections.get(sessionKey)?.running ?? false)) {
-          void this.closeSessionLink(sessionKey);
-        }
+    for (const [sessionKey] of [...this.links.entries()]) {
+      if (this.projections.get(sessionKey)?.running) continue;
+      if (this.linkProviderSigs.get(sessionKey) !== this.boundProviderSig(sessionKey)) {
+        void this.closeSessionLink(sessionKey);
       }
     }
     this.scheduleRender();
@@ -769,7 +811,7 @@ export class CodebuddyController implements ChatBackendController {
       const knownDisk = this.diskSessions.find((s) => s.id === sessionId);
       const filePath =
         knownDisk?.filePath ??
-        (await findCodebuddySessionFile(sessionId, this.workspacePath, this.options.codebuddyConfigDir?.()));
+        (await findCodebuddySessionFile(sessionId, this.workspacePath, this.options.codebuddyConfigDir?.(sessionId)));
       if (filePath) {
         const records = await readCodebuddySessionEvents(filePath);
         const projection = this.projectionFor(sessionId);
@@ -790,7 +832,7 @@ export class CodebuddyController implements ChatBackendController {
       const extraProjects = this.options.projects?.().recent.map((p) => p.path) ?? [];
       this.diskSessions = await scanCodebuddySessions(
         this.workspacePath,
-        this.options.codebuddyConfigDir?.(),
+        this.options.codebuddyConfigDir?.(this.activeId),
         extraProjects,
       );
       this.scheduleRender();
@@ -801,6 +843,7 @@ export class CodebuddyController implements ChatBackendController {
 
   private async closeSessionLink(sessionKey: string): Promise<void> {
     const link = this.links.get(sessionKey);
+    this.linkProviderSigs.delete(sessionKey);
     if (!link) return;
     this.links.delete(sessionKey);
     await link.dispose();
@@ -817,6 +860,19 @@ export class CodebuddyController implements ChatBackendController {
     if (link) {
       this.links.delete(oldKey);
       this.links.set(realSessionId, link);
+    }
+    const linkSig = this.linkProviderSigs.get(oldKey);
+    if (linkSig !== undefined) {
+      this.linkProviderSigs.delete(oldKey);
+      this.linkProviderSigs.set(realSessionId, linkSig);
+    }
+    const sessionModel = this.sessionModels.get(oldKey);
+    if (sessionModel) {
+      this.sessionModels.delete(oldKey);
+      if (!this.sessionModels.has(realSessionId)) {
+        this.sessionModels.set(realSessionId, sessionModel);
+      }
+      this.persistSessionModels();
     }
     const queue = this.queues.get(oldKey);
     if (queue) {
@@ -856,15 +912,17 @@ export class CodebuddyController implements ChatBackendController {
     if (existing?.running) return { key: currentKey, link: existing };
     if (!this.spawner) throw new Error(t('notConnected'));
 
-    const modelState = this.buildModelState();
+    const modelState = this.buildModelState(currentKey);
     const chosenModel = modelState.current?.model;
     const chosenEffort = modelState.current?.reasoningEffort;
     const projection = this.projectionFor(currentKey);
     const mode = projection.mode ?? this.draftMode;
     // bypassPermissions 通过客户端拦截器立即放行 can_use_tool，避免 HIGH/CRITICAL 或环境差异下仍拦截
     const cliMode = mode === 'bypassPermissions' ? 'default' : mode;
+    const spawnProviderSig = this.boundProviderSig(currentKey);
 
     const link = await this.spawner({
+      sessionId: currentKey,
       ...(isResume && !currentKey.startsWith('pending:') ? { resumeSessionId: currentKey } : {}),
       ...(chosenModel ? { model: chosenModel } : {}),
       ...(chosenEffort ? { effort: chosenEffort } : {}),
@@ -939,6 +997,7 @@ export class CodebuddyController implements ChatBackendController {
       },
       onExit: (code, signal, stderr) => {
         this.links.delete(currentKey);
+        this.linkProviderSigs.delete(currentKey);
         this.interactions.clear(currentKey);
         const proj = this.projections.get(currentKey);
         if (proj?.running) {
@@ -955,6 +1014,7 @@ export class CodebuddyController implements ChatBackendController {
     }
     if (link.running) {
       this.links.set(currentKey, link);
+      this.linkProviderSigs.set(currentKey, spawnProviderSig);
     }
     // 发送 initialize 获取最新模型和命令列表（不阻塞错误）
     const initResp = await link
@@ -1012,13 +1072,31 @@ export class CodebuddyController implements ChatBackendController {
     let sessionKey = this.activeId;
     let isResume = Boolean(sessionKey && !sessionKey.startsWith('pending:'));
     if (!sessionKey) {
+      const initialModel = this.buildModelState(undefined).current;
       sessionKey = `pending:${++this.draftCounter}`;
       isResume = false;
       this.activeId = sessionKey;
       this.tabs.setCurrentSession(sessionKey);
+      if (initialModel) {
+        this.sessionModels.set(sessionKey, {
+          provider: initialModel.provider,
+          model: initialModel.model,
+          ...(initialModel.reasoningEffort ? { effort: initialModel.reasoningEffort } : {}),
+        });
+      }
       const proj = this.projectionFor(sessionKey);
       proj.title = (prompt || t('acp.image')).replace(/\s+/gu, ' ').trim().slice(0, MAX_TITLE);
       proj.mode = this.draftMode;
+    } else if (!this.sessionModels.has(sessionKey)) {
+      const snapModel = this.buildModelState(sessionKey).current;
+      if (snapModel) {
+        this.sessionModels.set(sessionKey, {
+          provider: snapModel.provider,
+          model: snapModel.model,
+          ...(snapModel.reasoningEffort ? { effort: snapModel.reasoningEffort } : {}),
+        });
+        this.persistSessionModels();
+      }
     }
 
     this.editorContext.clearPinned();
@@ -1143,8 +1221,12 @@ export class CodebuddyController implements ChatBackendController {
 
   // ---------------------------------------------------------------- 模型与权限模式
 
-  private buildModelState(): ModelState {
-    const bound = this.options.boundProvider?.();
+  private modelEntryFor(sessionKey?: string): CodebuddyPreferredModel | undefined {
+    return (sessionKey ? this.sessionModels.get(sessionKey) : undefined) ?? this.selectedModel;
+  }
+
+  private buildModelState(sessionKey: string | undefined = this.activeId): ModelState {
+    const bound = this.options.boundProvider?.(sessionKey);
     const boundOpts: ModelOption[] =
       bound && bound.models.length > 0
         ? bound.models.map((m) => {
@@ -1176,16 +1258,17 @@ export class CodebuddyController implements ChatBackendController {
       model: firstOpt.model,
       ...(firstOpt.defaultEffort ? { effort: firstOpt.defaultEffort } : {}),
     };
+    const picked = this.modelEntryFor(sessionKey);
     const current: CodebuddyPreferredModel =
-      this.selectedModel &&
+      picked &&
       (bound
-        ? this.selectedModel.provider === bound.id &&
-          (bound.models.length === 0 || bound.models.some((m) => m.id === this.selectedModel!.model))
-        : this.selectedModel.provider === 'codebuddy' || this.selectedModel.provider === 'acp')
-        ? { ...this.selectedModel, provider: bound ? bound.id : 'codebuddy' }
+        ? picked.provider === bound.id &&
+          (bound.models.length === 0 || bound.models.some((m) => m.id === picked.model))
+        : picked.provider === 'codebuddy' || picked.provider === 'acp')
+        ? { ...picked, provider: bound ? bound.id : 'codebuddy' }
         : (defaultFromBound ?? fallbackFirst);
     if (bound && current.provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, current.model);
+      this.options.onProviderModelSelected?.(bound.id, current.model, sessionKey);
     }
 
     const exists = options.some((o) => o.provider === current.provider && o.model === current.model);
@@ -1212,21 +1295,29 @@ export class CodebuddyController implements ChatBackendController {
   }
 
   private async selectModel(provider: string, model: string, effort?: string): Promise<void> {
-    const bound = this.options.boundProvider?.();
+    const sessionKey = this.activeId;
+    const bound = this.options.boundProvider?.(sessionKey);
     if (bound && provider === bound.id) {
-      this.options.onProviderModelSelected?.(bound.id, model);
+      this.options.onProviderModelSelected?.(bound.id, model, sessionKey);
     }
-    const prevEffort = this.selectedModel?.effort;
-    const prevProvider = this.selectedModel?.provider;
-    this.selectedModel = { provider, model, ...(effort ? { effort } : {}) };
-    this.options.savePreferredModel?.(this.selectedModel);
+    const prev = this.modelEntryFor(sessionKey);
+    const prevEffort = prev?.effort;
+    const prevProvider = prev?.provider;
+    const nextModel: CodebuddyPreferredModel = { provider, model, ...(effort ? { effort } : {}) };
+    if (sessionKey) {
+      this.sessionModels.set(sessionKey, nextModel);
+      this.persistSessionModels();
+    } else {
+      this.selectedModel = nextModel;
+      this.options.savePreferredModel?.(nextModel);
+    }
 
-    if (this.activeId) {
-      const link = this.links.get(this.activeId);
+    if (sessionKey) {
+      const link = this.links.get(sessionKey);
       if (link?.running) {
-        const needsRespawn = (effort !== prevEffort || provider !== prevProvider) && !(this.projections.get(this.activeId)?.running ?? false);
+        const needsRespawn = (effort !== prevEffort || provider !== prevProvider) && !(this.projections.get(sessionKey)?.running ?? false);
         if (needsRespawn) {
-          await this.closeSessionLink(this.activeId);
+          await this.closeSessionLink(sessionKey);
         } else {
           await link.sendControlRequest({ subtype: 'set_model', model }, 8_000).catch(() => undefined);
         }

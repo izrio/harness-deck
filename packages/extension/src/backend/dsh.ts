@@ -4,6 +4,7 @@
  *   RuntimeManager ──endpoint──▶ DshConnection ──client──▶ ChatController ◀──messages──▶ Webview
  */
 import type { RuntimeStatus } from '@harness-deck/shared';
+import { buildProviderProxyScope } from '../accounts/SessionIsolationStore.ts';
 import { DshConnection } from '../dsh/DshConnection.ts';
 import { RuntimeManager, type RuntimeConfig } from '../runtime/RuntimeManager.ts';
 import { ChatController } from '../dsh/view/ChatController.ts';
@@ -53,6 +54,15 @@ export function createDshBackend(profile: Extract<BackendProfile, { kind: 'dsh' 
     restartRuntime: () => void manager.restart(),
     openWebUI: (sessionTitle) => void openWebUI(sessionTitle),
     boundProvider: () => host.boundProvider?.(profile.id),
+    ...(host.onProviderModelSelected
+      ? {
+          onProviderModelSelected: (providerId: string, model: string, sessionId?: string) =>
+            host.onProviderModelSelected?.(providerId, model, {
+              backendId: profile.id,
+              ...(sessionId ? { sessionId } : {}),
+            }),
+        }
+      : {}),
   });
 
   const disposers = [
@@ -107,6 +117,7 @@ async function readRuntimeConfig(profile: Extract<BackendProfile, { kind: 'dsh' 
         proxy.origin,
         proxy.token,
         host.storageRoot,
+        buildProviderProxyScope(profile.id),
       );
       if (providerPatch?.env) {
         launchEnv = host.processEnv(providerPatch.env);
