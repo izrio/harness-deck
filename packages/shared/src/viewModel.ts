@@ -701,11 +701,52 @@ export interface RecentProject {
   readonly isCurrent?: boolean;
 }
 
+/** 云端开发环境类型（用于图标/引导文案提示）。 */
+export type CloudEnvironmentProvider = 'colab' | 'linux' | 'custom';
+
+/** 云端开发环境连接状态。 */
+export type CloudEnvironmentStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+
+/** 已保存的云端开发环境条目（对应一台运行 Halo 无头服务的远端主机）。 */
+export interface CloudEnvironmentView {
+  readonly id: string;
+  readonly name: string;
+  readonly endpointUrl: string;
+  readonly provider: CloudEnvironmentProvider;
+  readonly status: CloudEnvironmentStatus;
+  readonly hasCredentials: boolean;
+  readonly remoteProjectName?: string;
+  readonly remoteProjectPath?: string;
+  readonly lastConnectedAt?: number;
+  readonly error?: string;
+}
+
+/** 当前面板激活的是本地工作区还是某个云端环境。 */
+export type ActiveEnvironmentView =
+  | { readonly kind: 'local' }
+  | {
+      readonly kind: 'cloud';
+      readonly envId: string;
+      readonly name: string;
+      readonly provider: CloudEnvironmentProvider;
+      readonly endpointUrl: string;
+      readonly status: CloudEnvironmentStatus;
+      readonly remoteProjectName?: string;
+      readonly remoteProjectPath?: string;
+      readonly error?: string;
+    };
+
 /** 项目与 worktree 设置状态。 */
 export interface ProjectsState {
   readonly currentPath?: string;
   readonly recent: readonly RecentProject[];
   readonly configs: Readonly<Record<string, WorktreeProjectConfig>>;
+  /** 已配置的云端开发环境列表（Google Colab / 远端 Linux / 自定义 Halo Server）。 */
+  readonly cloudEnvironments?: readonly CloudEnvironmentView[];
+  /** 当前激活的环境（缺省视为本地）。 */
+  readonly activeEnvironment?: ActiveEnvironmentView;
+  /** 当连接到云端环境时，远端主机上可切换的项目目录列表。 */
+  readonly cloudRecent?: readonly RecentProject[];
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1149,34 +1190,135 @@ export interface SourceControlPrStatus {
   readonly checks?: SourceControlPrChecks;
 }
 
+export type SourceControlInProgressOp = 'merge' | 'rebase' | 'cherry-pick' | 'revert';
+
+export type SourceControlRefKind = 'head' | 'local' | 'remote' | 'tag';
+
+export interface SourceControlRefBadge {
+  readonly name: string;
+  readonly kind: SourceControlRefKind;
+}
+
+/** Git 分支或标签条目（用于 IDEA 风格分支树与快捷切换）。 */
+export interface SourceControlBranchView {
+  readonly name: string;
+  readonly kind: 'local' | 'remote' | 'tag';
+  readonly current?: boolean;
+  readonly upstream?: string;
+  readonly ahead?: number;
+  readonly behind?: number;
+  readonly lastCommitHash?: string;
+  readonly lastCommitSubject?: string;
+  readonly lastCommitDate?: number;
+}
+
+/** Git 贮藏（Stash）条目。 */
+export interface SourceControlStashView {
+  readonly index: number;
+  readonly ref: string;
+  readonly branch?: string;
+  readonly message: string;
+  readonly date?: number;
+}
+
+/** Git 日志列表中的单条提交（含父提交列表，用于渲染 DAG 提交图谱）。 */
+export interface SourceControlCommitView {
+  readonly hash: string;
+  readonly shortHash: string;
+  readonly parents: readonly string[];
+  readonly author: string;
+  readonly email?: string;
+  readonly date: number;
+  readonly subject: string;
+  readonly refs: readonly SourceControlRefBadge[];
+}
+
+/** 某次提交或贮藏中的单个变更文件。 */
+export interface SourceControlCommitFileView {
+  readonly path: string;
+  readonly oldPath?: string;
+  readonly status: SourceControlFileStatus;
+  readonly additions?: number;
+  readonly deletions?: number;
+}
+
+/** 单次提交的完整详情（含正文与文件改动列表）。 */
+export interface SourceControlCommitDetailView {
+  readonly hash: string;
+  readonly shortHash: string;
+  readonly parents: readonly string[];
+  readonly author: string;
+  readonly email?: string;
+  readonly date: number;
+  readonly subject: string;
+  readonly body: string;
+  readonly files: readonly SourceControlCommitFileView[];
+}
+
 export interface SourceControlActionResult {
   readonly kind:
     | 'commit'
+    | 'commitAndPush'
+    | 'amend'
     | 'push'
     | 'pr'
     | 'stage'
+    | 'stageAll'
     | 'unstage'
+    | 'unstageAll'
     | 'discard'
+    | 'discardAll'
     | 'checkout'
     | 'branch'
+    | 'renameBranch'
     | 'deleteBranch'
+    | 'merge'
+    | 'rebase'
     | 'pull'
     | 'fetch'
+    | 'stashSave'
+    | 'stashApply'
+    | 'stashPop'
+    | 'stashDrop'
+    | 'cherryPick'
+    | 'revertCommit'
+    | 'reset'
+    | 'continueOp'
+    | 'abortOp'
+    | 'resolveConflict'
     | 'settle';
   readonly ok: boolean;
   readonly at: number;
   readonly message?: string;
 }
 
-/** 源码控制只读状态：当前工作区的分支、远程与未提交改动。 */
+/** 源码控制只读状态：当前工作区的分支、远程、贮藏、进行中操作与未提交改动。 */
 export interface SourceControlState {
   /** 当前工作区是否是 Git 仓库。 */
   readonly available: boolean;
   /** 仓库根目录（绝对路径）。 */
   readonly root?: string;
   readonly branch?: string;
-  /** 本地分支列表（用于分支切换）。 */
+  /** 当前分支对应的上游引用名（如 `origin/main`）。 */
+  readonly upstream?: string;
+  /** 领先上游的提交数（待推送）。 */
+  readonly ahead?: number;
+  /** 落后上游的提交数（待拉取）。 */
+  readonly behind?: number;
+  /** 本地分支列表（用于分支切换，保持兼容）。 */
   readonly branches?: readonly string[];
+  /** 远程分支列表（如 `origin/main`）。 */
+  readonly remoteBranches?: readonly string[];
+  /** 标签列表。 */
+  readonly tags?: readonly string[];
+  /** 分支与标签完整元数据（本地 / 远程 / 标签，含最近提交与领先/落后计数）。 */
+  readonly branchDetails?: readonly SourceControlBranchView[];
+  /** 贮藏（Stash）列表。 */
+  readonly stashes?: readonly SourceControlStashView[];
+  /** 当前正在进行的合并/变基/拣选/回滚操作（常伴随冲突）。 */
+  readonly inProgressOp?: SourceControlInProgressOp;
+  /** 最近一次提交的完整信息（用于 Amend 自动回填）。 */
+  readonly lastCommitMessage?: string;
   readonly remote?: string;
   readonly files: readonly SourceControlFileView[];
   readonly additions: number;
@@ -1407,7 +1549,7 @@ export interface AccountsState {
 // ────────────────────────────────────────────────────────────
 
 export type ClientSurface = 'ide' | 'mobile-web';
-export type RemoteScope = 'read-only' | 'operate';
+export type RemoteScope = 'read-only' | 'operate' | 'owner';
 export type RemoteRouteKind = 'lan' | 'tailscale' | 'quick-tunnel' | 'tunnel';
 export type RemoteWebhookPreset =
   | 'bark'
@@ -1764,4 +1906,81 @@ export interface BrowserState {
   /** 最近网络请求记录（环形缓冲，供 DevTools Network 面板调试）。 */
   readonly networkRequests?: readonly BrowserNetworkEntry[];
   readonly error?: string;
+}
+
+// ────────────────────────────────────────────────────────────
+// 工作区文件 -> 远端存储（Google Cloud Storage / Google Drive / WebDAV）
+// ────────────────────────────────────────────────────────────
+
+export type RemoteStorageKind = 'google-cloud-storage' | 'google-drive' | 'webdav';
+
+/** 已保存的远端存储源视图（不含任何密钥或私钥）。 */
+export interface RemoteStorageView {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: RemoteStorageKind;
+  /** WebDAV 服务地址（如 https://dav.example.com/dav）。 */
+  readonly endpoint?: string;
+  /** Google Cloud Storage Bucket 名称。 */
+  readonly bucket?: string;
+  /** 根目录路径/前缀或 Google Drive 根文件夹 ID（缺省为根目录）。 */
+  readonly rootPath?: string;
+  /** 脱敏展示用账号标识（WebDAV 用户名或 Service Account client_email）。 */
+  readonly username?: string;
+  /** 是否已在本地 SecretStorage 中保存认证凭据。 */
+  readonly hasSecret: boolean;
+  readonly createdAt: number;
+}
+
+/** 远端文件/目录条目。 */
+export interface RemoteFileEntry {
+  /** 底层唯一标识（GCS object key / Google Drive fileId / WebDAV 相对路径）。 */
+  readonly id: string;
+  readonly name: string;
+  /** 相对于存储根路径的规范化路径（以 `/` 分隔）。 */
+  readonly path: string;
+  readonly kind: 'file' | 'directory';
+  readonly size?: number;
+  readonly modifiedAt?: number;
+  readonly mimeType?: string;
+}
+
+export interface RemoteStorageBreadcrumb {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** 列出远端某目录内容的单播结果。 */
+export interface RemoteStorageListResult {
+  readonly requestId: number;
+  readonly storageId: string;
+  readonly dirPath: string;
+  readonly breadcrumbs: readonly RemoteStorageBreadcrumb[];
+  readonly items: readonly RemoteFileEntry[];
+  readonly error?: string;
+}
+
+/** 远端存储一键登录授权进度与结果。 */
+export interface RemoteStorageAuthState {
+  readonly status: 'idle' | 'authorizing' | 'succeeded' | 'error';
+  readonly kind?: RemoteStorageKind;
+  readonly method?: 'oauth' | 'gcloud';
+  readonly email?: string;
+  readonly storageId?: string;
+  readonly error?: string;
+}
+
+/** 已配置的远端存储源列表状态。 */
+export interface RemoteStoragesState {
+  readonly items: readonly RemoteStorageView[];
+  /** 是否已配置 Google OAuth 桌面端 Client ID（来自本地保存或环境变量）。 */
+  readonly googleOAuthConfigured?: boolean;
+  /** 已保存的 Google OAuth Client ID（非敏感，用于表单回显）。 */
+  readonly googleClientId?: string;
+  /** 本机是否检测到 gcloud CLI（可零配置拉起官方浏览器授权）。 */
+  readonly gcloudAvailable?: boolean;
+  /** 本机是否已存在可直接复用的 gcloud ADC 登录态。 */
+  readonly gcloudAdcReady?: boolean;
+  /** 当前进行中或最近一次一键授权的状态。 */
+  readonly auth?: RemoteStorageAuthState;
 }

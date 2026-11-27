@@ -376,16 +376,12 @@ async function inspectCodebuddy(params: {
 async function queryAntigravitySlotQuota(params: {
   readonly rawTokenJson?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
-  readonly getHttpProxy?: () => string | undefined;
-  readonly clientVersion?: string;
   readonly cliCommand?: string;
   readonly runCliUsage?: QuotaServiceOptions['runCliUsage'];
 }): Promise<QuotaView | undefined> {
   return await queryAntigravityQuota({
     ...(params.rawTokenJson !== undefined ? { rawTokenJson: params.rawTokenJson } : {}),
     ...(params.env ? { env: params.env } : {}),
-    ...(params.getHttpProxy ? { getHttpProxy: params.getHttpProxy } : {}),
-    ...(params.clientVersion ? { clientVersion: params.clientVersion } : {}),
     ...(params.cliCommand ? { cliCommand: params.cliCommand } : {}),
     ...(params.runCliUsage ? { runCliUsage: params.runCliUsage } : {}),
   });
@@ -445,11 +441,10 @@ async function inspectAntigravity(params: {
   readonly includeQuota?: boolean;
   readonly getHttpProxy?: () => string | undefined;
   readonly fetchImpl?: FetchLike;
-  readonly clientVersion?: string;
   readonly cliCommand?: string;
   readonly runCliUsage?: QuotaServiceOptions['runCliUsage'];
 }): Promise<AccountInspectionResult> {
-  const { accountId, isActiveSlot, env, secrets, now, includeQuota, getHttpProxy, fetchImpl, clientVersion, cliCommand, runCliUsage } = params;
+  const { accountId, isActiveSlot, env, secrets, now, includeQuota, getHttpProxy, fetchImpl, cliCommand, runCliUsage } = params;
   const slotKey = accountSlotSecretKey(accountId);
   const storedRaw = (await secrets.get(slotKey))?.trim();
   let raw = storedRaw;
@@ -476,8 +471,6 @@ async function inspectAntigravity(params: {
       if (includeQuota === true && activeCliCommand) {
         const cliQuota = await queryAntigravitySlotQuota({
           env,
-          ...(getHttpProxy ? { getHttpProxy } : {}),
-          ...(clientVersion ? { clientVersion } : {}),
           cliCommand: activeCliCommand,
           ...(runCliUsage ? { runCliUsage } : {}),
         }).catch(() => undefined);
@@ -529,8 +522,6 @@ async function inspectAntigravity(params: {
     if (isSystemAccountId(accountId) && isActiveSlot !== false && includeQuota === true && activeCliCommand) {
       const cliQuota = await queryAntigravitySlotQuota({
         env,
-        ...(getHttpProxy ? { getHttpProxy } : {}),
-        ...(clientVersion ? { clientVersion } : {}),
         cliCommand: activeCliCommand,
         ...(runCliUsage ? { runCliUsage } : {}),
       }).catch(() => undefined);
@@ -559,9 +550,7 @@ async function inspectAntigravity(params: {
   const expired = accessTokenExpired && !refreshToken;
 
   const shouldQueryUserInfo = !email && !accessTokenExpired && Boolean(accessToken) && (includeQuota === true || Boolean(fetchImpl));
-  const shouldQueryQuota =
-    includeQuota === true &&
-    ((!accessTokenExpired && Boolean(accessToken)) || (Boolean(activeCliCommand) && !expired));
+  const shouldQueryQuota = includeQuota === true && Boolean(activeCliCommand) && !expired;
 
   const [fetchedEmail, quota] = await Promise.all([
     shouldQueryUserInfo
@@ -575,8 +564,6 @@ async function inspectAntigravity(params: {
       ? queryAntigravitySlotQuota({
           rawTokenJson: raw,
           env,
-          ...(getHttpProxy ? { getHttpProxy } : {}),
-          ...(clientVersion ? { clientVersion } : {}),
           ...(activeCliCommand ? { cliCommand: activeCliCommand } : {}),
           ...(runCliUsage ? { runCliUsage } : {}),
         }).catch(() => undefined)
@@ -658,7 +645,6 @@ export async function inspectOfficialAccount(params: {
   readonly includeQuota?: boolean;
   readonly getHttpProxy?: () => string | undefined;
   readonly fetchImpl?: FetchLike;
-  readonly clientVersion?: string;
   readonly cliCommand?: string;
   readonly runAntigravityUsageCli?: QuotaServiceOptions['runCliUsage'];
   readonly now?: () => number;
@@ -674,7 +660,6 @@ export async function inspectOfficialAccount(params: {
     includeQuota,
     getHttpProxy,
     fetchImpl,
-    clientVersion,
     cliCommand,
     runAntigravityUsageCli,
   } = params;
@@ -753,7 +738,6 @@ export async function inspectOfficialAccount(params: {
       ...(includeQuota !== undefined ? { includeQuota } : {}),
       ...(getHttpProxy ? { getHttpProxy } : {}),
       ...(fetchImpl ? { fetchImpl } : {}),
-      ...(clientVersion ? { clientVersion } : {}),
       ...(cliCommand ? { cliCommand } : {}),
       ...(runAntigravityUsageCli ? { runCliUsage: runAntigravityUsageCli } : {}),
     });

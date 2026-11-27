@@ -4,7 +4,7 @@
  * - 自动应答 `SYSTEM/ping`（原样回传 `opaque`）、处理 `SYSTEM/disconnect` 平滑重连、即时 ACK `CALLBACK` 帧
  * - 优先通过入站 `sessionWebhook` 回复 Markdown；过期或主动推送时自动回退到钉钉 OpenAPI（`accessToken`）
  */
-import WebSocket from 'ws';
+import { createProxyAwareWebSocket, type FetchLike } from '../../providers/proxyFetch.ts';
 import {
   computeReconnectDelay,
   rawDataToBuffer,
@@ -27,7 +27,7 @@ export interface DingTalkBotAdapterOptions {
   readonly clientId: string;
   readonly clientSecret: string;
   readonly apiBase?: string;
-  readonly fetchImpl?: typeof fetch;
+  readonly fetchImpl?: FetchLike;
   readonly createWebSocket?: WebSocketFactory;
   readonly reconnectBaseMs?: number;
   readonly now?: () => number;
@@ -164,7 +164,7 @@ export class DingTalkBotAdapter implements ImBotAdapter {
     }
 
     if (!this.running) return;
-    const factory = this.options.createWebSocket ?? ((u: string) => new WebSocket(u));
+    const factory = this.options.createWebSocket ?? createProxyAwareWebSocket();
     let ws: ImBotSocketLike;
     try {
       ws = factory(wsUrl);
@@ -173,9 +173,11 @@ export class DingTalkBotAdapter implements ImBotAdapter {
       return;
     }
     this.socket = ws;
+    let lastError: string | undefined;
 
     ws.on('open', () => {
       if (this.socket !== ws || !this.running) return;
+      lastError = undefined;
       this.reconnectAttempt = 0;
       const now = (this.options.now ?? Date.now)();
       this.setStatus({ status: 'connected', lastConnectedAt: now });
@@ -195,15 +197,17 @@ export class DingTalkBotAdapter implements ImBotAdapter {
 
     ws.on('error', (err) => {
       if (this.socket !== ws || !this.running) return;
-      this.callbacks.log(`[IM Bot:dingtalk] WebSocket error: ${err.message}`);
+      lastError = err.message || String(err);
+      this.callbacks.log(`[IM Bot:dingtalk] WebSocket error: ${lastError}`);
     });
 
     ws.on('close', (code, reason) => {
       if (this.socket !== ws) return;
       this.socket = undefined;
       if (!this.running) return;
-      const text = reason?.toString('utf8') || `code ${code}`;
-      this.scheduleReconnect(`WebSocket closed (${text})`);
+      const reasonText = reason?.toString('utf8').trim();
+      const detail = reasonText ? `WebSocket closed (${reasonText})` : (lastError || `WebSocket closed (code ${code})`);
+      this.scheduleReconnect(detail);
     });
   }
 

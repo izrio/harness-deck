@@ -32,11 +32,17 @@ import type {
   ProviderModelItem,
   ProvidersState,
   QuotaView,
+  RemoteFileEntry,
   RemoteScope,
   RemoteState,
+  RemoteStorageBreadcrumb,
+  RemoteStoragesState,
   RuntimeStatus,
   SessionHeader,
   SessionListItem,
+  SourceControlCommitDetailView,
+  SourceControlCommitFileView,
+  SourceControlCommitView,
   BackendsState,
   TabsState,
   TerminalState,
@@ -157,6 +163,25 @@ export interface ViewState {
   readonly fileCandidates: { readonly requestId: number; readonly items: readonly FileCandidate[] };
   /** 右侧面板「文件」标签页的工作区文件列表与加载态。 */
   readonly panelFiles: { readonly requestId: number; readonly items: readonly FileCandidate[]; readonly loading: boolean };
+  /** 已配置的远端存储源列表（Google Cloud Storage / Google Drive / WebDAV）。 */
+  readonly remoteStorages: RemoteStoragesState;
+  /** 右侧面板当前正在浏览的远端文件目录内容。 */
+  readonly remoteFiles: {
+    readonly requestId: number;
+    readonly storageId?: string;
+    readonly dirPath: string;
+    readonly breadcrumbs: readonly RemoteStorageBreadcrumb[];
+    readonly items: readonly RemoteFileEntry[];
+    readonly loading: boolean;
+    readonly error?: string;
+  };
+  /** 最近一次本地或远端文件写操作结果（用于触发列表自动刷新）。 */
+  readonly lastFileAction?: {
+    readonly storageId: string;
+    readonly action: 'upload' | 'download' | 'delete' | 'mkdir' | 'test';
+    readonly ok: boolean;
+    readonly n: number;
+  };
   readonly toasts: readonly Toast[];
   /**
    * 把一段文字放进输入框；`n` 每次递增，输入框据此更新。
@@ -206,6 +231,24 @@ export interface ViewState {
     readonly message?: string;
     readonly title?: string;
     readonly body?: string;
+    readonly error?: string;
+  };
+  readonly gitLogResult?: {
+    readonly requestId: number;
+    readonly commits: readonly SourceControlCommitView[];
+    readonly hasMore: boolean;
+    readonly append?: boolean;
+    readonly error?: string;
+  };
+  readonly gitCommitDetailResult?: {
+    readonly requestId: number;
+    readonly detail?: SourceControlCommitDetailView;
+    readonly error?: string;
+  };
+  readonly gitStashDetailResult?: {
+    readonly requestId: number;
+    readonly index: number;
+    readonly files: readonly SourceControlCommitFileView[];
     readonly error?: string;
   };
   /** 图片内容缓存：`local:<localId>` 或 attachmentId → data URL；'loading' 读取中，'error' 读不到。 */
@@ -301,6 +344,8 @@ const initialState: ViewState = {
   commands: [],
   fileCandidates: { requestId: -1, items: [] },
   panelFiles: { requestId: -1, items: [], loading: false },
+  remoteStorages: { items: [] },
+  remoteFiles: { requestId: -1, dirPath: '', breadcrumbs: [], items: [], loading: false },
   toasts: [],
   prefill: { text: '', n: 0, mode: 'replace' },
   pendingImages: { images: [], n: 0 },
@@ -547,6 +592,31 @@ export function requestPanelFiles(query: string): void {
   postToHost({ type: 'searchFiles', payload: { requestId, query } });
 }
 
+export function requestRemoteFiles(storageId: string, dirPath = '', query = ''): void {
+  const requestId = ++nextPanelSearchId;
+  const sameTarget = state.remoteFiles.storageId === storageId && state.remoteFiles.dirPath === dirPath;
+  set({
+    remoteFiles: {
+      requestId,
+      storageId,
+      dirPath,
+      breadcrumbs: sameTarget ? state.remoteFiles.breadcrumbs : [],
+      items: sameTarget ? state.remoteFiles.items : [],
+      loading: true,
+      error: undefined,
+    },
+  });
+  postToHost({
+    type: 'listRemoteFiles',
+    payload: {
+      requestId,
+      storageId,
+      ...(dirPath ? { dirPath } : {}),
+      ...(query ? { query } : {}),
+    },
+  });
+}
+
 function normalizeSettingsTab(tab: SettingsTab | 'interface' | 'extensions'): SettingsTab {
   if (tab === 'interface') return 'appearance';
   if (tab === 'extensions') return 'skills';
@@ -707,6 +777,7 @@ export function applyHostMessage(message: HostToWebview): void {
         ...(p.projects ? { projects: p.projects } : {}),
         ...(p.workbench ? { workbench: p.workbench } : {}),
         ...(p.remote !== undefined ? { remote: p.remote } : {}),
+        ...(p.remoteStorages ? { remoteStorages: p.remoteStorages } : {}),
         ...(p.terminal ? { terminal: p.terminal } : {}),
         ...(p.browser ? { browser: p.browser } : {}),
       });
@@ -848,6 +919,60 @@ export function applyHostMessage(message: HostToWebview): void {
         set({ fileCandidates: message.payload });
       }
       return;
+    case 'remoteStorages':
+      set({ remoteStorages: message.payload });
+      return;
+    case 'remoteStorageAuthProgress':
+      set({
+        remoteStorages: {
+          ...state.remoteStorages,
+          auth: message.payload,
+        },
+      });
+      return;
+    case 'remoteFilesListed':
+      if (message.payload.requestId >= state.remoteFiles.requestId) {
+        set({
+          remoteFiles: {
+            requestId: message.payload.requestId,
+            storageId: message.payload.storageId,
+            dirPath: message.payload.dirPath,
+            breadcrumbs: message.payload.breadcrumbs,
+            items: message.payload.items,
+            loading: false,
+            ...(message.payload.error ? { error: message.payload.error } : {}),
+          },
+        });
+      }
+      return;
+    case 'remoteFileActionDone': {
+      const dl = message.payload.download;
+      if (dl && typeof window !== 'undefined' && typeof document !== 'undefined') {
+        try {
+          const binary = atob(dl.dataBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+          const blob = new Blob([bytes], { type: dl.mimeType || 'application/octet-stream' });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = dl.name;
+          anchor.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1_000);
+        } catch {
+          // ignore download trigger failures in test env
+        }
+      }
+      set({
+        lastFileAction: {
+          storageId: message.payload.storageId,
+          action: message.payload.action,
+          ok: message.payload.ok,
+          n: (state.lastFileAction?.n ?? 0) + 1,
+        },
+      });
+      return;
+    }
     case 'items': {
       const patch = message.payload;
       if (patch.reset) {
@@ -916,6 +1041,15 @@ export function applyHostMessage(message: HostToWebview): void {
       return;
     case 'sourceControlDraftGenerated':
       set({ draftGeneratedResult: message.payload });
+      return;
+    case 'sourceControlLogResult':
+      set({ gitLogResult: message.payload });
+      return;
+    case 'sourceControlCommitDetail':
+      set({ gitCommitDetailResult: message.payload });
+      return;
+    case 'sourceControlStashDetail':
+      set({ gitStashDetailResult: message.payload });
       return;
     case 'terminalState':
       set({ terminal: message.payload });

@@ -11,6 +11,11 @@ const READ_ONLY_ALLOWED_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'loadOlder',
   'openDiff',
   'openSourceControlDiff',
+  'sourceControlFetchLog',
+  'sourceControlFetchCommitDetail',
+  'sourceControlOpenCommitFileDiff',
+  'sourceControlFetchStashDetail',
+  'sourceControlOpenStashFileDiff',
   'previewApproval',
   'previewMarkdown',
   'previewFile',
@@ -28,6 +33,8 @@ const READ_ONLY_ALLOWED_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'fetchSkillMarket',
   'fetchMcpMarket',
   'browserGetConsoleObject',
+  'listRemoteFiles',
+  'previewRemoteFile',
 ]);
 
 /** 无论何种远程作用域都默认禁止的高危宿主机配置与远程管理写操作（必须回到本机 IDE 操作）。 */
@@ -91,6 +98,16 @@ const REMOTE_BLOCKED_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'setAccountAutomation',
   'importAccounts',
   'exportAccounts',
+  'addCloudEnvironment',
+  'updateCloudEnvironment',
+  'connectCloudEnvironment',
+  'disconnectCloudEnvironment',
+  'removeCloudEnvironment',
+  'switchCloudProject',
+  'upsertRemoteStorage',
+  'deleteRemoteStorage',
+  'startRemoteStorageOAuth',
+  'cancelRemoteStorageOAuth',
 ]);
 
 export function extractHostname(hostHeader: string): string | undefined {
@@ -132,6 +149,10 @@ export function authorizeRemoteMessage(
   scope: RemoteScope,
   message: WebviewToHost,
 ): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
+  // 无头云端宿主签发的 owner 拥有者权限：允许在无本地 IDE 的远端主机上管理目录、底层、服务商与账号
+  if (scope === 'owner') {
+    return { ok: true };
+  }
   if (REMOTE_BLOCKED_TYPES.has(message.type)) {
     return { ok: false, reason: `Remote clients cannot execute host configuration action "${message.type}"` };
   }

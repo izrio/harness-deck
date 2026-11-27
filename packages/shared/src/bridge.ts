@@ -28,8 +28,14 @@ import type {
   QuotaView,
   RemoteScope,
   RemoteState,
+  RemoteStorageAuthState,
+  RemoteStorageListResult,
+  RemoteStoragesState,
   SessionHeader,
   SessionListItem,
+  SourceControlCommitDetailView,
+  SourceControlCommitFileView,
+  SourceControlCommitView,
   BackendsState,
   TabsState,
   TerminalState,
@@ -128,10 +134,16 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('removeWorktree'),
     payload: z.object({ path: z.string().min(1).max(4_096), confirmed: z.boolean().optional() }),
   }),
-  /** 提交改动（显式动作；stageAll 为 false 时仅提交已暂存文件）。 */
+  /** 提交改动（支持 IDEA 风格按勾选文件提交、Amend 修改上次提交与提交并推送）。 */
   z.object({
     type: z.literal('sourceControlCommit'),
-    payload: z.object({ message: z.string().min(1).max(5_000), stageAll: z.boolean().optional() }),
+    payload: z.object({
+      message: z.string().min(1).max(5_000),
+      stageAll: z.boolean().optional(),
+      files: z.array(z.string().min(1).max(4_096)).max(500).optional(),
+      amend: z.boolean().optional(),
+      push: z.boolean().optional(),
+    }),
   }),
   /** 推送当前分支（显式动作，不 force）。 */
   z.object({ type: z.literal('sourceControlPush'), payload: empty }),
@@ -140,7 +152,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('sourceControlCreatePr'),
     payload: z.object({ title: z.string().min(1).max(500), body: z.string().max(20_000) }),
   }),
-  /** 单文件暂存 / 取消暂存 / 撤销改动（P0-2）。 */
+  /** 单文件与批量暂存 / 取消暂存 / 撤销改动（P0-2）。 */
   z.object({
     type: z.literal('sourceControlStageFile'),
     payload: z.object({ path: z.string().min(1).max(4_096) }),
@@ -149,6 +161,8 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('sourceControlUnstageFile'),
     payload: z.object({ path: z.string().min(1).max(4_096) }),
   }),
+  z.object({ type: z.literal('sourceControlStageAll'), payload: empty }),
+  z.object({ type: z.literal('sourceControlUnstageAll'), payload: empty }),
   z.object({
     type: z.literal('sourceControlDiscardFile'),
     payload: z.object({
@@ -156,6 +170,10 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       untracked: z.boolean().optional(),
       confirmed: z.boolean().optional(),
     }),
+  }),
+  z.object({
+    type: z.literal('sourceControlDiscardAll'),
+    payload: z.object({ confirmed: z.boolean().optional() }),
   }),
   /** 按 Hunk 暂存或撤销改动（P0-1 / P0-2）。 */
   z.object({
@@ -166,14 +184,24 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('sourceControlDiscardHunk'),
     payload: z.object({ patch: z.string().min(1).max(500_000), confirmed: z.boolean().optional() }),
   }),
-  /** 分支切换 / 新建分支 / 删除分支 / 拉取 / 抓取（P0-2）。 */
+  /** 分支切换 / 新建（可选起点）/ 重命名 / 删除 / 合并 / 变基 / 拉取 / 抓取。 */
   z.object({
     type: z.literal('sourceControlCheckoutBranch'),
     payload: z.object({ branch: z.string().min(1).max(200) }),
   }),
   z.object({
     type: z.literal('sourceControlCreateBranch'),
-    payload: z.object({ branch: z.string().min(1).max(200) }),
+    payload: z.object({
+      branch: z.string().min(1).max(200),
+      startPoint: z.string().min(1).max(200).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('sourceControlRenameBranch'),
+    payload: z.object({
+      oldName: z.string().trim().min(1).max(200),
+      newName: z.string().trim().min(1).max(200),
+    }),
   }),
   z.object({
     type: z.literal('sourceControlDeleteBranch'),
@@ -183,8 +211,106 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
       confirmed: z.boolean().optional(),
     }),
   }),
+  z.object({
+    type: z.literal('sourceControlMergeBranch'),
+    payload: z.object({ branch: z.string().trim().min(1).max(200) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlRebaseBranch'),
+    payload: z.object({ branch: z.string().trim().min(1).max(200) }),
+  }),
   z.object({ type: z.literal('sourceControlPull'), payload: empty }),
   z.object({ type: z.literal('sourceControlFetch'), payload: empty }),
+  /** 进行中合并/变基/拣选/回滚操作控制与单文件冲突解决。 */
+  z.object({ type: z.literal('sourceControlContinueOp'), payload: empty }),
+  z.object({ type: z.literal('sourceControlAbortOp'), payload: empty }),
+  z.object({
+    type: z.literal('sourceControlResolveConflict'),
+    payload: z.object({
+      path: z.string().min(1).max(4_096),
+      strategy: z.enum(['ours', 'theirs', 'mark']),
+    }),
+  }),
+  /** Git 提交日志（DAG 图谱）、提交详情、历史文件 Diff 与提交操作（Cherry-pick / Revert / Reset）。 */
+  z.object({
+    type: z.literal('sourceControlFetchLog'),
+    payload: z.object({
+      requestId: z.number().int(),
+      query: z.string().max(200).optional(),
+      branch: z.string().max(200).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      skip: z.number().int().min(0).max(10_000).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('sourceControlFetchCommitDetail'),
+    payload: z.object({
+      requestId: z.number().int(),
+      hash: z.string().regex(/^[0-9a-fA-F]{4,64}$/u),
+    }),
+  }),
+  z.object({
+    type: z.literal('sourceControlOpenCommitFileDiff'),
+    payload: z.object({
+      hash: z.string().regex(/^[0-9a-fA-F]{4,64}$/u),
+      path: z.string().min(1).max(4_096),
+      oldPath: z.string().min(1).max(4_096).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('sourceControlCherryPick'),
+    payload: z.object({ hash: z.string().regex(/^[0-9a-fA-F]{4,64}$/u) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlRevertCommit'),
+    payload: z.object({ hash: z.string().regex(/^[0-9a-fA-F]{4,64}$/u) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlResetToCommit'),
+    payload: z.object({
+      hash: z.string().regex(/^[0-9a-fA-F]{4,64}$/u),
+      mode: z.enum(['soft', 'mixed', 'hard']),
+      confirmed: z.boolean().optional(),
+    }),
+  }),
+  /** Git 贮藏（Stash）：新建、查看文件与 Diff、Apply / Pop / Drop。 */
+  z.object({
+    type: z.literal('sourceControlStashSave'),
+    payload: z.object({
+      message: z.string().max(500).optional(),
+      includeUntracked: z.boolean().optional(),
+      paths: z.array(z.string().min(1).max(4_096)).max(500).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('sourceControlStashApply'),
+    payload: z.object({ index: z.number().int().min(0).max(500) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlStashPop'),
+    payload: z.object({ index: z.number().int().min(0).max(500) }),
+  }),
+  z.object({
+    type: z.literal('sourceControlStashDrop'),
+    payload: z.object({
+      index: z.number().int().min(0).max(500),
+      confirmed: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('sourceControlFetchStashDetail'),
+    payload: z.object({
+      requestId: z.number().int(),
+      index: z.number().int().min(0).max(500),
+    }),
+  }),
+  z.object({
+    type: z.literal('sourceControlOpenStashFileDiff'),
+    payload: z.object({
+      index: z.number().int().min(0).max(500),
+      path: z.string().min(1).max(4_096),
+    }),
+  }),
   /** AI / 规则生成提交信息与 PR 描述草稿（P0-2）。 */
   z.object({
     type: z.literal('sourceControlGenerateCommitMessage'),
@@ -562,6 +688,49 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('openProject'),
     payload: z.object({ path: z.string().min(1).max(4_096), inPlace: z.boolean().optional() }),
+  }),
+  /** 添加并配对一个云端开发环境（Colab / 远端 Linux / 自定义 Halo Server）。 */
+  z.object({
+    type: z.literal('addCloudEnvironment'),
+    payload: z.object({
+      name: z.string().max(120).optional(),
+      provider: z.enum(['colab', 'linux', 'custom']).optional(),
+      pairingUrlOrEndpoint: z.string().min(1).max(2_048),
+      pairingCode: z.string().max(256).optional(),
+      connectNow: z.boolean().optional(),
+    }),
+  }),
+  /** 更新已保存云环境的名称、类型或隧道配对链接（如 Colab 重启后刷新隧道地址）。 */
+  z.object({
+    type: z.literal('updateCloudEnvironment'),
+    payload: z.object({
+      id: z.string().min(1).max(120),
+      name: z.string().max(120).optional(),
+      provider: z.enum(['colab', 'linux', 'custom']).optional(),
+      pairingUrlOrEndpoint: z.string().min(1).max(2_048).optional(),
+      pairingCode: z.string().max(256).optional(),
+      reconnect: z.boolean().optional(),
+    }),
+  }),
+  /** 切换到并连接指定云端开发环境。 */
+  z.object({
+    type: z.literal('connectCloudEnvironment'),
+    payload: z.object({ id: z.string().min(1).max(120) }),
+  }),
+  /** 断开当前云端环境并切回本地工作区。 */
+  z.object({
+    type: z.literal('disconnectCloudEnvironment'),
+    payload: empty,
+  }),
+  /** 删除一个已保存的云端开发环境及其本地保存的配对凭据。 */
+  z.object({
+    type: z.literal('removeCloudEnvironment'),
+    payload: z.object({ id: z.string().min(1).max(120) }),
+  }),
+  /** 在当前已连接的云端环境中切换远端工作目录。 */
+  z.object({
+    type: z.literal('switchCloudProject'),
+    payload: z.object({ path: z.string().min(1).max(4_096) }),
   }),
   /** 为项目创建 git worktree 并执行复制文件与准备命令。 */
   z.object({
@@ -966,14 +1135,14 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('setRemoteConfig'),
     payload: z.object({
       selectedHost: z.string().max(255).optional(),
-      scope: z.enum(['read-only', 'operate']).optional(),
+      scope: z.enum(['read-only', 'operate', 'owner']).optional(),
       tunnelUrl: z.string().max(2_000).optional(),
     }),
   }),
   z.object({
     type: z.literal('generateRemotePairing'),
     payload: z.object({
-      scope: z.enum(['read-only', 'operate']).optional(),
+      scope: z.enum(['read-only', 'operate', 'owner']).optional(),
       routeKind: z.enum(['lan', 'tailscale', 'quick-tunnel', 'tunnel']).optional(),
     }),
   }),
@@ -983,7 +1152,7 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     payload: z.object({
       deviceId: z.string().min(1).max(120),
       name: z.string().min(1).max(80).optional(),
-      scope: z.enum(['read-only', 'operate']).optional(),
+      scope: z.enum(['read-only', 'operate', 'owner']).optional(),
     }),
   }),
   z.object({ type: z.literal('revokeRemoteDevice'), payload: z.object({ deviceId: z.string().min(1).max(120) }) }),
@@ -1057,6 +1226,140 @@ export const webviewToHostSchema = z.discriminatedUnion('type', [
     type: z.literal('testImBotChannel'),
     payload: z.object({ platform: z.enum(['wecom', 'feishu', 'dingtalk', 'telegram']) }),
   }),
+  /** 远端存储（Google Cloud Storage / Google Drive / WebDAV）与文件管理操作。 */
+  z.object({
+    type: z.literal('upsertRemoteStorage'),
+    payload: z.object({
+      id: z.string().min(1).max(120).optional(),
+      name: z.string().min(1).max(120),
+      kind: z.enum(['google-cloud-storage', 'google-drive', 'webdav']),
+      endpoint: z.string().max(2_048).optional(),
+      bucket: z.string().max(256).optional(),
+      rootPath: z.string().max(1_024).optional(),
+      username: z.string().max(256).optional(),
+      /** undefined 保留原凭据；非空写入 SecretStorage（密码 / Access Token / Service Account JSON / Refresh Token JSON）。 */
+      secret: z.string().max(64_000).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('deleteRemoteStorage'),
+    payload: z.object({ id: z.string().min(1).max(120) }),
+  }),
+  z.object({
+    type: z.literal('testRemoteStorage'),
+    payload: z.object({ id: z.string().min(1).max(120) }),
+  }),
+  /** 探测本机 gcloud / Google OAuth 一键授权就绪状态（只读、无副作用）。 */
+  z.object({ type: z.literal('probeRemoteStorageAuth'), payload: empty }),
+  /** 启动 Google 浏览器一键登录授权（本地 OAuth PKCE 回环或本机 gcloud ADC）。 */
+  z.object({
+    type: z.literal('startRemoteStorageOAuth'),
+    payload: z.object({
+      kind: z.enum(['google-drive', 'google-cloud-storage']),
+      method: z.enum(['oauth', 'gcloud']),
+      storageId: z.string().min(1).max(120).optional(),
+      name: z.string().max(120).optional(),
+      bucket: z.string().max(256).optional(),
+      rootPath: z.string().max(1_024).optional(),
+      clientId: z.string().max(512).optional(),
+      clientSecret: z.string().max(512).optional(),
+    }),
+  }),
+  /** 取消正在进行的浏览器授权回调等待。 */
+  z.object({ type: z.literal('cancelRemoteStorageOAuth'), payload: empty }),
+  z.object({
+    type: z.literal('listRemoteFiles'),
+    payload: z.object({
+      requestId: z.number().int(),
+      storageId: z.string().min(1).max(120),
+      dirPath: z.string().max(4_096).optional(),
+      query: z.string().max(500).optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('previewRemoteFile'),
+    payload: z.object({
+      storageId: z.string().min(1).max(120),
+      entryId: z.string().min(1).max(4_096),
+      path: z.string().min(1).max(4_096),
+      name: z.string().min(1).max(512),
+    }),
+  }),
+  z.object({
+    type: z.literal('downloadRemoteFile'),
+    payload: z.object({
+      storageId: z.string().min(1).max(120),
+      entryId: z.string().min(1).max(4_096),
+      path: z.string().min(1).max(4_096),
+      name: z.string().min(1).max(512),
+    }),
+  }),
+  z.object({
+    type: z.literal('uploadRemoteFiles'),
+    payload: z.object({
+      storageId: z.string().min(1).max(120),
+      dirPath: z.string().max(4_096).optional(),
+      /** 未提供时由宿主弹出系统文件选择框读取本地文件；提供时直接上传 base64 内容（支持移动端/浏览器）。 */
+      files: z
+        .array(
+          z.object({
+            name: z.string().min(1).max(512),
+            dataBase64: z.string().max(32 * 1024 * 1024),
+            mimeType: z.string().max(256).optional(),
+          }),
+        )
+        .max(20)
+        .optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('deleteRemoteFile'),
+    payload: z.object({
+      storageId: z.string().min(1).max(120),
+      entryId: z.string().min(1).max(4_096),
+      path: z.string().min(1).max(4_096),
+      name: z.string().min(1).max(512),
+      kind: z.enum(['file', 'directory']),
+    }),
+  }),
+  z.object({
+    type: z.literal('createRemoteFolder'),
+    payload: z.object({
+      storageId: z.string().min(1).max(120),
+      dirPath: z.string().max(4_096).optional(),
+      name: z.string().min(1).max(256),
+    }),
+  }),
+  /** 本地工作区文件管理常用操作（严格限定在当前工作区目录内）。 */
+  z.object({
+    type: z.literal('deleteLocalFile'),
+    payload: z.object({
+      path: z.string().min(1).max(4_096),
+      kind: z.enum(['file', 'directory']),
+    }),
+  }),
+  z.object({
+    type: z.literal('createLocalFolder'),
+    payload: z.object({
+      dirPath: z.string().max(4_096).optional(),
+      name: z.string().min(1).max(256),
+    }),
+  }),
+  z.object({
+    type: z.literal('uploadLocalFiles'),
+    payload: z.object({
+      dirPath: z.string().max(4_096).optional(),
+      files: z
+        .array(
+          z.object({
+            name: z.string().min(1).max(512),
+            dataBase64: z.string().max(32 * 1024 * 1024),
+          }),
+        )
+        .max(20)
+        .optional(),
+    }),
+  }),
 ]);
 
 export type WebviewToHost = z.infer<typeof webviewToHostSchema>;
@@ -1089,6 +1392,7 @@ export interface HostSnapshot {
   readonly extensions?: ExtensionsState;
   readonly workbench?: WorkbenchState;
   readonly remote?: RemoteState;
+  readonly remoteStorages?: RemoteStoragesState;
   readonly terminal?: TerminalState;
   readonly browser?: BrowserState;
 }
@@ -1149,6 +1453,23 @@ export type HostToWebview =
   | { readonly type: 'markdownPreview'; readonly payload: MarkdownPreviewData }
   | { readonly type: 'diffContent'; readonly payload: DiffContentData }
   | { readonly type: 'remote'; readonly payload: RemoteState }
+  | { readonly type: 'remoteStorages'; readonly payload: RemoteStoragesState }
+  | { readonly type: 'remoteStorageAuthProgress'; readonly payload: RemoteStorageAuthState }
+  | { readonly type: 'remoteFilesListed'; readonly payload: RemoteStorageListResult }
+  | {
+      readonly type: 'remoteFileActionDone';
+      readonly payload: {
+        readonly storageId: string;
+        readonly action: 'upload' | 'download' | 'delete' | 'mkdir' | 'test';
+        readonly ok: boolean;
+        readonly message?: string;
+        readonly download?: {
+          readonly name: string;
+          readonly mimeType?: string;
+          readonly dataBase64: string;
+        };
+      };
+    }
   | { readonly type: 'navigateToSession'; readonly payload: { readonly sessionId?: string } }
   | { readonly type: 'diffOpened'; readonly payload: { readonly token: number } }
   | { readonly type: 'imageData'; readonly payload: { readonly attachmentId: string; readonly dataUrl?: string } }
@@ -1178,6 +1499,33 @@ export type HostToWebview =
         readonly message?: string;
         readonly title?: string;
         readonly body?: string;
+        readonly error?: string;
+      };
+    }
+  | {
+      readonly type: 'sourceControlLogResult';
+      readonly payload: {
+        readonly requestId: number;
+        readonly commits: readonly SourceControlCommitView[];
+        readonly hasMore: boolean;
+        readonly append?: boolean;
+        readonly error?: string;
+      };
+    }
+  | {
+      readonly type: 'sourceControlCommitDetail';
+      readonly payload: {
+        readonly requestId: number;
+        readonly detail?: SourceControlCommitDetailView;
+        readonly error?: string;
+      };
+    }
+  | {
+      readonly type: 'sourceControlStashDetail';
+      readonly payload: {
+        readonly requestId: number;
+        readonly index: number;
+        readonly files: readonly SourceControlCommitFileView[];
         readonly error?: string;
       };
     }

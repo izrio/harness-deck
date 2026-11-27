@@ -79,7 +79,7 @@ function parseRemoteConfig(raw: unknown): StoredRemoteConfig {
     ...(typeof obj.selectedHost === 'string' && obj.selectedHost.trim()
       ? { selectedHost: obj.selectedHost.trim() }
       : {}),
-    scope: obj.scope === 'read-only' ? 'read-only' : 'operate',
+    scope: obj.scope === 'read-only' ? 'read-only' : obj.scope === 'owner' ? 'owner' : 'operate',
     ...(typeof obj.tunnelUrl === 'string' && normalizeTunnelUrl(obj.tunnelUrl)
       ? { tunnelUrl: normalizeTunnelUrl(obj.tunnelUrl) }
       : {}),

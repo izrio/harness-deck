@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="webdav-cloud" x1="6" y1="8" x2="42" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="55%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="webdav-base" x1="10" y1="36" x2="38" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+  </defs>
+  <path d="M13 33h23a8 8 0 0 0 1.2-15.91A12 12 0 0 0 14.1 14.3 9.5 9.5 0 0 0 13 33Z" fill="url(#webdav-cloud)"/>
+  <path d="M24 33v6" stroke="url(#webdav-base)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M12 39h24" stroke="url(#webdav-base)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="24" cy="39" r="3.5" fill="#3B82F6"/>
+</svg>

@@ -261,6 +261,37 @@ describe('WeComBotAdapter (智能机器人长连接)', () => {
     await adapter.stop();
     expect(adapter.getStatus().status).toBe('stopped');
   });
+
+  it('surfaces underlying socket error message on empty-reason close(1006) instead of opaque code 1006', async () => {
+    const sockets: MockWs[] = [];
+    const statuses: ImBotAdapterStatus[] = [];
+    const adapter = new WeComBotAdapter(
+      {
+        botId: 'bot_err',
+        secret: 'sec_err',
+        reconnectBaseMs: 60_000,
+        createWebSocket: () => {
+          const ws = new MockWs();
+          sockets.push(ws);
+          return ws;
+        },
+      },
+      {
+        onMessage: () => undefined,
+        onStatusChange: (s) => statuses.push(s),
+        log: () => undefined,
+      },
+    );
+
+    await adapter.start();
+    const ws = sockets[0]!;
+    ws.emit('error', new Error('connect ETIMEDOUT 1.2.3.4:443'));
+    ws.close(1006, '');
+
+    expect(adapter.getStatus().status).toBe('reconnecting');
+    expect(adapter.getStatus().error).toBe('connect ETIMEDOUT 1.2.3.4:443');
+    await adapter.stop();
+  });
 });
 
 describe('FeishuBotAdapter (飞书长连接 PBBP2)', () => {

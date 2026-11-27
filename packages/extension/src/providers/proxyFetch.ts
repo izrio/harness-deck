@@ -13,9 +13,11 @@
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
-import { Readable } from 'node:stream';
+import net from 'node:net';
+import { Readable, type Duplex } from 'node:stream';
 import tls from 'node:tls';
 import zlib from 'node:zlib';
+import WebSocket from 'ws';
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -568,6 +570,13 @@ function withFreshFallbackSignal(init?: RequestInit): RequestInit | undefined {
   return { ...init, signal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS) };
 }
 
+function isProxySocketFailure(err: unknown): boolean {
+  const msg = describeFetchError(err);
+  return /Failed to establish a socket connection to proxies|ERR_PROXY_CONNECTION_FAILED|HTTP proxy CONNECT failed/iu.test(
+    msg,
+  );
+}
+
 export function createProxyAwareFetch(
   getHttpProxy?: () => string | undefined,
   options?: {
@@ -625,7 +634,16 @@ export function createProxyAwareFetch(
     try {
       return await baseFetch(input, init);
     } catch (directErr) {
-      if (isElectron || isCallerManualAbort(init?.signal, directErr)) throw directErr;
+      if (isCallerManualAbort(init?.signal, directErr)) throw directErr;
+      // Electron / VS Code 宿主下若系统/配置代理不可达（如 127.0.0.1:7890 未启动导致代理建连失败），回退直连
+      if (isElectron && isProxySocketFailure(directErr) && (targetUrl.protocol === 'http:' || targetUrl.protocol === 'https:')) {
+        try {
+          return await fetchDirectNode(targetUrl, withFreshFallbackSignal(init));
+        } catch {
+          throw directErr;
+        }
+      }
+      if (isElectron) throw directErr;
       // WSL2 / 纯 Node 运行时下原生 fetch（undici）遇 IPv6 黑洞或 DNS 隧道异常时，回退纯 IPv4 Node 直连
       if (inWsl && (targetUrl.protocol === 'http:' || targetUrl.protocol === 'https:')) {
         try {
@@ -636,5 +654,361 @@ export function createProxyAwareFetch(
       }
       throw directErr;
     }
+  };
+}
+
+const PROXY_WS_CONNECT_TIMEOUT_MS = 3_500;
+const DIRECT_WS_CONNECT_TIMEOUT_MS = 10_000;
+const MAX_CONNECT_HEADER_BYTES = 16 * 1024;
+
+function upgradeSocketToTls(
+  socket: net.Socket,
+  targetHost: string,
+  timeoutMs: number,
+  rejectUnauthorized?: boolean,
+): Promise<tls.TLSSocket> {
+  return new Promise<tls.TLSSocket>((resolve, reject) => {
+    let settled = false;
+    const tlsSocket = tls.connect({
+      socket,
+      ...(net.isIP(targetHost) === 0 ? { servername: targetHost } : {}),
+      ...(rejectUnauthorized !== undefined ? { rejectUnauthorized } : {}),
+    });
+    const timer = setTimeout(() => {
+      finishError(new Error(`TLS handshake timed out (${targetHost})`));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      tlsSocket.removeListener('secureConnect', onSecureConnect);
+      tlsSocket.removeListener('error', finishError);
+      tlsSocket.removeListener('close', onClose);
+    };
+    const finishError = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      tlsSocket.destroy();
+      socket.destroy();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    const onClose = () => finishError(new Error('TLS socket closed during handshake'));
+    const onSecureConnect = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      tlsSocket.setTimeout(0);
+      resolve(tlsSocket);
+    };
+    tlsSocket.once('secureConnect', onSecureConnect);
+    tlsSocket.once('error', finishError);
+    tlsSocket.once('close', onClose);
+  });
+}
+
+/**
+ * 直接用原始 `net.connect` / `tls.connect` 建立 HTTP CONNECT 隧道（绕过 VS Code `@vscode/proxy-agent`
+ * 对全局 `http.request` 的劫持），并在需要时完成目标主机 TLS 握手。
+ */
+function connectViaHttpProxyTunnel(
+  proxyUrl: URL,
+  targetHost: string,
+  targetPort: number,
+  isSecure: boolean,
+  timeoutMs: number,
+  rejectUnauthorized?: boolean,
+): Promise<net.Socket> {
+  return new Promise<net.Socket>((resolve, reject) => {
+    const proxyHost = proxyUrl.hostname.replace(/^\[|\]$/gu, '');
+    const proxyPort = proxyUrl.port ? Number(proxyUrl.port) : proxyUrl.protocol === 'https:' ? 443 : 80;
+    const authority = net.isIP(targetHost) === 6 ? `[${targetHost}]:${targetPort}` : `${targetHost}:${targetPort}`;
+    const proxyAuth = proxyAuthHeader(proxyUrl);
+
+    let settled = false;
+    let rawBuf: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+
+    const rawSocket: net.Socket =
+      proxyUrl.protocol === 'https:'
+        ? tls.connect({
+            host: proxyHost,
+            port: proxyPort,
+            ...(net.isIP(proxyHost) === 0 ? { servername: proxyHost } : {}),
+          })
+        : net.connect({ host: proxyHost, port: proxyPort });
+
+    const timer = setTimeout(() => {
+      finishError(new Error(`Proxy CONNECT timed out (${proxyHost}:${proxyPort})`));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      rawSocket.removeListener('connect', onConnected);
+      rawSocket.removeListener('secureConnect', onConnected);
+      rawSocket.removeListener('data', onData);
+      rawSocket.removeListener('error', finishError);
+      rawSocket.removeListener('close', onClose);
+    };
+
+    const finishError = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rawSocket.destroy();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+
+    const onClose = () => {
+      finishError(new Error(`Proxy closed connection during CONNECT (${proxyHost}:${proxyPort})`));
+    };
+
+    const onConnected = () => {
+      const lines = [
+        `CONNECT ${authority} HTTP/1.1`,
+        `Host: ${authority}`,
+        ...(proxyAuth ? [`Proxy-Authorization: ${proxyAuth}`] : []),
+        'Proxy-Connection: Keep-Alive',
+        '',
+        '',
+      ];
+      rawSocket.write(lines.join('\r\n'));
+    };
+
+    const onData = (chunk: Buffer) => {
+      rawBuf = Buffer.concat([rawBuf, chunk]);
+      const headerEnd = rawBuf.indexOf('\r\n\r\n');
+      if (headerEnd === -1) {
+        if (rawBuf.length > MAX_CONNECT_HEADER_BYTES) {
+          finishError(new Error('HTTP proxy CONNECT response header too large'));
+        }
+        return;
+      }
+      const headerText = rawBuf.subarray(0, headerEnd).toString('latin1');
+      const leftover = rawBuf.subarray(headerEnd + 4);
+      const statusLine = headerText.split('\r\n', 1)[0] ?? '';
+      const match = /^HTTP\/\d+\.\d+\s+(\d{3})/u.exec(statusLine);
+      const status = match ? Number(match[1]) : 0;
+      if (status < 200 || status >= 300) {
+        finishError(new Error(`HTTP proxy CONNECT failed with status ${status || 'invalid'}`));
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      if (leftover.length > 0) {
+        rawSocket.pause();
+        rawSocket.unshift(leftover);
+      }
+
+      if (!isSecure) {
+        rawSocket.setTimeout(0);
+        resolve(rawSocket);
+        return;
+      }
+
+      void upgradeSocketToTls(rawSocket, targetHost, timeoutMs, rejectUnauthorized).then(resolve, reject);
+    };
+
+    rawSocket.once(proxyUrl.protocol === 'https:' ? 'secureConnect' : 'connect', onConnected);
+    rawSocket.on('data', onData);
+    rawSocket.once('error', finishError);
+    rawSocket.once('close', onClose);
+  });
+}
+
+function connectDirectSocket(
+  targetHost: string,
+  targetPort: number,
+  isSecure: boolean,
+  timeoutMs: number,
+  family?: 4 | 6,
+  rejectUnauthorized?: boolean,
+): Promise<net.Socket> {
+  return new Promise<net.Socket>((resolve, reject) => {
+    let settled = false;
+    const socket: net.Socket = isSecure
+      ? tls.connect({
+          host: targetHost,
+          port: targetPort,
+          ...(family ? { family } : {}),
+          ...(net.isIP(targetHost) === 0 ? { servername: targetHost } : {}),
+          ...(rejectUnauthorized !== undefined ? { rejectUnauthorized } : {}),
+        })
+      : net.connect({
+          host: targetHost,
+          port: targetPort,
+          ...(family ? { family } : {}),
+        });
+
+    const timer = setTimeout(() => {
+      finishError(new Error(`WebSocket connect timed out (${targetHost}:${targetPort})`));
+    }, timeoutMs);
+
+    const readyEvent = isSecure ? 'secureConnect' : 'connect';
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.removeListener(readyEvent, onReady);
+      socket.removeListener('error', finishError);
+      socket.removeListener('close', onClose);
+    };
+    const finishError = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.destroy();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    const onClose = () => finishError(new Error(`Socket closed during connect (${targetHost}:${targetPort})`));
+    const onReady = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.setTimeout(0);
+      resolve(socket);
+    };
+
+    socket.once(readyEvent, onReady);
+    socket.once('error', finishError);
+    socket.once('close', onClose);
+  });
+}
+
+export interface ProxyAwareWebSocketOptions {
+  readonly isWsl?: boolean;
+  readonly wslHostIp?: () => string | undefined;
+  readonly proxyConnectTimeoutMs?: number;
+  readonly directConnectTimeoutMs?: number;
+  readonly rejectUnauthorized?: boolean;
+  /** 仅测试用：强制跳过环回地址免代理规则，以验证本地 mock proxy 行为。 */
+  readonly bypassLoopback?: boolean;
+}
+
+class ProxyAwareWebSocketAgent extends http.Agent {
+  constructor(private readonly dial: () => Promise<net.Socket>) {
+    super({ keepAlive: false });
+  }
+
+  override createConnection(
+    _options: http.ClientRequestArgs,
+    callback?: (err: Error | null, stream: Duplex) => void,
+  ): Duplex | null | undefined {
+    void this.dial().then(
+      (socket) => {
+        callback?.(null, socket);
+        socket.resume();
+      },
+      (err) =>
+        (callback as ((err: Error | null, stream?: Duplex) => void) | undefined)?.(
+          err instanceof Error ? err : new Error(String(err)),
+        ),
+    );
+    return undefined;
+  }
+}
+
+/**
+ * 创建支持代理隧道、WSL2 宿主机代理修复与代理不可达自动回退直连的 WebSocket 工厂：
+ * - 显式传入自定义 `http.Agent`，避免 VS Code `@vscode/proxy-agent` 强行劫持全局 `http/https`
+ *   导致本地代理未启动或 WSL2 回环代理不可达时直接报 `Failed to establish a socket connection to proxies`；
+ * - 命中代理时先走原生 HTTP CONNECT 隧道；若代理为 WSL2 回环地址（如 `127.0.0.1:7890`）且连接失败，
+ *   自动改试 WSL2 Windows 宿主机网关 IP；仍不可达时自动回退直连（WSL2 优先 IPv4）。
+ */
+export function createProxyAwareWebSocket(
+  getHttpProxy?: () => string | undefined,
+  options?: ProxyAwareWebSocketOptions,
+): (url: string, headers?: Record<string, string>) => WebSocket {
+  const inWsl = options?.isWsl ?? isWslEnvironment();
+  const resolveWslHost = options?.wslHostIp ?? detectWslHostIp;
+  const proxyTimeoutMs = options?.proxyConnectTimeoutMs ?? PROXY_WS_CONNECT_TIMEOUT_MS;
+  const directTimeoutMs = options?.directConnectTimeoutMs ?? DIRECT_WS_CONNECT_TIMEOUT_MS;
+  const rejectUnauthorized = options?.rejectUnauthorized;
+
+  return (url: string, headers?: Record<string, string>): WebSocket => {
+    const targetUrl = new URL(url);
+    const isSecure = targetUrl.protocol === 'wss:' || targetUrl.protocol === 'https:';
+    const targetHost = targetUrl.hostname.replace(/^\[|\]$/gu, '');
+    const targetPort = targetUrl.port ? Number(targetUrl.port) : isSecure ? 443 : 80;
+
+    const httpEquivalent = new URL(targetUrl.toString());
+    httpEquivalent.protocol = isSecure ? 'https:' : 'http:';
+
+    const resolveProxy = (): URL | undefined => {
+      if (options?.bypassLoopback === false) {
+        const raw =
+          getHttpProxy?.()?.trim() ||
+          (isSecure
+            ? (process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy)
+            : (process.env.HTTP_PROXY ?? process.env.http_proxy)) ||
+          '';
+        if (!raw.trim()) return undefined;
+        try {
+          const parsed = new URL(raw.includes('://') ? raw : `http://${raw}`);
+          return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed : undefined;
+        } catch {
+          return undefined;
+        }
+      }
+      return resolveHttpProxyUrl(httpEquivalent, getHttpProxy?.());
+    };
+
+    const dialDirect = async (): Promise<net.Socket> => {
+      if (inWsl && net.isIP(targetHost) === 0) {
+        try {
+          return await connectDirectSocket(targetHost, targetPort, isSecure, directTimeoutMs, 4, rejectUnauthorized);
+        } catch {
+          // fall through to default family
+        }
+      }
+      return await connectDirectSocket(targetHost, targetPort, isSecure, directTimeoutMs, undefined, rejectUnauthorized);
+    };
+
+    const dial = async (): Promise<net.Socket> => {
+      const proxyUrl = resolveProxy();
+      if (proxyUrl) {
+        let lastProxyErr: unknown;
+        try {
+          return await connectViaHttpProxyTunnel(
+            proxyUrl,
+            targetHost,
+            targetPort,
+            isSecure,
+            proxyTimeoutMs,
+            rejectUnauthorized,
+          );
+        } catch (proxyErr) {
+          lastProxyErr = proxyErr;
+          if (inWsl && isLoopbackHost(proxyUrl.hostname)) {
+            const hostIp = resolveWslHost();
+            if (hostIp && hostIp !== proxyUrl.hostname) {
+              const wslProxyUrl = new URL(proxyUrl.toString());
+              wslProxyUrl.hostname = hostIp;
+              try {
+                return await connectViaHttpProxyTunnel(
+                  wslProxyUrl,
+                  targetHost,
+                  targetPort,
+                  isSecure,
+                  proxyTimeoutMs,
+                  rejectUnauthorized,
+                );
+              } catch (wslErr) {
+                lastProxyErr = wslErr;
+              }
+            }
+          }
+        }
+        try {
+          return await dialDirect();
+        } catch {
+          throw lastProxyErr;
+        }
+      }
+      return await dialDirect();
+    };
+
+    const agent = new ProxyAwareWebSocketAgent(dial);
+    return new WebSocket(url, {
+      agent,
+      ...(headers ? { headers } : {}),
+      ...(rejectUnauthorized !== undefined ? { rejectUnauthorized } : {}),
+    });
   };
 }

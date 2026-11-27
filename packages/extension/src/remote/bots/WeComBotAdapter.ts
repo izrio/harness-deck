@@ -5,7 +5,7 @@
  * - 支持 `aibot_msg_callback` 收消息、`aibot_respond_msg` 原生流式输出（`finish: false -> true`）与 `aibot_send_msg` 主动发送
  */
 import { randomUUID } from 'node:crypto';
-import WebSocket from 'ws';
+import { createProxyAwareWebSocket } from '../../providers/proxyFetch.ts';
 import {
   computeReconnectDelay,
   rawDataToBuffer,
@@ -223,7 +223,7 @@ export class WeComBotAdapter implements ImBotAdapter {
       return { ok: true, detail: 'Connected' };
     }
     const url = this.options.wsUrl ?? DEFAULT_WECOM_WS_URL;
-    const factory = this.options.createWebSocket ?? ((u: string) => new WebSocket(u));
+    const factory = this.options.createWebSocket ?? createProxyAwareWebSocket();
     return await new Promise((resolve) => {
       let settled = false;
       const done = (res: { readonly ok: boolean; readonly detail?: string }, ws?: ImBotSocketLike) => {
@@ -280,7 +280,7 @@ export class WeComBotAdapter implements ImBotAdapter {
     });
 
     const url = this.options.wsUrl ?? DEFAULT_WECOM_WS_URL;
-    const factory = this.options.createWebSocket ?? ((u: string) => new WebSocket(u));
+    const factory = this.options.createWebSocket ?? createProxyAwareWebSocket();
     let ws: ImBotSocketLike;
     try {
       ws = factory(url);
@@ -290,9 +290,11 @@ export class WeComBotAdapter implements ImBotAdapter {
       return;
     }
     this.socket = ws;
+    let lastError: string | undefined;
 
     ws.on('open', () => {
       if (this.socket !== ws || !this.running) return;
+      lastError = undefined;
       const reqId = `sub_${randomUUID().replace(/-/gu, '').slice(0, 12)}`;
       this.subscribeReqId = reqId;
       this.sendJson({
@@ -318,7 +320,8 @@ export class WeComBotAdapter implements ImBotAdapter {
 
     ws.on('error', (err) => {
       if (this.socket !== ws || !this.running) return;
-      this.callbacks.log(`[IM Bot:wecom] WebSocket error: ${err.message}`);
+      lastError = err.message || String(err);
+      this.callbacks.log(`[IM Bot:wecom] WebSocket error: ${lastError}`);
     });
 
     ws.on('close', (code, reason) => {
@@ -326,8 +329,9 @@ export class WeComBotAdapter implements ImBotAdapter {
       this.socket = undefined;
       this.clearHeartbeat();
       if (!this.running) return;
-      const text = reason?.toString('utf8') || `code ${code}`;
-      this.handleDisconnect(`WebSocket closed (${text})`);
+      const reasonText = reason?.toString('utf8').trim();
+      const detail = reasonText ? `WebSocket closed (${reasonText})` : (lastError || `WebSocket closed (code ${code})`);
+      this.handleDisconnect(detail);
     });
   }
 

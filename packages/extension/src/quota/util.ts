@@ -10,16 +10,12 @@ export interface QuotaServiceOptions {
   /** 环境变量（测试里可注入临时 HOME / 区域 / Cookie）。 */
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly getHttpProxy?: () => string | undefined;
-  /** 已探测到的底层 CLI 版本号（例如 Antigravity 的 `1.5.13`，用于构造合规的 User-Agent）。 */
-  readonly clientVersion?: string;
   /** 注入 fetch 实现（测试用），默认按宿主代理配置创建。 */
   readonly fetchImpl?: FetchLike;
   readonly now?: () => number;
-  /** 直接传入该账号槽位的 OAuth 凭据 JSON（例如 Antigravity 多账号切换时避免误读磁盘或 IDE 备用凭据）。 */
+  /** 可选：该账号槽位的 OAuth 凭据 JSON（用于判断 Antigravity 槽位是否已存在凭据状态）。 */
   readonly rawTokenJson?: string;
-  /** 读取 Antigravity 磁盘凭据时是否允许回退 IDE 独立凭据文件（多账号隔离时应为 false）。 */
-  readonly allowIdeFallback?: boolean;
-  /** 可选：解析后的底层 CLI 可执行文件路径（如 Antigravity 的 `agy`），用于凭据在系统 Keyring / access_token 过期 / 直连失败时通过官方 CLI 回退查询。 */
+  /** 可选：解析后的底层 CLI 可执行文件路径（如 Antigravity 的 `agy`），用于通过官方 CLI 查询额度。 */
   readonly cliCommand?: string;
   /** 可选：注入 Antigravity CLI 额度查询命令执行器（测试用）。 */
   readonly runCliUsage?: (options: {

@@ -21,6 +21,7 @@ import type {
   WebviewToHost,
 } from '@harness-deck/shared';
 import type { KeyValueStore, SecretStore } from '../../host/HostPlatform.ts';
+import type { FetchLike } from '../../providers/proxyFetch.ts';
 import { DingTalkBotAdapter } from './DingTalkBotAdapter.ts';
 import { FeishuBotAdapter } from './FeishuBotAdapter.ts';
 import { TelegramBotAdapter } from './TelegramBotAdapter.ts';
@@ -85,7 +86,7 @@ export interface ImBotManagerOptions {
     credentials: ImBotChannelCredentials,
     callbacks: ImBotAdapterCallbacks,
   ) => ImBotAdapter;
-  readonly fetchImpl?: typeof fetch;
+  readonly fetchImpl?: FetchLike;
   readonly createWebSocket?: WebSocketFactory;
   readonly now?: () => number;
 }

@@ -9,7 +9,7 @@
  * - 系统通知调度（NotificationDispatcher）与全部 16 个宿主命令
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { realpath } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
@@ -28,6 +28,7 @@ import {
   type BackendsState,
   type ChatCommand,
   type ClientSurface,
+  type CloudEnvironmentStatus,
   type DiscoveredGitSkill,
   type ExtensionsState,
   type HostSnapshot,
@@ -41,9 +42,13 @@ import {
   type PreferencesState,
   type ProjectsState,
   type ProvidersState,
+  type RecentProject,
+  type RemoteQuickTunnelView,
   type RemoteRouteKind,
   type RemoteScope,
   type RemoteState,
+  type RemoteStorageAuthState,
+  type RemoteStoragesState,
   type RuntimeStatus,
   type SkillImportCandidate,
   type SkillMarketState,
@@ -195,6 +200,7 @@ import {
   updateProjectConfigsMap,
 } from '../projects/ProjectService.ts';
 import { fetchRemoteProviderModels, ProviderProxy } from '../providers/ProviderProxy.ts';
+import { createProxyAwareFetch, createProxyAwareWebSocket } from '../providers/proxyFetch.ts';
 import {
   clearQuotaCacheFor,
   queryAntigravityQuota,
@@ -222,10 +228,23 @@ import { ClientHub, UNICAST_HOST_MESSAGE_TYPES } from './ClientHub.ts';
 import type { HostCommandId, HostPlatform } from './HostPlatform.ts';
 import { CommandReceipts } from './receipts.ts';
 import { DeviceAuthStore } from '../remote/DeviceAuthStore.ts';
+import { CloudEnvironmentStore, parseCloudPairingInput } from '../remote/CloudEnvironmentStore.ts';
+import { CloudHostConnection, pairWithCloudHost } from '../remote/CloudHostClient.ts';
 import { buildMobileDiffContent, buildMobileFileContent } from '../remote/mobileDiff.ts';
 import { PushService } from '../remote/PushService.ts';
 import { RemoteBridgeServer } from '../remote/RemoteBridgeServer.ts';
 import { ImBotManager } from '../remote/bots/ImBotManager.ts';
+import { createRemoteStorageAdapter, type RemoteStorageAdapter } from '../storage/RemoteStorageClient.ts';
+import { RemoteStorageStore } from '../storage/RemoteStorageStore.ts';
+import {
+  GOOGLE_OAUTH_CLIENT_ID_KEY,
+  GOOGLE_OAUTH_CLIENT_SECRET_KEY,
+  probeGcloudAuth,
+  startGcloudAdcAuth,
+  startGoogleLoopbackOAuth,
+  type ActiveGoogleAuthHandle,
+  type GcloudProbeResult,
+} from '../storage/GoogleStorageAuth.ts';
 import type { TailscaleExec } from '../remote/TailscaleService.ts';
 import { isSchedulerLockHeld, schedulerLockPath } from '../sidecar/schedulerLock.ts';
 
@@ -263,14 +282,35 @@ const WORKBENCH_MESSAGE_TYPES: ReadonlySet<WebviewToHost['type']> = new Set([
   'sourceControlCreatePr',
   'sourceControlStageFile',
   'sourceControlUnstageFile',
+  'sourceControlStageAll',
+  'sourceControlUnstageAll',
   'sourceControlDiscardFile',
+  'sourceControlDiscardAll',
   'sourceControlStageHunk',
   'sourceControlDiscardHunk',
   'sourceControlCheckoutBranch',
   'sourceControlCreateBranch',
+  'sourceControlRenameBranch',
   'sourceControlDeleteBranch',
+  'sourceControlMergeBranch',
+  'sourceControlRebaseBranch',
   'sourceControlPull',
   'sourceControlFetch',
+  'sourceControlContinueOp',
+  'sourceControlAbortOp',
+  'sourceControlResolveConflict',
+  'sourceControlFetchLog',
+  'sourceControlFetchCommitDetail',
+  'sourceControlOpenCommitFileDiff',
+  'sourceControlCherryPick',
+  'sourceControlRevertCommit',
+  'sourceControlResetToCommit',
+  'sourceControlStashSave',
+  'sourceControlStashApply',
+  'sourceControlStashPop',
+  'sourceControlStashDrop',
+  'sourceControlFetchStashDetail',
+  'sourceControlOpenStashFileDiff',
   'sourceControlGenerateCommitMessage',
   'sourceControlGeneratePrDraft',
   'sourceControlSettlePr',
@@ -304,6 +344,15 @@ export interface HarnessHostRuntime {
   executeCommand(cmd: HostCommandId): Promise<void>;
   getRemoteState?(): RemoteState;
   generateRemotePairing?(options?: { readonly scope?: RemoteScope; readonly routeKind?: RemoteRouteKind }): Promise<RemoteState>;
+  updateRemoteConfig?(patch: {
+    readonly selectedHost?: string;
+    readonly scope?: RemoteScope;
+    readonly tunnelUrl?: string;
+  }): Promise<RemoteState>;
+  setQuickTunnelEnabled?(enabled: boolean): Promise<RemoteQuickTunnelView>;
+  configureTailscaleServe?(
+    enabled: boolean,
+  ): Promise<{ readonly ok: boolean; readonly manualCommand: string; readonly error?: string }>;
   dispose(): Promise<void>;
 }
 
@@ -340,6 +389,17 @@ export function createHarnessHostRuntime(
   const remoteBridgeBox: { current?: RemoteBridgeServer } = {};
   const imBotManagerBox: { current?: ImBotManager } = {};
   let startIfNeededRef: () => void = () => undefined;
+  const cloudProxyBox: {
+    activeEnvId?: string;
+    connection?: CloudHostConnection;
+    status: CloudEnvironmentStatus;
+    error?: string;
+    cloudRecent: readonly RecentProject[];
+    lastSnapshot?: HostSnapshot;
+  } = {
+    status: 'disconnected',
+    cloudRecent: [],
+  };
 
   const currentRemoteState = (): RemoteState | undefined => {
     if (!remoteBridgeBox.current) return undefined;
@@ -365,7 +425,45 @@ export function createHarnessHostRuntime(
 
   const isAnyClientVisible = (): boolean => clientHub.isAnyClientVisible();
 
+  const remoteStorageStore = new RemoteStorageStore(platform.globalState, platform.secrets);
+  const remoteStorageAdapters = new Map<string, { readonly signature: string; readonly adapter: RemoteStorageAdapter }>();
+  let gcloudProbeCache: GcloudProbeResult | undefined;
+  let remoteStorageAuthState: RemoteStorageAuthState = { status: 'idle' };
+  let activeGoogleAuthHandle: ActiveGoogleAuthHandle | undefined;
+
+  const resolveGoogleOAuthClientId = (): string | undefined => {
+    const saved = platform.globalState.get<unknown>(GOOGLE_OAUTH_CLIENT_ID_KEY);
+    if (typeof saved === 'string' && saved.trim()) return saved.trim();
+    const envVal = process.env.HALO_GOOGLE_OAUTH_CLIENT_ID?.trim();
+    return envVal || undefined;
+  };
+
+  const buildRemoteStoragesState = (): RemoteStoragesState => {
+    const googleClientId = resolveGoogleOAuthClientId();
+    return {
+      ...remoteStorageStore.toState(),
+      googleOAuthConfigured: Boolean(googleClientId),
+      ...(googleClientId ? { googleClientId } : {}),
+      ...(gcloudProbeCache ? { gcloudAvailable: gcloudProbeCache.gcloudAvailable, gcloudAdcReady: gcloudProbeCache.adcReady } : {}),
+      ...(remoteStorageAuthState.status !== 'idle' ? { auth: remoteStorageAuthState } : {}),
+    };
+  };
+
   const post = (message: HostToWebview): void => {
+    // 连接到云端环境期间，屏蔽本地底层的后台状态推送，仅保留本地项目/云环境列表、远端存储与本地 Toast
+    if (
+      cloudProxyBox.activeEnvId &&
+      message.type !== 'projects' &&
+      message.type !== 'toast' &&
+      message.type !== 'remote' &&
+      message.type !== 'remoteStorages' &&
+      message.type !== 'remoteStorageAuthProgress' &&
+      message.type !== 'remoteFilesListed' &&
+      message.type !== 'remoteFileActionDone' &&
+      message.type !== 'diffContent'
+    ) {
+      return;
+    }
     const remoteState = message.type === 'snapshot' && message.payload.remote === undefined ? currentRemoteState() : undefined;
     const outgoing: HostToWebview =
       message.type === 'snapshot'
@@ -375,6 +473,7 @@ export function createHarnessHostRuntime(
               ...message.payload,
               ...(message.payload.hostKind === undefined ? { hostKind: platform.hostKind } : {}),
               ...(remoteState ? { remote: remoteState } : {}),
+              ...(message.payload.remoteStorages === undefined ? { remoteStorages: buildRemoteStoragesState() } : {}),
             },
           }
         : message;
@@ -880,7 +979,8 @@ export function createHarnessHostRuntime(
     };
   };
 
-  // ---- 最近项目与 Worktree 配置 ----
+  // ---- 最近项目、Worktree 配置与云端环境 ----
+  const cloudEnvStore = new CloudEnvironmentStore(platform.globalState, platform.secrets);
   const readRecentProjects = () => parseRecentProjects(platform.globalState.get<unknown>(RECENT_PROJECTS_KEY));
   const saveRecentProjectPath = async (projectPath: string): Promise<void> => {
     const next = recordRecentProject(readRecentProjects(), projectPath);
@@ -889,12 +989,38 @@ export function createHarnessHostRuntime(
   if (folders().length > 0) {
     void saveRecentProjectPath(workspacePath);
   }
-  const projectsState = (): ProjectsState =>
-    buildProjectsState({
+  const projectsState = (): ProjectsState => {
+    const base = buildProjectsState({
       ...(folders().length > 0 ? { currentPath: workspacePath } : {}),
       recent: readRecentProjects(),
       configs: parseProjectConfigs(platform.settings.get<unknown>('projects', {})),
     });
+    const cloudEnvironments = cloudEnvStore.toViews(
+      cloudProxyBox.activeEnvId,
+      cloudProxyBox.status,
+      cloudProxyBox.error,
+    );
+    const activeEntry = cloudProxyBox.activeEnvId ? cloudEnvStore.get(cloudProxyBox.activeEnvId) : undefined;
+    const activeEnvironment = activeEntry
+      ? {
+          kind: 'cloud' as const,
+          envId: activeEntry.id,
+          name: activeEntry.name,
+          provider: activeEntry.provider,
+          endpointUrl: activeEntry.endpointUrl,
+          status: cloudProxyBox.status,
+          ...(activeEntry.remoteProjectName ? { remoteProjectName: activeEntry.remoteProjectName } : {}),
+          ...(activeEntry.remoteProjectPath ? { remoteProjectPath: activeEntry.remoteProjectPath } : {}),
+          ...(cloudProxyBox.error ? { error: cloudProxyBox.error } : {}),
+        }
+      : { kind: 'local' as const };
+    return {
+      ...base,
+      cloudEnvironments,
+      activeEnvironment,
+      ...(activeEntry && cloudProxyBox.cloudRecent.length > 0 ? { cloudRecent: cloudProxyBox.cloudRecent } : {}),
+    };
+  };
 
   let hub: WorkbenchHub | undefined;
   let buildingWorkbenchState = false;
@@ -1023,6 +1149,24 @@ export function createHarnessHostRuntime(
     post({ type: 'projects', payload: projectsState() });
     hub?.schedulePush();
   };
+  void cloudEnvStore.hydrateCredentialPresence().then(() => {
+    if (cloudEnvStore.list().length > 0) {
+      pushProjects();
+    }
+  });
+  const pushRemoteStorages = (): void => {
+    post({ type: 'remoteStorages', payload: buildRemoteStoragesState() });
+  };
+  const setRemoteStorageAuthState = (next: RemoteStorageAuthState): void => {
+    remoteStorageAuthState = next;
+    post({ type: 'remoteStorageAuthProgress', payload: next });
+    pushRemoteStorages();
+  };
+  void remoteStorageStore.hydrateSecretPresence().then(() => {
+    if (remoteStorageStore.list().length > 0) {
+      pushRemoteStorages();
+    }
+  });
 
   let switchBackendFn: (id: string, forceReload?: boolean) => Promise<void> = async () => undefined;
   let openSessionInActiveFn: (
@@ -1352,7 +1496,6 @@ export function createHarnessHostRuntime(
     includeQuota = false,
   ): Promise<void> => {
     const effectiveIncludeQuota = includeQuota && isQuotaFetchEnabled();
-    const clientVersion = installedVersions.get(backendId);
     const activeAccountId = activeOfficialAccountId(backendId, readBackendChannels(), readProviders(), readAccounts());
     const isActiveSlot = activeAccountId === accountId;
     const lowerBackend = backendId.toLowerCase();
@@ -1376,7 +1519,6 @@ export function createHarnessHostRuntime(
       secrets: platform.secrets,
       includeQuota: effectiveIncludeQuota,
       getHttpProxy: () => platform.settings.getHttpProxy(),
-      ...(clientVersion ? { clientVersion } : {}),
       ...(cliCommand ? { cliCommand } : {}),
       ...(runtimeOptions.runAntigravityUsageCli ? { runAntigravityUsageCli: runtimeOptions.runAntigravityUsageCli } : {}),
     });
@@ -3221,7 +3363,8 @@ export function createHarnessHostRuntime(
     dispatchMessage: (msg) => handleWebviewMessageRef(msg, 'ide'),
     onStateChange: () => pushRemote(),
     log,
-    ...(runtimeOptions.fetchImpl ? { fetchImpl: runtimeOptions.fetchImpl } : {}),
+    fetchImpl: runtimeOptions.fetchImpl ?? createProxyAwareFetch(() => platform.settings.getHttpProxy()),
+    createWebSocket: createProxyAwareWebSocket(() => platform.settings.getHttpProxy()),
   });
   imBotManagerBox.current = imBotManager;
 
@@ -3417,6 +3560,259 @@ export function createHarnessHostRuntime(
 
   const commandReceipts = new CommandReceipts();
 
+  /** 处于云环境代理模式时，仍由本地宿主直接处理的消息集合（确保随时可管理本地项目、云环境和宿主配置）。 */
+  const LOCAL_ONLY_IN_CLOUD_MODE: ReadonlySet<WebviewToHost['type']> = new Set([
+    'addRecentProject',
+    'removeRecentProject',
+    'openSettings',
+    'showLogs',
+    'openExternal',
+    'setPreferences',
+    'setAppearance',
+    'setRemoteEnabled',
+    'setRemoteConfig',
+    'generateRemotePairing',
+    'clearRemotePairing',
+    'updateRemoteDevice',
+    'revokeRemoteDevice',
+    'disconnectAllRemote',
+    'refreshRemoteNetwork',
+    'probeTailscale',
+    'configureTailscaleServe',
+    'probeQuickTunnel',
+    'setQuickTunnelEnabled',
+    'setRemotePushConfig',
+    'testRemotePush',
+    'updateImBotChannel',
+    'generateImBotPairing',
+    'clearImBotPairing',
+    'revokeImBotUser',
+    'testImBotChannel',
+  ]);
+
+  const PASSIVE_CLOUD_MESSAGES: ReadonlySet<WebviewToHost['type']> = new Set([
+    'refreshSourceControl',
+    'fetchQuota',
+    'searchFiles',
+    'loadImage',
+    'fetchSkillMarket',
+    'fetchMcpMarket',
+  ]);
+
+  const mergeCloudSnapshot = (remoteSnapshot: HostSnapshot): HostSnapshot => {
+    const localProjects = projectsState();
+    const mergedProjects: ProjectsState = {
+      ...localProjects,
+      ...(remoteSnapshot.projects?.configs
+        ? { configs: { ...localProjects.configs, ...remoteSnapshot.projects.configs } }
+        : {}),
+    };
+    const remoteState = currentRemoteState();
+    return {
+      ...remoteSnapshot,
+      hostKind: platform.hostKind,
+      projects: mergedProjects,
+      remoteStorages: buildRemoteStoragesState(),
+      ...(remoteState ? { remote: remoteState } : {}),
+    };
+  };
+
+  const syncRemoteProjectMetadata = async (
+    envId: string,
+    remotePath: string | undefined,
+    remoteFolderName: string | undefined,
+    recent: readonly RecentProject[] | undefined,
+  ): Promise<void> => {
+    if (cloudProxyBox.activeEnvId !== envId) return;
+    if (recent) {
+      cloudProxyBox.cloudRecent = recent;
+    }
+    const existing = cloudEnvStore.get(envId);
+    if (!existing) return;
+    const nextPath = remotePath?.trim() || existing.remoteProjectPath;
+    const nextName =
+      remoteFolderName?.trim() ||
+      (nextPath ? (nextPath.split(/[\\/]+/u).filter(Boolean).pop() ?? nextPath) : existing.remoteProjectName);
+    if (nextPath !== existing.remoteProjectPath || nextName !== existing.remoteProjectName) {
+      await cloudEnvStore.update(envId, {
+        ...(nextName ? { remoteProjectName: nextName } : {}),
+        ...(nextPath ? { remoteProjectPath: nextPath } : {}),
+      });
+    }
+  };
+
+  const pushLocalSnapshotNow = (): void => {
+    const localSnap = active
+      ? withUnifiedTabs(active.backend.controller.peekSnapshot?.() ?? active.backend.controller.snapshot())
+      : idleSnapshot();
+    const remoteState = currentRemoteState();
+    clientHub.broadcast({
+      type: 'snapshot',
+      payload: {
+        ...localSnap,
+        hostKind: platform.hostKind,
+        projects: projectsState(),
+        ...(remoteState ? { remote: remoteState } : {}),
+      },
+    });
+  };
+
+  let cloudConnectSeq = 0;
+
+  const disconnectCloudEnv = (restoreLocalSnapshot: boolean, notifyToast = false): void => {
+    cloudConnectSeq += 1;
+    const wasActive = Boolean(cloudProxyBox.activeEnvId);
+    cloudProxyBox.connection?.dispose();
+    cloudProxyBox.connection = undefined;
+    cloudProxyBox.activeEnvId = undefined;
+    cloudProxyBox.status = 'disconnected';
+    cloudProxyBox.error = undefined;
+    cloudProxyBox.cloudRecent = [];
+    cloudProxyBox.lastSnapshot = undefined;
+    if (restoreLocalSnapshot) {
+      pushLocalSnapshotNow();
+    } else {
+      pushProjects();
+    }
+    if (wasActive && notifyToast) {
+      post({ type: 'toast', payload: { level: 'info', text: t('cloud.disconnected') } });
+    }
+  };
+
+  const connectCloudEnv = async (envId: string): Promise<void> => {
+    const seq = ++cloudConnectSeq;
+    const entry = cloudEnvStore.get(envId);
+    if (!entry) {
+      post({ type: 'toast', payload: { level: 'error', text: t('cloud.notFound') } });
+      return;
+    }
+    const cookieValue = await cloudEnvStore.getCookie(envId);
+    // 防止在等待 SecretStore 读取期间用户已断开或切换到了别的云环境
+    if (seq !== cloudConnectSeq) return;
+    if (!cookieValue) {
+      post({ type: 'toast', payload: { level: 'error', text: t('cloud.missingCredentials') } });
+      return;
+    }
+
+    cloudProxyBox.connection?.dispose();
+    cloudProxyBox.connection = undefined;
+    cloudProxyBox.activeEnvId = envId;
+    cloudProxyBox.status = 'connecting';
+    cloudProxyBox.error = undefined;
+    cloudProxyBox.cloudRecent = [];
+    cloudProxyBox.lastSnapshot = undefined;
+    pushProjects();
+
+    const conn = new CloudHostConnection({
+      envId,
+      endpointUrl: entry.endpointUrl,
+      cookieValue,
+      createWebSocket: createProxyAwareWebSocket(() => platform.settings.getHttpProxy()),
+      log,
+      onStatusChange: (status, error) => {
+        if (cloudProxyBox.activeEnvId !== envId) return;
+        const prevStatus = cloudProxyBox.status;
+        cloudProxyBox.status = status;
+        cloudProxyBox.error = error;
+        if (status === 'connected') {
+          void cloudEnvStore.update(envId, { lastConnectedAt: Date.now() }).then(() => {
+            if (cloudProxyBox.activeEnvId === envId) {
+              pushProjects();
+            }
+          });
+          if (prevStatus !== 'connected') {
+            post({ type: 'toast', payload: { level: 'info', text: t('cloud.connected', entry.name) } });
+          }
+        }
+        pushProjects();
+      },
+      onMessage: (remoteMsg) => {
+        if (cloudProxyBox.activeEnvId !== envId) return;
+        if (remoteMsg.type === 'snapshot') {
+          void syncRemoteProjectMetadata(
+            envId,
+            remoteMsg.payload.projects?.currentPath,
+            remoteMsg.payload.session.folder,
+            remoteMsg.payload.projects?.recent,
+          ).then(() => {
+            if (cloudProxyBox.activeEnvId !== envId) return;
+            const merged = mergeCloudSnapshot(remoteMsg.payload);
+            cloudProxyBox.lastSnapshot = merged;
+            clientHub.broadcast({ type: 'snapshot', payload: merged });
+          });
+          return;
+        }
+        if (remoteMsg.type === 'projects') {
+          void syncRemoteProjectMetadata(
+            envId,
+            remoteMsg.payload.currentPath,
+            undefined,
+            remoteMsg.payload.recent,
+          ).then(() => {
+            if (cloudProxyBox.activeEnvId !== envId) return;
+            pushProjects();
+          });
+          return;
+        }
+        clientHub.broadcast(remoteMsg);
+      },
+    });
+    cloudProxyBox.connection = conn;
+    conn.start();
+  };
+
+  const resolveStorageAdapter = async (storageId: string): Promise<{
+    readonly config: ReturnType<RemoteStorageStore['get']>;
+    readonly adapter?: RemoteStorageAdapter;
+  }> => {
+    const config = remoteStorageStore.get(storageId);
+    if (!config) return { config: undefined };
+    const secret = await remoteStorageStore.getSecret(storageId);
+    const signature = JSON.stringify([config.kind, config.endpoint, config.bucket, config.rootPath, config.username, secret ?? '']);
+    const cached = remoteStorageAdapters.get(storageId);
+    if (cached && cached.signature === signature) {
+      return { config, adapter: cached.adapter };
+    }
+    const fetchImpl = runtimeOptions.fetchImpl ?? createProxyAwareFetch(() => platform.settings.getHttpProxy());
+    const adapter = createRemoteStorageAdapter(config, secret, fetchImpl);
+    remoteStorageAdapters.set(storageId, { signature, adapter });
+    return { config, adapter };
+  };
+
+  /**
+   * 解析目标路径并沿最近存在的祖先目录做 `realpath` 校验，彻底防止符号链接逃逸工作区根目录。
+   * `allowRoot: true` 时允许结果等于工作区根目录本身（用于定位上传/建目录的基准目录）。
+   */
+  const resolveRealPathInsideWorkspace = async (
+    rawPath: string,
+    allowRoot = false,
+  ): Promise<string | undefined> => {
+    const candidate = isAbsolute(rawPath) ? resolve(rawPath) : resolve(workspacePath, rawPath);
+    const lexicalRel = relative(workspacePath, candidate);
+    if (lexicalRel.startsWith('..') || isAbsolute(lexicalRel)) return undefined;
+    if (!allowRoot && !lexicalRel) return undefined;
+
+    const realRoot = await realpath(workspacePath).catch(() => resolve(workspacePath));
+    // 沿祖先向上寻找最近真实存在的目录，再把剩余相对段拼回去检查
+    const pendingSegments: string[] = [];
+    let probe = candidate;
+    while (true) {
+      try {
+        const resolvedBase = await realpath(probe);
+        const resolvedTarget = pendingSegments.length > 0 ? resolve(resolvedBase, ...pendingSegments) : resolvedBase;
+        const realRel = relative(realRoot, resolvedTarget);
+        if (realRel.startsWith('..') || isAbsolute(realRel)) return undefined;
+        if (!allowRoot && !realRel) return undefined;
+        return resolvedTarget;
+      } catch {
+        const parent = dirname(probe);
+        if (parent === probe) return undefined;
+        pendingSegments.unshift(basename(probe));
+        probe = parent;
+      }
+    }
+  };
+
   const handleWebviewMessage = (message: WebviewToHost, clientId = 'ide'): void => {
     const client = clientHub.getClient(clientId);
     const surface: ClientSurface = client?.surface ?? 'ide';
@@ -3434,6 +3830,559 @@ export function createHarnessHostRuntime(
   const dispatchWebviewMessage = (message: WebviewToHost): void => {
     const commandId = 'commandId' in message ? message.commandId : undefined;
     if (commandId && !commandReceipts.accept(`${message.type}:${commandId}`)) return;
+
+    // ---- 云端开发环境管理（本地与云代理模式下均由本地宿主直接处理） ----
+    if (message.type === 'addCloudEnvironment') {
+      void (async () => {
+        const parsed = parseCloudPairingInput(message.payload.pairingUrlOrEndpoint, message.payload.pairingCode);
+        if (!parsed) {
+          post({ type: 'toast', payload: { level: 'error', text: t('cloud.invalidEndpoint') } });
+          return;
+        }
+        if (!parsed.pairingCode) {
+          post({ type: 'toast', payload: { level: 'error', text: t('cloud.pairingCodeRequired') } });
+          return;
+        }
+        const fetchImpl = runtimeOptions.fetchImpl ?? createProxyAwareFetch(() => platform.settings.getHttpProxy());
+        const paired = await pairWithCloudHost({
+          endpointUrl: parsed.endpointUrl,
+          code: parsed.pairingCode,
+          deviceName: `Halo (${platform.hostKind})`,
+          fetchImpl,
+        });
+        if (!paired.ok) {
+          post({ type: 'toast', payload: { level: 'error', text: t('cloud.pairFailed', paired.error) } });
+          return;
+        }
+        const entry = await cloudEnvStore.add(
+          {
+            name: message.payload.name?.trim() || parsed.suggestedName,
+            endpointUrl: parsed.endpointUrl,
+            provider: message.payload.provider ?? parsed.inferredProvider,
+          },
+          paired.cookieValue,
+        );
+        pushProjects();
+        post({ type: 'toast', payload: { level: 'info', text: t('cloud.added', entry.name) } });
+        if (message.payload.connectNow !== false) {
+          await connectCloudEnv(entry.id);
+        }
+      })();
+      return;
+    }
+    if (message.type === 'updateCloudEnvironment') {
+      void (async () => {
+        const existing = cloudEnvStore.get(message.payload.id);
+        if (!existing) {
+          post({ type: 'toast', payload: { level: 'error', text: t('cloud.notFound') } });
+          return;
+        }
+        let nextEndpoint = existing.endpointUrl;
+        let nextCookie: string | undefined;
+        let nextProvider = message.payload.provider ?? existing.provider;
+        if (message.payload.pairingUrlOrEndpoint || message.payload.pairingCode) {
+          const parsed = parseCloudPairingInput(
+            message.payload.pairingUrlOrEndpoint ?? existing.endpointUrl,
+            message.payload.pairingCode,
+          );
+          if (!parsed) {
+            post({ type: 'toast', payload: { level: 'error', text: t('cloud.invalidEndpoint') } });
+            return;
+          }
+          nextEndpoint = parsed.endpointUrl;
+          if (!message.payload.provider) {
+            nextProvider = existing.provider;
+          }
+          if (parsed.pairingCode) {
+            const fetchImpl = runtimeOptions.fetchImpl ?? createProxyAwareFetch(() => platform.settings.getHttpProxy());
+            const paired = await pairWithCloudHost({
+              endpointUrl: parsed.endpointUrl,
+              code: parsed.pairingCode,
+              deviceName: `Halo (${platform.hostKind})`,
+              fetchImpl,
+            });
+            if (!paired.ok) {
+              post({ type: 'toast', payload: { level: 'error', text: t('cloud.pairFailed', paired.error) } });
+              return;
+            }
+            nextCookie = paired.cookieValue;
+          }
+        }
+        const updated = await cloudEnvStore.update(
+          existing.id,
+          {
+            ...(message.payload.name !== undefined ? { name: message.payload.name } : {}),
+            endpointUrl: nextEndpoint,
+            provider: nextProvider,
+          },
+          nextCookie,
+        );
+        pushProjects();
+        if (updated) {
+          post({ type: 'toast', payload: { level: 'info', text: t('cloud.updated', updated.name) } });
+          if (message.payload.reconnect || (cloudProxyBox.activeEnvId === updated.id && (nextCookie || nextEndpoint !== existing.endpointUrl))) {
+            await connectCloudEnv(updated.id);
+          }
+        }
+      })();
+      return;
+    }
+    if (message.type === 'connectCloudEnvironment') {
+      void connectCloudEnv(message.payload.id);
+      return;
+    }
+    if (message.type === 'disconnectCloudEnvironment') {
+      disconnectCloudEnv(true, true);
+      return;
+    }
+    if (message.type === 'removeCloudEnvironment') {
+      void (async () => {
+        const existing = cloudEnvStore.get(message.payload.id);
+        if (cloudProxyBox.activeEnvId === message.payload.id) {
+          disconnectCloudEnv(true, false);
+        }
+        const removed = await cloudEnvStore.remove(message.payload.id);
+        pushProjects();
+        if (removed && existing) {
+          post({ type: 'toast', payload: { level: 'info', text: t('cloud.removed', existing.name) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'switchCloudProject') {
+      if (cloudProxyBox.connection) {
+        const sent = cloudProxyBox.connection.send({
+          type: 'openProject',
+          payload: { path: message.payload.path, inPlace: true },
+        });
+        if (!sent) {
+          post({ type: 'toast', payload: { level: 'error', text: t('cloud.notConnected') } });
+        }
+      }
+      return;
+    }
+
+    // ---- 远端文件存储（Google Cloud Storage / Google Drive / WebDAV） ----
+    if (message.type === 'upsertRemoteStorage') {
+      void (async () => {
+        const saved = await remoteStorageStore.upsert(message.payload);
+        remoteStorageAdapters.delete(saved.id);
+        pushRemoteStorages();
+        post({ type: 'toast', payload: { level: 'info', text: t('storage.saved', saved.name) } });
+      })();
+      return;
+    }
+    if (message.type === 'deleteRemoteStorage') {
+      void (async () => {
+        const existing = remoteStorageStore.get(message.payload.id);
+        remoteStorageAdapters.delete(message.payload.id);
+        const removed = await remoteStorageStore.remove(message.payload.id);
+        pushRemoteStorages();
+        if (removed && existing) {
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.deleted', existing.name) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'probeRemoteStorageAuth') {
+      void (async () => {
+        gcloudProbeCache = await probeGcloudAuth();
+        pushRemoteStorages();
+      })();
+      return;
+    }
+    if (message.type === 'cancelRemoteStorageOAuth') {
+      activeGoogleAuthHandle?.cancel();
+      activeGoogleAuthHandle = undefined;
+      setRemoteStorageAuthState({ status: 'idle' });
+      return;
+    }
+    if (message.type === 'startRemoteStorageOAuth') {
+      void (async () => {
+        const { kind, method, storageId, name, bucket, rootPath, clientId, clientSecret } = message.payload;
+        if (kind === 'google-cloud-storage' && !bucket?.trim()) {
+          const err = t('storage.authBucketMissing');
+          setRemoteStorageAuthState({ status: 'error', kind, method, error: err });
+          post({ type: 'toast', payload: { level: 'error', text: err } });
+          return;
+        }
+
+        activeGoogleAuthHandle?.cancel();
+        activeGoogleAuthHandle = undefined;
+
+        let resolvedClientId = clientId?.trim() || resolveGoogleOAuthClientId();
+        let resolvedClientSecret = clientSecret?.trim() || undefined;
+        if (method === 'oauth') {
+          if (!resolvedClientId) {
+            const err = t('storage.authClientIdMissing');
+            setRemoteStorageAuthState({ status: 'error', kind, method, error: err });
+            post({ type: 'toast', payload: { level: 'error', text: err } });
+            return;
+          }
+          if (clientId?.trim()) {
+            await platform.globalState.update(GOOGLE_OAUTH_CLIENT_ID_KEY, resolvedClientId);
+          }
+          if (clientSecret?.trim()) {
+            await platform.secrets.store(GOOGLE_OAUTH_CLIENT_SECRET_KEY, clientSecret.trim());
+          } else {
+            resolvedClientSecret =
+              (await platform.secrets.get(GOOGLE_OAUTH_CLIENT_SECRET_KEY)) ||
+              process.env.HALO_GOOGLE_OAUTH_CLIENT_SECRET?.trim() ||
+              undefined;
+          }
+        }
+
+        setRemoteStorageAuthState({ status: 'authorizing', kind, method });
+
+        try {
+          const fetchImpl = runtimeOptions.fetchImpl ?? createProxyAwareFetch(() => platform.settings.getHttpProxy());
+          const handle =
+            method === 'oauth'
+              ? await startGoogleLoopbackOAuth({
+                  kind,
+                  clientId: resolvedClientId!,
+                  ...(resolvedClientSecret ? { clientSecret: resolvedClientSecret } : {}),
+                  openExternal: (url) => platform.openExternal(url),
+                  fetchImpl,
+                })
+              : startGcloudAdcAuth({ kind });
+
+          activeGoogleAuthHandle = handle;
+          const result = await handle.promise;
+          if (activeGoogleAuthHandle === handle) {
+            activeGoogleAuthHandle = undefined;
+          }
+
+          const defaultName =
+            kind === 'google-drive'
+              ? result.email
+                ? `Google Drive · ${result.email.split('@')[0]}`
+                : 'Google Drive'
+              : bucket?.trim() || 'Google Cloud Storage';
+
+          const saved = await remoteStorageStore.upsert({
+            ...(storageId ? { id: storageId } : {}),
+            name: name?.trim() || defaultName,
+            kind,
+            ...(kind === 'google-cloud-storage' && bucket?.trim() ? { bucket: bucket.trim() } : {}),
+            ...(rootPath?.trim() ? { rootPath: rootPath.trim() } : {}),
+            ...(result.email ? { username: result.email } : {}),
+            secret: result.secretJson,
+          });
+          remoteStorageAdapters.delete(saved.id);
+          setRemoteStorageAuthState({
+            status: 'succeeded',
+            kind,
+            method,
+            storageId: saved.id,
+            ...(result.email ? { email: result.email } : {}),
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.authSucceeded', saved.name) } });
+        } catch (error) {
+          activeGoogleAuthHandle = undefined;
+          const detail = error instanceof Error ? error.message : String(error);
+          if (detail === 'Authorization cancelled') {
+            setRemoteStorageAuthState({ status: 'idle' });
+            return;
+          }
+          setRemoteStorageAuthState({ status: 'error', kind, method, error: detail });
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.authFailed', detail) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'testRemoteStorage') {
+      void (async () => {
+        try {
+          const { config, adapter } = await resolveStorageAdapter(message.payload.id);
+          if (!config || !adapter) {
+            post({
+              type: 'remoteFileActionDone',
+              payload: { storageId: message.payload.id, action: 'test', ok: false, message: t('storage.notFound') },
+            });
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.notFound') } });
+            return;
+          }
+          await adapter.test();
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId: config.id, action: 'test', ok: true, message: t('storage.testOk', config.name) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.testOk', config.name) } });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId: message.payload.id, action: 'test', ok: false, message: detail },
+          });
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.testFailed', detail) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'listRemoteFiles') {
+      void (async () => {
+        const { requestId, storageId, dirPath, query } = message.payload;
+        try {
+          const { adapter } = await resolveStorageAdapter(storageId);
+          if (!adapter) {
+            post({
+              type: 'remoteFilesListed',
+              payload: { requestId, storageId, dirPath: dirPath ?? '', breadcrumbs: [], items: [], error: t('storage.notFound') },
+            });
+            return;
+          }
+          const result = await adapter.list(dirPath ?? '', query);
+          post({
+            type: 'remoteFilesListed',
+            payload: {
+              requestId,
+              storageId,
+              dirPath: result.dirPath,
+              breadcrumbs: result.breadcrumbs,
+              items: result.items,
+            },
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({
+            type: 'remoteFilesListed',
+            payload: { requestId, storageId, dirPath: dirPath ?? '', breadcrumbs: [], items: [], error: detail },
+          });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'previewRemoteFile') {
+      void (async () => {
+        const { storageId, entryId, path: remotePath, name } = message.payload;
+        try {
+          const { adapter } = await resolveStorageAdapter(storageId);
+          if (!adapter) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.notFound') } });
+            return;
+          }
+          const { bytes } = await adapter.read(entryId, remotePath);
+          if (bytes.length > 512 * 1024) {
+            post({
+              type: 'diffContent',
+              payload: { path: remotePath, title: name, kind: 'cannotPreview', message: t('storage.previewTooLarge') },
+            });
+            return;
+          }
+          if (bytes.subarray(0, 8_192).includes(0)) {
+            post({
+              type: 'diffContent',
+              payload: { path: remotePath, title: name, kind: 'cannotPreview', message: t('storage.previewBinary') },
+            });
+            return;
+          }
+          post({
+            type: 'diffContent',
+            payload: buildMobileFileContent(remotePath, bytes.toString('utf8'), t('storage.previewFailed', 'empty'), {
+              editable: false,
+            }),
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({
+            type: 'diffContent',
+            payload: { path: remotePath, title: name, kind: 'cannotPreview', message: t('storage.previewFailed', detail) },
+          });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'downloadRemoteFile') {
+      void (async () => {
+        const { storageId, entryId, path: remotePath, name } = message.payload;
+        const ctx = clientRequestContext.getStore();
+        try {
+          const { adapter } = await resolveStorageAdapter(storageId);
+          if (!adapter) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.notFound') } });
+            return;
+          }
+          const { bytes, mimeType } = await adapter.read(entryId, remotePath);
+          const safeName = basename(name) || 'download';
+          if (ctx?.surface === 'mobile-web') {
+            post({
+              type: 'remoteFileActionDone',
+              payload: {
+                storageId,
+                action: 'download',
+                ok: true,
+                message: t('storage.downloadReady', safeName),
+                download: {
+                  name: safeName,
+                  ...(mimeType ? { mimeType } : {}),
+                  dataBase64: bytes.toString('base64'),
+                },
+              },
+            });
+            post({ type: 'toast', payload: { level: 'info', text: t('storage.downloadReady', safeName) } });
+            return;
+          }
+          const picked = await platform.pickOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            defaultPath: workspacePath,
+            title: t('storage.downloadDirTitle'),
+          });
+          const destDir = picked[0];
+          if (!destDir) return;
+          const destPath = resolve(destDir, safeName);
+          await writeFile(destPath, bytes);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'download', ok: true, message: t('storage.downloaded', safeName, destDir) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.downloaded', safeName, destDir) } });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'download', ok: false, message: detail },
+          });
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.downloadFailed', detail) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'uploadRemoteFiles') {
+      void (async () => {
+        const { storageId, dirPath, files } = message.payload;
+        try {
+          const { adapter } = await resolveStorageAdapter(storageId);
+          if (!adapter) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.notFound') } });
+            return;
+          }
+          const uploadList: { readonly name: string; readonly bytes: Buffer; readonly mimeType?: string }[] = [];
+          if (files && files.length > 0) {
+            for (const f of files) {
+              uploadList.push({
+                name: basename(f.name) || f.name,
+                bytes: Buffer.from(f.dataBase64, 'base64'),
+                ...(f.mimeType ? { mimeType: f.mimeType } : {}),
+              });
+            }
+          } else {
+            const picked = await platform.pickOpenDialog({
+              canSelectFiles: true,
+              canSelectFolders: false,
+              canSelectMany: true,
+              defaultPath: workspacePath,
+              title: t('storage.uploadTitle'),
+            });
+            if (picked.length === 0) return;
+            for (const filePath of picked) {
+              const data = await readFile(filePath);
+              uploadList.push({ name: basename(filePath), bytes: data });
+            }
+          }
+          for (const item of uploadList) {
+            await adapter.upload(dirPath ?? '', item.name, item.bytes, item.mimeType);
+          }
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'upload', ok: true, message: t('storage.uploaded', uploadList.length) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.uploaded', uploadList.length) } });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'upload', ok: false, message: detail },
+          });
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.uploadFailed', detail) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'deleteRemoteFile') {
+      void (async () => {
+        const { storageId, entryId, path: remotePath, name, kind } = message.payload;
+        try {
+          const { adapter } = await resolveStorageAdapter(storageId);
+          if (!adapter) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.notFound') } });
+            return;
+          }
+          await adapter.delete(entryId, remotePath, kind);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'delete', ok: true, message: t('storage.fileDeleted', name) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.fileDeleted', name) } });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'delete', ok: false, message: detail },
+          });
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.deleteFailed', detail) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'createRemoteFolder') {
+      void (async () => {
+        const { storageId, dirPath, name } = message.payload;
+        try {
+          const { adapter } = await resolveStorageAdapter(storageId);
+          if (!adapter) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.notFound') } });
+            return;
+          }
+          await adapter.mkdir(dirPath ?? '', name);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'mkdir', ok: true, message: t('storage.folderCreated', name) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.folderCreated', name) } });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId, action: 'mkdir', ok: false, message: detail },
+          });
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.mkdirFailed', detail) } });
+        }
+      })();
+      return;
+    }
+
+    // ---- 云端代理模式路由 ----
+    if (cloudProxyBox.activeEnvId) {
+      if (message.type === 'openProject') {
+        // 在云端模式下选择任意本地项目，自动断开云连接并恢复本地快照，再按需切换本地工作区
+        disconnectCloudEnv(true, false);
+      } else if (message.type === 'ready') {
+        const ctx = clientRequestContext.getStore();
+        const snap = cloudProxyBox.lastSnapshot
+          ? mergeCloudSnapshot(cloudProxyBox.lastSnapshot)
+          : mergeCloudSnapshot(
+              active
+                ? withUnifiedTabs(active.backend.controller.peekSnapshot?.() ?? active.backend.controller.snapshot())
+                : idleSnapshot(),
+            );
+        if (ctx) {
+          clientHub.sendTo(ctx.clientId, { type: 'snapshot', payload: snap });
+        } else {
+          clientHub.broadcast({ type: 'snapshot', payload: snap });
+        }
+        cloudProxyBox.connection?.send({ type: 'ready', payload: {} });
+        return;
+      } else if (!LOCAL_ONLY_IN_CLOUD_MODE.has(message.type)) {
+        const sent = cloudProxyBox.connection?.send(message) ?? false;
+        if (!sent && !PASSIVE_CLOUD_MESSAGES.has(message.type)) {
+          post({ type: 'toast', payload: { level: 'error', text: t('cloud.notConnected') } });
+        }
+        return;
+      }
+    }
     if (message.type === 'fetchBackendModels') {
       void (async () => {
         const { requestId, backendId } = message.payload;
@@ -3799,12 +4748,28 @@ export function createHarnessHostRuntime(
         // 不读凭据、不发请求。绑定第三方服务商时（Claude / CodeBuddy）实际消耗的是编程套餐额度，
         // 官方订阅额度不再适用，同样隐藏。切换账号/重启底层期间 active 会短暂置空，必须按 targetBackendId
         // 解析当前目标底层，避免误回退到 defaultBackendId（如 dsh）导致额度标识永久消失。
-        const backendId = active?.backend.profile.id ?? targetBackendId;
-        const profile = active?.backend.profile ?? profiles().find((p) => p.id === backendId);
-        const providerId = quotaProviderFor(profile);
+        let backendId = active?.backend.profile.id ?? targetBackendId;
+        let profile = active?.backend.profile ?? profiles().find((p) => p.id === backendId);
+        let providerId = quotaProviderFor(profile);
         if (!providerId || (providerId !== 'antigravity' && effectiveProviderFor(backendId))) {
           post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
           return;
+        }
+        // Antigravity 仅通过官方 `agy -p /usage --output-format json` CLI 查询，
+        // 若当前正处于切换账号槽位/重启底层过渡期，需等待磁盘槽位切换完成后再调用 CLI，避免串读旧账号。
+        if (providerId === 'antigravity') {
+          await switching.catch(() => undefined);
+          if (!isQuotaFetchEnabled()) {
+            post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
+            return;
+          }
+          backendId = active?.backend.profile.id ?? targetBackendId;
+          profile = active?.backend.profile ?? profiles().find((p) => p.id === backendId);
+          providerId = quotaProviderFor(profile);
+          if (!providerId || (providerId !== 'antigravity' && effectiveProviderFor(backendId))) {
+            post({ type: 'quotaFetched', payload: { requestId, error: t('usage.unavailable') } });
+            return;
+          }
         }
         if (force) {
           clearQuotaCacheFor(providerId);
@@ -3817,9 +4782,8 @@ export function createHarnessHostRuntime(
           const accCfg = isSystemAccountId(activeAccId)
             ? undefined
             : readAccounts().find((a) => a.id === activeAccId);
-          // Antigravity 按激活账号槽位精确解析凭据：优先采用同账号且更新的磁盘续期 token，否则直接用该槽位快照，
-          // 绝不误读其他账号的磁盘凭据导致切换账号后串号；若凭据在系统 Keyring 或 access_token 过期且确认当前磁盘/Keyring 归属本槽位，
-          // 允许回退官方 `agy -p /usage --output-format json`。
+          // Antigravity 仅在确认磁盘/Keyring 凭据归属当前激活槽位后，通过官方 `agy -p /usage --output-format json` CLI 查询
+          // （严禁直连 `cloudcode-pa.googleapis.com` 内部接口），避免切换账号时串号。
           let antigravityRawToken: string | undefined;
           let antigravityDiskMatchedSlot = false;
           let staleSystemSlotReplaced = false;
@@ -3899,14 +4863,12 @@ export function createHarnessHostRuntime(
               : providerId === 'antigravity'
                 ? queryAntigravityQuota
                 : queryCodebuddyQuota;
-          const clientVersion = installedVersions.get(backendId);
           const antigravityCliCommand =
             providerId === 'antigravity' && canUseAntigravityCli ? await resolveAntigravityCliCommand(profile) : undefined;
           const debugReasons: string[] = [];
           const quota = await query({
             env: accPatch.env,
             getHttpProxy: () => platform.settings.getHttpProxy(),
-            ...(clientVersion ? { clientVersion } : {}),
             ...(antigravityRawToken !== undefined ? { rawTokenJson: antigravityRawToken } : {}),
             ...(antigravityCliCommand ? { cliCommand: antigravityCliCommand } : {}),
             ...(providerId === 'antigravity' && runtimeOptions.runAntigravityUsageCli
@@ -5210,6 +6172,118 @@ export function createHarnessHostRuntime(
       void sendInlineFile(message.payload.path);
       return;
     }
+    if (message.type === 'deleteLocalFile') {
+      void (async () => {
+        const rawPath = message.payload.path;
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        try {
+          const safeTarget = await resolveRealPathInsideWorkspace(rawPath, false);
+          if (!safeTarget) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.deleteFailed', 'EACCES') } });
+            return;
+          }
+          await rm(safeTarget, { recursive: message.payload.kind === 'directory', force: false });
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId: 'local', action: 'delete', ok: true, message: t('storage.fileDeleted', basename(rawPath)) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.fileDeleted', basename(rawPath)) } });
+          void hub?.refreshSourceControl();
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.deleteFailed', detail) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'createLocalFolder') {
+      void (async () => {
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        const safeName = message.payload.name.replace(/[\\/]+/gu, '').trim();
+        if (!safeName || safeName === '.' || safeName === '..') {
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.mkdirFailed', 'Invalid folder name') } });
+          return;
+        }
+        try {
+          const rawDir = message.payload.dirPath?.trim()
+            ? resolve(workspacePath, message.payload.dirPath.trim(), safeName)
+            : resolve(workspacePath, safeName);
+          const safeTargetDir = await resolveRealPathInsideWorkspace(rawDir, false);
+          if (!safeTargetDir) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.mkdirFailed', 'EACCES') } });
+            return;
+          }
+          await mkdir(safeTargetDir, { recursive: true });
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId: 'local', action: 'mkdir', ok: true, message: t('storage.folderCreated', safeName) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.folderCreated', safeName) } });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.mkdirFailed', detail) } });
+        }
+      })();
+      return;
+    }
+    if (message.type === 'uploadLocalFiles') {
+      void (async () => {
+        if (!platform.isWorkspaceTrusted()) {
+          post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return;
+        }
+        try {
+          const rawBase = message.payload.dirPath?.trim()
+            ? resolve(workspacePath, message.payload.dirPath.trim())
+            : resolve(workspacePath);
+          const safeBaseDir = await resolveRealPathInsideWorkspace(rawBase, true);
+          if (!safeBaseDir) {
+            post({ type: 'toast', payload: { level: 'error', text: t('storage.uploadFailed', 'EACCES') } });
+            return;
+          }
+          const filesToWrite: { readonly name: string; readonly bytes: Buffer }[] = [];
+          if (message.payload.files && message.payload.files.length > 0) {
+            for (const f of message.payload.files) {
+              filesToWrite.push({ name: basename(f.name) || f.name, bytes: Buffer.from(f.dataBase64, 'base64') });
+            }
+          } else {
+            const picked = await platform.pickOpenDialog({
+              canSelectFiles: true,
+              canSelectFolders: false,
+              canSelectMany: true,
+              title: t('storage.uploadTitle'),
+            });
+            if (picked.length === 0) return;
+            for (const src of picked) {
+              filesToWrite.push({ name: basename(src), bytes: await readFile(src) });
+            }
+          }
+          await mkdir(safeBaseDir, { recursive: true });
+          for (const item of filesToWrite) {
+            const safeName = basename(item.name);
+            const safeDest = await resolveRealPathInsideWorkspace(resolve(safeBaseDir, safeName), false);
+            if (!safeDest) continue;
+            await writeFile(safeDest, item.bytes);
+          }
+          post({
+            type: 'remoteFileActionDone',
+            payload: { storageId: 'local', action: 'upload', ok: true, message: t('storage.uploaded', filesToWrite.length) },
+          });
+          post({ type: 'toast', payload: { level: 'info', text: t('storage.uploaded', filesToWrite.length) } });
+          void hub?.refreshSourceControl();
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          post({ type: 'toast', payload: { level: 'error', text: t('storage.uploadFailed', detail) } });
+        }
+      })();
+      return;
+    }
     if (message.type === 'saveWorkspaceFile') {
       void (async () => {
         const rawPath = message.payload.path;
@@ -6069,7 +7143,15 @@ export function createHarnessHostRuntime(
     executeCommand,
     getRemoteState: () => currentRemoteState() ?? remoteBridge.getState(),
     generateRemotePairing: (opts) => remoteBridge.generatePairing(opts),
+    updateRemoteConfig: (patch) => remoteBridge.updateConfig(patch),
+    setQuickTunnelEnabled: (enabled) => remoteBridge.setQuickTunnelEnabled(enabled),
+    configureTailscaleServe: (enabled) => remoteBridge.configureTailscaleServe(enabled),
     dispose: async () => {
+      activeGoogleAuthHandle?.cancel();
+      activeGoogleAuthHandle = undefined;
+      cloudProxyBox.connection?.dispose();
+      cloudProxyBox.connection = undefined;
+      cloudProxyBox.activeEnvId = undefined;
       if (gatewayLogTimer) {
         clearTimeout(gatewayLogTimer);
         gatewayLogTimer = undefined;

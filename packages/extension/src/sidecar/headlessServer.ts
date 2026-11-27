@@ -6,12 +6,14 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { RemoteState } from '@harness-deck/shared';
+import type { RemoteRouteKind, RemoteScope, RemoteState } from '@harness-deck/shared';
 import { createHarnessHostRuntime, type HarnessHostRuntime } from '../host/HarnessHostRuntime.ts';
 import type { HostPlatform } from '../host/HostPlatform.ts';
 import { noWorkbench } from '../vm/workbench.ts';
 import { FileKeyValueStore, FileSettingsStore, workspaceStateFilePath } from './fileStores.ts';
 import { acquireSchedulerLock } from './schedulerLock.ts';
+
+export type HeadlessTunnelMode = 'none' | 'quick' | 'tailscale';
 
 export interface HeadlessServerOptions {
   readonly configRoot: string;
@@ -20,6 +22,12 @@ export interface HeadlessServerOptions {
   readonly bindHost?: string;
   readonly webviewDistRoot?: string;
   readonly generatePairingOnStart?: boolean;
+  /** 配对默认作用域：普通模式为 `operate`，云端无头宿主（`--cloud` / `--scope owner`）使用 `owner`。 */
+  readonly scope?: RemoteScope;
+  /** 启动时自动开启的公网入口类型。 */
+  readonly tunnel?: HeadlessTunnelMode;
+  /** 自定义公网入口 URL（如 Named Cloudflare Tunnel / frp / 反代域名）。 */
+  readonly publicUrl?: string;
   readonly log?: (line: string) => void;
 }
 
@@ -157,8 +165,35 @@ export async function runHeadlessServer(options: HeadlessServerOptions): Promise
     ...(options.bindHost ? { remoteBindHost: options.bindHost } : {}),
   });
 
+  const pairingScope: RemoteScope = options.scope ?? 'operate';
+  let activeRouteKind: RemoteRouteKind = 'lan';
+
+  if (options.publicUrl?.trim()) {
+    await runtime.updateRemoteConfig?.({ tunnelUrl: options.publicUrl.trim(), scope: pairingScope });
+    activeRouteKind = 'tunnel';
+  } else if (pairingScope !== 'operate') {
+    await runtime.updateRemoteConfig?.({ scope: pairingScope });
+  }
+
+  if (options.tunnel === 'quick') {
+    const qt = await runtime.setQuickTunnelEnabled?.(true);
+    if (qt?.status === 'running' && qt.url) {
+      activeRouteKind = 'quick-tunnel';
+      log(`quick tunnel ready: ${qt.url}`);
+    } else {
+      log(`quick tunnel unavailable (${qt?.error ?? 'not installed'}), falling back to ${activeRouteKind}`);
+    }
+  } else if (options.tunnel === 'tailscale') {
+    const ts = await runtime.configureTailscaleServe?.(true);
+    if (ts?.ok) {
+      activeRouteKind = 'tailscale';
+    } else {
+      log(`tailscale serve unavailable (${ts?.error ?? 'failed'}), falling back to ${activeRouteKind}`);
+    }
+  }
+
   if (options.generatePairingOnStart !== false) {
-    await runtime.generateRemotePairing?.({ scope: 'operate', routeKind: 'lan' });
+    await runtime.generateRemotePairing?.({ scope: pairingScope, routeKind: activeRouteKind });
   } else {
     runtime.handleWebviewMessage({ type: 'setRemoteEnabled', payload: { enabled: true } });
   }
@@ -190,7 +225,7 @@ export async function runHeadlessServer(options: HeadlessServerOptions): Promise
   }
 
   const onRefreshPairing = (): void => {
-    void runtime.generateRemotePairing?.({ scope: 'operate', routeKind: 'lan' }).then(async (next) => {
+    void runtime.generateRemotePairing?.({ scope: pairingScope, routeKind: activeRouteKind }).then(async (next) => {
       await writeServerInfo();
       if (next.pairing?.url) {
         log(`refreshed pairing URL: ${next.pairing.url}`);

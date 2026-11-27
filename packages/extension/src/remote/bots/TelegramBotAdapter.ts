@@ -4,6 +4,7 @@
  * - 自动校验 `getMe` 获取机器人用户名，用于在群聊中精准识别 `@bot` 提及与回复
  * - 支持 `sendChatAction('typing')`、`sendMessage` + 节流 `editMessageText` 流式更新与超长消息自动分段
  */
+import type { FetchLike } from '../../providers/proxyFetch.ts';
 import {
   computeReconnectDelay,
   splitMarkdownChunks,
@@ -22,7 +23,7 @@ const TELEGRAM_POLL_TIMEOUT_SEC = 25;
 export interface TelegramBotAdapterOptions {
   readonly botToken: string;
   readonly apiBase?: string;
-  readonly fetchImpl?: typeof fetch;
+  readonly fetchImpl?: FetchLike;
   readonly pollTimeoutSec?: number;
   readonly reconnectBaseMs?: number;
   readonly now?: () => number;

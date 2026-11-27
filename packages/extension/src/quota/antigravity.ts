@@ -1,38 +1,29 @@
 /**
  * Antigravity（agy）订阅额度：
- * 1. 优先读取 OAuth 凭据直连 Cloud Code `retrieveUserQuotaSummary`（低延迟、不启子进程）；
- * 2. 若凭据托管在系统 Keyring（macOS Keychain / Windows Credential Manager / Linux Secret Service）、
- *    本地 `access_token` 已过期需 CLI 自动续期、使用企业/ADC 认证或直连受限时，在调用方明确授予
- *    `cliCommand` 的前提下回退调用官方 `agy -p /usage --output-format json`，把 Gemini 池 /
- *    Claude+GPT 池 / 独立模型池的 5 小时与每周窗口归一化成视图模型。
+ * 仅通过官方 `agy -p /usage --output-format json` CLI 查询（严禁直连 `cloudcode-pa.googleapis.com`
+ * 等内部 HTTP 接口），兼容系统 Keyring（macOS Keychain / Windows Credential Manager / Linux Secret
+ * Service）、本地 OAuth 自动续期与企业/ADC 认证，并把 Gemini 池 / Claude+GPT 池 / 独立模型池的
+ * 5 小时与每周窗口归一化成视图模型。
  */
 import { execFile } from 'node:child_process';
-import { access, readFile } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { QuotaView, QuotaWindowView } from '@harness-deck/shared';
-import { createProxyAwareFetch } from '../providers/proxyFetch.ts';
 import { parseEpochMs, rec, roundPercent, type QuotaServiceOptions, type Rec } from './util.ts';
 
-const PRIMARY_HOST = 'https://daily-cloudcode-pa.googleapis.com';
-const FALLBACK_HOST = 'https://cloudcode-pa.googleapis.com';
-const QUOTA_PATH = '/v1internal:retrieveUserQuotaSummary';
-/** 服务端按 User-Agent 的 CLI 版本做分组门控；缺少版本时只返回 3p 池，漏掉 Gemini 与独立模型池。 */
-const DEFAULT_CLI_VERSION = '1.5.14';
 const GROUP_MODELS_PREFIX = /^Models within this group:\s*/iu;
 /** 与其它提供方一致：成功结果缓存 5 分钟。 */
 export const ANTIGRAVITY_CACHE_MS = 300_000;
-const TIMEOUT_MS = 20_000;
 const CLI_TIMEOUT_MS = 30_000;
 const CLI_MAX_BUFFER = 2 * 1024 * 1024;
-const CREDENTIAL_FILES = ['antigravity-cli/antigravity-oauth-token', 'jetski-standalone-oauth-token'] as const;
 
 interface InFlightQuotaResult {
   readonly view?: QuotaView;
   readonly reasons: readonly string[];
 }
 
-/** 成功结果按 token+UA 缓存（token 只作内存 key）；并发同 key 请求共享同一在途 Promise。 */
+/** 成功结果按 CLI 路径 + `.gemini` 目录缓存；并发同 key 请求共享同一在途 Promise。 */
 const cache = new Map<string, { readonly at: number; readonly value: QuotaView }>();
 const inFlight = new Map<string, Promise<InFlightQuotaResult>>();
 let cacheGeneration = 0;
@@ -43,108 +34,8 @@ export function clearAntigravityQuotaCache(): void {
   inFlight.clear();
 }
 
-function userAgent(clientVersion?: string): string {
-  const version = clientVersion?.trim();
-  return `antigravity/cli/${version && /^\d+\.\d+/u.test(version) ? version : DEFAULT_CLI_VERSION}`;
-}
-
 function geminiDir(env: Readonly<Record<string, string | undefined>>): string {
   return join(env.HOME ?? env.USERPROFILE ?? homedir(), '.gemini');
-}
-
-type TokenParseResult =
-  | { readonly kind: 'valid'; readonly accessToken: string }
-  | { readonly kind: 'present-unusable'; readonly reason: 'expired' | 'missing-access' }
-  | { readonly kind: 'invalid' };
-
-/** 从单份 Antigravity OAuth 凭据 JSON 提取未过期的 access_token；返回状态以区分「有效/过期/缺少access_token/无结构」。 */
-function parseAccessTokenFromRaw(raw: string, now: number): TokenParseResult {
-  let json: Rec | undefined;
-  try {
-    json = rec(JSON.parse(raw));
-  } catch {
-    return { kind: 'invalid' };
-  }
-  const token = rec(json?.token);
-  if (!token) return { kind: 'invalid' };
-  const accessToken = token.access_token;
-  const refreshToken =
-    (typeof token.refresh_token === 'string' && token.refresh_token.trim()) ||
-    (typeof token.refreshToken === 'string' && token.refreshToken.trim()) ||
-    (typeof json?.refresh_token === 'string' && json.refresh_token.trim()) ||
-    (typeof json?.refreshToken === 'string' && json.refreshToken.trim()) ||
-    '';
-  if (typeof accessToken !== 'string' || !accessToken.trim()) {
-    return refreshToken ? { kind: 'present-unusable', reason: 'missing-access' } : { kind: 'invalid' };
-  }
-  const expiry = parseEpochMs(token.expiry);
-  if (expiry !== undefined && expiry <= now) {
-    return { kind: 'present-unusable', reason: 'expired' };
-  }
-  return { kind: 'valid', accessToken: accessToken.trim() };
-}
-
-/** 依次尝试 CLI / IDE 的凭据文件；若 CLI 主凭据文件存在且含有效结构但 access_token 已过期，不回退 IDE 凭据以免多账号切换时串号。 */
-async function readAccessToken(
-  env: Readonly<Record<string, string | undefined>>,
-  now: number,
-  allowIdeFallback = true,
-  onDebug?: (detail: string) => void,
-): Promise<string | undefined> {
-  const files = allowIdeFallback ? CREDENTIAL_FILES : [CREDENTIAL_FILES[0]];
-  for (let i = 0; i < files.length; i += 1) {
-    const file = files[i]!;
-    let raw: string;
-    try {
-      raw = await readFile(join(geminiDir(env), file), 'utf8');
-    } catch {
-      continue;
-    }
-    const parsed = parseAccessTokenFromRaw(raw, now);
-    if (parsed.kind === 'valid') return parsed.accessToken;
-    if (i === 0 && parsed.kind === 'present-unusable') {
-      onDebug?.(parsed.reason === 'expired' ? 'disk-primary-expired' : 'disk-primary-missing-access');
-      return undefined;
-    }
-  }
-  onDebug?.('disk-token-missing');
-  return undefined;
-}
-
-/** 主域失败时重试备用域；任何失败都返回 undefined 并记录非敏感诊断原因。 */
-async function requestQuota(
-  fetchFn: ReturnType<typeof createProxyAwareFetch>,
-  token: string,
-  ua: string,
-  onDebug?: (detail: string) => void,
-): Promise<Rec | undefined> {
-  for (const host of [PRIMARY_HOST, FALLBACK_HOST]) {
-    try {
-      const response = await fetchFn(`${host}${QUOTA_PATH}`, {
-        method: 'POST',
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-          'user-agent': ua,
-        },
-        body: '{}',
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      if (!response.ok) {
-        onDebug?.(`${host} http-${response.status}`);
-        await response.body?.cancel().catch(() => undefined);
-        continue;
-      }
-      const json = rec(await response.json());
-      if (json) return json;
-      onDebug?.(`${host} invalid-json`);
-    } catch (err) {
-      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      onDebug?.(`${host} ${msg}`);
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -319,7 +210,7 @@ function defaultRunAgyUsageCli(options: {
   });
 }
 
-async function queryViaCliFallback(params: {
+async function queryViaCli(params: {
   readonly cliCommand: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly now: () => number;
@@ -375,85 +266,27 @@ async function queryViaCliFallback(params: {
   return result.view;
 }
 
-/** 查询 Antigravity 订阅额度；直连 OAuth 优先，不可用且传入 `cliCommand` 时回退官方 `agy -p /usage --output-format json`。 */
+/** 查询 Antigravity 订阅额度；仅通过官方 `agy -p /usage --output-format json` CLI 获取。 */
 export async function queryAntigravityQuota(options: QuotaServiceOptions = {}): Promise<QuotaView | undefined> {
   const now = options.now ?? Date.now;
   const env = options.env ?? process.env;
   const cliCommand = options.cliCommand?.trim();
 
-  // 若先前已通过 CLI 回退拿到有效缓存且当前未命中有效直连 token，直接复用 5 分钟缓存避免重复检测
-  const debugReasons: string[] = [];
-  const collectDebug = (detail: string): void => {
-    debugReasons.push(detail);
-  };
-
-  let token: string | undefined;
-  if (options.rawTokenJson !== undefined) {
-    const parsed = parseAccessTokenFromRaw(options.rawTokenJson, now());
-    if (parsed.kind === 'valid') {
-      token = parsed.accessToken;
-    } else if (parsed.kind === 'present-unusable') {
-      collectDebug(`raw-token-${parsed.reason}`);
-    } else {
-      collectDebug('raw-token-invalid');
-    }
-  } else {
-    token = await readAccessToken(env, now(), options.allowIdeFallback !== false, collectDebug);
+  if (!cliCommand) {
+    options.onDebug?.('cli-unavailable');
+    return undefined;
   }
 
-  if (token) {
-    const ua = userAgent(options.clientVersion);
-    const cacheKey = `${token}\0${ua}`;
-    const cached = cache.get(cacheKey);
-    if (cached && now() - cached.at < ANTIGRAVITY_CACHE_MS) return cached.value;
-
-    let pending = inFlight.get(cacheKey);
-    if (!pending) {
-      const fetchFn = options.fetchImpl ?? createProxyAwareFetch(options.getHttpProxy);
-      const generation = cacheGeneration;
-      let created: Promise<InFlightQuotaResult>;
-      const run = async (): Promise<InFlightQuotaResult> => {
-        const reasons: string[] = [];
-        const json = await requestQuota(fetchFn, token, ua, (detail) => reasons.push(detail));
-        if (!json) return { reasons };
-        const windows = readWindows(json);
-        if (windows.length === 0) {
-          reasons.push('empty-windows');
-          return { reasons };
-        }
-        const view: QuotaView = { windows, queriedAt: now() };
-        if (generation === cacheGeneration) {
-          cache.set(cacheKey, { at: now(), value: view });
-        }
-        return { view, reasons };
-      };
-      created = run().finally(() => {
-        if (inFlight.get(cacheKey) === created) {
-          inFlight.delete(cacheKey);
-        }
-      });
-      inFlight.set(cacheKey, created);
-      pending = created;
-    }
-
-    const result = await pending;
-    if (result.view) return result.view;
-    debugReasons.push(...result.reasons);
+  if (!(await hasAntigravityStateOnDisk(env, options.rawTokenJson))) {
+    options.onDebug?.('disk-token-missing');
+    return undefined;
   }
 
-  if (cliCommand && (await hasAntigravityStateOnDisk(env, options.rawTokenJson))) {
-    const cliView = await queryViaCliFallback({
-      cliCommand,
-      env,
-      now,
-      ...(options.runCliUsage ? { runCliUsage: options.runCliUsage } : {}),
-      onDebug: collectDebug,
-    });
-    if (cliView) return cliView;
-  }
-
-  if (options.onDebug) {
-    for (const reason of debugReasons) options.onDebug(reason);
-  }
-  return undefined;
+  return await queryViaCli({
+    cliCommand,
+    env,
+    now,
+    ...(options.runCliUsage ? { runCliUsage: options.runCliUsage } : {}),
+    ...(options.onDebug ? { onDebug: options.onDebug } : {}),
+  });
 }

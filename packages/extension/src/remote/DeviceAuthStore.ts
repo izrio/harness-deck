@@ -55,7 +55,7 @@ function parseStoredDevices(raw: unknown): StoredDeviceRecord[] {
       typeof rec.id !== 'string' ||
       !rec.id ||
       typeof rec.name !== 'string' ||
-      (rec.scope !== 'read-only' && rec.scope !== 'operate') ||
+      (rec.scope !== 'read-only' && rec.scope !== 'operate' && rec.scope !== 'owner') ||
       !isValidSha256Hex(rec.tokenHash)
     ) {
       continue;

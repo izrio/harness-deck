@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## 0.20.0
+
+### 中文
+
+- **云端开发环境（Google Colab / 远端 Linux）**：左下角「切换项目」弹出层、侧边栏菜单与「设置 → 项目」全面支持本地项目与云端环境原地一键切换；本地宿主内置代理客户端直连远端 `halo-server`（VS Code / JetBrains / Desktop 三端一致生效、零 Webview CSP 限制），支持云端多目录切换、断线自动重连与随时一键切回本地；无头服务新增 `--cloud` 预设（`owner` 权限 + 自动 `cloudflared` 隧道）并附 Google Colab 一键模板 `docs/colab/halo-colab.ipynb`。
+- **工作区文件管理升级（本地 + Google Drive / Google Cloud Storage / WebDAV）**：右侧工作区「文件」面板新增本地工作区与远端存储源统一切换，支持面包屑导航、文本高亮预览、上传、下载、新建文件夹与二次确认删除；接入弹窗采用带离线品牌图标的厂商卡片选择与一键跳转浏览器登录授权（支持本地 OAuth 2.0 PKCE 回环回调与本机 `gcloud` ADC 零配置接入，手动 JSON / Token 折叠为高级项），本地文件操作强制 `realpath` 防符号链接逃逸校验。
+- **Git 工作台增强（提交历史、贮藏 Stash 与高级操作）**：右侧 Git 面板新增提交日志与单提交文件 Diff 查看、Stash 贮藏列表与保存/应用/弹出/删除、Amend 修订上次提交、分支重命名/合并/变基、Cherry-pick / Revert / Reset 以及冲突态继续/中止闭环。
+- **连接与额度稳定性优化**：增强代理感知 WebSocket 建连与 IM 机器人适配稳定性，优化 Antigravity 额度查询路径与标签栏/右键菜单交互。
+
+### English
+
+- **Cloud Development Environments (Google Colab / Remote Linux)**: Unified Local Projects and Cloud Environments inside the bottom-left Project Switcher, sidebar menu, and Settings → Projects; added a host-side WebSocket proxy (`CloudHostClient`) so VS Code, JetBrains, and Halo Desktop connect seamlessly to remote `halo-server` hosts with zero Webview CSP friction, remote subfolder switching, automatic reconnect, and one-click return to local workspaces. Added `--cloud` preset (`owner` scope + auto `cloudflared` quick tunnel) to headless server and a ready-to-use Colab template at `docs/colab/halo-colab.ipynb`.
+- **Workspace Files Overhaul (Local + Google Drive / Google Cloud Storage / WebDAV)**: Added unified local and remote storage browsing in the Workspace Files panel with breadcrumbs, inline text preview, upload, download, new folder, and confirmed delete; added provider brand cards with offline logos and one-click browser sign-in (local OAuth 2.0 PKCE loopback + zero-config `gcloud` ADC detection, with manual JSON/Token tucked under Advanced) plus `realpath` symlink-escape protection for local workspace operations.
+- **Git Workbench Expansion (Commit Log, Stashes & Advanced Ops)**: Added commit history browsing with per-commit file diffs, Stash management (save/apply/pop/drop), commit amend, branch rename/merge/rebase, cherry-pick/revert/reset, and in-progress conflict continue/abort controls.
+- **Connectivity & Quota Refinements**: Hardened proxy-aware WebSocket handling for IM bot adapters, streamlined Antigravity quota probing, and refined tab bar and context-menu guards.
+
 ## 0.19.0
 
 ### 中文

@@ -49,11 +49,13 @@ import { cn } from '../../lib/utils.ts';
 import { requestCreateTask, setActiveModule, toggleSettingsPage, useView } from '../../store.ts';
 import { loadState, postToHost, saveState } from '../../vscode.ts';
 import { BackendLogo } from '../BackendLogo.tsx';
+import { CloudEnvironmentDialog } from '../CloudEnvironmentDialog.tsx';
 import {
   ChatIcon,
   CheckIcon,
   ChevronRightIcon,
   CloseIcon,
+  CloudIcon,
   ErrorIcon,
   FolderIcon,
   GitBranchIcon,
@@ -103,6 +105,7 @@ export function WorkbenchSidebar({
   const clientScope = useView((s) => s.clientScope);
   const isMobileRemote = clientSurface === 'mobile-web';
   const remoteReadOnly = isMobileRemote && clientScope === 'read-only';
+  const canManageCloud = !isMobileRemote || clientScope === 'owner';
 
   const activeModule = useView((s) => s.activeModule);
   const settingsOpen = useView((s) => s.settingsOpen);
@@ -122,6 +125,7 @@ export function WorkbenchSidebar({
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>('all');
   const [projectsExpanded, setProjectsExpanded] = useState<boolean>(() => loadState().projectsExpanded ?? false);
   const [pendingDelete, setPendingDelete] = useState<GroupedSessionItem | undefined>(undefined);
+  const [cloudDialogOpen, setCloudDialogOpen] = useState(false);
 
   useEffect(() => {
     if (searchOpen) {
@@ -407,6 +411,16 @@ export function WorkbenchSidebar({
                           <span>{t('wb.sessions.addProject')}</span>
                         </DropdownMenuItem>
                       ) : null}
+                      {canManageCloud ? (
+                        <DropdownMenuItem
+                          data-testid="sidebar-connect-cloud-item"
+                          className="gap-2 text-[12px]"
+                          onSelect={() => setCloudDialogOpen(true)}
+                        >
+                          <CloudIcon className="size-3.5 text-accent-ink" />
+                          <span>{t('composer.connectCloud')}</span>
+                        </DropdownMenuItem>
+                      ) : null}
                       {onNewWorktree ? (
                         <DropdownMenuItem
                           disabled={remoteReadOnly}
@@ -660,6 +674,7 @@ export function WorkbenchSidebar({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <CloudEnvironmentDialog open={cloudDialogOpen} onOpenChange={setCloudDialogOpen} />
     </>
   );
 }

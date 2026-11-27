@@ -64,7 +64,7 @@ async function saveWindowBounds(win: BrowserWindow): Promise<void> {
 
 function startEmbeddedHeadlessServer(): Promise<string> {
   return new Promise((resolveUrl, rejectUrl) => {
-    const args = [config.sidecarEntry, '--headless-server', config.configRoot, config.projectPath];
+    const args = [config.sidecarEntry, '--headless-server', config.configRoot, config.projectPath, '--scope', 'owner'];
     if (config.port > 0) args.push('--port', String(config.port));
     const child = spawn(process.execPath, args, {
       env: {

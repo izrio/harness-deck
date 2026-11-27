@@ -128,4 +128,69 @@ describe('TabBar 跨智能体标签与图标渲染', () => {
     fireEvent.click(closeOthers);
     expect(vscode.posted).toContainEqual({ type: 'closeTabs', payload: { key: 'utab-2', scope: 'others' } });
   });
+
+  it('标签溢出时支持鼠标垂直滚轮横向滑动并显示左右滚动按钮，未溢出时隐藏滚动按钮', () => {
+    render(<TabBar />);
+    act(() => {
+      applyHostMessage({
+        type: 'snapshot',
+        payload: makeSnapshot({
+          tabs: {
+            items: Array.from({ length: 8 }, (_, idx) => ({
+              key: `utab-${idx + 1}`,
+              backendId: 'dsh',
+              sessionId: `s${idx + 1}`,
+              title: `会话标签 ${idx + 1}`,
+              running: false,
+            })),
+            active: 'utab-1',
+          },
+        }),
+      });
+    });
+
+    const tabBar = screen.getByTestId('tabs');
+    // 未溢出时不显示左右滚动按钮
+    expect(screen.queryByTestId('tabbar-scroll-left-btn')).toBeNull();
+    expect(screen.queryByTestId('tabbar-scroll-right-btn')).toBeNull();
+
+    // 模拟标签栏发生横向溢出（clientWidth=240, scrollWidth=800）
+    let scrollLeft = 0;
+    Object.defineProperty(tabBar, 'clientWidth', { configurable: true, value: 240 });
+    Object.defineProperty(tabBar, 'scrollWidth', { configurable: true, value: 800 });
+    Object.defineProperty(tabBar, 'scrollLeft', {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (value: number) => {
+        scrollLeft = Math.max(0, Math.min(560, value));
+      },
+    });
+    tabBar.scrollBy = ((options?: ScrollToOptions | number) => {
+      const delta = typeof options === 'number' ? options : (options?.left ?? 0);
+      tabBar.scrollLeft += delta;
+    }) as typeof tabBar.scrollBy;
+
+    fireEvent.scroll(tabBar);
+    const leftBtn = screen.getByTestId('tabbar-scroll-left-btn') as HTMLButtonElement;
+    const rightBtn = screen.getByTestId('tabbar-scroll-right-btn') as HTMLButtonElement;
+    expect(leftBtn.disabled).toBe(true);
+    expect(rightBtn.disabled).toBe(false);
+
+    // 桌面鼠标垂直滚轮（deltaY > 0）自动转为横向滚动
+    const wheelEvent = new WheelEvent('wheel', { deltaY: 120, deltaX: 0, cancelable: true });
+    act(() => {
+      tabBar.dispatchEvent(wheelEvent);
+    });
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(scrollLeft).toBe(120);
+    expect(leftBtn.disabled).toBe(false);
+    expect(rightBtn.disabled).toBe(false);
+
+    // 点击向右 / 向左滚动按钮按可见区域步进滑动
+    fireEvent.click(rightBtn);
+    expect(scrollLeft).toBeGreaterThan(120);
+    const afterRight = scrollLeft;
+    fireEvent.click(leftBtn);
+    expect(scrollLeft).toBeLessThan(afterRight);
+  });
 });

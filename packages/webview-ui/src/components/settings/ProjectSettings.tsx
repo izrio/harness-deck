@@ -3,13 +3,26 @@
  * macOS 设置风格：无外框浅底圆角卡片 + 卡片内缩极细横线分割 + 宽松行距呼吸感。
  */
 import { useEffect, useRef, useState } from 'react';
-import type { WorktreeProjectConfig } from '@harness-deck/shared';
+import type { CloudEnvironmentStatus, CloudEnvironmentView, WorktreeProjectConfig } from '@harness-deck/shared';
 import { SettingsSection } from './SettingsSection.tsx';
 import { useT } from '../../i18n.ts';
 import { cn } from '../../lib/utils.ts';
 import { setProjectsLocal, useView } from '../../store.ts';
 import { postToHost } from '../../vscode.ts';
-import { CheckIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, MoreIcon, PlusIcon, TerminalIcon, TrashIcon } from '../icons.tsx';
+import {
+  CheckIcon,
+  CloudIcon,
+  CloudOffIcon,
+  PencilIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  GitBranchIcon,
+  MoreIcon,
+  PlusIcon,
+  TerminalIcon,
+  TrashIcon,
+} from '../icons.tsx';
+import { CloudEnvironmentDialog } from '../CloudEnvironmentDialog.tsx';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -50,11 +63,32 @@ export function ProjectSettings() {
   const t = useT();
   const projects = useView((s) => s.projects);
   const clientSurface = useView((s) => s.clientSurface);
+  const clientScope = useView((s) => s.clientScope);
   const isMobileRemote = clientSurface === 'mobile-web';
+  const canManageCloud = !isMobileRemote || clientScope === 'owner';
   const folder = useView((s) => s.session.folder);
   const [createWtOpen, setCreateWtOpen] = useState(false);
   const [createWtBranch, setCreateWtBranch] = useState('');
   const [removeWtOpen, setRemoveWtOpen] = useState(false);
+  const [cloudDialogOpen, setCloudDialogOpen] = useState(false);
+  const [editingCloudEnv, setEditingCloudEnv] = useState<CloudEnvironmentView | null>(null);
+  const cloudEnvironments = projects.cloudEnvironments ?? [];
+  const activeCloud = projects.activeEnvironment?.kind === 'cloud' ? projects.activeEnvironment : undefined;
+
+  const cloudStatusLabel = (status: CloudEnvironmentStatus): string => {
+    switch (status) {
+      case 'connected':
+        return t('cloud.status.connected');
+      case 'connecting':
+        return t('cloud.status.connecting');
+      case 'reconnecting':
+        return t('cloud.status.reconnecting');
+      case 'error':
+        return t('cloud.status.error');
+      default:
+        return t('cloud.status.disconnected');
+    }
+  };
   const [selectedPath, setSelectedPath] = useState<string | undefined>(() => projects.currentPath ?? projects.recent[0]?.path);
   const activePath =
     selectedPath && projects.recent.some((r) => r.path === selectedPath)
@@ -235,6 +269,160 @@ export function ProjectSettings() {
           </div>
         )}
       </SettingsSection>
+
+      {canManageCloud || cloudEnvironments.length > 0 ? (
+        <SettingsSection
+          title={t('settings.projects.cloudTitle')}
+          testId="settings-cloud-environments"
+          actions={
+            canManageCloud ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="settings-cloud-add-btn"
+                onClick={() => {
+                  setEditingCloudEnv(null);
+                  setCloudDialogOpen(true);
+                }}
+              >
+                <PlusIcon className="size-3.5" />
+                <span>{t('composer.connectCloud')}</span>
+              </Button>
+            ) : undefined
+          }
+        >
+          {cloudEnvironments.length === 0 ? (
+            <div className="px-4 py-10 text-center text-[12px] text-ink-3" data-testid="settings-cloud-empty">
+              {t('settings.projects.cloudEmpty')}
+            </div>
+          ) : (
+            <div className="flex flex-col divide-y divide-line/55 px-4">
+              {cloudEnvironments.map((env) => {
+                const isActive = activeCloud?.envId === env.id;
+                const dotClass =
+                  env.status === 'connected'
+                    ? 'bg-ok'
+                    : env.status === 'connecting' || env.status === 'reconnecting'
+                      ? 'bg-warn animate-pulse'
+                      : env.status === 'error'
+                        ? 'bg-err'
+                        : 'bg-ink-3/45';
+                return (
+                  <div
+                    key={env.id}
+                    data-testid={`settings-cloud-env-${env.id}`}
+                    className="flex items-center gap-3.5 py-3.5"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'relative inline-flex size-7 shrink-0 items-center justify-center rounded-lg',
+                        isActive
+                          ? 'bg-accent-tint/70 text-accent-ink'
+                          : 'bg-canvas/80 text-ink-3 dark:bg-page/55',
+                      )}
+                    >
+                      <CloudIcon className="size-3.5" />
+                      <span
+                        className={cn(
+                          'absolute right-0.5 bottom-0.5 size-1.5 rounded-full ring-1 ring-surface',
+                          dotClass,
+                        )}
+                      />
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="truncate text-[13px] leading-5 font-medium text-ink">
+                          {env.remoteProjectName ? `${env.name} · ${env.remoteProjectName}` : env.name}
+                        </span>
+                        <span className="inline-flex items-center rounded-md bg-canvas/85 px-1.5 py-0.5 text-[10.5px] leading-4 font-medium text-ink-2 dark:bg-page/55">
+                          {cloudStatusLabel(env.status)}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11.5px] leading-4 text-ink-3">
+                        {env.remoteProjectPath ? `${env.remoteProjectPath} · ${env.endpointUrl}` : env.endpointUrl}
+                      </div>
+                      {env.error ? (
+                        <div className="mt-0.5 truncate text-[11px] leading-4 text-err">{env.error}</div>
+                      ) : null}
+                    </div>
+
+                    {canManageCloud ? (
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {isActive ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            data-testid={`settings-cloud-disconnect-${env.id}`}
+                            onClick={() => postToHost({ type: 'disconnectCloudEnvironment', payload: {} })}
+                          >
+                            <CloudOffIcon className="size-3" />
+                            <span>{t('settings.projects.cloudDisconnect')}</span>
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="xs"
+                            data-testid={`settings-cloud-connect-${env.id}`}
+                            onClick={() => {
+                              if (!env.hasCredentials) {
+                                setEditingCloudEnv(env);
+                                setCloudDialogOpen(true);
+                                return;
+                              }
+                              postToHost({ type: 'connectCloudEnvironment', payload: { id: env.id } });
+                            }}
+                          >
+                            <span>{t('settings.projects.cloudConnect')}</span>
+                          </Button>
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="shrink-0 text-ink-2 hover:text-ink"
+                              aria-label={t('common.moreActions')}
+                            >
+                              <MoreIcon className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-36">
+                            <DropdownMenuItem
+                              className="gap-2 text-[12.5px]"
+                              onSelect={() => {
+                                setEditingCloudEnv(env);
+                                setCloudDialogOpen(true);
+                              }}
+                            >
+                              <PencilIcon className="size-3.5 text-ink-2" />
+                              <span>{t('settings.projects.cloudEdit')}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              className="gap-2 text-[12.5px]"
+                              onSelect={() => postToHost({ type: 'removeCloudEnvironment', payload: { id: env.id } })}
+                            >
+                              <TrashIcon className="size-3.5" />
+                              <span>{t('settings.projects.cloudRemove')}</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SettingsSection>
+      ) : null}
 
       {activePath ? (
         <SettingsSection
@@ -419,6 +607,11 @@ export function ProjectSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <CloudEnvironmentDialog
+        open={cloudDialogOpen}
+        onOpenChange={setCloudDialogOpen}
+        editing={editingCloudEnv}
+      />
     </div>
   );
 }

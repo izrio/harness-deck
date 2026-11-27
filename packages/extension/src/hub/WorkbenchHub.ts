@@ -33,19 +33,40 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import type { BackendProfile, CrossProjectSession, ProgrammaticSessionRequest, SessionObservation } from '../backend/types.ts';
 import type { DiffRequest } from '../vm/workbench.ts';
 import { readGitFileAtRef, readGitStatus } from '../sourceControl/gitStatus.ts';
+import { readGitCommitDetail, readGitLog } from '../sourceControl/gitLog.ts';
 import {
+  applyStash,
+  dropStash,
+  popStash,
+  readStashFileDiffContents,
+  readStashFiles,
+  saveStash,
+} from '../sourceControl/gitStash.ts';
+import {
+  abortGitOperation,
   checkoutBranch,
+  cherryPickCommit,
   commitAll,
+  continueGitOperation,
   createBranch,
   createPullRequest,
   deleteBranch,
+  discardAllFiles,
   discardFile,
   discardHunk,
   fetchRemote,
+  mergeBranch,
   pullCurrentBranch,
   pushCurrentBranch,
+  rebaseBranch,
+  renameBranch,
+  resetToCommit,
+  resolveConflictFile,
+  revertCommit,
+  stageAllFiles,
   stageFile,
   stageHunk,
+  unstageAllFiles,
   unstageFile,
 } from '../sourceControl/gitWrite.ts';
 import {
@@ -570,23 +591,64 @@ export class WorkbenchHub {
           this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
           return true;
         }
-        const result = await commitAll(
-          this.host.workspacePath(),
-          message.payload.message,
-          message.payload.stageAll !== undefined ? { stageAll: message.payload.stageAll } : undefined,
-        );
+        const cwd = this.sourceControl?.root ?? this.host.workspacePath();
+        const commitOpts: {
+          stageAll?: boolean;
+          files?: readonly string[];
+          amend?: boolean;
+        } = {};
+        if (message.payload.stageAll !== undefined) commitOpts.stageAll = message.payload.stageAll;
+        if (message.payload.files !== undefined) {
+          // 校验所有路径均在仓库内，防目录穿越
+          const safeFiles = message.payload.files.filter((p) => {
+            const rel = relative(cwd, resolve(cwd, p));
+            return !rel.startsWith('..') && !isAbsolute(rel);
+          });
+          commitOpts.files = safeFiles;
+        }
+        if (message.payload.amend !== undefined) commitOpts.amend = message.payload.amend;
+
+        const commitRes = await commitAll(cwd, message.payload.message, commitOpts);
+        let finalOk = commitRes.ok;
+        let finalMsg = commitRes.message;
+        const wantPush = Boolean(message.payload.push);
+        const actionKind: SourceControlActionResult['kind'] = wantPush
+          ? 'commitAndPush'
+          : message.payload.amend
+            ? 'amend'
+            : 'commit';
+
+        if (commitRes.ok && wantPush) {
+          const pushRes = await pushCurrentBranch(cwd);
+          finalOk = pushRes.ok;
+          finalMsg = pushRes.message;
+        }
+
         const action: SourceControlActionResult = {
-          kind: 'commit',
-          ok: result.ok,
+          kind: actionKind,
+          ok: finalOk,
           at: this.now(),
-          ...(result.message ? { message: result.message } : {}),
+          ...(finalMsg ? { message: finalMsg } : {}),
         };
         await this.refreshSourceControl(action);
         this.host.post({
           type: 'toast',
-          payload: result.ok
-            ? { level: 'info', text: t('sourceControl.committed') }
-            : { level: 'error', text: t('sourceControl.commitFailed', result.message ?? '') },
+          payload: finalOk
+            ? {
+                level: 'info',
+                text: wantPush
+                  ? t('sourceControl.committedAndPushed')
+                  : message.payload.amend
+                    ? t('sourceControl.amended')
+                    : t('sourceControl.committed'),
+              }
+            : {
+                level: 'error',
+                text:
+                  commitRes.ok && wantPush
+                    ? t('sourceControl.pushFailed', finalMsg ?? '')
+                    : t('sourceControl.commitFailed', finalMsg ?? ''),
+              },
         });
         return true;
       }
@@ -786,7 +848,7 @@ export class WorkbenchHub {
           return true;
         }
         const root = this.sourceControl?.root ?? this.host.workspacePath();
-        const result = await createBranch(root, message.payload.branch);
+        const result = await createBranch(root, message.payload.branch, message.payload.startPoint);
         await this.refreshSourceControl({
           kind: 'branch',
           ok: result.ok,
@@ -798,6 +860,509 @@ export class WorkbenchHub {
           payload: result.ok
             ? { level: 'info', text: t('sourceControl.branchCreated', message.payload.branch) }
             : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlStageAll': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await stageAllFiles(root);
+        await this.refreshSourceControl({
+          kind: 'stageAll',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        if (!result.ok) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') } });
+        }
+        return true;
+      }
+
+      case 'sourceControlUnstageAll': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await unstageAllFiles(root);
+        await this.refreshSourceControl({
+          kind: 'unstageAll',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        if (!result.ok) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') } });
+        }
+        return true;
+      }
+
+      case 'sourceControlDiscardAll': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const confirmed =
+          message.payload.confirmed === true ||
+          (await this.host.confirm?.(
+            t('sourceControl.discardAllConfirm'),
+            t('sourceControl.discardDetail'),
+            t('sourceControl.discardAction'),
+          )) !== false;
+        if (!confirmed) return true;
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await discardAllFiles(root);
+        await this.refreshSourceControl({
+          kind: 'discardAll',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.discarded') }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlRenameBranch': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await renameBranch(root, message.payload.oldName, message.payload.newName);
+        await this.refreshSourceControl({
+          kind: 'renameBranch',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.branchRenamed', message.payload.oldName, message.payload.newName) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlMergeBranch': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await mergeBranch(root, message.payload.branch);
+        await this.refreshSourceControl({
+          kind: 'merge',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.merged', message.payload.branch) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlRebaseBranch': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await rebaseBranch(root, message.payload.branch);
+        await this.refreshSourceControl({
+          kind: 'rebase',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.rebased', message.payload.branch) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlContinueOp': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await continueGitOperation(root, this.sourceControl?.inProgressOp);
+        await this.refreshSourceControl({
+          kind: 'continueOp',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.opContinued') }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlAbortOp': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await abortGitOperation(root, this.sourceControl?.inProgressOp);
+        await this.refreshSourceControl({
+          kind: 'abortOp',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.opAborted') }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlResolveConflict': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const relCheck = relative(root, resolve(root, message.payload.path));
+        if (relCheck.startsWith('..') || isAbsolute(relCheck)) return true;
+        const result = await resolveConflictFile(root, message.payload.path, message.payload.strategy);
+        await this.refreshSourceControl({
+          kind: 'resolveConflict',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.conflictResolved', message.payload.path) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlFetchLog': {
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        try {
+          const { commits, hasMore } = await readGitLog(root, {
+            ...(message.payload.query !== undefined ? { query: message.payload.query } : {}),
+            ...(message.payload.branch !== undefined ? { branch: message.payload.branch } : {}),
+            ...(message.payload.limit !== undefined ? { limit: message.payload.limit } : {}),
+            ...(message.payload.skip !== undefined ? { skip: message.payload.skip } : {}),
+          });
+          this.host.post({
+            type: 'sourceControlLogResult',
+            payload: {
+              requestId: message.payload.requestId,
+              commits,
+              hasMore,
+              ...(message.payload.skip && message.payload.skip > 0 ? { append: true } : {}),
+            },
+          });
+        } catch (error) {
+          this.host.post({
+            type: 'sourceControlLogResult',
+            payload: {
+              requestId: message.payload.requestId,
+              commits: [],
+              hasMore: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+        }
+        return true;
+      }
+
+      case 'sourceControlFetchCommitDetail': {
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        try {
+          const detail = await readGitCommitDetail(root, message.payload.hash);
+          this.host.post({
+            type: 'sourceControlCommitDetail',
+            payload: {
+              requestId: message.payload.requestId,
+              ...(detail ? { detail } : { error: 'commit not found' }),
+            },
+          });
+        } catch (error) {
+          this.host.post({
+            type: 'sourceControlCommitDetail',
+            payload: {
+              requestId: message.payload.requestId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+        }
+        return true;
+      }
+
+      case 'sourceControlOpenCommitFileDiff': {
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const absPath = resolve(root, message.payload.path);
+        const relCheck = relative(root, absPath);
+        if (relCheck.startsWith('..') || isAbsolute(relCheck)) return true;
+        if (!this.host.openDiff) return true;
+        const hash = message.payload.hash;
+        const beforePath = message.payload.oldPath ?? message.payload.path;
+        const [before, after] = await Promise.all([
+          readGitFileAtRef(root, beforePath, `${hash}^`),
+          readGitFileAtRef(root, message.payload.path, hash),
+        ]);
+        await this.host.openDiff({
+          kind: 'contents',
+          path: absPath,
+          before: before ?? '',
+          after: after ?? '',
+          created: before === undefined,
+          scope: 'turn',
+        });
+        return true;
+      }
+
+      case 'sourceControlCherryPick': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await cherryPickCommit(root, message.payload.hash);
+        await this.refreshSourceControl({
+          kind: 'cherryPick',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.cherryPicked', message.payload.hash.slice(0, 7)) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlRevertCommit': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await revertCommit(root, message.payload.hash);
+        await this.refreshSourceControl({
+          kind: 'revertCommit',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.reverted', message.payload.hash.slice(0, 7)) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlResetToCommit': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        if (message.payload.mode === 'hard' && message.payload.confirmed !== true) {
+          const confirmed =
+            (await this.host.confirm?.(
+              t('sourceControl.resetHardConfirm', message.payload.hash.slice(0, 7)),
+              t('sourceControl.discardDetail'),
+              t('sourceControl.discardAction'),
+            )) !== false;
+          if (!confirmed) return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await resetToCommit(root, message.payload.hash, message.payload.mode);
+        await this.refreshSourceControl({
+          kind: 'reset',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.resetDone', message.payload.hash.slice(0, 7)) }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlStashSave': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const safePaths = message.payload.paths?.filter((p) => {
+          const rel = relative(root, resolve(root, p));
+          return !rel.startsWith('..') && !isAbsolute(rel);
+        });
+        const result = await saveStash(root, {
+          ...(message.payload.message !== undefined ? { message: message.payload.message } : {}),
+          ...(message.payload.includeUntracked !== undefined ? { includeUntracked: message.payload.includeUntracked } : {}),
+          ...(safePaths && safePaths.length > 0 ? { paths: safePaths } : {}),
+        });
+        await this.refreshSourceControl({
+          kind: 'stashSave',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.stashSaved') }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlStashApply': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await applyStash(root, message.payload.index);
+        await this.refreshSourceControl({
+          kind: 'stashApply',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.stashApplied') }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlStashPop': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await popStash(root, message.payload.index);
+        await this.refreshSourceControl({
+          kind: 'stashPop',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.stashPopped') }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlStashDrop': {
+        if (!this.host.isWorkspaceTrusted()) {
+          this.host.post({ type: 'toast', payload: { level: 'error', text: t('workspace.untrusted') } });
+          return true;
+        }
+        const confirmed =
+          message.payload.confirmed === true ||
+          (await this.host.confirm?.(
+            t('sourceControl.stashDropConfirm', message.payload.index),
+            t('sourceControl.discardDetail'),
+            t('sourceControl.discardAction'),
+          )) !== false;
+        if (!confirmed) return true;
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const result = await dropStash(root, message.payload.index);
+        await this.refreshSourceControl({
+          kind: 'stashDrop',
+          ok: result.ok,
+          at: this.now(),
+          ...(result.message ? { message: result.message } : {}),
+        });
+        this.host.post({
+          type: 'toast',
+          payload: result.ok
+            ? { level: 'info', text: t('sourceControl.stashDropped') }
+            : { level: 'error', text: t('sourceControl.actionFailed', result.message ?? '') },
+        });
+        return true;
+      }
+
+      case 'sourceControlFetchStashDetail': {
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        try {
+          const files = await readStashFiles(root, message.payload.index);
+          this.host.post({
+            type: 'sourceControlStashDetail',
+            payload: {
+              requestId: message.payload.requestId,
+              index: message.payload.index,
+              files,
+            },
+          });
+        } catch (error) {
+          this.host.post({
+            type: 'sourceControlStashDetail',
+            payload: {
+              requestId: message.payload.requestId,
+              index: message.payload.index,
+              files: [],
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+        }
+        return true;
+      }
+
+      case 'sourceControlOpenStashFileDiff': {
+        const root = this.sourceControl?.root ?? this.host.workspacePath();
+        const absPath = resolve(root, message.payload.path);
+        const relCheck = relative(root, absPath);
+        if (relCheck.startsWith('..') || isAbsolute(relCheck)) return true;
+        if (!this.host.openDiff) return true;
+        const { before, after } = await readStashFileDiffContents(root, message.payload.index, message.payload.path);
+        await this.host.openDiff({
+          kind: 'contents',
+          path: absPath,
+          before: before ?? '',
+          after: after ?? '',
+          created: before === undefined,
+          scope: 'turn',
         });
         return true;
       }

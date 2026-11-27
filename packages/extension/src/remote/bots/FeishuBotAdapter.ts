@@ -4,8 +4,8 @@
  * - 原生 PBBP2 Protobuf 二进制帧收发、分片重组、3 秒内即时 ACK 与定期 CONTROL Ping 保活
  * - 使用 `tenant_access_token` 发送交互式 Markdown 卡片并支持 `PATCH` 节流流式更新
  */
-import WebSocket from 'ws';
 import type { ImBotFeishuDomain } from '@harness-deck/shared';
+import { createProxyAwareWebSocket, type FetchLike } from '../../providers/proxyFetch.ts';
 import {
   decodeFeishuPbFrame,
   encodeFeishuPbFrame,
@@ -39,7 +39,7 @@ export interface FeishuBotAdapterOptions {
   readonly appId: string;
   readonly appSecret: string;
   readonly domain?: ImBotFeishuDomain;
-  readonly fetchImpl?: typeof fetch;
+  readonly fetchImpl?: FetchLike;
   readonly createWebSocket?: WebSocketFactory;
   readonly reconnectBaseMs?: number;
   readonly now?: () => number;
@@ -287,7 +287,7 @@ export class FeishuBotAdapter implements ImBotAdapter {
     }
 
     if (!this.running) return;
-    const factory = this.options.createWebSocket ?? ((u: string) => new WebSocket(u));
+    const factory = this.options.createWebSocket ?? createProxyAwareWebSocket();
     let ws: ImBotSocketLike;
     try {
       ws = factory(wsUrl);
@@ -296,9 +296,11 @@ export class FeishuBotAdapter implements ImBotAdapter {
       return;
     }
     this.socket = ws;
+    let lastError: string | undefined;
 
     ws.on('open', () => {
       if (this.socket !== ws || !this.running) return;
+      lastError = undefined;
       this.reconnectAttempt = 0;
       const now = (this.options.now ?? Date.now)();
       this.setStatus({ status: 'connected', lastConnectedAt: now });
@@ -322,7 +324,8 @@ export class FeishuBotAdapter implements ImBotAdapter {
 
     ws.on('error', (err) => {
       if (this.socket !== ws || !this.running) return;
-      this.callbacks.log(`[IM Bot:feishu] WebSocket error: ${err.message}`);
+      lastError = err.message || String(err);
+      this.callbacks.log(`[IM Bot:feishu] WebSocket error: ${lastError}`);
     });
 
     ws.on('close', (code, reason) => {
@@ -330,8 +333,9 @@ export class FeishuBotAdapter implements ImBotAdapter {
       this.socket = undefined;
       this.clearHeartbeat();
       if (!this.running) return;
-      const text = reason?.toString('utf8') || `code ${code}`;
-      this.scheduleReconnect(`WebSocket closed (${text})`);
+      const reasonText = reason?.toString('utf8').trim();
+      const detail = reasonText ? `WebSocket closed (${reasonText})` : (lastError || `WebSocket closed (code ${code})`);
+      this.scheduleReconnect(detail);
     });
   }
 

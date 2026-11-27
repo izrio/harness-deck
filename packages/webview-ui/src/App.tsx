@@ -8,6 +8,7 @@ import {
   useView,
 } from './store.ts';
 import { cn } from './lib/utils.ts';
+import { installEmptyAreaContextMenuGuard } from './lib/contextMenuGuard.ts';
 import { applyHighContrast, applyThemeMode, applyThemePreset } from './theme.ts';
 import {
   consumePendingDeepLinkSession,
@@ -74,6 +75,7 @@ import { useT } from './i18n.ts';
 
 export function App() {
   useEffect(() => startHostBridge((msg) => applyHostMessage(msg)), []);
+  useEffect(() => installEmptyAreaContextMenuGuard(), []);
 
   const transport = useTransportState();
   const ready = useView((s) => s.ready);
